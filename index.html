@@ -1662,7 +1662,6 @@
            que normalmente lo cacharia nunca aparece. Siempre abre en
            Restauracion. -->
       <div class="mgrtools" id="teKindTools" hidden>
-        <button type="button" class="minibtn on" id="teKindRest">Restauración</button>
         <button type="button" class="minibtn" id="teKindMg">Horas AMG</button>
       </div>
       <!-- Only appears for people who joined before the name was required. Without a
@@ -1860,7 +1859,6 @@
       <!-- Que empresa esta metiendo el manager por esta persona. Igual que en
            los telefonos: vuelve sola a Restauracion despues de cada guardado. -->
       <div class="mgrtools" id="ceKindTools" hidden style="margin-top:12px;">
-        <button type="button" class="minibtn on" id="ceKindRest">Restauración</button>
         <button type="button" class="minibtn" id="ceKindMg">Horas AMG</button>
       </div>
       <div class="field" style="margin-top:12px;"><label>Fecha</label><input type="date" id="casualEntryDate"></div>
@@ -2070,7 +2068,6 @@
            llenar, no arriba de la tarjeta, porque escoge lo que va a escribir.
            Igual que en el lado de planta: NO se acuerda de la ultima vez. -->
       <div class="mgrtools" id="cmKindTools" hidden>
-        <button type="button" class="minibtn on" id="cmKindRest">Restauración</button>
         <button type="button" class="minibtn" id="cmKindMg">Horas AMG</button>
       </div>
       <div class="field"><label>Fecha</label><input type="date" id="casualMyDate"></div>
@@ -3111,7 +3108,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-05-BR';
+  const APP_BUILD = '2026-09-05-BS';
 
   // Stamp the version everywhere it is shown. Null-safe on purpose: a screen
   // that does not carry the tag is not an error.
@@ -4134,12 +4131,10 @@
     ceKind = (k === 'mudanza') ? 'mudanza' : 'restauracion';
     const row = $('#ceKindTools'); if(!row) return;
     row.hidden = !mgOn();
-    const r = $('#ceKindRest'), m = $('#ceKindMg');
-    if(r) r.classList.toggle('on', ceKind === 'restauracion');
-    if(m) m.classList.toggle('on', ceKind === 'mudanza');
+    const m = $('#ceKindMg');
+    if(m){ const on = ceKind === 'mudanza'; m.classList.toggle('on', on); m.textContent = on ? '✓ Horas AMG' : 'Horas AMG'; }
   }
-  if($('#ceKindRest')) $('#ceKindRest').addEventListener('click', ()=> setCeKind('restauracion'));
-  if($('#ceKindMg'))   $('#ceKindMg').addEventListener('click',   ()=> setCeKind('mudanza'));
+  if($('#ceKindMg')) $('#ceKindMg').addEventListener('click', ()=> setCeKind(ceKind === 'mudanza' ? 'restauracion' : 'mudanza'));
   $('#casualEntrySave').addEventListener('click', async ()=>{
     const date = $('#casualEntryDate').value;
     if(!date) return alert('Escriba la fecha.');
@@ -4537,25 +4532,45 @@
     pdf.text(casualPaidView ? 'Already paid' : 'Unpaid hours', L, y); y += 20;
 
     pdf.setFont('helvetica','bold'); pdf.setFontSize(10);
-    pdf.text('DATE', L, y); pdf.text('HOURS', L+150, y); pdf.text('STATUS', L+250, y); y += 6;
+    pdf.text('DATE', L, y); pdf.text('CO.', L+95, y); pdf.text('HOURS', L+150, y); pdf.text('STATUS', L+250, y); y += 6;
     pdf.setLineWidth(0.7); pdf.line(L, y, 548, y); y += 14;
 
     pdf.setFont('helvetica','normal');
     rows.forEach(r => {
       if(y > 760){ pdf.addPage(); y = 60; }
       const mismatch = r.labor_load_hours != null && Math.abs((+r.reported_hours||0)-(+r.labor_load_hours||0)) >= 0.01;
+      const mgRow = (r.work_kind === 'mudanza');
       pdf.text(String(r.work_date||''), L, y);
+      // La etiqueta: asi el trabajador ve en el papel que horas fueron de AMG
+      // y que horas de restauracion, y que cada lado se pago a su precio.
+      if(mgRow){ pdf.setFont('helvetica','bold'); pdf.text('AMG', L+95, y); pdf.setFont('helvetica','normal'); }
       pdf.text(String(r.reported_hours != null ? r.reported_hours : ''), L+150, y);
-      pdf.text(r.paid_at ? 'paid' : (mismatch ? 'mismatch' : 'open'), L+250, y);
+      pdf.text(r.paid_at ? 'paid' : (mgRow ? 'open' : (mismatch ? 'mismatch' : 'open')), L+250, y);
       y += 15;
     });
 
     y += 6; pdf.line(L, y, 548, y); y += 20;
-    if(rate === null){
-      pdf.text('No hourly rate set for this person yet.', L, y); y += 16;
-    } else {
-      pdf.text('Hours  ' + pay.hours.toFixed(2) + '   x   ' + money(rate) + ' / hour', L, y);
-      pdf.text(money(pay.amount), 470, y); y += 16;
+    // Un renglon por empresa, cada uno con SU precio, y el total abajo.
+    const mgR = mgRateTemp(casualPersonKey);
+    const restRows = rows.filter(r => r.work_kind !== 'mudanza'), mgRows = rows.filter(r => r.work_kind === 'mudanza');
+    const line = (label, subset, rr) => {
+      if(!subset.length) return;
+      const hrs = subset.reduce((a, r) => a + (+r.reported_hours || 0), 0);
+      if(rr === null){
+        pdf.text(label + '  ' + hrs.toFixed(2) + ' h   -   no hourly rate set yet / sin tarifa', L, y);
+      } else {
+        const sub = payForCasual(subset, rate, mgR);
+        pdf.text(label + '  ' + hrs.toFixed(2) + ' h   x   ' + money(rr) + ' / hour', L, y);
+        pdf.text(money(sub.amount), 470, y);
+      }
+      y += 16;
+    };
+    line('Restoration', restRows, rate);
+    line('AMG Moving ', mgRows, mgR);
+    if(restRows.length && mgRows.length){
+      pdf.setFont('helvetica','bold');
+      pdf.text('TOTAL  ' + pay.hours.toFixed(2) + ' h', L, y); pdf.text(money(pay.amount), 470, y);
+      pdf.setFont('helvetica','normal'); y += 16;
     }
 
     // ---- Every movement of money, with its reason. This is the proof he
@@ -4817,8 +4832,7 @@
   $('#inboxRefresh').addEventListener('click', () =>
     revisar($('#inboxRefresh'), refreshInbox, () => (inboxRows || []).length));
   $('#teAdd').addEventListener('click', addEntry);
-  if($('#teKindRest')) $('#teKindRest').addEventListener('click', ()=> setTeKind('restauracion'));
-  if($('#teKindMg'))   $('#teKindMg').addEventListener('click',   ()=> setTeKind('mudanza'));
+  if($('#teKindMg')) $('#teKindMg').addEventListener('click', ()=> setTeKind(teKind === 'mudanza' ? 'restauracion' : 'mudanza'));
   $('#teFrom').addEventListener('input', paintTeTotal);
   $('#teTo').addEventListener('input', paintTeTotal);
   $('#teamRefresh').addEventListener('click', () =>
@@ -13381,9 +13395,9 @@
     if(!row) return;
     row.hidden = !mgOn();
     if(row.hidden){ teKind = 'restauracion'; return; }
-    const r = $('#teKindRest'), m = $('#teKindMg');
-    if(r) r.classList.toggle('on', teKind === 'restauracion');
-    if(m) m.classList.toggle('on', teKind === 'mudanza');
+    // Un solo boton: apagado = restauracion (lo normal), prendido = AMG.
+    const m = $('#teKindMg');
+    if(m){ const on = teKind === 'mudanza'; m.classList.toggle('on', on); m.textContent = on ? '✓ Horas AMG' : 'Horas AMG'; }
   }
 
   function setTeKind(k){
@@ -14336,6 +14350,7 @@
     rows.forEach(r => {
       if(y > 760){ pdf.addPage(); y = 60; }
       pdf.text(String(r.work_date||''), L, y);
+      if(r.work_kind === 'mudanza'){ pdf.setFont('helvetica','bold'); pdf.text('AMG', L+72, y); pdf.setFont('helvetica','normal'); }
       pdf.text(fmtTime12(r.clock_in||''),  L+120, y);
       pdf.text(fmtTime12(r.clock_out||''), L+195, y);
       pdf.text(hhmm(hoursBetween(r.clock_in,r.clock_out)||0), L+290, y);
@@ -14347,11 +14362,28 @@
     y += 6; pdf.line(L, y, 548, y); y += 20;
     if(pay.wasPaid){
       pdf.text('Amount paid at the time of payment', L, y); y += 16;
-    } else if(rate === null){
-      pdf.text('No hourly rate set for this person yet.', L, y); y += 16;
     } else {
-      pdf.text('Hours  ' + pay.hours.toFixed(2) + '   x   ' + money(rate) + ' / hour', L, y);
-      pdf.text(money(pay.amount), 470, y); y += 16;
+      // Un renglon por empresa, cada uno con SU precio; el total abajo si hay de las dos.
+      const mgR = mgRateCrew(personKey);
+      const restRows = rows.filter(r => r.work_kind !== 'mudanza'), mgRows = rows.filter(r => r.work_kind === 'mudanza');
+      const line = (label, subset, rr) => {
+        if(!subset.length) return;
+        const sub = payFor(subset, rate, mgR);
+        if(rr === null){
+          pdf.text(label + '  ' + sub.hours.toFixed(2) + ' h   -   no hourly rate set yet / sin tarifa', L, y);
+        } else {
+          pdf.text(label + '  ' + sub.hours.toFixed(2) + ' h   x   ' + money(rr) + ' / hour', L, y);
+          pdf.text(money(sub.amount), 470, y);
+        }
+        y += 16;
+      };
+      line('Restoration', restRows, rate);
+      line('AMG Moving ', mgRows, mgR);
+      if(restRows.length && mgRows.length){
+        pdf.setFont('helvetica','bold');
+        pdf.text('TOTAL  ' + pay.hours.toFixed(2) + ' h', L, y); pdf.text(money(pay.amount), 470, y);
+        pdf.setFont('helvetica','normal'); y += 16;
+      }
     }
     pdf.text('Total hours  ' + hhmm(pay.minutes), L, y); y += 24;
     const partialPaid = (!pay.wasPaid && rate !== null) ? personPaymentsSum() : 0;
@@ -15435,9 +15467,8 @@
     if(!row) return;
     row.hidden = !(mgOn() && CASUAL_SHIFT_READY);
     if(row.hidden){ cmKind = 'restauracion'; return; }
-    const r = $('#cmKindRest'), m = $('#cmKindMg');
-    if(r) r.classList.toggle('on', cmKind === 'restauracion');
-    if(m) m.classList.toggle('on', cmKind === 'mudanza');
+    const m = $('#cmKindMg');
+    if(m){ const on = cmKind === 'mudanza'; m.classList.toggle('on', on); m.textContent = on ? '✓ Horas AMG' : 'Horas AMG'; }
   }
   function setCmKind(k){
     cmKind = (k === 'mudanza') ? 'mudanza' : 'restauracion';
@@ -15544,8 +15575,7 @@
     btn.disabled = false; btn.textContent = old;
   });
 
-  if($('#cmKindRest')) $('#cmKindRest').addEventListener('click', ()=> setCmKind('restauracion'));
-  if($('#cmKindMg'))   $('#cmKindMg').addEventListener('click',   ()=> setCmKind('mudanza'));
+  if($('#cmKindMg')) $('#cmKindMg').addEventListener('click', ()=> setCmKind(cmKind === 'mudanza' ? 'restauracion' : 'mudanza'));
   if($('#casualMyHistory')) $('#casualMyHistory').addEventListener('click', (e)=>{
     const b = e.target.closest('.cmDel');
     if(b) casualDeleteMyShift(b.dataset.cmid);
