@@ -3184,7 +3184,33 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-05-BW';
+  const APP_BUILD = '2026-09-05-BX';
+
+  // ---- ¿Hay una version nueva? ----
+  // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
+  // siempre. Aqui se compara APP_BUILD contra version.txt del servidor (sin
+  // cache) cada vez que la app vuelve al frente y cada 10 min; si difieren,
+  // sale una banda arriba con un boton para recargar.
+  async function checkForNewVersion(){
+    try{
+      const res = await fetch('version.txt?cb=' + Date.now(), { cache: 'no-store' });
+      if(!res.ok) return;
+      const latest = (await res.text()).trim();
+      if(!latest || latest === APP_BUILD) return;
+      let bar = document.getElementById('newVersionBar');
+      if(!bar){
+        bar = document.createElement('div'); bar.id = 'newVersionBar';
+        bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;background:#ff7a1a;color:#111;padding:10px 14px;font:600 14px/1.3 system-ui,sans-serif;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.4);';
+        document.body.appendChild(bar);
+      }
+      bar.innerHTML = 'Hay una versi&oacute;n nueva de la app (' + latest + '). '
+        + '<button type="button" style="margin-left:8px;padding:6px 12px;border-radius:999px;border:0;background:#111;color:#fff;font-weight:700;">Actualizar ahora</button>';
+      bar.querySelector('button').addEventListener('click', ()=> location.reload());
+    }catch(e){}
+  }
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') checkForNewVersion(); });
+  setInterval(checkForNewVersion, 10*60*1000);
+  setTimeout(checkForNewVersion, 4000);
 
   // Stamp the version everywhere it is shown. Null-safe on purpose: a screen
   // that does not carry the tag is not an error.
@@ -4255,7 +4281,11 @@
     if(m){ const on = ceKind === 'mudanza'; m.classList.toggle('on', on); m.textContent = on ? '✓ Horas AMG' : 'Horas AMG'; }
   }
   if($('#ceKindMg')) $('#ceKindMg').addEventListener('click', ()=> setCeKind(ceKind === 'mudanza' ? 'restauracion' : 'mudanza'));
-  $('#casualEntrySave').addEventListener('click', async ()=>{
+  $('#casualEntrySave').addEventListener('click', async ()=>{ try { await casualEntrySaveInner(); } catch(e){
+    // Un error aqui ANTES se tragaba en silencio y el boton parecia muerto.
+    alert('No se pudo guardar.\n\nDetalle: ' + ((e && e.message) || e) + '\nVersión: ' + APP_BUILD);
+  } });
+  async function casualEntrySaveInner(){
     const date = $('#casualEntryDate').value;
     if(!date) return alert('Escriba la fecha.');
     const fromVal = $('#casualEntryFrom').value, toVal = $('#casualEntryTo').value;
@@ -4296,10 +4326,10 @@
       setCeKind('restauracion');   // vuelve sola despues de CADA guardado
       updateCasualEntryPreview();
     }catch(e){
-      alert('No se pudo guardar. ¿Ya corrió supabase-casual-crew.sql?');
+      alert('No se pudo guardar.\n\nDetalle: ' + ((e && e.message) || 'sin detalle') + '\nVersión: ' + APP_BUILD);
     }
     btn.textContent = old; btn.disabled = false;
-  });
+  }
 
   async function loadCasualHoursAll(){
     if(!cloudOn() || !isManager()) return;
