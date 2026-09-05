@@ -535,6 +535,19 @@
   .mgrtools{display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 10px;}
   .mgrtools[hidden]{display:none !important;}
   .minibtn[hidden]{display:none !important;}
+  #casualRestPage[hidden], #casualAmgPage[hidden]{display:none !important;}
+  /* AMG = OTRO LUGAR, OTRO COLOR. Verde-azulado a proposito: no se parece ni
+     al naranja de restauracion ni al azul de las pildoras. Cuando alguien
+     toca "Horas AMG" tiene que notar de inmediato que ya no esta en Mis horas. */
+  :root{ --amg:#19b39a; --amg-dark:#128a76; --amg-tint:rgba(25,179,154,.10); }
+  .amgbanner{background:linear-gradient(135deg,var(--amg),var(--amg-dark)); color:#fff;
+    border-radius:14px; padding:14px 16px; margin:4px 0 12px;}
+  .amgbanner-t{font-family:'Chakra Petch',sans-serif; font-size:20px; font-weight:700; letter-spacing:.04em;}
+  .amgbanner-s{font-size:13px; opacity:.92; margin-top:4px; line-height:1.4;}
+  .amgcard{border-left:4px solid var(--amg) !important; background:var(--amg-tint) !important;}
+  .amgcard h2{color:var(--amg) !important;}
+  .btn-amg{background:var(--amg) !important; color:#fff !important; border-color:var(--amg) !important;}
+  .btn-amg:active{background:var(--amg-dark) !important;}
   .row2[hidden]{display:none !important;}
   .paysum .line[hidden]{display:none !important;}
   /* La etiqueta MG en una fila del historial. Solo las de mudanza la llevan:
@@ -2041,6 +2054,33 @@
     </section>
   </section>
 
+  <!-- ===================== HORAS AMG (mudanza) =====================
+       Otra ventana y otro color a proposito: cuando alguien toca "Horas AMG"
+       tiene que NOTAR que esta en otro lugar. Todo lo que se guarda desde
+       aqui lleva work_kind = 'mudanza'. -->
+  <section class="tab-panel" data-tab="amg">
+    <div class="amgbanner">
+      <div class="amgbanner-t">&#128666; HORAS AMG</div>
+      <div class="amgbanner-s">AMG Moving &middot; mudanza. Lo que guarde aqu&iacute; se paga a la tarifa de AMG, no a la de restauraci&oacute;n.</div>
+    </div>
+    <section class="card amgcard">
+      <h2>Meter horas de AMG</h2>
+      <div class="field"><label>D&iacute;a / Fecha</label><input type="date" id="amgDate"></div>
+      <div class="row2">
+        <div class="field"><label>Entrada / Hora Desde</label><input type="time" id="amgFrom"></div>
+        <div class="field"><label>Salida / Hora Hasta</label><input type="time" id="amgTo"></div>
+      </div>
+      <div class="tetotal" id="amgTotal">&mdash;</div>
+      <button class="btn btn-amg" type="button" id="amgAdd" style="width:100%; margin-top:10px;">Agregar horas de AMG</button>
+      <p class="clockhint">Puede agregar m&aacute;s de un turno en el d&iacute;a. Para restauraci&oacute;n, regrese a Mis horas.</p>
+    </section>
+    <section class="card amgcard">
+      <h2>Mis horas de AMG</h2>
+      <div id="amgEntries"><p class="clockhint">Nada todav&iacute;a.</p></div>
+      <div id="amgTotalBox" hidden></div>
+    </section>
+  </section>
+
   <!-- ===================== TAB 6: MANUAL ===================== -->
   <section class="tab-panel" data-tab="manual">
     <iframe id="manualFrame" data-src="manual.html" title="Manual de Campo"
@@ -2062,6 +2102,7 @@
     </div>
   </header>
   <main style="display:block;">
+   <div id="casualRestPage">
     <section class="card">
       <div class="inboxhead" style="margin-bottom:2px;">
         <h2 style="margin:0;">Sus horas</h2>
@@ -2080,6 +2121,30 @@
       <h2>Su historial</h2>
       <div id="casualMyHistory"><p class="clockhint">Nada todavía.</p></div>
     </section>
+   </div>
+   <!-- La pagina AMG del temporal: otro color, otro lugar. -->
+   <div id="casualAmgPage" hidden>
+    <div class="amgbanner">
+      <div class="amgbanner-t">&#128666; HORAS AMG</div>
+      <div class="amgbanner-s">AMG Moving &middot; mudanza. Lo que guarde aqu&iacute; se paga a la tarifa de AMG.</div>
+    </div>
+    <button type="button" class="btn btn-outline" id="camgBack" style="width:100%; margin-bottom:10px;">&#9664; Volver a Sus horas</button>
+    <section class="card amgcard">
+      <h2>Meter horas de AMG</h2>
+      <div class="field"><label>Fecha</label><input type="date" id="camgDate"></div>
+      <div class="row2">
+        <div class="field"><label>Hora desde</label><input type="time" id="camgFrom"></div>
+        <div class="field"><label>Hora hasta</label><input type="time" id="camgTo"></div>
+      </div>
+      <div class="tetotal" id="camgPreview">&mdash;</div>
+      <button class="btn btn-amg" type="button" id="camgSave" style="width:100%; margin-top:10px;">Guardar horas de AMG</button>
+      <p class="clockhint" id="camgMsg"></p>
+    </section>
+    <section class="card amgcard">
+      <h2>Sus horas de AMG</h2>
+      <div id="camgHistory"><p class="clockhint">Nada todav&iacute;a.</p></div>
+    </section>
+   </div>
   </main>
 </div>
 
@@ -2095,7 +2160,7 @@
   // in the header returns to the menu. The old tab strip is hidden but kept
   // so nothing that referenced .tab-btn / .tab-panel had to change.
   const SECTION_NAMES = {
-    reloj:'Reloj / Horas', labor:'Labor / Mano de Obra', equipment:'Equipment / Equipo',
+    reloj:'Reloj / Horas', amg:'Horas AMG / AMG Moving', labor:'Labor / Mano de Obra', equipment:'Equipment / Equipo',
     comms:'Comms / Comunicación', drying:'Drying / Secado',
     materials:'Materials / Materiales', measurements:'Measurements / Medidas',
     floorplan:'Floor Plan / Plano',
@@ -2492,6 +2557,11 @@
   function onTabChange(tab){
     requestAnimationFrame(() => sigPads.forEach(p => { try{ p.ensureSize(); }catch(e){} }));
     if(tab === 'floorplan' && $('#fp-date') && !$('#fp-date').value) $('#fp-date').value = todayStr();
+    if(tab === 'amg'){
+      if($('#amgDate') && !$('#amgDate').value) $('#amgDate').value = todayStr();
+      teKind = 'mudanza';
+      loadWorkKinds(); loadMyEntries();
+    }
     if(tab === 'reloj'){
       if($('#teDate') && !$('#teDate').value) $('#teDate').value = todayStr();
       // Siempre se vuelve a Restauracion al entrar. Una pildora pegajosa es
@@ -3105,7 +3175,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-05-BT';
+  const APP_BUILD = '2026-09-05-BU';
 
   // Stamp the version everywhere it is shown. Null-safe on purpose: a screen
   // that does not carry the tag is not an error.
@@ -4829,7 +4899,18 @@
   $('#inboxRefresh').addEventListener('click', () =>
     revisar($('#inboxRefresh'), refreshInbox, () => (inboxRows || []).length));
   $('#teAdd').addEventListener('click', addEntry);
-  if($('#teKindMg')) $('#teKindMg').addEventListener('click', ()=> setTeKind(teKind === 'mudanza' ? 'restauracion' : 'mudanza'));
+  // "Horas AMG" ya no es un interruptor: LLEVA a la ventana de AMG.
+  if($('#teKindMg')) $('#teKindMg').addEventListener('click', ()=>{ showTab('amg'); pushBack('reloj'); });
+  function paintAmgTotal(){
+    const t = $('#amgTotal'); if(!t) return;
+    const mins = hoursBetween($('#amgFrom').value, $('#amgTo').value);
+    t.textContent = mins === null ? '—' : mins === 0 ? '⚠ la entrada y la salida son la misma hora'
+      : hhmm(mins) + ' horas' + (mins > 16*60 ? '  ⚠ revise las horas' : '');
+  }
+  if($('#amgFrom')) $('#amgFrom').addEventListener('input', paintAmgTotal);
+  if($('#amgTo'))   $('#amgTo').addEventListener('input', paintAmgTotal);
+  if($('#amgAdd'))  $('#amgAdd').addEventListener('click', ()=> addEntry({
+    date:'#amgDate', from:'#amgFrom', to:'#amgTo', btn:'#amgAdd', kind:'mudanza', after: paintAmgTotal }));
   $('#teFrom').addEventListener('input', paintTeTotal);
   $('#teTo').addEventListener('input', paintTeTotal);
   $('#teamRefresh').addEventListener('click', () =>
@@ -4959,7 +5040,7 @@
     if(e.target.closest('.ppResend')) return resendPayment(row.dataset.pid);
   });
   $('#payMark').addEventListener('click', markPaid);
-  $('#myEntries').addEventListener('click', (e)=>{
+  const onMyEntriesClick = (e)=>{
     const fix = e.target.closest('.tefix');
     if(fix) return openCorrection(fix.closest('.entryrow').dataset.id);
     const save = e.target.closest('.tefixSave');
@@ -4972,7 +5053,9 @@
     if(e.target.closest('.tefixCancel')) return closeCorrection();
     const b = e.target.closest('.teconfirm'); if(!b) return;
     confirmEntry(b.closest('.entryrow').dataset.id, b);
-  });
+  };
+  $('#myEntries').addEventListener('click', onMyEntriesClick);
+  if($('#amgEntries')) $('#amgEntries').addEventListener('click', onMyEntriesClick);
   $('#myPayments').addEventListener('click', (e)=>{
     const yes = e.target.closest('.payYes'), no = e.target.closest('.payNo');
     if(yes || no){
@@ -13146,7 +13229,19 @@
   // at a total in dollars on the screen they check every day is exactly the
   // kind of number that becomes an argument on payday. What they were
   // actually handed already has its own card, "Mis pagos".
+  // La lista de la ventana AMG: solo los turnos de mudanza, con su total.
+  function renderAmgEntries(){
+    const box = $('#amgEntries'), tot = $('#amgTotalBox');
+    if(!box) return;
+    const rows = (myEntries || []).filter(isMg);
+    if(!rows.length){ box.innerHTML = '<p class="clockhint">Todav\u00eda no tiene horas de AMG.</p>'; if(tot) tot.hidden = true; return; }
+    box.innerHTML = rows.map(e => entryRow(e, false)).join('');
+    let mins = 0; rows.forEach(e => { mins += hoursBetween(e.clock_in, e.clock_out) || 0; });
+    if(tot){ tot.hidden = false; tot.innerHTML = `<div class="paysum" style="margin-top:12px;"><div class="grand"><span>TOTAL DE HORAS AMG</span><span>${hhmm(mins)}</span></div></div>`; }
+  }
+
   function renderMyHoursTotal(){
+    renderAmgEntries();
     const box = $('#myHoursTotal');
     if(!box) return;
     const rows = (myEntries || []).filter(e => hoursBetween(e.clock_in, e.clock_out) !== null);
@@ -13205,6 +13300,7 @@
     const stash = stashOpenCorrection();
     if(rowBox && myEntries.length) rowBox.innerHTML = myEntries.map(e => entryRow(e, false)).join('');
     restoreOpenCorrection(stash);
+    renderAmgEntries();
     if(myLaborShifts === null){ box.hidden = true; return; }
     const days = [...new Set(myEntries.map(e => e.work_date).filter(Boolean))].sort().reverse();
     const problems = [];
@@ -13392,6 +13488,8 @@
     if(!row) return;
     row.hidden = !mgOn();
     if(row.hidden){ teKind = 'restauracion'; return; }
+    row.classList.remove('on'); row.textContent = 'Horas AMG';
+    return;
     // Un solo boton: apagado = restauracion (lo normal), prendido = AMG.
     const m = $('#teKindMg');
     if(m){ const on = teKind === 'mudanza'; m.classList.toggle('on', on); m.textContent = on ? '✓ Horas AMG' : 'Horas AMG'; }
@@ -13402,9 +13500,14 @@
     paintKindPills();
   }
 
-  async function addEntry(){
+  // ctx dice de que pantalla vienen los campos. Sin ctx = Mis horas (restauracion).
+  // La ventana AMG llama con sus propios campos y kind:'mudanza'.
+  async function addEntry(ctx){
+    ctx = (ctx && ctx.date) ? ctx
+        : { date:'#teDate', from:'#teFrom', to:'#teTo', btn:'#teAdd', kind: teKind,
+            after: ()=>{ paintTeTotal(); setTeKind('restauracion'); } };
     if(!signedIn()) return;
-    const day = $('#teDate').value, from = $('#teFrom').value, to = $('#teTo').value;
+    const day = $(ctx.date).value, from = $(ctx.from).value, to = $(ctx.to).value;
     if(!day)  return alert('Escoja el día.');
     const mins = hoursBetween(from,to);
     if(mins === null) return alert('Escriba la hora de entrada y la de salida.');
@@ -13421,18 +13524,18 @@
         : `Ese día ya tiene un turno a esa misma hora:\n\n${fmtTime12(clash.clock_in)} - ${fmtTime12(clash.clock_out)} (${hhmm(hoursBetween(clash.clock_in, clash.clock_out)||0)})\n\nNo se puede trabajar dos turnos a la vez. Si el turno guardado está mal, tóquelo y use Corregir.\n\nSi volvió a trabajar más tarde ese día, ponga la hora en que REGRESÓ (después de las ${fmtTime12(clash.clock_out)}).`);
       return;
     }
-    const btn = $('#teAdd'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando…';
+    const btn = $(ctx.btn); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando…';
     try{
       const res = await authFetch('/rest/v1/time_entries', {
         method:'POST',
         headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
         body: JSON.stringify({ company_id:SES.company_id, user_id:SES.user_id,
           person_name:(SES.full_name||null), work_date:day, clock_in:from, clock_out:to,
-          work_kind: teKind })
+          work_kind: ctx.kind })
       });
       if(!res.ok) throw new Error('HTTP '+res.status);
-      $('#teFrom').value=''; $('#teTo').value=''; paintTeTotal();
-      setTeKind('restauracion');   // vuelve sola despues de CADA turno
+      $(ctx.from).value=''; $(ctx.to).value='';
+      if(ctx.after) ctx.after();   // Mis horas: vuelve sola a restauracion
       await loadMyEntries();
     }catch(e){ alert('No se pudo guardar. Revise su internet.'); }
     btn.textContent = old; btn.disabled = false;
@@ -15464,8 +15567,7 @@
     if(!row) return;
     row.hidden = !(mgOn() && CASUAL_SHIFT_READY);
     if(row.hidden){ cmKind = 'restauracion'; return; }
-    const m = $('#cmKindMg');
-    if(m){ const on = cmKind === 'mudanza'; m.classList.toggle('on', on); m.textContent = on ? '✓ Horas AMG' : 'Horas AMG'; }
+    const m = $('#cmKindMg'); if(m){ m.classList.remove('on'); m.textContent = 'Horas AMG'; }
   }
   function setCmKind(k){
     cmKind = (k === 'mudanza') ? 'mudanza' : 'restauracion';
@@ -15515,6 +15617,7 @@
         <div class="grand"><span>TOTAL DE HORAS</span><span>${(restH+mgH).toFixed(2)} hrs</span></div>
       </div>` : '';
     box.innerHTML = html + split;
+    if(typeof renderCasualAmgHistory === 'function') renderCasualAmgHistory();
   }
 
   // Borrar un turno propio. La base de datos refuerza las dos reglas: solo
@@ -15572,7 +15675,53 @@
     btn.disabled = false; btn.textContent = old;
   });
 
-  if($('#cmKindMg')) $('#cmKindMg').addEventListener('click', ()=> setCmKind(cmKind === 'mudanza' ? 'restauracion' : 'mudanza'));
+  function showCasualAmg(on){
+    const a = $('#casualAmgPage'), r = $('#casualRestPage');
+    if(!a || !r) return;
+    a.hidden = !on; r.hidden = on;
+    cmKind = on ? 'mudanza' : 'restauracion';
+    if(on){ if(!$('#camgDate').value) $('#camgDate').value = todayStr(); renderCasualAmgHistory(); window.scrollTo(0,0); }
+  }
+  if($('#cmKindMg')) $('#cmKindMg').addEventListener('click', ()=> showCasualAmg(true));
+  if($('#camgBack')) $('#camgBack').addEventListener('click', ()=> showCasualAmg(false));
+  function camgPreview(){
+    const t = $('#camgPreview'); if(!t) return;
+    const mins = hoursBetween($('#camgFrom').value, $('#camgTo').value);
+    t.textContent = mins == null ? '—' : hhmm(mins) + ' h';
+  }
+  if($('#camgFrom')) $('#camgFrom').addEventListener('change', camgPreview);
+  if($('#camgTo'))   $('#camgTo').addEventListener('change', camgPreview);
+  // Guardar desde la pagina AMG: los mismos pasos que "Sus horas", con kind mudanza.
+  if($('#camgSave')) $('#camgSave').addEventListener('click', async ()=>{
+    const ses = loadCasualSes(); if(!ses) return;
+    const date = $('#camgDate').value, from = $('#camgFrom').value, to = $('#camgTo').value;
+    const msg = $('#camgMsg');
+    if(!date || !from || !to){ msg.textContent = 'Escriba la fecha y las dos horas.'; return; }
+    const btn = $('#camgSave'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando…'; msg.textContent = '';
+    try{
+      const d = await authPost('/rest/v1/rpc/casual_log_shift', {
+        p_join_code: ses.joinCode, p_name: ses.name, p_pin: ses.pin,
+        p_date: date, p_from: from, p_to: to, p_kind: 'mudanza' });
+      casualMyHistory = d.history || [];
+      renderCasualMyHistory(casualMyHistory);
+      msg.textContent = 'Guardado — ' + Number(d.hours).toFixed(2) + ' horas de AMG.'; msg.style.color = '';
+      $('#camgFrom').value = ''; $('#camgTo').value = ''; camgPreview();
+    }catch(e){ msg.textContent = e.message || 'No se pudo guardar. Revise su internet.'; msg.style.color = 'var(--danger)'; }
+    btn.disabled = false; btn.textContent = old;
+  });
+  function renderCasualAmgHistory(){
+    const box = $('#camgHistory'); if(!box) return;
+    const rows = (casualMyHistory || []).filter(h => h.work_kind === 'mudanza');
+    if(!rows.length){ box.innerHTML = '<p class="clockhint">Todav\u00eda no tiene horas de AMG.</p>'; return; }
+    let tot = 0;
+    box.innerHTML = rows.map(h => { tot += (+h.reported_hours||0); return `<div class="entryrow"><span><span class="who">${esc(h.work_date)}</span>${
+      (h.clock_in && h.clock_out) ? '<br><span class="when">' + esc(fmtTime12(h.clock_in)) + ' - ' + esc(fmtTime12(h.clock_out)) + '</span>' : ''}${
+      h.paid_at ? '<br><span style="color:var(--green); font-weight:700; font-size:12px;">Pagado</span>' : ''}</span>
+      <span style="display:flex;align-items:center;gap:10px;"><span class="hrs">${(+h.reported_hours||0).toFixed(2)} hrs</span>${
+      (!h.paid_at && h.id) ? `<button type="button" class="minibtn cmDel" data-cmid="${esc(h.id)}">Borrar</button>` : ''}</span></div>`; }).join('')
+      + `<div class="paysum" style="margin-top:12px;"><div class="grand"><span>TOTAL DE HORAS AMG</span><span>${tot.toFixed(2)} hrs</span></div></div>`;
+  }
+  if($('#camgHistory')) $('#camgHistory').addEventListener('click', (e)=>{ const b = e.target.closest('.cmDel'); if(b) casualDeleteMyShift(b.dataset.cmid); });
   if($('#casualMyHistory')) $('#casualMyHistory').addEventListener('click', (e)=>{
     const b = e.target.closest('.cmDel');
     if(b) casualDeleteMyShift(b.dataset.cmid);
