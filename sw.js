@@ -6,6 +6,19 @@
 self.addEventListener('install',  e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 
+// The server sends url:"/" for "open the app". That is only correct when the
+// site lives at the root of a domain. On GitHub Pages the app sits in a
+// subfolder, so "/" would open the account's 404 page instead. Resolve every
+// incoming path against this worker's own scope, which is the app's folder on
+// any host.
+const APP_SCOPE = self.registration.scope;
+function appUrl(u) {
+  if (!u) return APP_SCOPE;
+  if (/^https?:\/\//i.test(u)) return u;
+  try { return new URL(String(u).replace(/^\/+/, ''), APP_SCOPE).href; }
+  catch (e) { return APP_SCOPE; }
+}
+
 self.addEventListener('push', event => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) {
@@ -19,7 +32,7 @@ self.addEventListener('push', event => {
       badge: data.badge || undefined,
       tag: data.tag || 'labor-log',
       renotify: true,
-      data: { url: data.url || '/' }
+      data: { url: appUrl(data.url) }
     })
   );
 });
@@ -28,7 +41,7 @@ self.addEventListener('push', event => {
 // otherwise opens the app.
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || '/';
+  const target = appUrl(event.notification.data && event.notification.data.url);
   event.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const c of all) {
