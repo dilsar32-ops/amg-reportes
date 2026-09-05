@@ -533,6 +533,14 @@
   /* Manager tools: one row of small pills above the inbox, so the labor logs
      the crew sent are what the screen is actually about. */
   .mgrtools{display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 10px;}
+  .mgrtools[hidden]{display:none !important;}
+  .row2[hidden]{display:none !important;}
+  .paysum .line[hidden]{display:none !important;}
+  /* La etiqueta MG en una fila del historial. Solo las de mudanza la llevan:
+     las de restauracion van limpias porque son la mayoria. */
+  .kindtag{display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px;
+    background:var(--blue); color:#fff; font-size:10.5px; font-weight:700;
+    letter-spacing:.04em; vertical-align:1px;}
   .minibtn{flex:0 0 auto; min-height:34px; padding:6px 11px; border-radius:999px; cursor:pointer;
     background:var(--surface-2); border:1px solid var(--line); color:var(--blue);
     font-family:'IBM Plex Sans',sans-serif; font-size:12px; font-weight:600; white-space:nowrap;}
@@ -1647,6 +1655,16 @@
     <div id="myHoursBox">
     <section class="card">
       <h2><span class="num">1</span>Mis horas</h2>
+      <!-- Que empresa se esta apuntando AHORA. Deliberadamente NO se acuerda
+           de la ultima vez: si la pildora quedara prendida en MG, al otro dia
+           el hombre apunta su dia normal de restauracion y se guarda como MG,
+           y como la revision del labor log salta las filas de MG, la alerta
+           que normalmente lo cacharia nunca aparece. Siempre abre en
+           Restauracion. -->
+      <div class="mgrtools" id="teKindTools" hidden>
+        <button type="button" class="minibtn on" id="teKindRest">Restauración</button>
+        <button type="button" class="minibtn" id="teKindMg">Horas MG</button>
+      </div>
       <!-- Only appears for people who joined before the name was required. Without a
            name the manager sees "Sin nombre" and cannot tell whose hours these are. -->
       <div class="field" id="teNameFix" hidden>
@@ -1730,6 +1748,15 @@
             <input type="number" id="personRate" step="0.01" inputmode="decimal" placeholder="0.00"></div>
           <div class="field"><label>&nbsp;</label>
             <button class="btn btn-outline" type="button" id="personRateSave" style="width:100%;">Guardar tarifa</button></div>
+        </div>
+        <!-- La tarifa de mudanza va en el MISMO cajon que la de siempre: es la
+             misma pregunta ("cuanto le pagamos a este hombre"), solo que para
+             el otro tipo de trabajo. Aparece sola cuando mudanza esta prendida. -->
+        <div class="row2 mgrateRow" hidden>
+          <div class="field"><label>Tarifa MG por hora $</label>
+            <input type="number" id="personRateMg" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+          <div class="field"><label>&nbsp;</label>
+            <button class="btn btn-outline" type="button" id="personRateMgSave" style="width:100%;">Guardar tarifa MG</button></div>
         </div>
         <div class="row2">
           <div class="field"><label>Alias en labor log</label>
@@ -1815,6 +1842,12 @@
           <div class="field"><label>&nbsp;</label>
             <button class="btn btn-outline" type="button" id="casualPersonRateSave" style="width:100%;">Guardar tarifa</button></div>
         </div>
+        <div class="row2 mgrateRow" hidden>
+          <div class="field"><label>Tarifa MG por hora $</label>
+            <input type="number" id="casualPersonRateMg" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+          <div class="field"><label>&nbsp;</label>
+            <button class="btn btn-outline" type="button" id="casualPersonRateMgSave" style="width:100%;">Guardar tarifa MG</button></div>
+        </div>
         <div class="row2">
           <div class="field"><label>PIN (4 dígitos)</label>
             <input type="text" id="casualPersonPin" inputmode="numeric" maxlength="4" placeholder="0000"></div>
@@ -1824,6 +1857,12 @@
         <p class="clockhint">Con el código del equipo, su nombre (igual a como está escrito aquí) y este PIN, puede entrar en Field Reports y poner sus propias horas — sin ver precios ni nada más.</p>
       </div>
 
+      <!-- Que empresa esta metiendo el manager por esta persona. Igual que en
+           los telefonos: vuelve sola a Restauracion despues de cada guardado. -->
+      <div class="mgrtools" id="ceKindTools" hidden style="margin-top:12px;">
+        <button type="button" class="minibtn on" id="ceKindRest">Restauración</button>
+        <button type="button" class="minibtn" id="ceKindMg">Horas MG</button>
+      </div>
       <div class="field" style="margin-top:12px;"><label>Fecha</label><input type="date" id="casualEntryDate"></div>
       <div class="row2">
         <div class="field"><label>Hora desde</label><input type="time" id="casualEntryFrom"></div>
@@ -1932,6 +1971,7 @@
       <button type="button" class="minibtn on" id="mgrMoreSegRates">&#128176; Precio al cliente</button>
       <button type="button" class="minibtn" id="mgrMoreSegPay">&#128179; Pagos por confirmar</button>
       <button type="button" class="minibtn" id="mgrMoreSegCrew">&#128101; Miembros del equipo</button>
+      <button type="button" class="minibtn" id="mgrMoreSegMg">&#128666; Horas MG</button>
     </div>
 
     <section class="card" id="mgrMoreRates">
@@ -1945,6 +1985,30 @@
           <div class="field"><label>After hours empieza</label><input type="time" id="mgrCutoff"></div>
         </div>
         <p class="hint" id="mgrNightWindow" style="margin-top:6px;"></p>
+        <!-- Una mudanza no se cobra como una restauracion. Mientras estas
+             cuatro casillas esten vacias, MUDANZA SIGUE APAGADA: nadie puede
+             apuntar horas de MG hasta que valgan algo. -->
+        <div id="mgrPriceMgBox" style="margin-top:16px; padding-top:14px; border-top:1px solid var(--line);">
+          <h2 style="font-size:15px; margin:0 0 4px;">Precio de MUDANZA (AMG Moving) al cliente</h2>
+          <p class="hint" id="mgrMgPriceState" style="margin:0 0 8px;"></p>
+          <div class="row3">
+            <div class="field"><label>Al cliente $/hora</label>
+              <input type="number" id="mgMgRateDay" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+            <div class="field"><label>After hours $/hora</label>
+              <input type="number" id="mgMgRateNight" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+            <div class="field"><label>After hours empieza</label>
+              <input type="time" id="mgMgCutoff"></div>
+          </div>
+          <div class="row2" style="margin-top:8px;">
+            <div class="field"><label>After hours termina</label>
+              <input type="time" id="mgMgCutoffEnd"></div>
+            <div class="field"><label>&nbsp;</label>
+              <button class="btn btn-outline" type="button" id="mgMgPriceSave" style="width:100%;">Guardar precios de mudanza</button></div>
+          </div>
+          <p class="hint" id="mgMgPriceMsg" style="margin-top:6px;"></p>
+          <button class="btn btn-accent" type="button" id="mgMgActivate" style="width:100%; margin-top:10px;">Prender MUDANZA</button>
+          <p class="hint">Si la mudanza se cobra igual a toda hora, ponga el mismo n&uacute;mero en las dos casillas de precio.</p>
+        </div>
         <p class="hint">Cambiar el precio <b>no cambia</b> los reportes que ya calculó &mdash; cada reporte guarda el precio con el que se calculó. El precio nuevo se usa en los reportes que abra de aquí en adelante.</p>
         <p class="hint" id="mgrRateSaveWarn" hidden style="color:var(--danger); font-weight:600;"></p>
       </div>
@@ -1963,6 +2027,19 @@
         <button type="button" class="btn btn-outline" id="crewListRefresh">Revisar</button>
       </div>
       <div id="crewListBox"><p class="clockhint">Toque Revisar.</p></div>
+    </section>
+
+    <!-- Cuarta pildora: las horas de MUDANZA de todos, de planta y temporales,
+         en UNA sola lista. Vive aqui y no en Reloj porque es configuracion y
+         correccion de todo el equipo, no el trabajo del dia. -->
+    <section class="card mgr-only" id="mgrMoreMg" hidden>
+      <div class="inboxhead" style="margin-bottom:2px;">
+        <h2 style="margin:0;">Horas MG &mdash; AMG Moving</h2>
+        <button type="button" class="btn btn-outline" id="mgMgRefresh">Revisar</button>
+      </div>
+      <p class="clockhint" id="mgMgIntro">Las horas de <b>mudanza</b> de todos, de planta y temporales, con su tarifa de MG. Las de restauraci&oacute;n no se tocan aqu&iacute;.</p>
+      <div id="mgMgList"><p class="clockhint">Toque Revisar.</p></div>
+      <div class="paysum" id="mgMgSum" hidden></div>
     </section>
   </section>
 
@@ -1989,6 +2066,13 @@
   <main style="display:block;">
     <section class="card">
       <h2>Sus horas</h2>
+      <!-- Que empresa se esta apuntando AHORA. Va pegado a los campos que va a
+           llenar, no arriba de la tarjeta, porque escoge lo que va a escribir.
+           Igual que en el lado de planta: NO se acuerda de la ultima vez. -->
+      <div class="mgrtools" id="cmKindTools" hidden>
+        <button type="button" class="minibtn on" id="cmKindRest">Restauración</button>
+        <button type="button" class="minibtn" id="cmKindMg">Horas MG</button>
+      </div>
       <div class="field"><label>Fecha</label><input type="date" id="casualMyDate"></div>
       <div class="row2">
         <div class="field"><label>Hora desde</label><input type="time" id="casualMyFrom"></div>
@@ -2416,6 +2500,10 @@
     if(tab === 'floorplan' && $('#fp-date') && !$('#fp-date').value) $('#fp-date').value = todayStr();
     if(tab === 'reloj'){
       if($('#teDate') && !$('#teDate').value) $('#teDate').value = todayStr();
+      // Siempre se vuelve a Restauracion al entrar. Una pildora pegajosa es
+      // como un dia normal termina guardado como MG sin que nada lo delate.
+      teKind = 'restauracion';
+      loadWorkKinds();
       loadMyEntries();
       if(isManager()){
         loadTeamEntries(); loadCasualTeam();
@@ -3023,7 +3111,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-05-BK';
+  const APP_BUILD = '2026-09-05-BP';
 
   // Stamp the version everywhere it is shown. Null-safe on purpose: a screen
   // that does not carry the tag is not an error.
@@ -3182,10 +3270,155 @@
   }
 
   // ---- The window's own pill row, same behaviour as the Labor logs pills
+
+  // ================= MUDANZA (MG): precios, tarifas y horas =================
+  // Los precios y las tarifas los escriben Amilcar y su asistente, igual que
+  // hacen con restauracion. Aqui solo estan las casillas y el guardado.
+
+  function mgKindRow(){ return WORK_KINDS.find(k => k.id === 'mudanza') || null; }
+
+  // Mudanza NO se puede prender hasta que tenga sus cuatro numeros. Un turno
+  // de MG sin precio se congelaria en $0.00 al cerrarlo, y nada en la app
+  // puede volver a abrir un dia cerrado.
+  function mgPriceComplete(k){
+    return !!(k && k.rate_day != null && k.rate_night != null && k.cutoff && k.cutoff_end);
+  }
+
+  async function paintMgPrices(){
+    if(!$('#mgrPriceMgBox')) return;
+    await loadWorkKinds();
+    const k = mgKindRow();
+    const st = $('#mgrMgPriceState'), act = $('#mgMgActivate');
+    if(!k){
+      if(st) st.textContent = 'Falta correr supabase-two-kinds-part1.sql.';
+      if(act) act.hidden = true;
+      return;
+    }
+    if($('#mgMgRateDay')   && k.rate_day   != null) $('#mgMgRateDay').value   = k.rate_day;
+    if($('#mgMgRateNight') && k.rate_night != null) $('#mgMgRateNight').value = k.rate_night;
+    if($('#mgMgCutoff')    && k.cutoff)             $('#mgMgCutoff').value    = String(k.cutoff).slice(0,5);
+    if($('#mgMgCutoffEnd') && k.cutoff_end)         $('#mgMgCutoffEnd').value = String(k.cutoff_end).slice(0,5);
+    const done = mgPriceComplete(k);
+    if(st){
+      st.textContent = k.active
+        ? 'MUDANZA ESTÁ PRENDIDA. Los trabajadores ya pueden apuntar horas de MG.'
+        : (done ? 'Los precios están puestos. Falta prenderla.'
+                : 'MUDANZA ESTÁ APAGADA. Nadie puede apuntar horas de MG hasta que estén los cuatro números.');
+      st.style.color = k.active ? 'var(--green)' : (done ? '' : 'var(--danger)');
+      st.style.fontWeight = '600';
+    }
+    // Interruptor de ellos, sin candado: igual que en restauracion, las tarifas
+    // las ponen cuando quieran. Lo que si esta protegido es el CIERRE: un turno
+    // de MG sin tarifa MG no se cierra nunca en $0.00 - queda pendiente y se
+    // avisa en rojo.
+    if(act){ act.hidden = false; act.textContent = k.active ? 'Apagar MUDANZA' : 'Prender MUDANZA'; }
+    document.querySelectorAll('.mgrateRow').forEach(r => { r.hidden = !k.active; });
+  }
+
+  async function saveMgPrices(){
+    const num = sel => { const v = parseFloat(($(sel)||{}).value); return Number.isFinite(v) ? v : null; };
+    const body = { rate_day: num('#mgMgRateDay'), rate_night: num('#mgMgRateNight'),
+                   cutoff: ($('#mgMgCutoff')||{}).value || null,
+                   cutoff_end: ($('#mgMgCutoffEnd')||{}).value || null };
+    const msg = $('#mgMgPriceMsg');
+    try{
+      const res = await authFetch('/rest/v1/work_kinds?id=eq.mudanza', {
+        method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
+        body: JSON.stringify(body) });
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      if(msg){ msg.textContent = 'Precios de mudanza guardados.'; msg.style.color = 'var(--green)'; }
+      await paintMgPrices();
+    }catch(e){
+      if(msg){ msg.textContent = 'No se pudo guardar. Revise su internet.'; msg.style.color = 'var(--danger)'; }
+    }
+  }
+
+  async function activateMg(){
+    const k = mgKindRow(); if(!k) return;
+    const turnOn = !k.active;
+    if(!confirm(turnOn
+      ? '¿Prender MUDANZA?\n\nCada trabajador va a ver el botón "Horas MG" en su teléfono. Las tarifas de MG las pone usted en cada persona, cuando quiera - un turno de MG sin tarifa queda pendiente, nunca se paga en $0.00.'
+      : '¿Apagar MUDANZA?\n\nEl botón "Horas MG" desaparece de los teléfonos. Las horas de MG que ya existen no se tocan.')) return;
+    try{
+      const res = await authFetch('/rest/v1/work_kinds?id=eq.mudanza', {
+        method:'PATCH', headers: cloudHeaders(), body: JSON.stringify({ active: turnOn }) });
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      await paintMgPrices();
+    }catch(e){ alert('No se pudo cambiar. Revise su internet.'); }
+  }
+
+  // ---- las horas de MG de todos, en una sola lista ----
+  async function loadMgHours(){
+    const box = $('#mgMgList'), sum = $('#mgMgSum');
+    if(!box) return;
+    await loadWorkKinds();
+    box.innerHTML = '<p class="clockhint">Buscando…</p>';
+    try{
+      const [teRes, chRes, ckRes, cwRes] = await Promise.all([
+        authFetch('/rest/v1/time_entries?select=id,user_id,person_name,work_date,clock_in,clock_out,paid_at,work_kind&work_kind=eq.mudanza&order=work_date.desc'),
+        authFetch('/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,paid_at,work_kind&work_kind=eq.mudanza&order=work_date.desc'),
+        authFetch('/rest/v1/crew_kind_rates?select=user_id,work_kind,rate&work_kind=eq.mudanza'),
+        authFetch('/rest/v1/casual_kind_rates?select=casual_worker_id,work_kind,rate&work_kind=eq.mudanza')
+      ]);
+      const te = teRes.ok ? await teRes.json() : [];
+      const ch = chRes.ok ? await chRes.json() : [];
+      const ckr = ckRes.ok ? await ckRes.json() : [];
+      const cwr = ckRes.ok ? (cwRes.ok ? await cwRes.json() : []) : [];
+      const rateCrew = id => (ckr.find(r => r.user_id === id) || {}).rate;
+      const rateTemp = id => (cwr.find(r => r.casual_worker_id === id) || {}).rate;
+      const people = new Map();
+      const add = (key, name, tipo, mins, rate) => {
+        if(!people.has(key)) people.set(key, { name, tipo, mins:0, rate });
+        const p = people.get(key); p.mins += mins;
+      };
+      te.forEach(e => {
+        if(e.paid_at) return;
+        add('c:'+e.user_id, e.person_name || 'Sin nombre', 'de planta',
+            hoursBetween(e.clock_in, e.clock_out) || 0, rateCrew(e.user_id));
+      });
+      ch.forEach(h => {
+        if(h.paid_at) return;
+        const w = (casualWorkers || []).find(x => String(x.id) === String(h.casual_worker_id));
+        add('t:'+h.casual_worker_id, (w && w.name) || 'Trabajador', 'temporal',
+            Math.round((+h.reported_hours || 0) * 60), rateTemp(h.casual_worker_id));
+      });
+      const rows = [...people.values()].sort((a,b) => b.mins - a.mins);
+      if(!rows.length){
+        box.innerHTML = '<p class="clockhint">Todavía nadie ha apuntado horas de MG.</p>';
+        if(sum) sum.hidden = true;
+        return;
+      }
+      let totMins = 0, faltan = 0;
+      box.innerHTML = rows.map(p => {
+        totMins += p.mins;
+        const sinTarifa = (p.rate == null);
+        if(sinTarifa) faltan++;
+        return `<div class="entryrow"><span>
+            <span class="who">${esc(p.name)}</span><br>
+            <span class="when">${esc(p.tipo)} &middot; ${sinTarifa
+              ? '<b style="color:var(--danger);">falta la tarifa de MG</b>'
+              : money(+p.rate) + '/hora MG'}</span></span>
+          <span class="hrs">${hhmm(p.mins)}</span></div>`;
+      }).join('');
+      if(sum){
+        sum.hidden = false;
+        sum.innerHTML = `<div class="line"><span>Horas MG sin pagar</span><span>${hhmm(totMins)}</span></div>`
+          + (faltan ? `<div class="line"><span style="color:var(--danger);">Falta tarifa de MG</span><span style="color:var(--danger);">${faltan} persona${faltan===1?'':'s'}</span></div>` : '');
+      }
+    }catch(e){
+      box.innerHTML = '<p class="clockhint">No se pudo cargar. Revise su internet.</p>';
+    }
+  }
+
+  if($('#mgMgPriceSave')) $('#mgMgPriceSave').addEventListener('click', saveMgPrices);
+  if($('#mgMgActivate'))  $('#mgMgActivate').addEventListener('click', activateMg);
+  if($('#mgMgRefresh'))   $('#mgMgRefresh').addEventListener('click', ()=> revisar($('#mgMgRefresh'), loadMgHours, ()=>0));
+
   function mgrMoreShow(which){
     const map = [['rates','#mgrMoreSegRates','#mgrMoreRates'],
                  ['pay',  '#mgrMoreSegPay',  '#mgrMorePay'],
-                 ['crew', '#mgrMoreSegCrew', '#crewListCard']];
+                 ['crew', '#mgrMoreSegCrew', '#crewListCard'],
+                 ['mg',   '#mgrMoreSegMg',   '#mgrMoreMg']];
     map.forEach(([key, btnSel, cardSel]) => {
       const btn = $(btnSel), card = $(cardSel);
       const on = key === which;
@@ -3194,11 +3427,14 @@
     });
     if(which === 'crew' && typeof loadCrewList === 'function') loadCrewList();
     if(which === 'pay'  && typeof renderMgrPayList === 'function') renderMgrPayList();
+    if(which === 'mg'   && typeof loadMgHours === 'function') loadMgHours();
+    if(which === 'rates'&& typeof paintMgPrices === 'function') paintMgPrices();
     window.scrollTo(0, 0);
   }
   if($('#mgrMoreSegRates')) $('#mgrMoreSegRates').addEventListener('click', ()=> mgrMoreShow('rates'));
   if($('#mgrMoreSegPay'))   $('#mgrMoreSegPay').addEventListener('click',   ()=> mgrMoreShow('pay'));
   if($('#mgrMoreSegCrew'))  $('#mgrMoreSegCrew').addEventListener('click',  ()=> mgrMoreShow('crew'));
+  if($('#mgrMoreSegMg'))    $('#mgrMoreSegMg').addEventListener('click',    ()=> mgrMoreShow('mg'));
   $('#myHoursToggle').addEventListener('click', ()=>{
     const box = $('#myHoursBox');
     box.hidden = !box.hidden;
@@ -3471,19 +3707,24 @@
   // was actually closed at, an open day at today's rate. The old loop priced
   // EVERY row whenever anything was unpaid, so handing it a mixed list (which
   // the balance below deliberately does) would have billed closed days twice.
-  function payForCasual(rows, rate){
-    let hours = 0, paid = 0, owed = 0, openCount = 0;
+  function payForCasual(rows, rate, mgRate){
+    let hours = 0, paid = 0, owed = 0, openCount = 0, sinPrecio = 0, sinPrecioHrs = 0;
+    const rateForRow = r => (r && r.work_kind === 'mudanza')
+      ? (mgRate === undefined ? null : mgRate) : rate;
     rows.forEach(r => {
       if(r.reported_hours != null) hours += +r.reported_hours;
       if(r.paid_at){ paid += (+r.paid_amount || 0); }
       else {
         openCount++;
-        if(rate !== null) owed += Math.round((+r.reported_hours||0) * (+rate||0) * 100) / 100;
+        const rr = rateForRow(r);
+        if(rr === null || rr === undefined){ sinPrecio++; sinPrecioHrs += (+r.reported_hours||0); return; }
+        owed += Math.round((+r.reported_hours||0) * (+rr||0) * 100) / 100;
       }
     });
     paid = Math.round(paid*100)/100; owed = Math.round(owed*100)/100;
     const allPaid = rows.length > 0 && openCount === 0;
-    return { hours, wasPaid: allPaid, amount: allPaid ? paid : owed, paid, owed, openCount };
+    return { hours, wasPaid: allPaid, amount: allPaid ? paid : owed, paid, owed, openCount,
+             sinPrecio, sinPrecioHrs };
   }
 
   // ---- The cash ledger for a temporary worker --------------------------
@@ -3517,7 +3758,7 @@
     const rate = casualRateOf(id);
     const all  = casualRowsFor(id);
     const openRows = all.filter(r => !r.paid_at);
-    const p = payForCasual(all, rate);
+    const p = payForCasual(all, rate, mgRateTemp(id));
     const earned = Math.round((p.paid + p.owed)*100)/100;
     const led = casualLedgerOf(id);
     return { rate, earned, frozen: p.paid, openGross: p.owed,
@@ -3548,7 +3789,7 @@
       const [wRes, hRes, pRes] = await Promise.all([
         authFetch('/rest/v1/casual_workers?select=id,name,status,rate,pin'
           + '&company_id=eq.' + SES.company_id + '&order=name.asc', { headers: cloudHeaders() }),
-        authFetch('/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount'
+        authFetch('/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount,work_kind,clock_in,clock_out'
           + '&company_id=eq.' + SES.company_id + '&order=work_date.desc&limit=5000', { headers: cloudHeaders() }),
         authFetch('/rest/v1/casual_payments?select=id,casual_worker_id,paid_on,amount,kind,note,settle_key,created_at'
           + '&company_id=eq.' + SES.company_id + '&order=paid_on.desc&limit=5000', { headers: cloudHeaders() })
@@ -3660,6 +3901,9 @@
     const w = casualWorkers.find(w => w.id === id);
     $('#casualPersonName').textContent = w ? w.name : '';
     $('#casualPersonRate').value = (w && w.rate != null) ? w.rate : '';
+    if($('#casualPersonRateMg')){ const m = mgRateTemp(casualPersonKey); $('#casualPersonRateMg').value = m === null ? '' : m; }
+    setCeKind('restauracion');
+    document.querySelectorAll('.mgrateRow').forEach(r => { r.hidden = !mgOn(); });
     $('#casualPersonPin').value = (w && w.pin != null) ? w.pin : '';
     $('#casualPersonSettings').hidden = true;
     const removed = w && w.status === 'removed';
@@ -3682,6 +3926,24 @@
     $('#casualTeamCard').scrollIntoView({ block:'start' });
   });
 
+  if($('#casualPersonRateMgSave')) $('#casualPersonRateMgSave').addEventListener('click', async ()=>{
+    const val = parseFloat($('#casualPersonRateMg').value);
+    if(!(val >= 0)) return alert('Escriba la tarifa MG por hora.');
+    const btn = $('#casualPersonRateMgSave'); btn.disabled = true; const old = btn.textContent;
+    btn.textContent = 'Guardando…';
+    try{
+      const res = await authFetch('/rest/v1/casual_kind_rates', {
+        method:'POST',
+        headers: Object.assign(cloudHeaders(), { 'Prefer':'return=representation,resolution=merge-duplicates' }),
+        body: JSON.stringify({ casual_worker_id:casualPersonKey, company_id:SES.company_id, work_kind:'mudanza', rate:val }) });
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      MG_RATE_TEMP[casualPersonKey] = val;
+      renderCasualPerson();
+      btn.textContent = 'Guardado';
+      setTimeout(()=>{ btn.textContent = old; }, 1500);
+    }catch(e){ alert('No se pudo guardar la tarifa MG.'); btn.textContent = old; }
+    btn.disabled = false;
+  });
   $('#casualPersonRateSave').addEventListener('click', async ()=>{
     const val = parseFloat($('#casualPersonRate').value);
     if(!(val >= 0)) return alert('Escriba la tarifa por hora.');
@@ -3844,29 +4106,55 @@
     }catch(e){ src.textContent = ''; }
   }
 
+  let ceKind = 'restauracion';        // nunca se persiste
+  function setCeKind(k){
+    ceKind = (k === 'mudanza') ? 'mudanza' : 'restauracion';
+    const row = $('#ceKindTools'); if(!row) return;
+    row.hidden = !mgOn();
+    const r = $('#ceKindRest'), m = $('#ceKindMg');
+    if(r) r.classList.toggle('on', ceKind === 'restauracion');
+    if(m) m.classList.toggle('on', ceKind === 'mudanza');
+  }
+  if($('#ceKindRest')) $('#ceKindRest').addEventListener('click', ()=> setCeKind('restauracion'));
+  if($('#ceKindMg'))   $('#ceKindMg').addEventListener('click',   ()=> setCeKind('mudanza'));
   $('#casualEntrySave').addEventListener('click', async ()=>{
     const date = $('#casualEntryDate').value;
     if(!date) return alert('Escriba la fecha.');
     const fromVal = $('#casualEntryFrom').value, toVal = $('#casualEntryTo').value;
     const mins = hoursBetween(fromVal, toVal);
     const reported = mins == null ? null : mins/60;
+    if(mins == null) return alert('Escriba la hora de entrada y la de salida.');
+    if(mins === 0)    return alert('La hora de entrada y la de salida son iguales.');
     const laborLoadVal = $('#casualEntryLaborLoad').value;
-    const laborLoad = laborLoadVal === '' ? null : parseFloat(laborLoadVal);
+    // Una fila de MG no puede llevar horas del lider (los labor logs son de
+    // restauracion; la base de datos lo rechaza). Se ignora con aviso.
+    const isMgEntry = (ceKind === 'mudanza');
+    const laborLoad = (laborLoadVal === '' || isMgEntry) ? null : parseFloat(laborLoadVal);
+    if(isMgEntry && laborLoadVal !== '') alert('Un turno de MG no lleva "Horas del líder" — se guarda sin ese dato.');
+    // Ya se permiten varios turnos al dia, asi que aqui se rechaza lo unico que
+    // no puede pasar: dos turnos a la misma hora, sea del tipo que sea.
+    const sameDay = casualRowsFor(casualPersonKey).filter(r => r.work_date === date && r.clock_in && r.clock_out);
+    const [aI, aF] = shiftSpan(fromVal, toVal);
+    const clash = sameDay.find(r => { const [bI, bF] = shiftSpan(r.clock_in, r.clock_out); return bI < aF - 1 && aI < bF - 1; });
+    if(clash) return alert('Ese día ya tiene un turno a esa misma hora:\n\n' + fmtTime12(clash.clock_in) + ' - ' + fmtTime12(clash.clock_out)
+      + (clash.work_kind === 'mudanza' ? ' (MG)' : '') + '\n\nNadie trabaja dos turnos a la vez.');
     const btn = $('#casualEntrySave'); btn.disabled = true; const old = btn.textContent;
     btn.textContent = 'Guardando…';
     try{
-      const res = await authFetch('/rest/v1/casual_hours?on_conflict=casual_worker_id,work_date', {
+      const res = await authFetch('/rest/v1/casual_hours', {
         method:'POST',
-        headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal,resolution=merge-duplicates'}),
+        headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal'}),
         body: JSON.stringify({
           company_id: SES.company_id, casual_worker_id: casualPersonKey, work_date: date,
-          reported_hours: reported, labor_load_hours: laborLoad
+          reported_hours: reported, labor_load_hours: laborLoad,
+          clock_in: fromVal, clock_out: toVal, work_kind: ceKind
         })
       });
       if(!res.ok) throw new Error('HTTP '+res.status);
       await loadCasualHoursAll();
       renderCasualPerson();
       $('#casualEntryFrom').value = ''; $('#casualEntryTo').value = ''; $('#casualEntryLaborLoad').value = '';
+      setCeKind('restauracion');   // vuelve sola despues de CADA guardado
       updateCasualEntryPreview();
     }catch(e){
       alert('No se pudo guardar. ¿Ya corrió supabase-casual-crew.sql?');
@@ -3877,7 +4165,7 @@
   async function loadCasualHoursAll(){
     if(!cloudOn() || !isManager()) return;
     try{
-      const res = await authFetch('/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount'
+      const res = await authFetch('/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount,work_kind,clock_in,clock_out'
         + '&company_id=eq.' + SES.company_id + '&order=work_date.desc', { headers: cloudHeaders() });
       if(res.ok) casualHoursAll = await res.json();
     }catch(e){}
@@ -3892,10 +4180,12 @@
   function casualDayRow(r){
     const status = casualMatchStatus(r.reported_hours, r.labor_load_hours);
     const reviewable = status.cls === 'mismatch' || status.cls === 'partial';
+    const mg = (r.work_kind === 'mudanza');
+    const times = (r.clock_in && r.clock_out) ? ' &middot; ' + esc(fmtTime12(r.clock_in)) + ' - ' + esc(fmtTime12(r.clock_out)) : '';
     return `<div class="entryrow${reviewable ? ' reviewable' : ''}"${reviewable ? ' data-review-date="'+esc(r.work_date)+'"' : ''}>
-      <span><span class="who">${esc(r.work_date)}</span>
-        ${status.text ? '<br><span class="matchstatus '+status.cls+'">'+status.text+'</span>' : ''}
-        ${r.labor_load_hours != null
+      <span><span class="who">${esc(r.work_date)}</span>${mg ? '<span class="kindtag">MG</span>' : ''}${times ? '<span class="when">' + times + '</span>' : ''}
+        ${(!mg && status.text) ? '<br><span class="matchstatus '+status.cls+'">'+status.text+'</span>' : ''}
+        ${mg ? '' : r.labor_load_hours != null
           ? '<br><span class="when">líder: ' + esc(String(r.labor_load_hours)) + ' hrs</span>'
           : '<br><span class="when">líder: no hay dato</span>'}</span>
       <span class="hrs">${r.reported_hours != null ? r.reported_hours + ' hrs' : '—'}</span>
@@ -3947,7 +4237,7 @@
     }
 
     const rate = casualRateOf(casualPersonKey);
-    const pay = payForCasual(rows, rate);
+    const pay = payForCasual(rows, rate, mgRateTemp(casualPersonKey));
     const sum = $('#casualPersonPay');
     const b = casualBalanceOf(casualPersonKey);
     if(rate === null){
@@ -4092,8 +4382,16 @@
 
   $('#csConfirm').addEventListener('click', async ()=>{
     const rate = casualRateOf(casualPersonKey);
-    const rows = casualPersonRows().filter(r => r.reported_hours != null && !r.paid_at);
-    if(!rows.length || rate === null) return;
+    const mgR  = mgRateTemp(casualPersonKey);
+    const allOpen = casualPersonRows().filter(r => r.reported_hours != null && !r.paid_at);
+    // Igual que en planta: una fila sin tarifa para SU tipo no se cierra.
+    const rows = allOpen.filter(r => (r.work_kind === 'mudanza') ? mgR !== null : rate !== null);
+    const skipped = allOpen.length - rows.length;
+    if(!rows.length){
+      return alert(allOpen.some(r => r.work_kind === 'mudanza') && mgR === null
+        ? 'Tiene horas de MG pero no tiene tarifa de MG. Póngala en Tarifa / PIN antes de cerrar.'
+        : 'Primero escriba la tarifa de esta persona.');
+    }
     const typed = parseFloat($('#csCash').value);
     if(!Number.isFinite(typed) || typed < 0) return alert('Escriba cuánto le entregó hoy. Si no le dio nada, escriba 0.');
     const cash = Math.round(typed * 100) / 100;
@@ -4102,7 +4400,8 @@
       && Math.abs((+r.reported_hours||0) - (+r.labor_load_hours||0)) >= 0.01).length;
     if(!confirm('¿Cerrar ' + rows.length + ' día(s) de ' + (w?w.name:'') + ' y anotar '
       + money(cash) + ' entregados hoy?'
-      + (mismatched ? '\n\n⚠ ' + mismatched + ' día(s) no coinciden con el líder.' : '')))
+      + (mismatched ? '\n\n⚠ ' + mismatched + ' día(s) no coinciden con el líder.' : '')
+      + (skipped ? '\n\n⚠ ' + skipped + ' turno(s) de MG NO se cierran: falta la tarifa de MG. Quedan pendientes.' : '')))
       return;
     const btn = $('#csConfirm'); btn.disabled = true; const old = btn.textContent;
     btn.textContent = 'Guardando…';
@@ -4125,7 +4424,8 @@
         if(!res.ok) throw new Error('HTTP '+res.status);
       }
       for(const r of rows){
-        const amount = Math.round((+r.reported_hours||0) * (+rate||0) * 100) / 100;
+        const rr = (r.work_kind === 'mudanza') ? mgR : rate;
+        const amount = Math.round((+r.reported_hours||0) * (+rr||0) * 100) / 100;
         const res = await authFetch('/rest/v1/casual_hours?id=eq.' + encodeURIComponent(r.id) + '&paid_at=is.null', {
           method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal'}),
           body: JSON.stringify({ paid_at: stamp, paid_amount: amount })
@@ -4197,7 +4497,7 @@
     if(!rows.length) return alert('Esta persona no tiene horas que imprimir.');
     const w = casualWorkers.find(w => w.id === casualPersonKey);
     const rate = casualRateOf(casualPersonKey);
-    const pay = payForCasual(rows, rate);
+    const pay = payForCasual(rows, rate, mgRateTemp(casualPersonKey));
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF('p','pt','a4');
     const L = 48; let y = 60;
@@ -4494,6 +4794,8 @@
   $('#inboxRefresh').addEventListener('click', () =>
     revisar($('#inboxRefresh'), refreshInbox, () => (inboxRows || []).length));
   $('#teAdd').addEventListener('click', addEntry);
+  if($('#teKindRest')) $('#teKindRest').addEventListener('click', ()=> setTeKind('restauracion'));
+  if($('#teKindMg'))   $('#teKindMg').addEventListener('click',   ()=> setTeKind('mudanza'));
   $('#teFrom').addEventListener('input', paintTeTotal);
   $('#teTo').addEventListener('input', paintTeTotal);
   $('#teamRefresh').addEventListener('click', () =>
@@ -4524,6 +4826,24 @@
     $('#segPaid').classList.add('on'); $('#segUnpaid').classList.remove('on'); renderPerson();
   });
   $('#personRateSave').addEventListener('click', saveRate);
+  if($('#personRateMgSave')) $('#personRateMgSave').addEventListener('click', async ()=>{
+    const val = parseFloat($('#personRateMg').value);
+    if(!(val >= 0)) return alert('Escriba la tarifa MG por hora.');
+    const btn = $('#personRateMgSave'); btn.disabled = true; const old = btn.textContent;
+    btn.textContent = 'Guardando…';
+    try{
+      const res = await authFetch('/rest/v1/crew_kind_rates', {
+        method:'POST',
+        headers: Object.assign(cloudHeaders(), { 'Prefer':'return=representation,resolution=merge-duplicates' }),
+        body: JSON.stringify({ user_id:personKey, company_id:SES.company_id, work_kind:'mudanza', rate:val }) });
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      MG_RATE_CREW[personKey] = val;
+      renderPerson();
+      btn.textContent = 'Guardado';
+      setTimeout(()=>{ btn.textContent = old; }, 1500);
+    }catch(e){ alert('No se pudo guardar la tarifa MG.'); btn.textContent = old; }
+    btn.disabled = false;
+  });
   $('#personAliasSave').addEventListener('click', saveAlias);
   $('#personSettingsToggle').addEventListener('click', ()=>{
     $('#personSettings').hidden = !$('#personSettings').hidden;
@@ -4540,6 +4860,11 @@
     }
     const row = e.target.closest('.entryrow'); if(!row) return;
     const id = row.dataset.eid;
+    // Las pildoras Restauracion / Horas MG del panel de correccion: solo se
+    // marca cual esta prendida. NO se re-dibuja, porque eso destruiria el
+    // panel con lo que ya escribio.
+    const kb = e.target.closest('.ed-kind');
+    if(kb){ row.querySelectorAll('.ed-kind').forEach(b => b.classList.toggle('on', b === kb)); return; }
     if(e.target.closest('.matchstatus') && row.dataset.reviewDate) return reviewCrewDay(row.dataset.reviewDate);
     if(e.target.closest('.teedit'))   return editEntryRow(id);
     if(e.target.closest('.ed-cancel'))return renderPerson();
@@ -12377,13 +12702,14 @@
     const day  = e.work_date || '';
     return `<div class="entryrow${e.confirmed?' telocked':''}" data-id="${e.id}">
       <span>${showName ? `<span class="who">${esc(e.person_name||'Sin nombre')}</span><br>` : ''}
-        <span class="when">${esc(day)} · ${esc(fmtTime12(e.clock_in||''))} - ${esc(fmtTime12(e.clock_out||''))}</span>
-        ${myLeaderLineFor(day)}${myCorrectionLineFor(e)}</span>
+        <span class="when">${esc(day)} · ${esc(fmtTime12(e.clock_in||''))} - ${esc(fmtTime12(e.clock_out||''))}</span>${
+          isMg(e) ? '<span class="kindtag">' + esc(kindLabel('mudanza')) + '</span>' : ''}
+        ${isMg(e) ? '' : myLeaderLineFor(day)}${myCorrectionLineFor(e)}</span>
       <span style="display:flex;align-items:center;gap:10px;">
         <span class="hrs">${mins===null?'—':hhmm(mins)}</span>
         ${e.confirmed ? '<span class="telock">Confirmado</span>'
                       : (showName ? '' : '<button type="button" class="teconfirm">Confirmar</button>')}
-        ${(!showName && myDayNeedsFix(day)) ? '<button type="button" class="btn btn-outline tefix" style="width:auto; min-height:44px; padding:8px 14px; margin:0;">Corregir</button>' : ''}
+        ${(!showName && (myDayNeedsFix(day) || isMg(e) || !e.confirmed)) ? '<button type="button" class="btn btn-outline tefix" style="width:auto; min-height:44px; padding:8px 14px; margin:0;">Corregir</button>' : ''}
       </span>
       ${fixingEntryId === String(e.id) ? `
       <div class="tefixbox" style="flex-basis:100%; margin-top:10px; padding-top:12px; border-top:1px solid var(--line);">
@@ -12474,7 +12800,7 @@
     try{
       const res = await authFetch(
         // paid hours drop off the worker's screen - a new week starts clean
-        '/rest/v1/time_entries?select=id,work_date,clock_in,clock_out,confirmed,person_name,created_at'
+        '/rest/v1/time_entries?select=id,work_date,clock_in,clock_out,confirmed,person_name,created_at,work_kind'
         + (CORRECTION_READY ? ',corrected_at,corrected_count,original_clock_in,original_clock_out' : '')
         + '&user_id=eq.' + SES.user_id + (PAID_READY ? '&paid_at=is.null' : '')
         + '&order=work_date.desc,clock_in.desc&limit=' + MY_ENTRIES_LIMIT,
@@ -12527,6 +12853,8 @@
   // the leader usually hasn't sent anything yet - alerting then would be
   // noise, and would blame the worker for someone else's pending paperwork.
   const LABOR_LOG_GRACE_MS = 60 * 60 * 1000;   // 1 hour
+  // Solo las filas de restauracion definen que dias hay que revisar: los labor
+  // logs de MG no existen, asi que un dia de MG no debe ensanchar la ventana.
   async function checkMyHoursAgainstLaborLog(){
     const box = $('#myHoursAlert');
     if(!box) return;
@@ -12583,10 +12911,19 @@
     return hit.length ? hit : null;
   }
   function myDayVerdict(day){
-    if(myLaborShifts === null || !day) return null;
+    if(!day) return null;
+    // El encime se evalua SIEMPRE, aunque el labor log no haya llegado.
+    const ovEarly = myDayOverlap(day);
+    if(ovEarly && myLaborShifts === null){
+      return { kind:'overlap', rows: ovEarly, leader:'', theirs:null, times:'',
+               mine: myEntries.filter(e => e.work_date === day)
+                 .reduce((s, e) => s + (hoursBetween(e.clock_in, e.clock_out) || 0), 0) };
+    }
+    if(myLaborShifts === null) return null;
     const shifts = myLaborShifts.filter(s => s.log_date === day);
-    const dayRows = myEntries.filter(e => e.work_date === day);
-    const mine = dayRows.reduce((s, e) => s + (hoursBetween(e.clock_in, e.clock_out) || 0), 0);
+    const dayRows  = myEntries.filter(e => e.work_date === day);
+    const restRows = dayRows.filter(e => !isMg(e));
+    const mine = restRows.reduce((s, e) => s + (hoursBetween(e.clock_in, e.clock_out) || 0), 0);
     // Times sorted by when they START - a leader's blocks come back in
     // whatever order the log stored them, and "9:00 AM - 12:00 AM,
     // 8:00 AM - 9:00 AM" reads like a mistake when it is just unsorted.
@@ -12597,8 +12934,13 @@
     // His own duplicate comes first: it explains the number he is staring
     // at, and it is the thing he can actually act on.
     const ov = myDayOverlap(day);
-    if(ov) return { kind: 'overlap', mine, theirs: shifts.length ? theirs : null,
+    if(ov) return { kind: 'overlap',
+                    mine: dayRows.reduce((s, e) => s + (hoursBetween(e.clock_in, e.clock_out) || 0), 0),
+                    theirs: shifts.length ? theirs : null,
                     times: shifts.length ? times : '', leader, rows: ov };
+    // Un dia cuyas filas son TODAS de MG no tiene nada que comparar: los labor
+    // logs solo se mandan de restauracion. Callar, no inventar un "no aparece".
+    if(dayRows.length && !restRows.length) return null;
     if(shifts.length){
       // Same rule as the manager's side: only flag claiming MORE than the
       // leader reported. Fewer hours is not a payroll risk.
@@ -12775,10 +13117,11 @@
     if(!box) return;
     const rows = (myEntries || []).filter(e => hoursBetween(e.clock_in, e.clock_out) !== null);
     if(!rows.length){ box.hidden = true; box.innerHTML = ''; return; }
-    let total = 0, confirmed = 0, open = 0, openMins = 0;
+    let total = 0, confirmed = 0, open = 0, openMins = 0, mgMins = 0, restMins = 0;
     rows.forEach(e => {
       const m = hoursBetween(e.clock_in, e.clock_out) || 0;
       total += m;
+      if(isMg(e)) mgMins += m; else restMins += m;
       if(e.confirmed) confirmed += m; else { open += 1; openMins += m; }
     });
     const days = new Set(rows.map(e => e.work_date).filter(Boolean)).size;
@@ -12789,6 +13132,8 @@
       </div>
       <div class="line" style="padding-top:6px;"><span>${days} día${days === 1 ? '' : 's'} trabajado${days === 1 ? '' : 's'}</span>
         <span>${(total/60).toFixed(2)} horas</span></div>
+      ${mgMins ? `<div class="line"><span>Restauración</span><span>${hhmm(restMins)}</span></div>
+      <div class="line"><span>MG &middot; mudanza</span><span>${hhmm(mgMins)}</span></div>` : ''}
       ${open ? `<div class="line"><span style="color:#d9a021;">Falta confirmar ${open} registro${open === 1 ? '' : 's'}</span>
         <span style="color:#d9a021;">${hhmm(openMins)}</span></div>` : ''}
       ${confirmed && open ? `<div class="line"><span>Ya confirmadas</span><span>${hhmm(confirmed)}</span></div>` : ''}
@@ -12986,6 +13331,43 @@
     }) || null;
   }
 
+  // ---------- Tipos de trabajo: restauracion y mudanza (MG) ----------
+  // WORK_KINDS llega de la tabla work_kinds. Mientras mudanza este 'active
+  // = false' (o si la consulta falla, o el telefono esta sin senal) la fila
+  // de pildoras NO se muestra y todo se comporta exactamente como antes.
+  let WORK_KINDS = [];
+  let teKind = 'restauracion';          // nunca se persiste, a proposito
+
+  const kindLabel  = k => (WORK_KINDS.find(x => x.id === k) || {}).label_short
+                          || (k === 'mudanza' ? 'MG' : '');
+  const mgOn       = () => WORK_KINDS.some(k => k.id === 'mudanza' && k.active);
+  const isMg       = e => (e && e.work_kind) === 'mudanza';
+
+  async function loadWorkKinds(){
+    if(!signedIn()) return;
+    try{
+      const res = await authFetch('/rest/v1/work_kinds?select=id,label_es,label_short,active,sort_order&order=sort_order');
+      if(!res.ok) return;                 // tabla sin crear todavia: silencio
+      WORK_KINDS = await res.json();
+    }catch(e){}
+    paintKindPills();
+  }
+
+  function paintKindPills(){
+    const row = $('#teKindTools');
+    if(!row) return;
+    row.hidden = !mgOn();
+    if(row.hidden){ teKind = 'restauracion'; return; }
+    const r = $('#teKindRest'), m = $('#teKindMg');
+    if(r) r.classList.toggle('on', teKind === 'restauracion');
+    if(m) m.classList.toggle('on', teKind === 'mudanza');
+  }
+
+  function setTeKind(k){
+    teKind = (k === 'mudanza') ? 'mudanza' : 'restauracion';
+    paintKindPills();
+  }
+
   async function addEntry(){
     if(!signedIn()) return;
     const day = $('#teDate').value, from = $('#teFrom').value, to = $('#teTo').value;
@@ -13011,10 +13393,12 @@
         method:'POST',
         headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
         body: JSON.stringify({ company_id:SES.company_id, user_id:SES.user_id,
-          person_name:(SES.full_name||null), work_date:day, clock_in:from, clock_out:to })
+          person_name:(SES.full_name||null), work_date:day, clock_in:from, clock_out:to,
+          work_kind: teKind })
       });
       if(!res.ok) throw new Error('HTTP '+res.status);
       $('#teFrom').value=''; $('#teTo').value=''; paintTeTotal();
+      setTeKind('restauracion');   // vuelve sola despues de CADA turno
       await loadMyEntries();
     }catch(e){ alert('No se pudo guardar. Revise su internet.'); }
     btn.textContent = old; btn.disabled = false;
@@ -13065,7 +13449,10 @@
       // full - that is the money. Paid history is capped, because with eight
       // crew a single capped list would start dropping the oldest paid weeks
       // after a few months, silently.
-      const cols = 'id,user_id,person_name,work_date,clock_in,clock_out,confirmed'
+      // work_kind va SIEMPRE, sin bandera: la columna existe en produccion
+      // desde la parte 1. Sin ella el lado del manager ve undefined y cada
+      // hora de MG se preciaria a la tarifa de restauracion.
+      const cols = 'id,user_id,person_name,work_date,clock_in,clock_out,confirmed,work_kind'
                  + (PAID_READY ? ',paid_at,paid_amount' : '')
                  + (CORRECTION_READY ? ',corrected_at,corrected_count,original_clock_in,original_clock_out' : '');
       const base = '/rest/v1/time_entries?select=' + cols
@@ -13087,6 +13474,7 @@
         if(paidRes.ok) teamRows = teamRows.concat(await paidRes.json());
       }
       await loadRates();
+      await loadWorkKinds(); await loadKindRates();
       // Don't yank someone back to the list mid-look at a specific person -
       // e.g. jumping here from Miembros del equipo's pencil opens a person
       // directly, and the Reloj tab's own background refresh shouldn't undo
@@ -13148,30 +13536,58 @@
 
   function rateOf(key){ const r = RATES[key]; return (r===undefined || r===null) ? null : +r; }
 
+  // Tarifas de MUDANZA. La de RESTAURACION no se toca: sigue siendo RATES /
+  // casual_workers.rate, mismo lector y mismo escritor que siempre, para que
+  // ningun numero viejo se mueva. La de mudanza vive aparte.
+  let MG_RATE_CREW = {}, MG_RATE_TEMP = {};
+  async function loadKindRates(){
+    try{
+      const [a, b] = await Promise.all([
+        authFetch('/rest/v1/crew_kind_rates?select=user_id,rate&work_kind=eq.mudanza'),
+        authFetch('/rest/v1/casual_kind_rates?select=casual_worker_id,rate&work_kind=eq.mudanza')
+      ]);
+      if(a.ok){ MG_RATE_CREW = {}; (await a.json()).forEach(r => { MG_RATE_CREW[r.user_id] = r.rate; }); }
+      if(b.ok){ MG_RATE_TEMP = {}; (await b.json()).forEach(r => { MG_RATE_TEMP[r.casual_worker_id] = r.rate; }); }
+    }catch(e){}
+  }
+  // null = SIN PRECIO. Nunca 0, porque 0 es un precio valido ("no le cobro")
+  // y "no sabemos" tiene que poder distinguirse de "vale cero".
+  const mgRateCrew = key => { const r = MG_RATE_CREW[key]; return (r===undefined||r===null) ? null : +r; };
+  const mgRateTemp = id  => { const r = MG_RATE_TEMP[id];  return (r===undefined||r===null) ? null : +r; };
+
   // Hours still owed are priced at today's rate. Hours already paid are NOT
   // re-priced - they report the amount that actually went out, stored on the
   // row at the moment of payment. Otherwise a raise would rewrite history.
-  function payFor(rows, rate){
-    let minutes = 0, paid = 0, allPaid = rows.length > 0;
+  // rate = tarifa de restauracion (como siempre). mgRate = la de mudanza, o
+  // null si no se la han puesto. Se precia CADA FILA con la tarifa de SU tipo:
+  // un mismo dia puede tener la manana en MG y la tarde en restauracion.
+  // Una fila sin precio NO se suma y se cuenta aparte - jamas se paga en $0.00.
+  function payFor(rows, rate, mgRate){
+    let minutes = 0, paid = 0, allPaid = rows.length > 0, sinPrecio = 0, sinPrecioMins = 0;
     rows.forEach(r => {
       const m = hoursBetween(r.clock_in, r.clock_out);
       if(m) minutes += m;
       if(r.paid_at) paid += (+r.paid_amount || 0); else allPaid = false;
     });
     const hours = minutes/60;
+    const rateForRow = r => (r && r.work_kind === 'mudanza')
+      ? (mgRate === undefined ? null : mgRate) : rate;
     // Payment stores a rounded amount per shift, so the total has to be the sum
     // of those rounded amounts - otherwise the PDF and the history can differ
     // by a cent or two on odd minutes.
     let owed = 0;
-    if(!allPaid && rate !== null && rate !== undefined){
+    if(!allPaid){
       rows.forEach(r => {
+        if(r.paid_at) return;
         const m = hoursBetween(r.clock_in, r.clock_out) || 0;
-        owed += Math.round((m/60) * (+rate || 0) * 100) / 100;
+        const rr = rateForRow(r);
+        if(rr === null || rr === undefined){ sinPrecio++; sinPrecioMins += m; return; }
+        owed += Math.round((m/60) * (+rr || 0) * 100) / 100;
       });
       owed = Math.round(owed*100)/100;
     }
     return { minutes, hours, rate, wasPaid: allPaid,
-             amount: allPaid ? paid : owed };
+             amount: allPaid ? paid : owed, sinPrecio, sinPrecioMins };
   }
 
   async function loadRates(){
@@ -13277,7 +13693,7 @@
     let grand = 0, missing = 0;
     const html = list.map(p => {
       const rate = rateOf(p.key);
-      const pay  = payFor(p.rows, rate);
+      const pay  = payFor(p.rows, rate, mgRateCrew(p.key));
       const show = pay.wasPaid || rate !== null;      // paid rows carry their own amount
       if(!show) missing++; else grand += pay.amount;
       // Unconfirmed hours are still editable by the worker. Paying them means
@@ -13548,13 +13964,15 @@
       : `<p class="clockhint">${personPaidView ? 'Todavía no le ha pagado nada.' : 'No tiene horas sin pagar.'}</p>`;
 
     const rate = rateOf(personKey);
-    const pay  = payFor(rows, rate);
+    const pay  = payFor(rows, rate, mgRateCrew(personKey));
     const partialPaid = (!pay.wasPaid && rate !== null) ? personPaymentsSum() : 0;
     // No floor at zero anymore - paying someone more than they're owed right
     // now (an adelanto) is a real thing, and it should show as a credit that
     // carries forward, not silently vanish at "$0.00".
     const balance = Math.round((pay.amount - partialPaid)*100)/100;
     $('#personRate').value = rate === null ? '' : rate;
+    if($('#personRateMg')){ const m = mgRateCrew(personKey); $('#personRateMg').value = m === null ? '' : m; }
+    document.querySelectorAll('.mgrateRow').forEach(r => { r.hidden = !mgOn(); });
     $('#personPay').innerHTML = pay.wasPaid
       ? `<div class="line"><span>Total de horas</span><span>${hhmm(pay.minutes)}</span></div>
          <div class="line"><span>Lo que se le pagó en su momento</span><span></span></div>
@@ -13648,7 +14066,7 @@
     // return already-paid rows, which would make "owed" the historical paid
     // total instead of what's actually still outstanding.
     const unpaidRows = teamRows.filter(r => (r.user_id || nameOf(r)) === personKey && !r.paid_at);
-    const owed = payFor(unpaidRows, rate).amount;
+    const owed = payFor(unpaidRows, rate, mgRateCrew(personKey)).amount;
     // No floor at zero - if this payment is more than what's owed, the
     // negative balance is a real advance that should show as credit.
     const balanceAfter = Math.round((owed - personPaymentsSum() - amount)*100)/100;
@@ -13766,6 +14184,11 @@
           <div class="field"><label>Entrada</label><input type="time" class="ed-in"  value="${esc(hm(r.clock_in))}"></div>
           <div class="field"><label>Salida</label><input type="time" class="ed-out" value="${esc(hm(r.clock_out))}"></div>
         </div>
+        ${mgOn() ? `<div class="field" style="margin-top:8px;"><label>Empresa</label>
+          <div class="mgrtools" style="margin:0;">
+            <button type="button" class="minibtn ed-kind${r.work_kind === 'mudanza' ? '' : ' on'}" data-kind="restauracion">Restauración</button>
+            <button type="button" class="minibtn ed-kind${r.work_kind === 'mudanza' ? ' on' : ''}" data-kind="mudanza">Horas MG</button>
+          </div></div>` : ''}
         ${others}
         <div class="row2" style="margin-top:10px;">
           <button type="button" class="btn btn-ink ed-save" style="width:100%; margin:0;">Guardar</button>
@@ -13790,6 +14213,8 @@
     // it only shows as "falta confirmar"), and the times he originally had
     // are kept so the change is visible at payment time.
     const body = { work_date:day, clock_in:from, clock_out:to };
+    const kb = row.querySelector('.ed-kind.on');
+    if(kb) body.work_kind = kb.dataset.kind;
     const changed = cur && (hm(cur.clock_in) !== from || hm(cur.clock_out) !== to
                             || (cur.work_date||'') !== day);
     // Deliberately does NOT stamp corrected_at: that column is written only
@@ -13863,7 +14288,7 @@
     const any  = teamRows.find(r => (r.user_id || nameOf(r)) === personKey);
     const who  = any ? nameOf(any) : '';
     const rate = rateOf(personKey);
-    const pay  = payFor(rows, rate);
+    const pay  = payFor(rows, rate, mgRateCrew(personKey));
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF('p','pt','a4');
     const L = 48; let y = 60;
@@ -13974,18 +14399,28 @@
   }
 
   async function markPaid(){
-    const rows = personRows().filter(r => !r.paid_at);
-    if(!rows.length) return;
+    const allOpen = personRows().filter(r => !r.paid_at);
+    if(!allOpen.length) return;
     const any  = teamRows.find(r => (r.user_id || nameOf(r)) === personKey);
     const rate = rateOf(personKey);
-    if(rate === null) return alert('Primero escriba la tarifa por hora de esta persona.');
+    const mgR  = mgRateCrew(personKey);
+    // Un turno cuyo tipo no tiene tarifa NO se cierra. Cerrarlo lo congelaria
+    // en $0.00 para siempre, y nada en la app puede volver a abrir un dia
+    // cerrado. Se cierra lo que si tiene precio y el resto queda pendiente.
+    const rows = allOpen.filter(r => isMg(r) ? mgR !== null : rate !== null);
+    const skipped = allOpen.length - rows.length;
+    if(!rows.length){
+      return alert(allOpen.some(isMg) && mgR === null
+        ? 'Esta persona tiene horas de MG pero no tiene tarifa de MG. Póngala en Editar (Tarifa MG) antes de cerrar.'
+        : 'Primero escriba la tarifa por hora de esta persona.');
+    }
     // The credit math below has to match what the server will actually let
     // clearPersonPayments delete - if this person's card has been open a
     // while and they answered a payment from their own phone in the
     // meantime, a stale personPayments here would compute the wrong
     // credit_consumed and either lose or duplicate real money.
     await loadPersonPayments(personKey);
-    const pay = payFor(rows, rate);
+    const pay = payFor(rows, rate, mgR);
     const partialPaid = personPaymentsSum();
     const remaining = Math.max(0, Math.round((pay.amount - partialPaid)*100)/100);
     const open = rows.filter(r => !r.confirmed).length;
@@ -14000,6 +14435,7 @@
               + '\n\n'
               + (open ? '⚠ ' + open + ' turno(s) todavía SIN CONFIRMAR. Esa persona '
                       + 'todavía no ha dicho que sus horas están bien.\n\n' : '')
+              + (skipped ? '⚠ ' + skipped + ' turno(s) de MG NO se cierran porque falta la tarifa de MG. Quedan pendientes.\n\n' : '')
               + 'Esas horas desaparecen del teléfono de esa persona. Usted las sigue viendo en el historial.')) return;
 
     const btn = $('#payMark'); btn.disabled = true; const old = btn.textContent;
@@ -14008,7 +14444,7 @@
     try{
       for(const r of rows){
         btn.textContent = 'Guardando ' + (++done) + '/' + rows.length + '…';
-        const one = payFor([r], rate);
+        const one = payFor([r], rate, mgR);
         // "&paid_at=is.null" means this only touches hours that are still
         // unpaid. If the other manager paid them a second ago, this changes
         // nothing instead of stamping a second, different amount over theirs.
@@ -14964,17 +15400,93 @@
   $('#casualMyFrom').addEventListener('change', casualMyPreview);
   $('#casualMyTo').addEventListener('change', casualMyPreview);
 
+  // ---- estado de la pantalla del trabajador temporal ----
+  // CASUAL_SHIFT_READY se apaga solo si la parte 2 del SQL todavia no corrio:
+  // en ese caso la app se comporta exactamente como antes.
+  let CASUAL_SHIFT_READY = true;
+  let casualMyHistory = [];
+  let cmKind = 'restauracion';        // nunca se persiste, a proposito
+
+  function paintCmKind(){
+    const row = $('#cmKindTools');
+    if(!row) return;
+    row.hidden = !(mgOn() && CASUAL_SHIFT_READY);
+    if(row.hidden){ cmKind = 'restauracion'; return; }
+    const r = $('#cmKindRest'), m = $('#cmKindMg');
+    if(r) r.classList.toggle('on', cmKind === 'restauracion');
+    if(m) m.classList.toggle('on', cmKind === 'mudanza');
+  }
+  function setCmKind(k){
+    cmKind = (k === 'mudanza') ? 'mudanza' : 'restauracion';
+    paintCmKind();
+  }
+
+  // El trabajador temporal NUNCA inicia sesion, asi que no puede leer
+  // work_kinds con RLS. La lista de tipos le llega en su propio login.
+  async function loadCasualKinds(){
+    try{
+      const res = await fetch(CLOUD.url + '/rest/v1/work_kinds?select=id,label_short,active',
+        { headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + CLOUD.key } });
+      if(res.ok) WORK_KINDS = await res.json();
+    }catch(e){}
+    paintCmKind();
+  }
+
   function renderCasualMyHistory(history){
     const box = $('#casualMyHistory'); if(!box) return;
-    box.innerHTML = (history && history.length) ? history.map(h=>{
-      const status = casualMatchStatus(h.reported_hours, h.labor_load_hours);
+    casualMyHistory = history || casualMyHistory || [];
+    const rows = casualMyHistory;
+    if(!rows.length){ box.innerHTML = '<p class="clockhint">Nada todavía.</p>'; return; }
+    let restH = 0, mgH = 0;
+    const html = rows.map(h=>{
+      const mg = (h.work_kind === 'mudanza');
+      const hrs = +h.reported_hours || 0;
+      if(mg) mgH += hrs; else restH += hrs;
+      // Los labor logs solo se mandan de restauracion: una fila de MG no tiene
+      // con que compararse, asi que no lleva ninguna marca de "no coincide".
+      const status = mg ? { text:'', cls:'' } : casualMatchStatus(h.reported_hours, h.labor_load_hours);
       const paid = h.paid_at ? '<br><span style="color:var(--green); font-weight:700; font-size:12px;">Pagado</span>' : '';
+      const times = (h.clock_in && h.clock_out)
+        ? '<br><span class="when">' + esc(fmtTime12(h.clock_in)) + ' - ' + esc(fmtTime12(h.clock_out)) + '</span>' : '';
+      const del = (!h.paid_at && h.id && CASUAL_SHIFT_READY)
+        ? `<button type="button" class="minibtn cmDel" data-cmid="${esc(h.id)}">Borrar</button>` : '';
       return `<div class="entryrow">
-        <span><span class="who">${esc(h.work_date)}</span>${paid}
+        <span><span class="who">${esc(h.work_date)}</span>${
+          mg ? '<span class="kindtag">MG</span>' : ''}${paid}${times}
           ${status.text ? '<br><span class="matchstatus '+status.cls+'">'+status.text+'</span>' : ''}</span>
-        <span class="hrs">${h.reported_hours != null ? (+h.reported_hours).toFixed(2) + ' hrs' : '—'}</span>
+        <span style="display:flex;align-items:center;gap:10px;">
+          <span class="hrs">${h.reported_hours != null ? hrs.toFixed(2) + ' hrs' : '—'}</span>${del}</span>
       </div>`;
-    }).join('') : '<p class="clockhint">Nada todavía.</p>';
+    }).join('');
+    const split = mgH ? `<div class="paysum" style="margin-top:12px;">
+        <div class="line"><span>Restauración</span><span>${restH.toFixed(2)} hrs</span></div>
+        <div class="line"><span>MG &middot; mudanza</span><span>${mgH.toFixed(2)} hrs</span></div>
+        <div class="grand"><span>TOTAL DE HORAS</span><span>${(restH+mgH).toFixed(2)} hrs</span></div>
+      </div>` : '';
+    box.innerHTML = html + split;
+  }
+
+  // Borrar un turno propio. La base de datos refuerza las dos reglas: solo
+  // suyo, y solo si NO esta pagado.
+  async function casualDeleteMyShift(id){
+    const ses = loadCasualSes(); if(!ses) return;
+    const row = (casualMyHistory || []).find(h => String(h.id) === String(id));
+    if(!row) return;
+    const msg = $('#casualMyMsg');
+    if(!confirm('¿Borrar este turno?\n\n' + (row.work_date || '')
+      + (row.clock_in ? '\n' + fmtTime12(row.clock_in) + ' - ' + fmtTime12(row.clock_out) : '')
+      + '\n' + (+row.reported_hours || 0).toFixed(2) + ' horas'
+      + (row.work_kind === 'mudanza' ? ' (MG)' : '')
+      + '\n\nEsto no se puede deshacer.')) return;
+    try{
+      const d = await authPost('/rest/v1/rpc/casual_delete_my_shift', {
+        p_join_code: ses.joinCode, p_name: ses.name, p_pin: ses.pin, p_id: id });
+      casualMyHistory = d.history || [];
+      renderCasualMyHistory(casualMyHistory);
+      if(msg){ msg.textContent = 'Turno borrado.'; msg.style.color = ''; }
+    }catch(e){
+      if(msg){ msg.textContent = e.message || 'No se pudo borrar.'; msg.style.color = 'var(--danger)'; }
+    }
   }
 
   function enterCasualHome(ses, history){
@@ -14984,8 +15496,11 @@
     $('#casualHome').hidden = false;
     $('#casualHomeName').textContent = ses.name;
     if(!$('#casualMyDate').value) $('#casualMyDate').value = todayStr();
+    cmKind = 'restauracion';        // siempre abre en Restauracion
     casualMyPreview();
-    renderCasualMyHistory(history);
+    casualMyHistory = history || [];
+    renderCasualMyHistory(casualMyHistory);
+    loadCasualKinds();
   }
 
   $('#casualLoginGo').addEventListener('click', async ()=>{
@@ -15006,6 +15521,13 @@
     btn.disabled = false; btn.textContent = old;
   });
 
+  if($('#cmKindRest')) $('#cmKindRest').addEventListener('click', ()=> setCmKind('restauracion'));
+  if($('#cmKindMg'))   $('#cmKindMg').addEventListener('click',   ()=> setCmKind('mudanza'));
+  if($('#casualMyHistory')) $('#casualMyHistory').addEventListener('click', (e)=>{
+    const b = e.target.closest('.cmDel');
+    if(b) casualDeleteMyShift(b.dataset.cmid);
+  });
+
   $('#casualMySave').addEventListener('click', async ()=>{
     const ses = loadCasualSes(); if(!ses) return;
     const date = $('#casualMyDate').value;
@@ -15016,16 +15538,37 @@
     btn.textContent = 'Guardando…';
     msg.textContent = '';
     try{
-      const d = await authPost('/rest/v1/rpc/casual_log_hours', {
-        p_join_code: ses.joinCode, p_name: ses.name, p_pin: ses.pin,
-        p_date: date, p_from: from, p_to: to
-      });
-      renderCasualMyHistory(d.history);
-      msg.textContent = 'Guardado — ' + Number(d.hours).toFixed(2) + ' horas.';
+      let d;
+      // La funcion nueva permite varios turnos al dia y rechaza los encimados.
+      // Si todavia no esta en la base de datos, se cae sola a la de siempre,
+      // que sigue reemplazando el dia - nunca duplicando.
+      if(CASUAL_SHIFT_READY){
+        try{
+          d = await authPost('/rest/v1/rpc/casual_log_shift', {
+            p_join_code: ses.joinCode, p_name: ses.name, p_pin: ses.pin,
+            p_date: date, p_from: from, p_to: to, p_kind: cmKind });
+        }catch(err){
+          if(/casual_log_shift|PGRST202|404/i.test(String(err.message||''))){
+            CASUAL_SHIFT_READY = false;
+          } else { throw err; }
+        }
+      }
+      if(!d){
+        d = await authPost('/rest/v1/rpc/casual_log_hours', {
+          p_join_code: ses.joinCode, p_name: ses.name, p_pin: ses.pin,
+          p_date: date, p_from: from, p_to: to });
+      }
+      casualMyHistory = d.history || [];
+      renderCasualMyHistory(casualMyHistory);
+      msg.textContent = 'Guardado — ' + Number(d.hours).toFixed(2) + ' horas'
+        + (cmKind === 'mudanza' ? ' de MG.' : '.');
+      msg.style.color = '';
       $('#casualMyFrom').value = ''; $('#casualMyTo').value = '';
+      setCmKind('restauracion');   // vuelve sola despues de CADA turno
       casualMyPreview();
     }catch(e){
       msg.textContent = e.message || 'No se pudo guardar. Revise su internet.';
+      msg.style.color = 'var(--danger)';
     }
     btn.disabled = false; btn.textContent = old;
   });
