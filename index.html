@@ -2225,7 +2225,7 @@
       <p class="clockhint">El manager le mandó copia de un cierre. Revíselo y responda si está de acuerdo o no; puede escribir una nota.</p>
       <div id="finCierresMine"><p class="clockhint">Ninguno todavía.</p></div>
     </section>
-    <section class="card amgcard" id="finGastoCard">
+    <section class="card amgcard" id="finGastoCard" data-drafttab="finanzas">
       <h2>Gasto</h2>
       <div class="row2">
         <div class="field"><label>Cuánto $</label><input type="number" id="g-amount" step="0.01" inputmode="decimal" placeholder="0.00"></div>
@@ -2247,7 +2247,7 @@
       <button type="button" class="btn btn-amg btn-block" id="g-save">Guardar gasto</button>
       <p class="clockhint" id="g-msg"></p>
     </section>
-    <section class="card amgcard" id="finPagoCard" hidden>
+    <section class="card amgcard" id="finPagoCard" data-drafttab="finanzas" hidden>
       <h2>Pagó cliente</h2>
       <div class="row2">
         <div class="field"><label>Cliente</label><select id="p-client"><option value="">Escoja el cliente</option><option value="Otro">Otro</option></select></div>
@@ -2904,6 +2904,18 @@
     });
     return ex;
   }
+  // Seguro y storage los paga la empresa: se escoge solo (si nadie lo ha cambiado a mano) para que no queden
+  // anotados como dinero que se le debe al manager.
+  document.addEventListener('change', e => {
+    if(e.target && e.target.id === 'g-what'){
+      const w = $('#g-what'), who = $('#g-who');
+      if(w && who && !who.dataset.touched && (w.value === 'seguro' || w.value === 'storage')){
+        if([...who.options].some(o => o.value === 'e')) who.value = 'e';
+        const wrap = $('#gWhoOtherField'); if(wrap) wrap.hidden = true;
+      }
+    }
+    if(e.target && e.target.id === 'g-who') e.target.dataset.touched = '1';
+  });
   document.addEventListener('change', e => { const sel = e.target.closest('.l-ex-who'); if(!sel) return; const wrap = sel.closest('.l-ex-row') && sel.closest('.l-ex-row').querySelector('.l-ex-other-wrap'); if(wrap) wrap.hidden = sel.value !== 'x'; });
   const EX_LABEL = { peaje:'Peaje', comida:'Comida', materiales:'Materiales comprados', cajas:'Cajas', otro:'Otro' };
   const CLIENT_OPTIONS = ['Robert','Susan','Sammy'];   // respaldo si la tabla amg_clients todavia no existe
@@ -3340,7 +3352,6 @@
     }
     if(tab === 'finanzas'){
       loadPeople().then(paintFinForms); paintFinForms();
-      const gc = $('#g-client'); if(gc && !gc.dataset.wired){ gc.dataset.wired = '1'; gc.addEventListener('change', ()=>{ const f = $('#gClientOtherField'); if(f) f.hidden = gc.value !== 'Otro'; }); }
       finShow('gasto'); paintCompanyHeader();
       if(!isManager()) loadFinCierresMine();
     }
@@ -4114,7 +4125,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AX';
+  const APP_BUILD = '2026-09-06-AY';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4632,11 +4643,15 @@
     if($('#inv-date') && !$('#inv-date').value) $('#inv-date').value = localToday();
     invPaintClients();
     const [, okInv, okLogs, , okMat] = await Promise.all([invLoadSettings(), invLoadInvoices(), invLoadLogs(), loadAmgClients(), invLoadMaterials()]);
-    INV_LOADED_OK = !!(okInv && okLogs && (okMat || AMG_MATERIALS.length));
+    // Los materiales tienen su propio aviso (out.unpriced + confirm al guardar): si no cargaron, no se
+    // bloquea todo el invoice. Lo que si bloquea es no poder leer los invoices o los reportes, porque
+    // sin eso se cobraria dos veces.
+    INV_LOADED_OK = !!(okInv && okLogs);
+    if(!okMat && !AMG_MATERIALS.length && $('#invMsg')) $('#invMsg').textContent = 'No se pudo leer la lista de materiales: los materiales de los reportes no se van a poder cobrar en este invoice.';
     if($('#invSave')) $('#invSave').disabled = !INV_LOADED_OK;
     invPaintClients(); invPaintMaterialSelect();
     if($('#inv-number') && !$('#inv-number').value) $('#inv-number').value = invNextNumber();
-    if(invPreselect) invApplyPreselect(); else { invPaintLogs(); invRender(); }
+    if(invPreselect) invApplyPreselect(); else { invPaintLogs(); invRebuildLogLines(); }
     if($('#invList') && !$('#invList').hidden) invRenderList();
   }
   function invPaintMaterialSelect(){
@@ -4716,8 +4731,9 @@
         const people = countPeople(sh.n || ''); const mins = hoursBetween(sh.f, sh.o); if(!people || mins === null || mins <= 0) return;
         const hours = Math.round(mins/60*100)/100;                       // lo que se muestra
         const unit = Math.round(people * (+cfg.rateDay||0) * 100)/100;
-        // El monto sale de los MINUTOS exactos, igual que el total del reporte y que Finanzas (no de las horas redondeadas).
-        out.push({ d:'Labor service\n' + people + ' worker' + (people===1?'':'s') + '\n' + invQty(hours) + ' hours total\n(Time worked by the team) ' + date, q:hours, u:unit, a:Math.round(people * (+cfg.rateDay||0) * mins/60 * 100)/100, src:String(log.id) });
+        // El monto es EXACTAMENTE horas x precio unitario: el cliente hace la multiplicacion en el papel
+        // y le tiene que dar. (Antes salia de los minutos exactos y la linea no cuadraba por centavos.)
+        out.push({ d:'Labor service\n' + people + ' worker' + (people===1?'':'s') + '\n' + invQty(hours) + ' hours total\n(Time worked by the team) ' + date, q:hours, u:unit, a:Math.round(hours * unit * 100)/100, src:String(log.id) });
       });
     }
     (p.s || []).forEach(sh => { const x = parseFloat(sh.x); if(Number.isFinite(x) && x !== 0) out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + (sh.e || 'extra') + ' ' + date, q:1, u:x, a:x, src:String(log.id) }); });
@@ -4808,9 +4824,11 @@
   // El invoice como objeto (lo que se guarda y lo que se dibuja).
   function invCurrent(){
     const c = invClient();
+    // Un reporte marcado que no produjo ninguna linea (sin precio) NO se marca como facturado: si se
+    // guardara en log_ids, desapareceria de la lista y ya nunca se podria cobrar.
     return { number: +($('#inv-number').value || invNextNumber()), issue_date: $('#inv-date').value || localToday(),
       client_id: c ? c.id : null, client_name: c ? c.name : '', bill_to: c ? (c.bill_to || '') : '', client_address: c ? (c.address || '') : '', client_phone: c ? (c.phone || '') : '', client_email: c ? (c.email || '') : '',
-      sent_by: (SES && SES.full_name) || 'Amilcar', lines: INV.lines.slice(), total: invTotalOf(INV.lines), log_ids: INV.logIds.slice(), status:'sent' };
+      sent_by: (SES && SES.full_name) || 'Amilcar', lines: INV.lines.slice(), total: invTotalOf(INV.lines), log_ids: INV.logIds.filter(id => INV.lines.some(l => String(l.src) === String(id))), status:'sent' };
   }
   // ---- El dibujo (mismo HTML para la vista previa y para el PDF) ----
   function invHtml(inv, kind){
@@ -4822,7 +4840,7 @@
       +   '<div style="display:flex;align-items:center;gap:14px;">' + (INV_LOGO ? '<img src="' + INV_LOGO + '" style="height:82px;display:block;">' : '<div><div style="font-size:44px;font-weight:900;letter-spacing:2px;line-height:1;">AMG</div><div style="font-size:11px;letter-spacing:3px;margin-top:4px;">SOLUTIONS AND SERVICES</div></div>') + '</div>'
       +   '<div style="text-align:right;"><div style="font-size:34px;font-weight:700;line-height:1.1;">' + (receipt ? 'Receipt' : 'Invoice') + '</div><div style="font-size:15px;margin-top:4px;">' + esc(S.from_email || '') + '</div></div>'
       + '</div>'
-      + '<div style="background:#4b5563;color:#fff;padding:14px 30px;font-size:14px;display:grid;grid-template-columns:' + (receipt ? '1fr 1fr 1fr' : '1fr 1fr') + ';gap:6px 18px;">'
+      + '<div style="background:#4b5563;color:#fff;padding:14px 30px;font-size:14px;display:grid;grid-template-columns:' + (receipt ? (inv.paid_method ? 'repeat(5,1fr)' : 'repeat(4,1fr)') : '1fr 1fr') + ';gap:6px 18px;">'
       +   '<div><b>INVOICE NO.</b> <span style="float:right;">' + esc(inv.number) + '</span></div><div><b>ISSUE DATE</b> <span style="float:right;">' + esc(invDate(inv.issue_date)) + '</span></div>'
       +   (receipt ? '<div><b>PAID ON</b> <span style="float:right;">' + esc(invDate(inv.paid_on)) + '</span></div>' + (inv.paid_method ? '<div><b>PAID BY</b> <span style="float:right;">' + esc(inv.paid_method) + '</span></div>' : '') + '<div><b>STATUS</b> <span style="float:right;color:#86efac;font-weight:800;">PAID</span></div>' : '')
       + '</div>'
@@ -4881,7 +4899,7 @@
   async function invSave(){
     const inv = invCurrent(); const msg = $('#invMsg');
     if(!inv.client_name){ msg.textContent = 'Escoja el cliente.'; return; }
-    if(!inv.lines.length){ msg.textContent = 'El invoice no tiene líneas: marque un reporte o agregue una línea.'; return; }
+    if(!inv.lines.length){ msg.textContent = 'El invoice no tiene líneas: marque arriba un reporte de mudanza. Si el reporte marcado dice "sin precio", póngale el precio al cliente en Precio AMG → Precio por cliente y vuelva a entrar.'; return; }
     if(!(inv.number > 0)){ msg.textContent = 'Ponga el número del invoice.'; return; }
     if(INV.unpriced && INV.unpriced.length && !confirm('Estos materiales del reporte NO tienen precio y no van en el invoice: ' + INV.unpriced.join(', ') + '.\n\nPóngales precio en Precio AMG → Materiales y vuelva a marcar el reporte, o guarde así.\n\n¿Guardar sin ellos?')) return;
     if(!cloudOn() || !navigator.onLine){ msg.textContent = 'Sin internet. Intente cuando tenga señal.'; return; }
@@ -17916,6 +17934,7 @@
     const cur = current !== undefined ? current : sel.value;
     let html = '<option value="">— escoja —</option>';
     finFixedOptions().forEach(o => { html += '<option value="' + esc(o.value) + '">' + esc(o.name) + '</option>'; });
+    html += '<option value="e">La empresa</option>';      // seguro, storage y demas gastos de la empresa: no se le deben a nadie
     html += '<option value="x">Otro nombre…</option>';
     sel.innerHTML = html;
     if(cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
@@ -18008,6 +18027,10 @@
   if($('#finSegGasto')) $('#finSegGasto').addEventListener('click', ()=> finShow('gasto'));
   if($('#finSegPago'))  $('#finSegPago').addEventListener('click',  ()=> finShow('pago'));
   if($('#finSegMine'))  $('#finSegMine').addEventListener('click',  ()=> finShow('mine'));
+  // Se conecta desde el arranque: el manager abre el mismo formulario dentro de SU pantalla y ahi nunca
+  // se pasaba por la pestana del trabajador, asi que "Otro cliente" no abria su casilla y el gasto se
+  // guardaba sin cliente.
+  if($('#g-client')) $('#g-client').addEventListener('change', ()=>{ const f = $('#gClientOtherField'); if(f) f.hidden = $('#g-client').value !== 'Otro'; });
   function paintFinForms(){
     paintWhoSelect($('#g-who')); paintWhoSelect($('#p-who'));
     paintClientOptions();
@@ -18190,10 +18213,28 @@
     const el = $('#' + id); if(!el || FIN_HOME[id]) return;
     FIN_HOME[id] = { parent: el.parentNode, next: el.nextSibling };
   }
+  const FIN_BTN = { finGastoCard:'finMAddGasto', finPagoCard:'finMAddPago' };
+  // Lo que se escribio en la pantalla del manager NO se queda cargado: si no lo guardo, se limpia (con su
+  // foto del recibo), para que el siguiente gasto no salga con el recibo de otro.
+  function finClearCard(id){
+    const pre = id === 'finGastoCard' ? 'g' : 'p';
+    ['-amount','-note','-msg'].forEach(sfx => { const el = $('#' + pre + sfx); if(el){ if('value' in el) el.value = ''; else el.textContent = ''; } });
+    const m = $('#' + pre + '-msg'); if(m){ m.textContent = ''; m.style.color = ''; }
+    const other = $('#' + pre + '-who-other'); if(other) other.value = '';
+    const co = $('#' + pre + '-client-other'); if(co) co.value = '';
+    const wsel = $('#' + pre + '-who'); if(wsel){ wsel.value = ''; delete wsel.dataset.touched; paintWhoSelect(wsel, ''); }
+    const csel = $('#' + pre + '-client'); if(csel) csel.value = '';
+    [pre + 'WhoOtherField', pre + 'ClientOtherField'].forEach(x => { const f = $('#' + x); if(f) f.hidden = true; });
+    if(id === 'finGastoCard' && $('#g-what')) $('#g-what').value = 'gasolina';
+    if(typeof finPhoto === 'object' && finPhoto){ finPhoto[pre] = null; if(typeof paintPhoto === 'function') paintPhoto(pre); }
+  }
   function finCardHome(id){
     const el = $('#' + id), h = FIN_HOME[id]; if(!el || !h || !h.parent) return;
-    if(el.parentNode !== h.parent) h.parent.insertBefore(el, h.next && h.next.parentNode === h.parent ? h.next : null);
+    const borrowed = el.parentNode !== h.parent;
+    if(borrowed) h.parent.insertBefore(el, h.next && h.next.parentNode === h.parent ? h.next : null);
     el.hidden = true;
+    const b = $('#' + FIN_BTN[id]); if(b) b.classList.remove('on');
+    if(borrowed) finClearCard(id);                    // solo lo prestado: no se le borra nada al trabajador
   }
   function finCardsHome(){ finCardHome('finGastoCard'); finCardHome('finPagoCard'); }
   function finMToggle(id, slotId, btnId){
@@ -18202,7 +18243,6 @@
     const open = el.parentNode === slot && !el.hidden;
     if(open){ finCardHome(id); if(btn) btn.classList.remove('on'); return; }
     finCardsHome();                                   // solo uno abierto a la vez
-    [['finMAddGasto'], ['finMAddPago']].forEach(([b]) => { const x = $('#' + b); if(x) x.classList.remove('on'); });
     slot.appendChild(el); el.hidden = false; if(btn) btn.classList.add('on');
     if(typeof paintFinForms === 'function') paintFinForms();
     if(typeof loadPeople === 'function') loadPeople().then(()=>{ if(typeof paintFinForms === 'function') paintFinForms(); });
@@ -18866,7 +18906,10 @@
 
   function fieldKey(el){
     const panel = el.closest('.tab-panel');
-    const tab   = panel ? panel.dataset.tab : '?';
+    // Una card prestada a otra pantalla conserva la llave de la SUYA, o lo escrito se guardaria
+    // con una llave que nadie vuelve a leer.
+    const home  = el.closest('[data-drafttab]');
+    const tab   = home ? home.dataset.drafttab : (panel ? panel.dataset.tab : '?');
     const row   = el.closest('tr, .shift-card, .reading-card, .measure-card, .meas-cut');
     let where = '';
     if(row && row.parentElement){
