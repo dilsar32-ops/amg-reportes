@@ -2166,10 +2166,7 @@
     </div>
     <section class="card amgcard" id="acFormCard">
       <h2 id="acTitle" style="font-size:15px; margin:0 0 4px;">Agregar cliente</h2>
-      <div class="field" id="acPickField" hidden><label>Cliente</label>
-        <select id="acPick"><option value="">Escoja un cliente o agregue uno nuevo</option><option value="__new">Otro cliente (nuevo)</option></select></div>
-      <p class="hint" id="acExistsHint" hidden style="color:var(--ok, #2e9e5b); font-weight:600;"></p>
-      <div class="field" id="acNameField"><label>Nombre <span class="hint">como aparece en el reporte de mudanza</span></label><input type="text" id="acName" placeholder="Ej: Robert" autocapitalize="words" autocomplete="off"></div>
+      <div class="field" id="acNameField"><label>Cliente <span class="hint">nombre, como aparece en el reporte de mudanza</span></label><input type="text" id="acName" placeholder="Ej: Robert" autocapitalize="words" autocomplete="off"></div>
       <div class="field" id="acBillToField" hidden><label>Nombre en el invoice <span class="hint">la empresa del cliente, si factura a nombre de ella</span></label><input type="text" id="acBillTo" placeholder="Ej: Boxwood living" autocapitalize="words" autocomplete="off"></div>
       <div id="acPricingBox">
         <div class="field"><label>Cómo se le cobra</label>
@@ -3320,9 +3317,7 @@
     if(tab === 'amgclientes'){
       const mgr = isManager() && document.body.classList.contains('mgr');   // por la puerta AMG (aunque entre el manager) es la pantalla del trabajador
       AC_MGR = mgr;
-      if($('#acPickField')) $('#acPickField').hidden = mgr;
       if($('#acBillToField')) $('#acBillToField').hidden = !mgr;
-      paintAcPick();
       if($('#acPricingBox')) $('#acPricingBox').hidden = !mgr;
       if($('#acListCard')) $('#acListCard').hidden = !mgr;                 // el crew no ve la lista de clientes: solo agrega
       if($('#acTitle')) $('#acTitle').textContent = mgr ? 'Agregar cliente' : 'Agregar cliente nuevo';
@@ -4104,7 +4099,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AK';
+  const APP_BUILD = '2026-09-06-AL';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4909,24 +4904,7 @@
   });
   // ---- Ventanilla Clientes (AMG Moving -> Clientes): datos completos + agregar / editar ----
   let acEditingId = null, AC_MGR = false;
-  // Ruleta del trabajador: clientes que ya existen + "Otro cliente (nuevo)". Si escoge uno que ya esta, se le dice.
-  function paintAcPick(){
-    const sel = $('#acPick'); if(!sel) return; const cur = sel.value;
-    sel.innerHTML = '<option value="">Escoja un cliente o agregue uno nuevo</option>' + amgClientNames().map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('') + '<option value="__new">Otro cliente (nuevo)</option>';
-    if(cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
-  }
-  function acExistsCheck(){
-    const h = $('#acExistsHint'), nm = ($('#acName') && $('#acName').value || '').trim(); if(!h) return;
-    const known = nm ? amgClientNames().find(n => amgKey(n) === amgKey(nm)) : null;
-    h.hidden = !known; h.textContent = known ? '✓ ' + known + ' ya está activo. Solo se guardarán los datos que le falten.' : '';
-  }
-  if($('#acPick')) $('#acPick').addEventListener('change', ()=>{
-    const v = $('#acPick').value; const nameF = $('#acNameField'), nameI = $('#acName');
-    if(!v){ nameF.hidden = true; nameI.value = ''; acExistsCheck(); return; }
-    if(v === '__new'){ nameF.hidden = false; nameI.disabled = false; nameI.value = ''; acExistsCheck(); nameI.focus(); return; }
-    nameF.hidden = false; nameI.value = v; nameI.disabled = true; acExistsCheck();
-  });
-  if($('#acName')) $('#acName').addEventListener('input', acExistsCheck);
+  // Agregar cliente: el nombre se escribe ahi mismo (sin ruleta). Si ya lo tenemos, se avisa al GUARDAR.
   function paintAmgClientCards(){
     const box = $('#amgClientCards'); if(!box) return;
     if(AMG_CLIENTS_STATE !== 'loaded'){ box.innerHTML = '<p class="clockhint">' + (AMG_CLIENTS_STATE === 'absent' ? 'Falta correr supabase-amg-clients.sql en Supabase.' : AMG_CLIENTS_STATE === 'error' ? 'No se pudo cargar la lista (¿sin señal?). Salga y vuelva a entrar a Clientes.' : 'Cargando…') + '</p>'; return; }
@@ -4961,8 +4939,7 @@
     $('#acEditBtns').hidden = !c; $('#acMsg').textContent = '';
     $('#acName').disabled = !!(c && !AC_MGR);                           // el crew completa datos; el nombre lo cambia el manager
     if($('#acRemove')) $('#acRemove').hidden = !AC_MGR;
-    if(!AC_MGR){ if($('#acPick')) $('#acPick').value = ''; if($('#acNameField')) $('#acNameField').hidden = true; if($('#acExistsHint')) $('#acExistsHint').hidden = true; }
-    else { if($('#acNameField')) $('#acNameField').hidden = false; }
+    if($('#acNameField')) $('#acNameField').hidden = false;
     if(c){ const f = $('#acFormCard'); if(f) f.scrollIntoView({ block:'start', behavior:'smooth' }); }
   }
   if($('#amgClientCards')) $('#amgClientCards').addEventListener('click', async (e)=>{
@@ -4993,14 +4970,14 @@
       // el servidor conserva lo que ya habia y solo llena lo vacio; si el manager lo quito, no lo revive.
       try{
         const known = AMG_CLIENTS.find(x => amgKey(x.name) === amgKey(name));
-        if(known && !confirm('El cliente "' + known.name + '" ya está en la lista. ¿Guardar de todos modos? Solo se agregan los datos que le falten; lo que ya tiene no cambia.')){ b.disabled = false; b.textContent = old; return; }
+        if(known && !confirm('⚠ Ya tenemos a "' + known.name + '" en nuestros archivos.\n\n¿Guardar de todos modos? Solo se le agregan los datos que le falten (teléfono, dirección…); lo que ya tiene no cambia.')){ b.disabled = false; b.textContent = old; msg.textContent = 'No se guardó: ' + known.name + ' ya estaba en los archivos.'; return; }
         const res = await authFetch('/rest/v1/rpc/amg_client_save_crew', { method:'POST', headers: cloudHeaders(), body: JSON.stringify({ p_name: name, p_phone: row.phone, p_address: row.address, p_email: row.email, p_contact: row.contact, p_note: row.note }) });
         if(res.status === 404) throw new Error('Falta correr supabase-amg-clients.sql (sección 3) en Supabase. Avísele a Amilcar.');
         if(!res.ok){ let t = await res.text(); try{ t = JSON.parse(t).message || t; }catch(e){} throw new Error(String(t).slice(0, 160)); }
         let out = null; try{ out = await res.json(); }catch(e){}
         const reloaded = await loadAmgClients(); paintAmgClientCards(); acFill(null);
-        msg.textContent = (out && out.existed)
-          ? (out.name || name) + ' ya existía: se guardaron solo los datos que le faltaban.'
+        msg.textContent = ((out && out.existed) || known)
+          ? (out && out.name ? out.name : name) + ' ya existía: se guardaron solo los datos que le faltaban.'
           : (out && out.name ? out.name : name) + ' agregado ✓' + (reloaded ? ' Ya lo puede escoger en el reporte de mudanza.' : ' Salga y vuelva a entrar para verlo en la lista.');
       }catch(err){ msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
       b.disabled = false; b.textContent = old; return;
