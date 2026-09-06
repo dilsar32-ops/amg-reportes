@@ -4125,7 +4125,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-BB';
+  const APP_BUILD = '2026-09-06-BC';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4457,9 +4457,10 @@
             <span class="when">${esc(p.label)} &middot; ${sin ? '<b style="color:var(--danger);">sin tarifa AMG</b>' : money(+p.rate) + '/hora AMG'}
             &middot; ${hhmm(p.mins)} h AMG sin pagar</span></span>
           <span style="display:flex; align-items:center; gap:6px; flex:0 0 auto;">
-            <input type="number" class="mgRateIn" step="0.01" inputmode="decimal" placeholder="$/hora" value="${sin ? '' : esc(p.rate)}"
+            ${(sin || MG_EDIT.has(p.tipo + ':' + p.id)) ? `<input type="number" class="mgRateIn" step="0.01" inputmode="decimal" placeholder="$/hora" value="${sin ? '' : esc(p.rate)}"
                    style="width:88px; min-height:34px; margin:0; padding:6px 8px;">
-            <button type="button" class="minibtn mgRateSave">Guardar</button>
+            <button type="button" class="minibtn mgRateSave">Guardar</button>` + (sin ? '' : `<button type="button" class="minibtn mgRateCancel">Cancelar</button>`)
+              : `<button type="button" class="minibtn mgRateEdit">Editar</button>`}
             <button type="button" class="minibtn mgRateDel" style="color:var(--danger);" title="Quitar de AMG">Quitar</button></span>
         </div>`;
       }).join('');
@@ -4486,8 +4487,21 @@
     if(!res.ok) throw new Error('HTTP '+res.status);
     if(isCrew) MG_RATE_CREW[id] = val; else MG_RATE_TEMP[id] = val;
   }
-  // Quitar de AMG = borrar su tarifa AMG. Sus horas de AMG ya apuntadas NO se
-  // tocan: si tiene sin pagar, sigue apareciendo en rojo "sin tarifa".
+  // Quien esta con la casilla abierta para cambiarle la tarifa (se guarda entre repintados).
+  const MG_EDIT = new Set();
+  // Borra las horas de MUDANZA SIN PAGAR de una persona. Las pagadas son historia y no se tocan;
+  // las de restauracion tampoco. Devuelve cuantas filas se fueron.
+  async function mgDelHours(tipo, id){
+    const url = tipo === 'c'
+      ? '/rest/v1/time_entries?user_id=eq.' + encodeURIComponent(id) + '&work_kind=eq.mudanza&paid_at=is.null'
+      : '/rest/v1/casual_hours?casual_worker_id=eq.' + encodeURIComponent(id) + '&work_kind=eq.mudanza&paid_at=is.null';
+    const res = await authFetch(url, { method:'DELETE', headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}) });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    let gone = []; try{ gone = await res.json(); }catch(e){}
+    return Array.isArray(gone) ? gone.length : 0;
+  }
+  // Quitar de AMG = borrar su tarifa AMG. Si tiene horas de AMG sin pagar se pregunta aparte si
+  // tambien se borran: si no, sigue saliendo en la lista en rojo (por eso "no se quitaba").
   async function mgDelRate(tipo, id){
     const isCrew = tipo === 'c';
     const res = await authFetch((isCrew ? '/rest/v1/crew_kind_rates?user_id=eq.' : '/rest/v1/casual_kind_rates?casual_worker_id=eq.')
@@ -4512,21 +4526,34 @@
     const [tipo, id] = row.dataset.mgkey.split(':');
     const name = row.dataset.mgname || '';
     const save = e.target.closest('.mgRateSave'), del = e.target.closest('.mgRateDel');
+    const key = row.dataset.mgkey;
+    if(e.target.closest('.mgRateEdit')){ MG_EDIT.add(key); await loadMgHours(); const inp = ($('#mgMgList [data-mgkey="' + key + '"] .mgRateIn')); if(inp){ inp.focus(); inp.select(); } return; }
+    if(e.target.closest('.mgRateCancel')){ MG_EDIT.delete(key); await loadMgHours(); return; }
     if(save){
       const val = parseFloat(row.querySelector('.mgRateIn').value);
       if(!(val >= 0)) return alert('Escriba la tarifa AMG por hora.');
       save.disabled = true; const old = save.textContent; save.textContent = 'Guardando…';
-      try{ await mgSetRate(tipo, id, val); save.textContent = 'Guardado'; setTimeout(()=> loadMgHours(), 600); }
+      try{ await mgSetRate(tipo, id, val); MG_EDIT.delete(key); save.textContent = 'Guardado'; setTimeout(()=> loadMgHours(), 600); }
       catch(err){ alert('No se pudo guardar la tarifa AMG.'); save.textContent = old; save.disabled = false; }
       return;
     }
     if(del){
       const hrs = (row.textContent.match(/(\d+:\d\d) h AMG sin pagar/)||[])[1];
-      const warn = (hrs && hrs !== '00:00') ? '\n\nOJO: tiene ' + hrs + ' h de AMG sin pagar. Esas horas NO se borran; van a aparecer en rojo "sin tarifa" hasta que las pague o le vuelva a poner tarifa.' : '';
-      if(!confirm('¿Quitar a ' + name + ' de AMG?\n\nSe le borra la tarifa de AMG. Sus horas de restauración no se tocan.' + warn)) return;
+      const tiene = !!(hrs && hrs !== '00:00');
+      if(!confirm('¿Quitar a ' + name + ' de AMG?\n\nSe le borra la tarifa de AMG. Sus horas de restauración no se tocan.')) return;
+      let borrarHoras = false;
+      if(tiene){
+        borrarHoras = confirm(name + ' tiene ' + hrs + ' h de AMG sin pagar.\n\n¿Borrar también esas horas?\n\nACEPTAR: se borran y desaparece de la lista. No se puede deshacer.\nCANCELAR: las horas se quedan y él va a seguir en la lista, en rojo "sin tarifa", hasta que se las pague.');
+      }
       del.disabled = true;
-      try{ await mgDelRate(tipo, id); await loadMgHours(); }
-      catch(err){ alert('No se pudo quitar. ¿Ya corrió el permiso de borrar (supabase-two-kinds-part2b.sql)?'); del.disabled = false; }
+      try{
+        if(borrarHoras){
+          const n = await mgDelHours(tipo, id);
+          if(!n) alert('No se borró ninguna hora (¿ya estaban pagadas o sin señal?). Se le quita solo la tarifa.');
+        }
+        await mgDelRate(tipo, id); MG_EDIT.delete(key); await loadMgHours();
+      }
+      catch(err){ alert('No se pudo quitar.\n\n' + ((err && err.message) || err)); del.disabled = false; }
     }
   });
 
