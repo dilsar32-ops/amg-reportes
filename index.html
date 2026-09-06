@@ -3693,7 +3693,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-M';
+  const APP_BUILD = '2026-09-06-N';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -17099,6 +17099,7 @@
         .concat(ch.map(r => ({ key:'t:' + r.casual_worker_id, date:String(r.work_date).slice(0, 10), h: +r.reported_hours || 0 })));
     }catch(e){ finExpenses = []; finPayments = []; finLogs = []; finClock = []; }
     renderFinGastos(); renderFinPagos();
+    if($('#finMCierre') && !$('#finMCierre').hidden) paintCierreSelects();   // la gente y los clientes ya llegaron: repintar los selects del cierre
   }
   function groupBy(rows, keyFn){ const m = new Map(); rows.forEach(r => { const k = keyFn(r); if(!m.has(k)) m.set(k, []); m.get(k).push(r); }); return m; }
   function renderFinGastos(){
@@ -17133,7 +17134,7 @@
         const m = shiftMathData(sh, p.r, 'mudanza'); if(m.noPrice) np = true; amt += m.amount || 0; c.hours += (m.regH || 0) * (m.people || 0);
         // Quien trabajo en esa mudanza: cada nombre del turno, sus horas y su tarifa de AMG.
         const mins = hoursBetween(sh.f, sh.o); const h = (mins === null) ? 0 : mins/60;
-        String(sh.n || '').split(',').map(x => x.trim()).filter(Boolean).forEach(nm => {
+        splitNames(sh.n).forEach(nm => {
           const { person, rate } = finRateForName(nm);
           const key = person ? (person.kind + ':' + person.id) : ('x:' + finNorm(nm));
           if(!c.people.has(key)) c.people.set(key, { name: person ? person.name : nm, hours:0, rate, amount:0, days:new Set(), key });
@@ -17210,7 +17211,8 @@
   }
 
   // ---- CIERRE: lo que quedo en un periodo y como se reparte ----
-  function paintCierreForm(){
+  function paintCierreForm(){ paintCierreSelects(); loadCierres(); }
+  function paintCierreSelects(){
     const f = $('#finCFrom'), t = $('#finCTo'); const today = localToday();
     const cs = $('#finCClient'); if(cs){
       const cur = cs.value; const names = new Map();
@@ -17220,8 +17222,7 @@
       cs.innerHTML = '<option value="">Todos los clientes (el período completo)</option>' + [...names.values()].sort((a, b) => a.localeCompare(b)).map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('');
       if(cur && [...cs.options].some(o => o.value === cur)) cs.value = cur;
     }
-    const st = $('#finCSendTo'); if(st && !st.options.length){ paintWhoSelect(st, ''); st.addEventListener('change', ()=>{ const f2 = $('#finCSendOtherField'); if(f2) f2.hidden = st.value !== 'x'; }); }
-    loadCierres();
+    paintCierreSendTo();
     if(f && !f.value) f.value = today.slice(0, 8) + '01';
     if(t && !t.value) t.value = today;
     const sel = $('#finCPartner'); if(sel){
@@ -17256,13 +17257,14 @@
   let lastCierre = null;
   // Horas × tarifa de AMG de cada nombre que aparece en los REPORTES de mudanza (para el cierre de UN cliente,
   // porque el reloj no sabe con qué cliente se trabajó ese día).
+  const splitNames = str => String(str || '').split(/[,\n;\/&]|\sy\s|\sand\s/i).map(x => x.trim()).filter(Boolean);
   function reportLaborOf(logs){
     const people = new Map(); let labor = 0, hours = 0, noRate = 0;
     logs.forEach(l => {
       const p = l.payload || {};
       (p.s || []).forEach(sh => {
         const mins = hoursBetween(sh.f, sh.o); const h = (mins === null) ? 0 : mins/60;
-        String(sh.n || '').split(',').map(x => x.trim()).filter(Boolean).forEach(nm => {
+        splitNames(sh.n).forEach(nm => {
           const { person, rate } = finRateForName(nm);
           const key = person ? (person.kind + ':' + person.id) : ('x:' + finNorm(nm));
           if(!people.has(key)) people.set(key, { key, name: person ? person.name : nm, hours:0, rate, amount:0, days:[] });
@@ -17299,14 +17301,16 @@
     const pays = finPayments.filter(r => inP(r.paid_on) && (!ckey || clientKey(r.client) === ckey));
     const cobrado = pays.reduce((s, r) => s + (+r.amount||0), 0);
     const byClient = [...groupBy(pays, r => clientKey(r.client)).entries()].map(([k, rows]) => ({ name: normClient(rows[0].client), total: rows.reduce((s, r) => s + (+r.amount||0), 0) })).sort((x, y) => y.total - x.total);
-    const exps = finExpenses.filter(r => inP(r.spent_on) && (!ckey || clientKey(r.client) === ckey));
+    // En el cierre de UN cliente, seguro y storage no entran en nada (ni en gastos, ni en "lo que puso", ni en las líneas).
+    const exps = finExpenses.filter(r => inP(r.spent_on) && (!ckey || clientKey(r.client) === ckey)).filter(r => !client || !FIN_FIXED.includes(r.what));
     const gastos = exps.filter(r => !FIN_FIXED.includes(r.what)).reduce((s, r) => s + (+r.amount||0), 0);
     const fijos = client ? 0 : exps.filter(r => FIN_FIXED.includes(r.what)).reduce((s, r) => s + (+r.amount||0), 0);
     const queda = cobrado - labor - gastos - fijos; const mitad = queda / 2;
     const meKey = 'c:' + (SES && SES.user_id); const meName = (SES && SES.full_name) || 'Manager';
-    const putBy = key => exps.filter(r => !FIN_FIXED.includes(r.what) || !client).filter(r => personKeyOf(r) === key).reduce((s, r) => s + (+r.amount||0), 0);
+    const putBy = key => exps.filter(r => personKeyOf(r) === key).reduce((s, r) => s + (+r.amount||0), 0);
     const putByCompany = exps.filter(r => r.paid_by_kind === 'e').reduce((s, r) => s + (+r.amount||0), 0);
-    const mePut = putBy(meKey); const partnerKey = partner ? partner.kind + ':' + partner.id : null; const partnerPut = partnerKey ? putBy(partnerKey) : 0;
+    // La llave del socio se arma igual que personKeyOf: un nombre libre ("x") se identifica por el nombre, no por un id que no tiene.
+    const mePut = putBy(meKey); const partnerKey = partner ? partner.kind + ':' + ((partner.id === null || partner.id === undefined) ? partner.name : partner.id) : null; const partnerPut = partnerKey ? putBy(partnerKey) : 0;
     const otherPut = exps.reduce((s, r) => s + (+r.amount||0), 0) - mePut - partnerPut - putByCompany;
     const heldByPartner = partnerKey ? pays.filter(r => r.kind === 'pago' && !r.delivered_at && personKeyOf(r) === partnerKey).reduce((s, r) => s + (+r.amount||0), 0) : 0;
     const billed = logs.reduce((s, l) => s + ((l.payload||{}).s||[]).reduce((s2, sh) => s2 + (shiftMathData(sh, (l.payload||{}).r, 'mudanza').amount || 0), 0), 0);
@@ -17315,9 +17319,20 @@
     lastCierre = { from, to, client, notes, cobrado, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner };
     out.innerHTML = cierreHtml(lastCierre);
     const pb = $('#finCPdf'); if(pb) pb.hidden = false;
-    const sb = $('#finCSendBox'); if(sb){ sb.hidden = false; const st = $('#finCSendTo'); if(st && !st.value && partnerV) st.value = partnerV; }
+    const sb = $('#finCSendBox'); if(sb){ sb.hidden = false; const st = $('#finCSendTo'); if(st && !st.dataset.touched && partnerV && [...st.options].some(o => o.value === partnerV)) st.value = partnerV; }
   }
   if($('#finCRun')) $('#finCRun').addEventListener('click', runCierre);
+  // Las notas se pueden seguir escribiendo después de calcular: se leen al guardar y al hacer el PDF.
+  function cierreNotesNow(c){ const n = $('#finCNotes'); if(c && n) c.notes = (n.value || '').trim(); return c; }
+  // Si cambia el período, el cliente o el socio, el cálculo de la pantalla ya no vale: hay que volver a calcular.
+  ['#finCFrom', '#finCTo', '#finCClient', '#finCPartner'].forEach(sel => { const el = $(sel); if(el) el.addEventListener('change', ()=>{ lastCierre = null; const o = $('#finCOut'); if(o) o.innerHTML = '<p class="clockhint">Cambió algo: toque "Calcular el cierre" otra vez.</p>'; if($('#finCPdf')) $('#finCPdf').hidden = true; if($('#finCSendBox')) $('#finCSendBox').hidden = true; }); });
+  function paintCierreSendTo(){
+    const st = $('#finCSendTo'); if(!st) return;
+    const cur = st.dataset.touched ? st.value : '';
+    paintWhoSelect(st, cur || '');
+    if(!st.dataset.touched) st.value = '';                      // que no se escoja solo al manager: la copia es para el otro
+    if(!st.dataset.wired){ st.dataset.wired = '1'; st.addEventListener('change', ()=>{ st.dataset.touched = '1'; const f2 = $('#finCSendOtherField'); if(f2) f2.hidden = st.value !== 'x'; }); }
+  }
   const cierreTitle = c => (c.client ? 'Cierre de ' + esc(c.client) : 'Cierre de todos los clientes') + ' · del ' + esc(finDate(c.from)) + ' al ' + esc(finDate(c.to));
   // El mismo dibujo para el cierre recién calculado y para uno guardado (snapshot): nunca se recalcula.
   function cierreHtml(c){
@@ -17371,8 +17386,9 @@
     pdf.setFont('helvetica','bold'); pdf.setFontSize(18); pdf.text('AMG MOVING — SETTLEMENT / CIERRE', L, y); y += 22;
     pdf.setFont('helvetica','normal'); pdf.setFontSize(11);
     pdf.text((c.client ? 'Client / Cliente: ' + c.client + '  ·  ' : 'All clients / Todos los clientes  ·  ') + 'Period / Período: ' + c.from + ' to ' + c.to + '  ·  Printed ' + new Date().toLocaleString(), L, y, { maxWidth: 500 }); y += 20;
-    if(meta && meta.sent_to_name){ pdf.text('Copy sent to / Copia a: ' + meta.sent_to_name + '  ·  ' + cierreStatusText(meta), L, y, { maxWidth: 500 }); y += 16; }
-    if(c.notes){ pdf.setFont('helvetica','italic'); const lines = pdf.splitTextToSize('Notes / Notas: ' + c.notes, 500); pdf.text(lines, L, y); y += 14 * lines.length + 4; pdf.setFont('helvetica','normal'); }
+    const plainStatus = m => m.status === 'acuerdo' ? 'AGREED / DE ACUERDO' : m.status === 'desacuerdo' ? 'DISAGREES / NO ESTA DE ACUERDO' : 'PENDING / SIN RESPONDER';
+    if(meta && meta.sent_to_name){ pdf.text('Copy sent to / Copia a: ' + meta.sent_to_name + '  ·  ' + plainStatus(meta), L, y, { maxWidth: 500 }); y += 16; }
+    if(c.notes){ pdf.setFont('helvetica','italic'); pdf.splitTextToSize('Notes / Notas: ' + c.notes, 500).forEach(ln => row(ln, '')); y += 4; pdf.setFont('helvetica','normal'); }
     y += 6;
     row(c.client ? 'Paid by ' + c.client + ' / Pagó el cliente' : 'Collected from clients / Cobrado a clientes', finMoney(c.cobrado), true);
     if(c.client) (c.payLines||[]).forEach(r => row('   ' + r.date + ' · ' + r.method + ' · held by ' + (r.delivered ? c.meName : r.by), finMoney(r.amount)));
@@ -17405,8 +17421,8 @@
     if(c.otherPut > 0) row('   Others paid (reimbursed separately)', finMoney(c.otherPut));
     if(c.putByCompany > 0) row('   Paid directly by the company', finMoney(c.putByCompany));
     if(meta && meta.status && meta.status !== 'pendiente'){
-      y += 10; pdf.setFont('helvetica','bold'); pdf.text('RESPONSE / RESPUESTA: ' + (meta.status === 'acuerdo' ? 'AGREED / DE ACUERDO' : 'DISAGREES / NO ESTÁ DE ACUERDO') + (meta.responded_by_name ? ' — ' + meta.responded_by_name : '') + (meta.responded_at ? ' · ' + String(meta.responded_at).slice(0, 10) : ''), L, y, { maxWidth: 500 }); y += 16;
-      if(meta.response_note){ pdf.setFont('helvetica','italic'); const ls = pdf.splitTextToSize('"' + meta.response_note + '"', 500); pdf.text(ls, L, y); y += 14 * ls.length; }
+      y += 10; pdf.splitTextToSize('RESPONSE / RESPUESTA: ' + plainStatus(meta) + (meta.responded_by_name ? ' - ' + meta.responded_by_name : '') + (meta.responded_at ? ' · ' + String(meta.responded_at).slice(0, 10) : ''), 500).forEach(ln => row(ln, '', true));
+      if(meta.response_note){ pdf.setFont('helvetica','italic'); pdf.splitTextToSize('"' + meta.response_note + '"', 500).forEach(ln => row(ln, '')); }
       pdf.setFont('helvetica','normal');
     }
     y += 10; pdf.setFontSize(9); pdf.setFont('helvetica','normal');
@@ -17414,16 +17430,17 @@
     const filename = 'AMG_Cierre_' + (c.client ? c.client.replace(/[^A-Za-z0-9]+/g, '_') + '_' : '') + c.from + '_' + c.to + '.pdf';
     if(isNative()) saveAndShareNative(pdf.output('blob'), filename); else pdf.save(filename);
   }
-  if($('#finCPdf')) $('#finCPdf').addEventListener('click', ()=>{ try{ buildCierrePdf(); }catch(e){ alert('No se pudo hacer el PDF.\n\n' + ((e && e.message) || e)); } });
+  if($('#finCPdf')) $('#finCPdf').addEventListener('click', ()=>{ try{ buildCierrePdf(cierreNotesNow(lastCierre)); }catch(e){ alert('No se pudo hacer el PDF.\n\n' + ((e && e.message) || e)); } });
 
   // ---------- Cierres guardados: mandar copia y responder ----------
   let finCierres = [], finCierresMine = [], casualCierres = [];
   const cierreStatusText = r => r.status === 'acuerdo' ? '✓ De acuerdo' + (r.responded_by_name ? ' · ' + r.responded_by_name : '') : r.status === 'desacuerdo' ? '✗ No está de acuerdo' + (r.responded_by_name ? ' · ' + r.responded_by_name : '') : (r.sent_to_name ? '⏳ Sin responder' : 'Guardado');
   async function saveCierre(){
-    const c = lastCierre; if(!c) return alert('Primero calcule el cierre.');
+    const c = cierreNotesNow(lastCierre); if(!c) return alert('Primero calcule el cierre.');
     const to = whoFromSelect($('#finCSendTo'), $('#finCSendOther'));
     if(!to) return alert('Escoja a quién mandarle la copia.');
     if(!cloudOn()) return alert('Sin internet. Intente cuando tenga señal.');
+    if(!confirm('¿Guardar este cierre y mandarle la copia a ' + to.name + '?')) return;
     const btn = $('#finCSave'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando…';
     const row = { work_kind:'mudanza', period_from: c.from, period_to: c.to, client: c.client, partner_kind: c.partner ? c.partner.kind : null, partner_id: c.partner ? (c.partner.id === null ? null : String(c.partner.id)) : null, partner_name: c.partner ? c.partner.name : null,
       snapshot: c, notes: c.notes || null, sent_to_kind: to.kind === 'e' ? 'x' : to.kind, sent_to_id: to.id === null || to.id === undefined ? null : String(to.id), sent_to_name: to.name, sent_at: new Date().toISOString(), created_by: SES.user_id };
@@ -17433,6 +17450,7 @@
       btn.textContent = 'Guardado ✓';
       const hint = to.kind === 'x' ? ' ' + to.name + ' no entra a la app con ese nombre: mándele el PDF y anote aquí lo que responda.' : '';
       alert('Cierre guardado y copia mandada a ' + to.name + '.' + hint);
+      const sb = $('#finCSendBox'); if(sb) sb.hidden = true;   // para guardar otra vez hay que volver a calcular (evita el doble toque)
       await loadCierres();
     }catch(e){ alert('No se pudo guardar.\n\n' + ((e && e.message) || e)); }
     setTimeout(()=>{ btn.disabled = false; btn.textContent = old; }, 1500);
@@ -17460,10 +17478,10 @@
         + '<div class="field"><label>Nota <span class="hint">opcional</span></label><textarea class="cierre-note" rows="2" placeholder="Ej: falta la gasolina del martes"></textarea></div>'
         + '<div class="row2"><button type="button" class="btn btn-outline cierreYes" data-id="' + esc(r.id) + '" data-ctx="' + ctx + '" style="color:var(--ok, #2e9e5b);">✓ De acuerdo</button><button type="button" class="btn btn-outline cierreNo" data-id="' + esc(r.id) + '" data-ctx="' + ctx + '" style="color:var(--danger);">✗ No estoy de acuerdo</button></div>'
         + '</div>' : '';
-    return '<details class="whychip" style="display:block;"><summary><b>' + cierreTitle(c) + '</b>' + who + '<br><span style="color:' + color + ';">' + esc(st) + '</span></summary><div class="whytext">'
+    return '<details class="whychip" style="display:block;"><summary style="flex-direction:column;align-items:flex-start;"><span style="display:block;"><b>' + cierreTitle(c) + '</b>' + who + '</span><span style="display:block;color:' + color + ';">' + esc(st) + '</span></summary><div class="whytext">'
       + cierreHtml(c) + respondBox
       + '<div class="row2" style="margin-top:8px;"><button type="button" class="btn btn-outline cierrePdf" data-id="' + esc(r.id) + '" data-ctx="' + ctx + '">PDF</button>'
-      + (ctx === 'mgr' ? '<button type="button" class="btn btn-outline cierreDel" data-id="' + esc(r.id) + '" style="color:var(--danger);">Borrar</button>' : '<span></span>') + '</div>'
+      + (ctx === 'mgr' ? '<button type="button" class="btn btn-outline cierreDel" data-id="' + esc(r.id) + '" data-ctx="mgr" style="color:var(--danger);">Borrar</button>' : '<span></span>') + '</div>'
       + '</div></details>';
   }
   function cierreById(id, ctx){ const list = ctx === 'mgr' ? finCierres : ctx === 'crew' ? finCierresMine : casualCierres; return list.find(r => String(r.id) === String(id)); }
