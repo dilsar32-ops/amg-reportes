@@ -1118,9 +1118,6 @@
         <div class="field" id="lClientField" hidden><label>Cliente</label>
           <select id="l-client">
             <option value="">Escoja el cliente</option>
-            <option value="Robert">Robert</option>
-            <option value="Susan">Susan</option>
-            <option value="Sammy">Sammy</option>
             <option value="Otro">Otro</option>
           </select></div>
       </div>
@@ -2161,7 +2158,7 @@
       <div class="field" id="gWhoOtherField" hidden><label>Nombre</label><input type="text" id="g-who-other" placeholder="Nombre de quien pagó" autocapitalize="words" autocomplete="off"></div>
       <div class="row2">
         <div class="field"><label>Día</label><input type="date" id="g-date"></div>
-        <div class="field"><label>Cliente <span class="hint">opcional</span></label><select id="g-client"><option value="">—</option><option value="Robert">Robert</option><option value="Susan">Susan</option><option value="Sammy">Sammy</option><option value="Otro">Otro</option></select></div>
+        <div class="field"><label>Cliente <span class="hint">opcional</span></label><select id="g-client"><option value="">—</option><option value="Otro">Otro</option></select></div>
       </div>
       <div class="field" id="gClientOtherField" hidden><label>¿Qué cliente?</label><input type="text" id="g-client-other" placeholder="Nombre del cliente" autocomplete="off"></div>
       <div class="field"><label>Nota <span class="hint">opcional</span></label><input type="text" id="g-note" placeholder="Ej. Shell, cajas para Robert" autocomplete="off"></div>
@@ -2174,7 +2171,7 @@
     <section class="card amgcard" id="finPagoCard" hidden>
       <h2>Pagó cliente</h2>
       <div class="row2">
-        <div class="field"><label>Cliente</label><select id="p-client"><option value="">Escoja el cliente</option><option value="Robert">Robert</option><option value="Susan">Susan</option><option value="Sammy">Sammy</option><option value="Otro">Otro</option></select></div>
+        <div class="field"><label>Cliente</label><select id="p-client"><option value="">Escoja el cliente</option><option value="Otro">Otro</option></select></div>
         <div class="field"><label>Cuánto $</label><input type="number" id="p-amount" step="0.01" inputmode="decimal" placeholder="0.00"></div>
       </div>
       <div class="field" id="pClientOtherField" hidden><label>¿Qué cliente?</label><input type="text" id="p-client-other" placeholder="Nombre del cliente" autocomplete="off"></div>
@@ -2260,6 +2257,17 @@
               <button class="btn btn-amg" type="button" id="mgMgPriceSave" style="width:100%;">Guardar precio de AMG</button></div>
           </div>
           <p class="hint" id="mgMgPriceMsg" style="margin-top:6px;"></p>
+          <div id="amgClientsBox" style="margin-top:14px;">
+            <h2 style="font-size:15px; margin:0 0 4px;">Precio por cliente</h2>
+            <p class="hint">Cada cliente puede tener <b>su propio $/hora por persona</b> (a uno se le cobra un precio y a otro, otro). El reporte de mudanza se cobra con el precio del cliente escogido; si el cliente no tiene precio, se usa el precio general de arriba.</p>
+            <div id="amgClientsList"><p class="clockhint">Cargando…</p></div>
+            <div class="row2" style="margin-top:8px;">
+              <div class="field"><label>Nuevo cliente</label><input type="text" id="amgClientNewName" placeholder="Nombre" autocapitalize="words" autocomplete="off"></div>
+              <div class="field"><label>$/hora por persona</label><input type="number" id="amgClientNewRate" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+            </div>
+            <button class="btn btn-outline" type="button" id="amgClientAdd" style="width:100%;">+ Agregar cliente</button>
+            <p class="hint" id="amgClientsMsg"></p>
+          </div>
           <button class="btn btn-outline" type="button" id="mgMgActivate" style="width:100%; margin-top:10px;">Prender AMG (mudanza)</button>
           <p class="hint">Cambiar el precio <b>no cambia</b> los labor logs de AMG que ya mand&oacute; &mdash; cada uno guarda el precio con el que se mand&oacute;.</p>
         </div>
@@ -2655,7 +2663,61 @@
     paintCompanyHeader();
   }
   // ---- Cliente de la mudanza: el select escribe en #l-team (el campo de siempre) ----
-  const CLIENT_OPTIONS = ['Robert','Susan','Sammy'];
+  const CLIENT_OPTIONS = ['Robert','Susan','Sammy'];   // respaldo si la tabla amg_clients todavia no existe
+  // ---- Clientes de AMG con su precio por hora (tabla amg_clients). El manager ve precios; el crew solo nombres. ----
+  let AMG_CLIENTS = [];
+  const AMG_CLIENTS_KEY = 'amgClients:v1';
+  const amgKey = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  try{ AMG_CLIENTS = JSON.parse(localStorage.getItem(AMG_CLIENTS_KEY) || '[]') || []; }catch(e){ AMG_CLIENTS = []; }
+  function amgClientNames(){
+    const a = AMG_CLIENTS.filter(c => c && c.active !== false && c.name).map(c => String(c.name).trim());
+    return a.length ? a : CLIENT_OPTIONS.slice();
+  }
+  // El $/hora del cliente, o null si no tiene (entonces manda el precio general de AMG).
+  function amgClientRate(name){
+    const n = amgKey(name); if(!n) return null;
+    const c = AMG_CLIENTS.find(x => x && x.active !== false && amgKey(x.name) === n);
+    return (c && c.rate !== null && c.rate !== undefined && +c.rate > 0) ? +c.rate : null;
+  }
+  const amgAnyClientRate = () => AMG_CLIENTS.some(c => c && c.active !== false && +c.rate > 0);
+  const amgClientDisplayName = name => { const n = amgKey(name); const c = AMG_CLIENTS.find(x => x && amgKey(x.name) === n); return c ? String(c.name).trim() : String(name || '').trim(); };
+  async function loadAmgClients(){
+    if(!signedIn() || !cloudOn()) return false;
+    try{
+      let rows = null;
+      if(isManager()){
+        const res = await authFetch('/rest/v1/amg_clients?select=id,name,rate,active,note&order=name', { headers: cloudHeaders() });
+        if(res.status === 404) return false;                       // tabla sin crear: se queda el respaldo
+        if(res.ok) rows = await res.json();
+      } else {
+        try{ rows = await authPost('/rest/v1/rpc/amg_client_names', {}); }catch(e){ rows = null; }
+        if(Array.isArray(rows)) rows = rows.map(r => ({ name: r.name, active: true }));
+      }
+      if(!Array.isArray(rows)) return false;
+      AMG_CLIENTS = rows;
+      try{ localStorage.setItem(AMG_CLIENTS_KEY, JSON.stringify(rows)); }catch(e){}
+      paintClientOptions();
+      return true;
+    }catch(e){ return false; }
+  }
+  // Los selects de cliente (reporte de mudanza, gasto, pago) se pintan desde la lista; el valor escogido se conserva.
+  function paintClientSelect(sel, firstLabel){
+    if(!sel) return;
+    const cur = sel.value;
+    let html = '<option value="">' + esc(firstLabel) + '</option>';
+    amgClientNames().forEach(n => { html += '<option value="' + esc(n) + '">' + esc(n) + '</option>'; });
+    html += '<option value="Otro">Otro</option>';
+    sel.innerHTML = html;
+    if(cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
+  }
+  function paintClientOptions(){
+    paintClientSelect($('#l-client'), 'Escoja el cliente');
+    paintClientSelect($('#g-client'), '—');
+    paintClientSelect($('#p-client'), 'Escoja el cliente');
+    if($('#l-client') && $('#l-team') && $('#l-team').value) paintClientFromTeam();
+  }
+  // El cliente del reporte de mudanza que esta en pantalla (lo que se escogio en Move Info).
+  function formClient(){ return (formKind() === 'mudanza' && $('#l-team')) ? String($('#l-team').value || '').trim() : ''; }
   function clientToTeam(){
     const sel = $('#l-client'), other = $('#l-client-other'), of = $('#lClientOtherField'), team = $('#l-team');
     if(!sel || !team) return;
@@ -2670,7 +2732,8 @@
     if(!sel || !team) return;
     const t = (team.value || '').trim();
     if(!t){ sel.value = ''; if(other) other.value = ''; if(of) of.hidden = true; return; }
-    if(CLIENT_OPTIONS.includes(t)){ sel.value = t; if(other) other.value = ''; if(of) of.hidden = true; }
+    const known = amgClientNames().find(n => amgKey(n) === amgKey(t));
+    if(known){ sel.value = known; if(other) other.value = ''; if(of) of.hidden = true; }
     else { sel.value = 'Otro'; if(other) other.value = t; if(of) of.hidden = false; }
   }
   if($('#l-client')) $('#l-client').addEventListener('change', clientToTeam);
@@ -2803,9 +2866,9 @@
         <span>${people || ''}</span></div>`;
     }).join('');
     const companyLine = document.body.classList.contains('is-mgr') ? (formKind() === 'mudanza'
-      ? `<div class="line"><span>Empresa</span><b style="color:var(--amg);">AMG Moving (mudanza)</b></div>` + (mgClientPrice()
-          ? `<div class="line"><span>Precio de AMG</span><span>${esc(rateStamp(mgClientPrice()))} — se congela al mandar</span></div>`
-          : `<div class="line" style="color:var(--danger); font-weight:700;">&#9888; Falta el precio de AMG. Póngalo en AMG Moving → Precio AMG antes de mandar.</div>`)
+      ? `<div class="line"><span>Empresa</span><b style="color:var(--amg);">AMG Moving (mudanza)</b></div>` + (mgClientPrice(formClient())
+          ? `<div class="line"><span>Precio de AMG</span><span>${esc(rateStamp(mgClientPrice(formClient())))} — se congela al mandar</span></div>`
+          : `<div class="line" style="color:var(--danger); font-weight:700;">&#9888; Falta el precio de AMG${formClient() ? ' para ' + esc(formClient()) : ''}. Póngalo en AMG Moving → Precio AMG (general o por cliente) antes de mandar.</div>`)
       : `<div class="line"><span>Empresa</span><span>Restoration Doctor</span></div>`) : '';
     box.innerHTML = `<div class="paysum" style="margin-top:0;">
       ${companyLine}
@@ -2815,7 +2878,7 @@
       <div class="line"><span>Turnos</span><span>${cards.length}</span></div>
       ${rows}
     </div>`;
-    laborShownCfg = (formKind() === 'mudanza') ? mgClientPrice() : null;   // lo que el manager LEYO; sendToManager lo compara con el precio fresco
+    laborShownCfg = (formKind() === 'mudanza') ? mgClientPrice(formClient()) : null;   // lo que el manager LEYO; sendToManager lo compara con el precio fresco
   }
 
   // The dock is built out of each panel's OWN .action-bar rather than a
@@ -3584,7 +3647,10 @@
     if(!k || !(+k.rate_day > 0)) m.push('Al cliente $/hora');
     return m;
   }
-  function mgClientPrice(){
+  // clientName: el cliente de la mudanza. Si ese cliente tiene su $/hora, ese manda; si no, el precio general de AMG.
+  function mgClientPrice(clientName){
+    const cr = (typeof amgClientRate === 'function') ? amgClientRate(clientName) : null;
+    if(cr !== null) return { rateDay:cr, rateNight:cr, cutoff:'00:00', cutoffEnd:'00:00', flat:true, client: amgClientDisplayName(clientName) };
     const k = (typeof mgKindRow === 'function') ? mgKindRow() : null;
     if(!k || mgPriceMissing(k).length) return null;
     // flat: un solo precio a toda hora (rateNight/cutoff solo existen para
@@ -3593,10 +3659,10 @@
   }
   // PASO 13: el precio en vigor depende de la empresa del formulario. Para
   // restauracion payCfg() nunca es null -> identico a hoy.
-  function ratesInForce(){ return lockedRate || (formKind() === 'mudanza' ? mgClientPrice() : payCfg()); }
+  function ratesInForce(){ return lockedRate || (formKind() === 'mudanza' ? mgClientPrice(formClient()) : payCfg()); }
   function rateStamp(c){
     if(!c) return 'sin precio de AMG';
-    if(c.flat) return '$' + (+c.rateDay||0).toFixed(2) + '/h por persona, un solo precio a toda hora';
+    if(c.flat) return '$' + (+c.rateDay||0).toFixed(2) + '/h por persona, un solo precio a toda hora' + (c.client ? ' (precio de ' + c.client + ')' : '');
     const end = c.cutoffEnd || '06:00';
     return '$' + (+c.rateDay||0).toFixed(2) + '/h, after hours $'
          + (+c.rateNight||0).toFixed(2) + ' de ' + fmtTime12(c.cutoff || '17:00')
@@ -3679,8 +3745,8 @@
             cutoff:String(d.r.c||'17:00').slice(0,5),
             cutoffEnd:String(d.r.e || '00:00').slice(0,5) };
     }else if(kind === 'mudanza'){
-      // null = no hay precio AMG usable: no se cobra nada, JAMAS el de restauracion.
-      lockedRate = mgClientPrice();
+      // null = no hay precio AMG usable: no se cobra nada, JAMAS el de restauracion. El cliente del reporte decide el precio.
+      lockedRate = mgClientPrice(d && d.t);
     }else{
       const c = payCfg();
       lockedRate = { rateDay:+c.rateDay, rateNight:+c.rateNight,
@@ -3694,7 +3760,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-R';
+  const APP_BUILD = '2026-09-06-S';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -3902,6 +3968,7 @@
   async function paintMgPrices(){
     if(!$('#mgrPriceMgBox')) return;
     await loadWorkKinds();
+    paintAmgClients(); loadAmgClients().then(paintAmgClients);
     const k = mgKindRow();
     const st = $('#mgrMgPriceState'), act = $('#mgMgActivate');
     if(!k){
@@ -4127,12 +4194,70 @@
   if($('#amgCodeChange')) $('#amgCodeChange').addEventListener('click', changeAmgCode);
   // AMG prendida pero sin precio al cliente: se dice en rojo arriba de las
   // pildoras, porque asi no se puede mandar ningun labor log de AMG.
+  // ---- Precio por cliente (AMG Moving -> Precio AMG) ----
+  function paintAmgClients(){
+    const box = $('#amgClientsList'); if(!box) return;
+    if(!AMG_CLIENTS.length){ box.innerHTML = '<p class="clockhint">Todavía no hay clientes guardados' + (cloudOn() ? '' : ' (sin internet)') + '. Si no aparece nada después de unos segundos, falta correr supabase-amg-clients.sql.</p>'; return; }
+    const row = c => '<div class="entryrow" style="align-items:center;"><span><span class="who">' + esc(c.name) + '</span><br><span class="when">' + (c.rate > 0 ? '$' + (+c.rate).toFixed(2) + '/h por persona' : 'sin precio propio: usa el general') + '</span></span>'
+      + '<span style="display:flex;gap:6px;align-items:center;"><input type="number" class="amgcRate" data-id="' + esc(c.id) + '" step="0.01" inputmode="decimal" placeholder="general" value="' + (c.rate > 0 ? (+c.rate) : '') + '" style="width:92px;">'
+      + '<button type="button" class="minibtn amgcSave" data-id="' + esc(c.id) + '">Guardar</button><button type="button" class="minibtn amgcOff" data-id="' + esc(c.id) + '" title="Quitar de la lista">✕</button></span></div>';
+    const act = AMG_CLIENTS.filter(c => c.active !== false), off = AMG_CLIENTS.filter(c => c.active === false);
+    box.innerHTML = (act.length ? act.map(row).join('') : '<p class="clockhint">Ningún cliente activo.</p>')
+      + (off.length ? '<details class="whychip" style="display:block;margin-top:6px;"><summary>Clientes quitados (' + off.length + ')</summary><div class="whytext">' + off.map(c => '<div class="entryrow"><span>' + esc(c.name) + '</span><button type="button" class="minibtn amgcOn" data-id="' + esc(c.id) + '">Volver a activar</button></div>').join('') + '</div></details>' : '');
+  }
+  async function amgClientsWrite(method, path, body){
+    const res = await authFetch('/rest/v1/amg_clients' + path, { method, headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal'}), body: body ? JSON.stringify(body) : undefined });
+    if(res.status === 404) throw new Error('Falta correr supabase-amg-clients.sql en Supabase.');
+    if(res.status === 409) throw new Error('Ya hay un cliente con ese nombre.');
+    if(!res.ok){ const t = await res.text(); throw new Error(t.slice(0, 160)); }
+  }
+  async function onAmgClientsClick(e){
+    const b = e.target.closest('button'); if(!b || !b.dataset.id) return;
+    const msg = $('#amgClientsMsg'); const id = b.dataset.id; const c = AMG_CLIENTS.find(x => String(x.id) === id);
+    if(!cloudOn()){ if(msg) msg.textContent = 'Sin internet.'; return; }
+    b.disabled = true;
+    try{
+      if(b.classList.contains('amgcSave')){
+        const inp = b.parentElement.querySelector('.amgcRate'); const v = (inp && inp.value !== '') ? +inp.value : null;
+        if(v !== null && !(v > 0)) throw new Error('El precio tiene que ser mayor que 0, o vacío para usar el general.');
+        await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(id), { rate: v, updated_at: new Date().toISOString() });
+        if(msg) msg.textContent = (c ? c.name : 'Cliente') + ': ' + (v === null ? 'usa el precio general' : '$' + v.toFixed(2) + '/h por persona') + ' ✓ (los reportes ya mandados no cambian).';
+      } else if(b.classList.contains('amgcOff')){
+        if(!confirm('¿Quitar a ' + (c ? c.name : 'este cliente') + ' de la lista? Sus reportes y pagos guardados no se tocan; solo deja de aparecer para escoger.')) { b.disabled = false; return; }
+        await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(id), { active: false, updated_at: new Date().toISOString() });
+        if(msg) msg.textContent = (c ? c.name : 'Cliente') + ' quitado.';
+      } else if(b.classList.contains('amgcOn')){
+        await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(id), { active: true, updated_at: new Date().toISOString() });
+        if(msg) msg.textContent = (c ? c.name : 'Cliente') + ' activo otra vez.';
+      }
+      await loadAmgClients(); paintAmgClients(); paintAmgPriceWarn();
+    }catch(err){ if(msg) msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
+    b.disabled = false;
+  }
+  if($('#amgClientsList')) $('#amgClientsList').addEventListener('click', onAmgClientsClick);
+  if($('#amgClientAdd')) $('#amgClientAdd').addEventListener('click', async ()=>{
+    const msg = $('#amgClientsMsg'); const name = (($('#amgClientNewName') && $('#amgClientNewName').value) || '').trim().replace(/\s+/g, ' ');
+    const rv = ($('#amgClientNewRate') && $('#amgClientNewRate').value !== '') ? +$('#amgClientNewRate').value : null;
+    if(!name){ if(msg) msg.textContent = 'Escriba el nombre del cliente.'; return; }
+    if(rv !== null && !(rv > 0)){ if(msg) msg.textContent = 'El precio tiene que ser mayor que 0 (o déjelo vacío para usar el general).'; return; }
+    if(!cloudOn()){ if(msg) msg.textContent = 'Sin internet.'; return; }
+    const b = $('#amgClientAdd'); b.disabled = true;
+    try{
+      const dup = AMG_CLIENTS.find(x => amgKey(x.name) === amgKey(name));
+      if(dup && dup.active === false){ await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(dup.id), { active: true, rate: rv, updated_at: new Date().toISOString() }); }
+      else await amgClientsWrite('POST', '', { name, rate: rv, active: true });
+      $('#amgClientNewName').value = ''; $('#amgClientNewRate').value = '';
+      if(msg) msg.textContent = name + ' agregado' + (rv !== null ? ' a $' + rv.toFixed(2) + '/h por persona' : ' (usa el precio general)') + ' ✓';
+      await loadAmgClients(); paintAmgClients(); paintAmgPriceWarn();
+    }catch(err){ if(msg) msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
+    b.disabled = false;
+  });
   function paintAmgPriceWarn(){
     const w = $('#amgPriceWarn'); if(!w || !isManager()) return;
     const k = mgKindRow();
-    const bad = !!(k && k.active && !mgClientPrice());
+    const bad = !!(k && k.active && !mgClientPrice() && !amgAnyClientRate());
     w.hidden = !bad;
-    w.textContent = bad ? 'AMG está prendida, pero falta el precio por hora al cliente. No se puede mandar ningún labor log de AMG hasta ponerlo en Precio AMG.' : '';
+    w.textContent = bad ? 'AMG está prendida, pero no hay precio por hora al cliente (ni general ni por cliente). No se puede mandar ningún reporte de mudanza hasta ponerlo en Precio AMG.' : '';
   }
   const AMG_TILE_HINT = 'Todo lo de mudanza: horas, tarifas y reportes de mudanza';
   function paintAmgTile(){ const h = $('#menuAmgHint'); if(h) h.textContent = AMG_TILE_HINT; }
@@ -4160,8 +4285,8 @@
     if(!isManager()) return;
     if(view === 'form'){
       if(!WORK_KINDS_OK){ const ok = await loadWorkKinds(); if(!ok){ alert('No se pudo leer el precio de AMG. Revise su internet y vuelva a intentar.'); return; } }
-      if(!mgClientPrice()){
-        if(confirm('Antes de llenar un reporte de mudanza hay que poner el precio por hora al cliente.\n\n¿Ir a Precio AMG?')) amgShow('price');
+      if(!mgClientPrice() && !amgAnyClientRate()){
+        if(confirm('Antes de llenar un reporte de mudanza hay que poner el precio por hora al cliente (general o por cliente).\n\n¿Ir a Precio AMG?')) amgShow('price');
         return;
       }
       if(openLogId !== null){ resetLabor(); }                                   // un log recibido cargado: se cierra, no es un borrador
@@ -14342,6 +14467,7 @@
       const res = await authFetch('/rest/v1/work_kinds?select=' + cols + '&order=sort_order', { headers: cloudHeaders() });
       if(res.ok){ WORK_KINDS = await res.json(); ok = true; WORK_KINDS_OK = true; }   // tabla sin crear: silencio
     }catch(e){}
+    if(ok && typeof loadAmgClients === 'function') loadAmgClients();   // los clientes con su precio viajan con los precios
     return ok;
   }
 
@@ -15729,7 +15855,7 @@
   // `r` is the price frozen onto that log's payload, when it has one. A log
   // priced before the night-wrap existed has no `e`, so it keeps the old
   // midnight-stop rule and its total stays exactly what was quoted.
-  function shiftMathData(sh, r, kind){
+  function shiftMathData(sh, r, kind, client){
     let rd, rn, cut, end;
     const people = countPeople(sh.n || '');
     const flat = kind === 'mudanza';                 // mudanza: un solo precio a toda hora
@@ -15737,7 +15863,7 @@
       // Precio congelado en el log: manda, sea la empresa que sea.
       rd = +r.d; rn = (r.n != null) ? +r.n : 0; cut = r.c || payCfg().cutoff; end = r.e || '00:00';
     }else if(flat){
-      const m = mgClientPrice();
+      const m = mgClientPrice(client);
       if(!m) return { people, ok:false, noPrice:true, regH:0, otH:0, extra:0, amount:0 };
       rd = m.rateDay; rn = m.rateDay; cut = '00:00'; end = '00:00';
     }else{
@@ -15754,9 +15880,9 @@
   }
   function addrMatchTotal(matches){
     return matches.reduce((s,m) => s + m.shifts.reduce((s2,sh) =>
-      s2 + shiftMathData(sh, m.row && m.row.payload && m.row.payload.r, m.row && m.row.work_kind).amount, 0), 0);
+      s2 + shiftMathData(sh, m.row && m.row.payload && m.row.payload.r, m.row && m.row.work_kind, m.row && m.row.payload && m.row.payload.t).amount, 0), 0);
   }
-  const addrAnyNoPrice = matches => matches.some(m => m.shifts.some(sh => shiftMathData(sh, m.row && m.row.payload && m.row.payload.r, m.row && m.row.work_kind).noPrice));
+  const addrAnyNoPrice = matches => matches.some(m => m.shifts.some(sh => shiftMathData(sh, m.row && m.row.payload && m.row.payload.r, m.row && m.row.work_kind, m.row && m.row.payload && m.row.payload.t).noPrice));
 
   let addrMatches = [];
   let addrQuery = '';
@@ -15832,8 +15958,8 @@
         `;
       });
       const reportTotal = m.shifts.reduce((s,sh)=>
-        s+shiftMathData(sh, m.row && m.row.payload && m.row.payload.r, m.row && m.row.work_kind).amount, 0);
-      const reportNoPrice = m.shifts.some(sh => shiftMathData(sh, m.row && m.row.payload && m.row.payload.r, m.row && m.row.work_kind).noPrice);
+        s+shiftMathData(sh, m.row && m.row.payload && m.row.payload.r, m.row && m.row.work_kind, m.row && m.row.payload && m.row.payload.t).amount, 0);
+      const reportNoPrice = m.shifts.some(sh => shiftMathData(sh, m.row && m.row.payload && m.row.payload.r, m.row && m.row.work_kind, m.row && m.row.payload && m.row.payload.t).noPrice);
       sectionsHtml += `
         <div style="margin-bottom:22px;">
           <div style="font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:15px; color:#2E5C74; border-bottom:2px solid #EEF1EE; padding-bottom:6px; margin-bottom:8px;">
@@ -15951,8 +16077,9 @@
       if(!ready){ hideOverlay(); return alert('Falta correr supabase-amg-labor-logs.sql en Supabase antes de guardar reportes de mudanza. Avísele a Amilcar.'); }
       const ok = await loadWorkKinds();
       if(!ok){ hideOverlay(); return alert(AMG_NO_SIGNAL); }
-      const cfg = mgClientPrice();
-        if(!cfg){ hideOverlay(); return alert('No se puede guardar esta mudanza.\n\nFalta el precio por hora al cliente. Vaya a AMG Moving → Precio AMG, póngalo y vuelva a mandarla.\n\nUna mudanza nunca se guarda con precio $0.'); }
+      await loadAmgClients();                 // el precio del cliente tambien fresco
+      const cfg = mgClientPrice(formClient());
+        if(!cfg){ hideOverlay(); return alert('No se puede guardar esta mudanza.\n\nFalta el precio por hora al cliente' + (formClient() ? ' (' + formClient() + ' no tiene precio y tampoco hay precio general)' : '') + '. Vaya a AMG Moving → Precio AMG, póngalo y vuelva a mandarla.\n\nUna mudanza nunca se guarda con precio $0.'); }
       if(laborShownCfg && rateStamp(laborShownCfg) !== rateStamp(cfg)){
         hideOverlay(); lockedRate = null; recalcGrandTotal(); renderLaborReview();
         return alert('El precio de AMG cambió desde que abrió esta pantalla. Ahora es: ' + rateStamp(cfg) + '.\n\nRevise el total y vuelva a tocar Mandar.');
@@ -16904,6 +17031,7 @@
   if($('#finSegMine'))  $('#finSegMine').addEventListener('click',  ()=> finShow('mine'));
   function paintFinForms(){
     paintWhoSelect($('#g-who')); paintWhoSelect($('#p-who'));
+    paintClientOptions();
     if($('#g-date') && !$('#g-date').value) $('#g-date').value = localToday();
     if($('#p-date') && !$('#p-date').value) $('#p-date').value = localToday();
     const pk = $('#p-kind-field'); if(pk) pk.hidden = !isManager();
@@ -17132,7 +17260,7 @@
       const p = l.payload || {}; const name = normClient(p.t) || '(sin cliente)'; const c = get(clientKey(name)); c.name = c.name || name;
       let amt = 0, np = false;
       (p.s || []).forEach(sh => {
-        const m = shiftMathData(sh, p.r, 'mudanza'); if(m.noPrice) np = true; amt += m.amount || 0; c.hours += (m.regH || 0) * (m.people || 0);
+        const m = shiftMathData(sh, p.r, 'mudanza', p.t); if(m.noPrice) np = true; amt += m.amount || 0; c.hours += (m.regH || 0) * (m.people || 0);
         // Quien trabajo en esa mudanza: cada nombre del turno, sus horas y su tarifa de AMG.
         const mins = hoursBetween(sh.f, sh.o); const h = (mins === null) ? 0 : mins/60;
         splitNames(sh.n).forEach(nm => {
@@ -17220,6 +17348,7 @@
       finPayments.forEach(r => { const n = normClient(r.client); if(n) names.set(clientKey(n), n); });
       finLogs.forEach(l => { const n = normClient((l.payload||{}).t); if(n) names.set(clientKey(n), n); });
       finExpenses.forEach(r => { const n = normClient(r.client); if(n) names.set(clientKey(n), n); });
+      amgClientNames().forEach(n => { if(!names.has(clientKey(n))) names.set(clientKey(n), n); });
       cs.innerHTML = '<option value="">Todos los clientes (el período completo)</option>' + [...names.values()].sort((a, b) => a.localeCompare(b)).map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('');
       if(cur && [...cs.options].some(o => o.value === cur)) cs.value = cur;
     }
@@ -17314,7 +17443,7 @@
     const mePut = putBy(meKey); const partnerKey = partner ? partner.kind + ':' + ((partner.id === null || partner.id === undefined) ? partner.name : partner.id) : null; const partnerPut = partnerKey ? putBy(partnerKey) : 0;
     const otherPut = exps.reduce((s, r) => s + (+r.amount||0), 0) - mePut - partnerPut - putByCompany;
     const heldByPartner = partnerKey ? pays.filter(r => r.kind === 'pago' && !r.delivered_at && personKeyOf(r) === partnerKey).reduce((s, r) => s + (+r.amount||0), 0) : 0;
-    const billed = logs.reduce((s, l) => s + ((l.payload||{}).s||[]).reduce((s2, sh) => s2 + (shiftMathData(sh, (l.payload||{}).r, 'mudanza').amount || 0), 0), 0);
+    const billed = logs.reduce((s, l) => s + ((l.payload||{}).s||[]).reduce((s2, sh) => s2 + (shiftMathData(sh, (l.payload||{}).r, 'mudanza', (l.payload||{}).t).amount || 0), 0), 0);
     const payLines = pays.map(r => ({ date: r.paid_on, method: FIN_METHOD[r.method] || r.method, by: whoLabel(r.received_by_kind, r.received_by_name), amount: +r.amount||0, delivered: !!r.delivered_at }));
     const expLines = exps.map(r => ({ date: r.spent_on, what: FIN_WHAT[r.what] || r.what, by: whoLabel(r.paid_by_kind, r.paid_by_name), amount: +r.amount||0, fixed: FIN_FIXED.includes(r.what) }));
     lastCierre = { from, to, client, notes, cobrado, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner };
