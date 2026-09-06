@@ -2301,6 +2301,17 @@
               <button class="btn btn-amg" type="button" id="mgMgPriceSave" style="width:100%;">Guardar precio de AMG</button></div>
           </div>
           <p class="hint" id="mgMgPriceMsg" style="margin-top:6px;"></p>
+          <div id="amgMatBox" style="margin-top:14px;">
+            <h2 style="font-size:15px; margin:0 0 4px;">Materiales (precio al cliente)</h2>
+            <p class="hint">Los materiales de su Materials Use Form, con el precio por unidad que se le cobra al cliente en el invoice. Sin precio, el material no se puede facturar.</p>
+            <div id="amgMatList"><p class="clockhint">Cargando…</p></div>
+            <div class="row2" style="margin-top:8px;">
+              <div class="field"><label>Nuevo material</label><input type="text" id="amgMatNewName" placeholder="Nombre" autocapitalize="words" autocomplete="off"></div>
+              <div class="field"><label>Precio $ por unidad</label><input type="number" id="amgMatNewPrice" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+            </div>
+            <button class="btn btn-outline" type="button" id="amgMatAdd" style="width:100%;">+ Agregar material</button>
+            <p class="hint" id="amgMatMsg"></p>
+          </div>
           <div id="amgClientsBox" style="margin-top:14px;">
             <h2 style="font-size:15px; margin:0 0 4px;">Precio por cliente</h2>
             <p class="hint">Cada cliente puede tener <b>su propio $/hora por persona</b> (a uno se le cobra un precio y a otro, otro). El reporte de mudanza se cobra con el precio del cliente escogido; si el cliente no tiene precio, se usa el precio general de arriba. Para agregar un cliente con todos sus datos (teléfono, dirección, contacto): pestaña <b>Clientes</b>.</p>
@@ -2337,7 +2348,14 @@
         <h2 style="font-size:15px; margin:12px 0 4px;">Reportes de mudanza de este cliente</h2>
         <p class="clockhint">Marque los reportes que van en este invoice. Cada uno se vuelve una l&iacute;nea <b>Labor service</b> con los trabajadores y las horas del reporte (precio unitario = trabajadores &times; $/hora del cliente).</p>
         <div id="invLogs"><p class="clockhint">Escoja un cliente.</p></div>
-        <h2 style="font-size:15px; margin:12px 0 4px;">Otras l&iacute;neas (materiales, cajas, etc.)</h2>
+        <h2 style="font-size:15px; margin:12px 0 4px;">Materiales</h2>
+        <p class="clockhint">Los de su Materials Use Form, al precio que puso en Precio AMG &rarr; Materiales.</p>
+        <div class="row2">
+          <div class="field"><label>Material</label><select id="inv-mat"><option value="">Escoja el material</option></select></div>
+          <div class="field"><label>Quantity</label><input type="number" id="inv-matqty" step="1" inputmode="numeric" value="1"></div>
+        </div>
+        <button type="button" class="btn btn-outline btn-block" id="invAddMat">+ Agregar material</button>
+        <h2 style="font-size:15px; margin:12px 0 4px;">Otras l&iacute;neas</h2>
         <div class="row2">
           <div class="field"><label>Description</label><input type="text" id="inv-ldesc" placeholder="Ej: Boxes (medium)" autocomplete="off"></div>
           <div class="field"><label>Quantity</label><input type="number" id="inv-lqty" step="0.01" inputmode="decimal" value="1"></div>
@@ -3825,6 +3843,7 @@
           sh.g = String(ga); sh.gk = gk; sh.gw = gk === 'x' ? (($('.s-gas-other',c)||{}).value || '').trim() : (gsel && gsel.options[gsel.selectedIndex] ? gsel.options[gsel.selectedIndex].textContent : ''); }
         return sh; })
     };
+    if(formKind() === 'mudanza' && typeof AMG_CLIENTS !== 'undefined'){ const cc = AMG_CLIENTS.find(x => x && amgKey(x.name) === amgKey($('#l-team').value)); if(cc && cc.id) p.cid = String(cc.id); }
     if(lockedRate){ p.r = { d:lockedRate.rateDay, n:lockedRate.rateNight,
                            c:lockedRate.cutoff, e:lockedRate.cutoffEnd };
       if(lockedRate.fixed > 0) p.r.f = +lockedRate.fixed;             // precio fijo por mudanza: se cobra una vez por reporte
@@ -3896,7 +3915,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-Z';
+  const APP_BUILD = '2026-09-06-AA';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4105,6 +4124,7 @@
     if(!$('#mgrPriceMgBox')) return;
     await loadWorkKinds();
     paintAmgClients(); loadAmgClients().then(paintAmgClients);
+    if(typeof paintAmgMaterials === 'function'){ paintAmgMaterials(); invLoadMaterials().then(paintAmgMaterials); }
     const k = mgKindRow();
     const st = $('#mgrMgPriceState'), act = $('#mgMgActivate');
     if(!k){
@@ -4337,7 +4357,8 @@
   // precio unitario = trabajadores x $/hora del cliente (2 x $50 = $100).
   const INV_DEFAULTS = { from_name:'AMG-solution & services LLC', from_addr1:'2300 pinmit dr , 117', from_addr2:'falls church VA 22043', from_addr3:'United States', from_email:'Info@amgmoving.com', next_number:4005 };
   let INV_SETTINGS = Object.assign({}, INV_DEFAULTS), INV_SETTINGS_OK = false, INVOICES = [], INV_LOGS = [], INV_LOGS_KEY = '';
-  let INV = { lines: [], logIds: [] };
+  let INV = { lines: [], logIds: [] }, INV_LOADED_OK = false;
+  let AMG_MATERIALS = [];
   const INV_LOGO = '';                        // data URL del logo (pendiente: Amilcar manda el PNG); mientras, el nombre en letras
   const invMoney = n => (Math.round((+n||0)*100)/100).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
   const invDate = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||'')); return m ? (m[2] + '/' + m[3] + '/' + m[1]) : String(d||''); };
@@ -4369,24 +4390,88 @@
     }catch(e){ return false; }
   }
   async function invLoadLogs(){
-    if(!isManager() || !cloudOn()) return;
+    if(!isManager() || !cloudOn()) return false;
     try{
       const res = await authFetch('/rest/v1/labor_logs?select=id,client_id,log_date,crew_leader,payload,work_kind&work_kind=eq.mudanza&order=log_date.desc&limit=500', { headers: cloudHeaders() });
-      if(res.ok) INV_LOGS = await res.json();
-    }catch(e){}
+      if(!res.ok) return false;
+      INV_LOGS = await res.json(); return true;
+    }catch(e){ return false; }
   }
   const invNextNumber = () => Math.max(+INV_SETTINGS.next_number || 0, ...INVOICES.map(i => (+i.number||0) + 1), 1);
   const invInvoicedLogIds = () => new Set(INVOICES.flatMap(i => i.log_ids || []).map(String));
+  async function invLoadMaterials(){
+    if(!isManager() || !cloudOn()) return false;
+    try{ const res = await authFetch('/rest/v1/amg_materials?select=*&order=sort_order,name', { headers: cloudHeaders() }); if(!res.ok) return false; AMG_MATERIALS = await res.json(); return true; }catch(e){ return false; }
+  }
   async function invOpen(){
     if(!isManager()) return;
     if($('#inv-date') && !$('#inv-date').value) $('#inv-date').value = localToday();
     invPaintClients();
-    await Promise.all([invLoadSettings(), invLoadInvoices(), invLoadLogs(), loadAmgClients()]);
-    invPaintClients();
+    const [, okInv, okLogs] = await Promise.all([invLoadSettings(), invLoadInvoices(), invLoadLogs(), loadAmgClients(), invLoadMaterials()]);
+    INV_LOADED_OK = !!(okInv && okLogs);
+    if($('#invSave')) $('#invSave').disabled = !INV_LOADED_OK;
+    invPaintClients(); invPaintMaterialSelect();
     if($('#inv-number') && !$('#inv-number').value) $('#inv-number').value = invNextNumber();
     invPaintLogs(); invRender();
     if($('#invList') && !$('#invList').hidden) invRenderList();
   }
+  function invPaintMaterialSelect(){
+    const sel = $('#inv-mat'); if(!sel) return; const cur = sel.value;
+    sel.innerHTML = '<option value="">Escoja el material</option>' + AMG_MATERIALS.filter(m => m.active !== false).map(m => '<option value="' + esc(m.id) + '">' + esc(m.name) + (m.unit_price != null ? ' — $' + invMoney(m.unit_price) : ' — sin precio') + '</option>').join('');
+    if(cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
+  }
+  if($('#invAddMat')) $('#invAddMat').addEventListener('click', ()=>{
+    const m = AMG_MATERIALS.find(x => String(x.id) === $('#inv-mat').value); const q = +$('#inv-matqty').value; const msg = $('#invMsg');
+    if(!m){ msg.textContent = 'Escoja el material.'; return; }
+    if(m.unit_price == null){ msg.textContent = m.name + ' no tiene precio. Póngalo en Precio AMG → Materiales.'; return; }
+    if(!(q > 0)){ msg.textContent = 'La cantidad tiene que ser mayor que 0.'; return; }
+    const u = +m.unit_price; INV.lines.push({ d: m.name + (m.unit_label ? ' (' + m.unit_label + ')' : ''), q, u, a: Math.round(q*u*100)/100, src:null });
+    $('#inv-matqty').value = '1'; msg.textContent = ''; invRender();
+  });
+  // ---- Precio AMG -> Materiales: precios por unidad ----
+  function paintAmgMaterials(){
+    const box = $('#amgMatList'); if(!box) return;
+    if(!AMG_MATERIALS.length){ box.innerHTML = '<p class="clockhint">' + (cloudOn() ? 'Sin materiales todavía (o falta correr supabase-amg-materials.sql).' : 'Sin internet.') + '</p>'; return; }
+    box.innerHTML = AMG_MATERIALS.filter(m => m.active !== false).map(m => '<div class="entryrow" style="align-items:center;"><span><span class="who">' + esc(m.name) + '</span><br><span class="when">' + (m.unit_price != null ? '$' + invMoney(m.unit_price) + ' por unidad' : '<span style="color:var(--danger);">sin precio</span>') + '</span></span>'
+      + '<span style="display:flex;gap:6px;align-items:center;"><input type="number" class="amgMatPrice" data-id="' + esc(m.id) + '" step="0.01" inputmode="decimal" placeholder="0.00" value="' + (m.unit_price != null ? +m.unit_price : '') + '" style="width:92px;"><button type="button" class="minibtn amgMatSave" data-id="' + esc(m.id) + '">Guardar</button><button type="button" class="minibtn amgMatOff" data-id="' + esc(m.id) + '" title="Quitar">✕</button></span></div>').join('');
+  }
+  async function amgMatWrite(method, path, body){
+    const res = await authFetch('/rest/v1/amg_materials' + path, { method, headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal'}), body: body ? JSON.stringify(body) : undefined });
+    if(res.status === 404) throw new Error('Falta correr supabase-amg-materials.sql en Supabase.');
+    if(res.status === 409) throw new Error('Ya hay un material con ese nombre.');
+    if(!res.ok){ const t = await res.text(); throw new Error(t.slice(0, 160)); }
+  }
+  if($('#amgMatList')) $('#amgMatList').addEventListener('click', async (e)=>{
+    const b = e.target.closest('button'); if(!b || !b.dataset.id) return; const msg = $('#amgMatMsg'); const m = AMG_MATERIALS.find(x => String(x.id) === b.dataset.id);
+    b.disabled = true;
+    try{
+      if(b.classList.contains('amgMatSave')){
+        const inp = b.parentElement.querySelector('.amgMatPrice'); const v = (inp && inp.value !== '') ? +inp.value : null;
+        if(v !== null && !(v >= 0)) throw new Error('El precio tiene que ser un número (0 o más).');
+        await amgMatWrite('PATCH', '?id=eq.' + encodeURIComponent(b.dataset.id), { unit_price: v, updated_at: new Date().toISOString() });
+        msg.textContent = (m ? m.name : 'Material') + ': ' + (v === null ? 'sin precio' : '$' + invMoney(v) + ' por unidad') + ' ✓';
+      } else if(b.classList.contains('amgMatOff')){
+        if(!confirm('¿Quitar ' + (m ? m.name : 'este material') + ' de la lista?')) { b.disabled = false; return; }
+        await amgMatWrite('PATCH', '?id=eq.' + encodeURIComponent(b.dataset.id), { active: false, updated_at: new Date().toISOString() });
+        msg.textContent = (m ? m.name : 'Material') + ' quitado.';
+      }
+      await invLoadMaterials(); paintAmgMaterials(); invPaintMaterialSelect();
+    }catch(err){ msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
+    b.disabled = false;
+  });
+  if($('#amgMatAdd')) $('#amgMatAdd').addEventListener('click', async ()=>{
+    const msg = $('#amgMatMsg'); const name = (($('#amgMatNewName').value) || '').trim().replace(/\s+/g, ' '); const pv = $('#amgMatNewPrice').value !== '' ? +$('#amgMatNewPrice').value : null;
+    if(!name){ msg.textContent = 'Escriba el nombre del material.'; return; }
+    if(pv !== null && !(pv >= 0)){ msg.textContent = 'El precio tiene que ser 0 o más.'; return; }
+    if(!cloudOn()){ msg.textContent = 'Sin internet.'; return; }
+    try{
+      const dup = AMG_MATERIALS.find(x => amgKey(x.name) === amgKey(name));
+      if(dup) await amgMatWrite('PATCH', '?id=eq.' + encodeURIComponent(dup.id), { active: true, unit_price: pv, updated_at: new Date().toISOString() });
+      else await amgMatWrite('POST', '', { name, unit_price: pv, sort_order: 100 + AMG_MATERIALS.length, active: true });
+      $('#amgMatNewName').value = ''; $('#amgMatNewPrice').value = '';
+      await invLoadMaterials(); paintAmgMaterials(); invPaintMaterialSelect(); msg.textContent = name + ' agregado ✓';
+    }catch(err){ msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
+  });
   function invPaintClients(){
     const sel = $('#inv-client'); if(!sel) return;
     const cur = sel.value;
@@ -4404,13 +4489,14 @@
       out.push({ d:'Moving service - flat rate\n' + date, q:1, u:+cfg.fixed, a:+cfg.fixed, src:String(log.id) });
     } else {
       (p.s || []).forEach(sh => {
-        const people = countPeople(sh.n || ''); const mins = hoursBetween(sh.f, sh.o); const hours = (mins === null) ? 0 : Math.round(mins/60*100)/100;
-        if(!people || !hours) return;
+        const people = countPeople(sh.n || ''); const mins = hoursBetween(sh.f, sh.o); if(!people || mins === null || mins <= 0) return;
+        const hours = Math.round(mins/60*100)/100;                       // lo que se muestra
         const unit = Math.round(people * (+cfg.rateDay||0) * 100)/100;
-        out.push({ d:'Labor service\n' + people + ' worker' + (people===1?'':'s') + '\n' + invQty(hours) + ' hours total\n(Time worked by the team) ' + date, q:hours, u:unit, a:Math.round(hours*unit*100)/100, src:String(log.id) });
+        // El monto sale de los MINUTOS exactos, igual que el total del reporte y que Finanzas (no de las horas redondeadas).
+        out.push({ d:'Labor service\n' + people + ' worker' + (people===1?'':'s') + '\n' + invQty(hours) + ' hours total\n(Time worked by the team) ' + date, q:hours, u:unit, a:Math.round(people * (+cfg.rateDay||0) * mins/60 * 100)/100, src:String(log.id) });
       });
     }
-    (p.s || []).forEach(sh => { const x = parseFloat(sh.x); if(Number.isFinite(x) && x > 0) out.push({ d:'Extra: ' + (sh.e || 'extra') + ' ' + date, q:1, u:x, a:x, src:String(log.id) }); });
+    (p.s || []).forEach(sh => { const x = parseFloat(sh.x); if(Number.isFinite(x) && x !== 0) out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + (sh.e || 'extra') + ' ' + date, q:1, u:x, a:x, src:String(log.id) }); });
     return out;
   }
   const invTotalOf = lines => Math.round(lines.reduce((s, l) => s + (+l.a||0), 0) * 100) / 100;
@@ -4420,14 +4506,20 @@
     if(!c){ box.innerHTML = '<p class="clockhint">Escoja un cliente.</p>'; $('#invClientInfo').textContent = ''; return; }
     $('#invClientInfo').innerHTML = '<b>TO:</b> ' + esc(c.name) + (c.address ? ' · ' + esc(c.address) : ' · <span style="color:var(--danger);">sin dirección (póngala en Clientes)</span>') + (c.phone ? ' · ' + esc(c.phone) : '') + (c.email ? ' · ' + esc(c.email) : '')
       + '<br><b>Precio:</b> ' + esc(rateStamp(mgClientPrice(c.name)));
+    if(!INV_LOADED_OK){ box.innerHTML = '<p class="clockhint" style="color:var(--danger);">No se pudieron leer los invoices guardados (¿sin señal?). Salga de Invoices y vuelva a entrar antes de facturar, para no cobrar un reporte dos veces.</p>'; return; }
     const done = invInvoicedLogIds();
-    const logs = INV_LOGS.filter(l => clientKey((l.payload||{}).t) === clientKey(c.name));
-    if(!logs.length){ box.innerHTML = '<p class="clockhint">No hay reportes de mudanza guardados con este cliente.</p>'; return; }
-    box.innerHTML = logs.slice(0, 60).map(l => {
+    const before = INV.logIds.length; INV.logIds = INV.logIds.filter(id => !done.has(id)); if(INV.logIds.length !== before) invRebuildLogLines();
+    // Se reconoce el cliente por su id guardado en el reporte (aunque lo hayan renombrado) o, si no, por el nombre.
+    const all = INV_LOGS.filter(l => { const p = l.payload || {}; return (p.cid && String(p.cid) === String(c.id)) || clientKey(p.t) === clientKey(c.name); });
+    const logs = all.filter(l => !done.has(String(l.id)));
+    if(!all.length){ box.innerHTML = '<p class="clockhint">No hay reportes de mudanza guardados con este cliente.</p>'; return; }
+    if(!logs.length){ box.innerHTML = '<p class="clockhint">Todos los reportes de este cliente ya están facturados (' + all.length + ').</p>'; return; }
+    const cut = logs.length > 60 ? '<p class="clockhint">Mostrando los 60 reportes más recientes sin facturar de ' + logs.length + '.</p>' : '';
+    box.innerHTML = cut + logs.slice(0, 60).map(l => {
       const lines = invLinesFromLog(l, c); const amt = invTotalOf(lines); const was = done.has(String(l.id)); const on = INV.logIds.includes(String(l.id));
       const p = l.payload || {}; const names = ((p.s||[])[0]||{}).n || '';
-      return '<label class="entryrow" style="align-items:center;gap:10px;cursor:pointer;"><input type="checkbox" class="invLogChk" data-id="' + esc(l.id) + '"' + (on ? ' checked' : '') + (was ? ' disabled' : '') + ' style="width:22px;height:22px;">'
-        + '<span style="flex:1;"><span class="who">' + esc(invDate(l.log_date)) + (l.crew_leader ? ' · ' + esc(l.crew_leader) : '') + '</span><br><span class="when">' + esc(names) + (was ? ' · <b>ya facturado</b>' : '') + '</span></span>'
+      return '<label class="entryrow" style="align-items:center;gap:10px;cursor:pointer;"><input type="checkbox" class="invLogChk" data-id="' + esc(l.id) + '"' + (on ? ' checked' : '') + ' style="width:22px;height:22px;">'
+        + '<span style="flex:1;"><span class="who">' + esc(invDate(l.log_date)) + (l.crew_leader ? ' · ' + esc(l.crew_leader) : '') + '</span><br><span class="when">' + esc(names) + '</span></span>'
         + '<span class="hrs">' + (lines.length ? '$' + invMoney(amt) : '<span style="color:var(--danger);">sin precio</span>') + '</span></label>';
     }).join('');
   }
@@ -4452,7 +4544,7 @@
   });
   function invRender(){
     const box = $('#invLines'); if(!box) return;
-    box.innerHTML = INV.lines.length ? INV.lines.map((l, i) => '<div class="entryrow"><span><span class="who" style="white-space:pre-line;">' + esc(l.d) + '</span><br><span class="when">' + invQty(l.q) + ' × $' + invMoney(l.u) + '</span></span><span style="display:flex;gap:6px;align-items:center;"><span class="hrs">$' + invMoney(l.a) + '</span><button type="button" class="minibtn invDelLine" data-i="' + i + '" title="Quitar">✕</button></span></div>').join('')
+    box.innerHTML = INV.lines.length ? INV.lines.map((l, i) => '<div class="entryrow"><span><span class="who" style="white-space:pre-line;">' + esc(l.d) + '</span><br><span class="when">' + invQty(l.q) + ' × $' + invMoney(l.u) + (l.src ? ' · del reporte (desmárquelo arriba para quitarlo)' : '') + '</span></span><span style="display:flex;gap:6px;align-items:center;"><span class="hrs">$' + invMoney(l.a) + '</span>' + (l.src ? '' : '<button type="button" class="minibtn invDelLine" data-i="' + i + '" title="Quitar">✕</button>') + '</span></div>').join('')
       : '<p class="clockhint">Todavía no hay líneas. Marque un reporte arriba o agregue una línea.</p>';
     $('#invTotal').textContent = '$' + invMoney(invTotalOf(INV.lines));
     const pw = $('#invPreviewWrap'); if(pw && !pw.hidden) invPreview();
@@ -4500,13 +4592,14 @@
   }
   function invPreview(){
     const wrap = $('#invPreviewWrap'); if(!wrap) return;
-    const inv = invCurrent(); if(!inv.client_name){ $('#invMsg').textContent = 'Escoja el cliente para la vista previa.'; return; }
+    const inv = invCurrent(); if(!inv.client_name){ wrap.hidden = true; wrap.innerHTML = ''; $('#invMsg').textContent = 'Escoja el cliente para la vista previa.'; return; }
     wrap.hidden = false;
     const w = Math.max(280, wrap.clientWidth || 340); const k = w / 760;
     wrap.innerHTML = '<div style="transform:scale(' + k + ');transform-origin:top left;width:760px;">' + invHtml(inv, 'invoice') + '</div>';
     const inner = wrap.firstElementChild; requestAnimationFrame(() => { wrap.style.height = (inner.firstElementChild.offsetHeight * k) + 'px'; });
   }
   if($('#invPreview')) $('#invPreview').addEventListener('click', invPreview);
+  ['#inv-number','#inv-date','#inv-method'].forEach(sel => { const el = $(sel); if(el) el.addEventListener('change', ()=>{ const pw = $('#invPreviewWrap'); if(pw && !pw.hidden) invPreview(); }); });
   // PDF de una pagina a partir del mismo HTML (html2canvas -> jsPDF), y compartir (Mensajes, Mail, WhatsApp) desde el telefono.
   async function invPdfBlob(inv, kind){
     const node = document.createElement('div'); node.className = 'printout'; node.innerHTML = invHtml(inv, kind); document.body.appendChild(node);
@@ -4527,7 +4620,7 @@
       const text = (kind === 'receipt' ? 'Receipt' : 'Invoice') + ' #' + inv.number + ' - AMG Moving - $' + invMoney(inv.total) + (kind === 'receipt' ? ' (paid)' : '') + '. Thank you!';
       if(isNative()) await saveAndShareNative(blob, name, text);
       else { const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); }
-    }catch(e){ alert('No se pudo hacer el PDF.\n\n' + ((e && e.message) || e)); }
+    }catch(e){ if(!/cancel/i.test(String((e && e.message) || e))) alert('No se pudo hacer el PDF.\n\n' + ((e && e.message) || e)); }
     hideOverlay();
   }
   async function invSave(){
@@ -4536,12 +4629,15 @@
     if(!inv.lines.length){ msg.textContent = 'El invoice no tiene líneas: marque un reporte o agregue una línea.'; return; }
     if(!(inv.number > 0)){ msg.textContent = 'Ponga el número del invoice.'; return; }
     if(!cloudOn() || !navigator.onLine){ msg.textContent = 'Sin internet. Intente cuando tenga señal.'; return; }
-    if(INVOICES.some(i => +i.number === +inv.number)){ msg.textContent = 'Ya hay un invoice con el número ' + inv.number + '. Use otro (el siguiente libre es ' + invNextNumber() + ').'; return; }
     const b = $('#invSave'); b.disabled = true; const old = b.textContent; b.textContent = 'Guardando…';
     try{
+      const fresh = await invLoadInvoices(); if(!fresh) throw new Error('No se pudieron leer los invoices guardados. Revise su internet y vuelva a intentar.');
+      const done = invInvoicedLogIds(); const dup = inv.log_ids.filter(id => done.has(id));
+      if(dup.length){ const who = INVOICES.find(i => (i.log_ids||[]).some(x => dup.includes(String(x)))); invPaintLogs(); invRebuildLogLines(); throw new Error('Un reporte marcado ya está en el invoice #' + (who ? who.number : '?') + '. Se quitó de la lista; revise y guarde otra vez.'); }
+      if(INVOICES.some(i => +i.number === +inv.number)){ $('#inv-number').value = invNextNumber(); throw new Error('Ya hay un invoice con el número ' + inv.number + '. Se cambió al ' + invNextNumber() + '; toque Guardar otra vez.'); }
       const res = await authFetch('/rest/v1/amg_invoices', { method:'POST', headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}), body: JSON.stringify(inv) });
       if(res.status === 404) throw new Error('Falta correr supabase-amg-invoices.sql en Supabase.');
-      if(res.status === 409) throw new Error('Ese número de invoice ya existe.');
+      if(res.status === 409){ await Promise.all([invLoadInvoices(), invLoadSettings()]); $('#inv-number').value = invNextNumber(); throw new Error('Ese número ya existe (otro teléfono lo usó). Se cambió al ' + invNextNumber() + '; toque Guardar otra vez.'); }
       if(!res.ok){ const t = await res.text(); throw new Error(t.slice(0, 160)); }
       const saved = (await res.json())[0];
       // el proximo numero
@@ -4578,7 +4674,7 @@
     if(b.classList.contains('invReceipt') || b.classList.contains('invSendReceipt')) return invShare(inv, 'receipt');
     if(b.classList.contains('invPaid')){
       const d = prompt('¿Qué día pagó ' + inv.client_name + '? (AAAA-MM-DD)', localToday()); if(d === null) return;
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(d.trim())) return alert('Fecha inválida. Use AAAA-MM-DD.');
+      const dd = d.trim(); const dt = new Date(dd + 'T00:00:00'); if(!/^\d{4}-\d{2}-\d{2}$/.test(dd) || isNaN(dt) || dt.toISOString().slice(0, 10) !== dd) return alert('Fecha inválida. Use AAAA-MM-DD (por ejemplo ' + localToday() + ').');
       const m = prompt('¿Cómo pagó? (Transfer, Zelle, Check, Cash, Card…)', inv.payment_method || 'Transfer'); if(m === null) return;
       b.disabled = true;
       try{
