@@ -467,6 +467,13 @@
   }
   .menubtn b{display:block; font-size:17px; font-weight:700;}
   .menubtn small{display:block; margin-top:3px; font-size:12.5px; color:var(--ink-soft);}
+  .menubtn.amg{border-left-color:var(--amg);}
+  /* Lo de manager dentro de AMG Moving se muestra por ROL (is-mgr), no por
+     contexto (mgr): se llega desde el menu principal, no desde Manager. */
+  .amg-mgr{display:none;}
+  body.is-mgr .amg-mgr{display:block;}
+  .amg-mgr[hidden]{display:none !important;}
+  .amgbox[hidden]{display:none !important;}
   .menubtn.mgr{border-left-color:var(--ink-soft); display:none;}
   body.is-mgr .menubtn.mgr{display:block;}
   .menubtn.mgr.on{border-left-color:var(--green);}
@@ -944,6 +951,8 @@
         <b>Reloj / Horas</b><small>Marcar la hora que entró y la que salió</small></button>
       <button type="button" class="menubtn" data-go-tab="labor">
         <b>Labor / Mano de Obra</b><small>Reporte del día y enviarlo al manager</small></button>
+      <button type="button" class="menubtn amg" data-go-tab="amgmoving">
+        <b>&#128666; AMG Moving</b><small>Todo lo de mudanza: horas, tarifas y labor logs</small></button>
       <button type="button" class="menubtn" data-go-tab="equipment">
         <b>Equipment / Equipo</b><small>Contar el equipo instalado</small></button>
       <button type="button" class="menubtn" data-go-tab="comms">
@@ -1982,7 +1991,6 @@
       <button type="button" class="minibtn on" id="mgrMoreSegRates">&#128176; Precio al cliente</button>
       <button type="button" class="minibtn" id="mgrMoreSegPay">&#128179; Pagos por confirmar</button>
       <button type="button" class="minibtn" id="mgrMoreSegCrew">&#128101; Miembros del equipo</button>
-      <button type="button" class="minibtn" id="mgrMoreSegMg">&#128666; AMG</button>
     </div>
 
     <section class="card" id="mgrMoreRates">
@@ -1996,20 +2004,6 @@
           <div class="field"><label>After hours empieza</label><input type="time" id="mgrCutoff"></div>
         </div>
         <p class="hint" id="mgrNightWindow" style="margin-top:6px;"></p>
-        <!-- Una mudanza no se cobra como una restauracion. Mientras estas
-             cuatro casillas esten vacias, MUDANZA SIGUE APAGADA: nadie puede
-             apuntar horas de AMG hasta que valgan algo. -->
-        <div id="mgrPriceMgBox" style="margin-top:16px; padding-top:14px; border-top:1px solid var(--line);">
-          <h2 style="font-size:15px; margin:0 0 4px;">Precio de AMG (mudanza) al cliente</h2>
-          <p class="hint" id="mgrMgPriceState" style="margin:0 0 8px;"></p>
-          <div class="row3">
-            <div class="field"><label>Al cliente $/hora</label>
-              <input type="number" id="mgMgRateDay" step="0.01" inputmode="decimal" placeholder="0.00"></div>
-            <div class="field"><label>After hours $/hora</label>
-              <input type="number" id="mgMgRateNight" step="0.01" inputmode="decimal" placeholder="0.00"></div>
-            <div class="field"><label>After hours empieza</label>
-              <input type="time" id="mgMgCutoff"></div>
-          </div>
           <div class="row2" style="margin-top:8px;">
             <div class="field"><label>After hours termina</label>
               <input type="time" id="mgMgCutoffEnd"></div>
@@ -2040,12 +2034,34 @@
       <div id="crewListBox"><p class="clockhint">Toque Revisar.</p></div>
     </section>
 
+  </section>
+
+  <!-- ===================== HORAS AMG (mudanza) =====================
+       Otra ventana y otro color a proposito: cuando alguien toca "Horas AMG"
+       tiene que NOTAR que esta en otro lugar. Todo lo que se guarda desde
+       aqui lleva work_kind = 'mudanza'. -->
+  <section class="tab-panel" data-tab="amgmoving">
+    <div class="amgbanner">
+      <div class="amgbanner-t">&#128666; AMG MOVING</div>
+      <div class="amgbanner-s">Todo lo de mudanza vive aqu&iacute;. Lo que guarde en esta secci&oacute;n es de AMG y se paga a la tarifa de AMG.</div>
+    </div>
+    <!-- Solo para manager (por rol). Las pildoras cambian la caja de abajo en
+         su lugar, igual que en Labor logs. Labor log AMG y Recibidos AMG se
+         agregan con el siguiente paso. -->
+    <div class="amg-mgr" id="amgTools">
+      <div class="mgrtools">
+        <button type="button" class="minibtn on" id="amgSegHours">&#9201; Horas AMG</button>
+        <button type="button" class="minibtn" id="amgSegPrice">&#128176; Precio AMG</button>
+        <button type="button" class="minibtn" id="amgSegMine">&#8986; Mis horas AMG</button>
+      </div>
+    </div>
+    <div class="amgbox amg-mgr" id="amgHoursBox">
     <!-- Cuarta pildora: las horas de MUDANZA de todos, de planta y temporales,
          en UNA sola lista. Vive aqui y no en Reloj porque es configuracion y
          correccion de todo el equipo, no el trabajo del dia. -->
-    <section class="card mgr-only" id="mgrMoreMg" hidden>
+    <section class="card amgcard" id="mgrMoreMg">
       <div class="inboxhead" style="margin-bottom:2px;">
-        <h2 style="margin:0;">AMG &mdash; AMG Moving</h2>
+        <h2 style="margin:0;">Los que van a mudanza</h2>
         <button type="button" class="btn btn-outline" id="mgMgRefresh">Revisar</button>
       </div>
       <p class="clockhint" id="mgMgIntro">Los que <b>van a mudanza</b>, con su tarifa de AMG. Agregue a quien vaya, y qu&iacute;telo cuando ya no. Los dem&aacute;s no aparecen aqu&iacute;.</p>
@@ -2061,17 +2077,26 @@
       <div id="mgMgList" style="margin-top:12px;"><p class="clockhint">Toque Revisar.</p></div>
       <div class="paysum" id="mgMgSum" hidden></div>
     </section>
-  </section>
-
-  <!-- ===================== HORAS AMG (mudanza) =====================
-       Otra ventana y otro color a proposito: cuando alguien toca "Horas AMG"
-       tiene que NOTAR que esta en otro lugar. Todo lo que se guarda desde
-       aqui lleva work_kind = 'mudanza'. -->
-  <section class="tab-panel" data-tab="amg">
-    <div class="amgbanner">
-      <div class="amgbanner-t">&#128666; HORAS AMG</div>
-      <div class="amgbanner-s">AMG Moving &middot; mudanza. Lo que guarde aqu&iacute; se paga a la tarifa de AMG, no a la de restauraci&oacute;n.</div>
     </div>
+    <div class="amgbox amg-mgr" id="amgPriceBox" hidden>
+    <section class="card amgcard" id="amgPriceCard">
+        <!-- Una mudanza no se cobra como una restauracion. Mientras estas
+             cuatro casillas esten vacias, MUDANZA SIGUE APAGADA: nadie puede
+             apuntar horas de AMG hasta que valgan algo. -->
+        <div id="mgrPriceMgBox">
+          <h2 style="font-size:15px; margin:0 0 4px;">Precio de AMG (mudanza) al cliente</h2>
+          <p class="hint" id="mgrMgPriceState" style="margin:0 0 8px;"></p>
+          <div class="row3">
+            <div class="field"><label>Al cliente $/hora</label>
+              <input type="number" id="mgMgRateDay" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+            <div class="field"><label>After hours $/hora</label>
+              <input type="number" id="mgMgRateNight" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+            <div class="field"><label>After hours empieza</label>
+              <input type="time" id="mgMgCutoff"></div>
+          </div>
+    </section>
+    </div>
+    <div class="amgbox" id="amgMineBox">
     <section class="card amgcard">
       <h2>Meter horas de AMG</h2>
       <div class="field"><label>D&iacute;a / Fecha</label><input type="date" id="amgDate"></div>
@@ -2088,6 +2113,7 @@
       <div id="amgEntries"><p class="clockhint">Nada todav&iacute;a.</p></div>
       <div id="amgTotalBox" hidden></div>
     </section>
+    </div>
   </section>
 
   <!-- ===================== TAB 6: MANUAL ===================== -->
@@ -2169,7 +2195,7 @@
   // in the header returns to the menu. The old tab strip is hidden but kept
   // so nothing that referenced .tab-btn / .tab-panel had to change.
   const SECTION_NAMES = {
-    reloj:'Reloj / Horas', amg:'Horas AMG / AMG Moving', labor:'Labor / Mano de Obra', equipment:'Equipment / Equipo',
+    reloj:'Reloj / Horas', amgmoving:'AMG Moving', labor:'Labor / Mano de Obra', equipment:'Equipment / Equipo',
     comms:'Comms / Comunicación', drying:'Drying / Secado',
     materials:'Materials / Materiales', measurements:'Measurements / Medidas',
     floorplan:'Floor Plan / Plano',
@@ -2566,10 +2592,11 @@
   function onTabChange(tab){
     requestAnimationFrame(() => sigPads.forEach(p => { try{ p.ensureSize(); }catch(e){} }));
     if(tab === 'floorplan' && $('#fp-date') && !$('#fp-date').value) $('#fp-date').value = todayStr();
-    if(tab === 'amg'){
+    if(tab === 'amgmoving'){
       if($('#amgDate') && !$('#amgDate').value) $('#amgDate').value = todayStr();
       teKind = 'mudanza';
       loadWorkKinds(); loadMyEntries();
+      if(isManager()) amgShow('hours'); else amgShow('mine');
     }
     if(tab === 'reloj'){
       if($('#teDate') && !$('#teDate').value) $('#teDate').value = todayStr();
@@ -3184,7 +3211,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-05-BX';
+  const APP_BUILD = '2026-09-05-BY';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -3580,11 +3607,31 @@
     }
   });
 
+  // Las pildoras de AMG Moving (manager). Un trabajador sin rol ve solo su caja.
+  function amgShow(which){
+    const map = [['hours','#amgSegHours','#amgHoursBox'],
+                 ['price','#amgSegPrice','#amgPriceBox'],
+                 ['mine', '#amgSegMine', '#amgMineBox']];
+    const mgr = isManager();
+    map.forEach(([key, btnSel, boxSel]) => {
+      const btn = $(btnSel), box = $(boxSel);
+      const on = mgr ? key === which : key === 'mine';
+      if(box) box.hidden = !on;
+      if(btn) btn.classList.toggle('on', on);
+    });
+    if(mgr && which === 'hours' && typeof loadMgHours === 'function') loadMgHours();
+    if(mgr && which === 'price' && typeof paintMgPrices === 'function') paintMgPrices();
+    if(which === 'mine' && typeof renderAmgEntries === 'function') renderAmgEntries();
+    window.scrollTo(0, 0);
+  }
+  if($('#amgSegHours')) $('#amgSegHours').addEventListener('click', ()=> amgShow('hours'));
+  if($('#amgSegPrice')) $('#amgSegPrice').addEventListener('click', ()=> amgShow('price'));
+  if($('#amgSegMine'))  $('#amgSegMine').addEventListener('click',  ()=> amgShow('mine'));
+
   function mgrMoreShow(which){
     const map = [['rates','#mgrMoreSegRates','#mgrMoreRates'],
                  ['pay',  '#mgrMoreSegPay',  '#mgrMorePay'],
-                 ['crew', '#mgrMoreSegCrew', '#crewListCard'],
-                 ['mg',   '#mgrMoreSegMg',   '#mgrMoreMg']];
+                 ['crew', '#mgrMoreSegCrew', '#crewListCard']];
     map.forEach(([key, btnSel, cardSel]) => {
       const btn = $(btnSel), card = $(cardSel);
       const on = key === which;
@@ -3593,14 +3640,12 @@
     });
     if(which === 'crew' && typeof loadCrewList === 'function') loadCrewList();
     if(which === 'pay'  && typeof renderMgrPayList === 'function') renderMgrPayList();
-    if(which === 'mg'   && typeof loadMgHours === 'function') loadMgHours();
     if(which === 'rates'&& typeof paintMgPrices === 'function') paintMgPrices();
     window.scrollTo(0, 0);
   }
   if($('#mgrMoreSegRates')) $('#mgrMoreSegRates').addEventListener('click', ()=> mgrMoreShow('rates'));
   if($('#mgrMoreSegPay'))   $('#mgrMoreSegPay').addEventListener('click',   ()=> mgrMoreShow('pay'));
   if($('#mgrMoreSegCrew'))  $('#mgrMoreSegCrew').addEventListener('click',  ()=> mgrMoreShow('crew'));
-  if($('#mgrMoreSegMg'))    $('#mgrMoreSegMg').addEventListener('click',    ()=> mgrMoreShow('mg'));
   $('#myHoursToggle').addEventListener('click', ()=>{
     const box = $('#myHoursBox');
     box.hidden = !box.hidden;
@@ -4984,7 +5029,7 @@
     revisar($('#inboxRefresh'), refreshInbox, () => (inboxRows || []).length));
   $('#teAdd').addEventListener('click', addEntry);
   // "Horas AMG" ya no es un interruptor: LLEVA a la ventana de AMG.
-  if($('#teKindMg')) $('#teKindMg').addEventListener('click', ()=>{ showTab('amg'); pushBack('reloj'); });
+  if($('#teKindMg')) $('#teKindMg').addEventListener('click', ()=>{ showTab('amgmoving'); pushBack('reloj'); });
   function paintAmgTotal(){
     const t = $('#amgTotal'); if(!t) return;
     const mins = hoursBetween($('#amgFrom').value, $('#amgTo').value);
