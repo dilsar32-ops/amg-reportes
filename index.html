@@ -3693,7 +3693,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-N';
+  const APP_BUILD = '2026-09-06-O';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -15677,13 +15677,16 @@
   }
   let inboxArchivedView = false;
   let openLogId = null;
-  const currentInboxRows = () => inboxArchivedView ? archivedRows : inboxRows;
+  // La lista de la pantalla es de UNA empresa: aunque inboxRows traiga filas de la otra (una respuesta vieja,
+  // un refresco que llego tarde), aqui se filtran por el tipo de la pantalla. Mudanza va a AMG Moving, nunca aqui.
+  const inboxKindOf = r => (r && r.work_kind === 'mudanza') ? 'mudanza' : 'restauracion';
+  const currentInboxRows = () => (inboxArchivedView ? archivedRows : inboxRows).filter(r => inboxKindOf(r) === laborMode);
 
   function renderInbox(){
     const list = $('#inboxList'); if(!list) return;
     // The badge always reflects the active queue, even while looking at
     // Archivados - archived reports don't need attention anymore.
-    const unread = inboxRows.filter(r=>!r.seen).length;
+    const unread = inboxRows.filter(r => !r.seen && inboxKindOf(r) === laborMode).length;
     const badge = $('#mgrBadge');
     if(badge){ badge.textContent = unread || ''; badge.hidden = !unread; }
     const rows = currentInboxRows();
@@ -15705,8 +15708,11 @@
   async function refreshInbox(){
     if(!cloudOn()) return;
     try{
-      inboxRows = await cloudFetchInbox(false);
-      if(inboxArchivedView) archivedRows = await cloudFetchInbox(true);
+      const kindAsked = laborMode;
+      const rows = await cloudFetchInbox(false, kindAsked);
+      if(kindAsked !== laborMode) return;                       // la pantalla cambio de empresa mientras la respuesta viajaba: no se pisa la otra lista
+      inboxRows = rows.filter(r => inboxKindOf(r) === kindAsked);
+      if(inboxArchivedView) archivedRows = (await cloudFetchInbox(true, kindAsked)).filter(r => inboxKindOf(r) === kindAsked);
       renderInbox();
       refreshAmgCounts();
     }
