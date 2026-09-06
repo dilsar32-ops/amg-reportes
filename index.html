@@ -1838,6 +1838,8 @@
     </section>
     </div>
 
+    <!-- Lo que a EL le pagaron. Es la pantalla del trabajador; dentro de la seccion de
+         Manager se pliega detras de la pastilla "Mis propias horas", como sus horas. -->
     <section class="card" id="myPaymentsCard" hidden>
       <h2>Mis pagos</h2>
       <div id="myPayments"></div>
@@ -4107,7 +4109,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-BG';
+  const APP_BUILD = '2026-09-06-BH';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4161,6 +4163,8 @@
     // horas" pill; outside it he is looking at the crew's screen, where his
     // own hours are the whole point and must be open.
     if($('#myHoursBox')) $('#myHoursBox').hidden = on;
+    MY_PAYS_FOLDED = on;                                   // en Manager, "Mis pagos" va detras de la pastilla
+    if($('#myPaymentsCard') && on) $('#myPaymentsCard').hidden = true;
     if($('#myHoursToggle')) $('#myHoursToggle').classList.remove('on');
     $('#mgrToggleLabel').textContent = on ? 'Manager: ON' : 'Manager';
     $('#mgrState').textContent  = on ? 'viendo precios' : '';
@@ -5355,11 +5359,16 @@
   if($('#mgrMoreSegRates')) $('#mgrMoreSegRates').addEventListener('click', ()=> mgrMoreShow('rates'));
   if($('#mgrMoreSegPay'))   $('#mgrMoreSegPay').addEventListener('click',   ()=> mgrMoreShow('pay'));
   if($('#mgrMoreSegCrew'))  $('#mgrMoreSegCrew').addEventListener('click',  ()=> mgrMoreShow('crew'));
+  // true = estamos en la seccion de Manager y "Mis pagos" solo se ve al abrir la pastilla.
+  let MY_PAYS_FOLDED = false, MY_PAYS_OPEN = false;
   $('#myHoursToggle').addEventListener('click', ()=>{
     const box = $('#myHoursBox');
     box.hidden = !box.hidden;
     // The pill fills in while his own hours are open, same as the other pills.
     $('#myHoursToggle').classList.toggle('on', !box.hidden);
+    MY_PAYS_OPEN = !box.hidden;
+    const pc = $('#myPaymentsCard');
+    if(pc) pc.hidden = MY_PAYS_FOLDED ? (!MY_PAYS_OPEN || !pc.dataset.hasrows) : !pc.dataset.hasrows;
   });
   $('#menuMgr').addEventListener('click', ()=>{
     // Manager mode is always on for an actual manager now - this tile just
@@ -15403,9 +15412,10 @@
         { headers: cloudHeaders() });
       const card = $('#myPaymentsCard'), box = $('#myPayments');
       if(!card || !box) return;
-      if(!res.ok){ card.hidden = true; return; }
+      if(!res.ok){ card.hidden = true; card.dataset.hasrows = ''; return; }
       const rows = await res.json();
-      card.hidden = !rows.length;
+      card.dataset.hasrows = rows.length ? '1' : '';
+      card.hidden = !rows.length || (MY_PAYS_FOLDED && !MY_PAYS_OPEN);
       if(!rows.length) return;
       box.innerHTML = rows.map(p => {
         const bal = +p.balance_after;
