@@ -2795,7 +2795,7 @@
     if(sl) sl.textContent = mg ? 'Buscar dirección en todas las mudanzas' : 'Buscar dirección en todo el archivo';
     // El formulario habla de mudanza: titulo, paso, y cada rotulo.
     const sn = panel.querySelector('.card[data-step="send"] h2 .num'); if(sn) sn.textContent = mg ? '4' : '3';
-    if(mg){ paintMatList(); loadMaterialNames(); $$('.l-ex-who', panel).forEach(sel => { if(!sel.options.length) paintWhoSelect(sel, ''); }); }
+    if(mg){ paintMatList(); loadMaterialNames(); $$('.l-ex-who', panel).forEach(sel => { if(!sel.options.length) paintWhoSelect(sel, ''); else repaintWhoKeep(sel); }); }
     const jh = panel.querySelector('.card[data-step="job"] h2');
     if(jh) jh.innerHTML = '<span class="num">1</span>' + (mg ? 'Move Info / Información de la mudanza' : 'Job Info / Información del Trabajo');
     if(FLOWS.labor && FLOWS.labor[0]) FLOWS.labor[0].t = mg ? 'Información de la mudanza' : 'Información del trabajo';
@@ -2805,7 +2805,7 @@
     const tf = $('#lTeamField'); if(tf) tf.hidden = mg;
     const cf = $('#lClientField'); if(cf) cf.hidden = !mg;
     if(mg){ paintClientOptions(); paintClientFromTeam(); } else { const of = $('#lClientOtherField'); if(of) of.hidden = true; }
-    if(mg && typeof loadPeople === 'function' && !FIN_PEOPLE.length) loadPeople().then(() => { $$('.shift-card', panel).forEach(c => paintShiftLabels(c, true)); $$('.l-ex-who', panel).forEach(repaintWhoKeep); });
+    if(mg && typeof loadPeople === 'function') (FIN_PEOPLE.length ? Promise.resolve() : loadPeople()).then(() => { $$('.shift-card', panel).forEach(c => paintShiftLabels(c, true)); $$('.l-ex-who', panel).forEach(repaintWhoKeep); });
     $$('.shift-card', panel).forEach(c => paintShiftLabels(c, mg));
     ['#mgrRateToggle','#mgrCodesToggle'].forEach(sel => { const el = $(sel); if(el) el.hidden = mg; });
     const fold = panel.querySelector('details.mgrfold'); if(fold) fold.hidden = mg;
@@ -2858,15 +2858,21 @@
   }
   // Gastos del trabajo: UNA fila de entrada y "+ Agregar otro gasto" para las demas. Las filas se numeran
   // de corrido (l-ex-*-N) y se renumeran al quitar una, porque el borrador las guarda por su id.
-  const exRowHtml = n => `<div class="l-ex-head"><span class="hint">Gasto ${n}</span><button type="button" class="icon-btn l-ex-rm">Quitar</button></div><div class="row2"><div class="field"><label>Qué fue</label><select id="l-ex-what-${n}" class="l-ex-what"><option value="">—</option><option value="peaje">Peaje</option><option value="comida">Comida</option><option value="materiales">Materiales comprados</option><option value="cajas">Cajas</option><option value="otro">Otro</option></select></div><div class="field"><label>Cuánto $</label><input type="number" id="l-ex-amt-${n}" class="l-ex-amt" step="0.01" inputmode="decimal" placeholder="0.00"></div></div>
+  // Cada gasto lleva su propia llave (l-ex-id). Antes la llave era la POSICION, asi que quitar el Gasto 1
+  // renombraba los demas y el gasto ya devuelto de abajo se sobreescribia: el servidor lo rechazaba y se
+  // perdia el lote entero. Un reporte viejo (sin llaves) conserva las posiciones de siempre.
+  const newExId = () => 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const exRowHtml = n => `<input type="hidden" id="l-ex-id-${n}" class="l-ex-id"><div class="l-ex-head"><span class="hint">Gasto ${n}</span><button type="button" class="icon-btn l-ex-rm">Quitar</button></div><div class="row2"><div class="field"><label>Qué fue</label><select id="l-ex-what-${n}" class="l-ex-what"><option value="">—</option><option value="peaje">Peaje</option><option value="comida">Comida</option><option value="materiales">Materiales comprados</option><option value="cajas">Cajas</option><option value="otro">Otro</option></select></div><div class="field"><label>Cuánto $</label><input type="number" id="l-ex-amt-${n}" class="l-ex-amt" step="0.01" inputmode="decimal" placeholder="0.00"></div></div>
           <div class="row2"><div class="field"><label>Quién lo pagó</label><select id="l-ex-who-${n}" class="l-ex-who"></select></div><div class="field l-ex-other-wrap" hidden><label>Nombre</label><input type="text" id="l-ex-other-${n}" class="l-ex-other" placeholder="Quién pagó" autocapitalize="words" autocomplete="off"></div></div>`;
   const exRows = () => $$('#lExList .l-ex-row');
   function renumberExRows(){
     exRows().forEach((row, i) => { const n = i + 1; row.dataset.n = n; const h = row.querySelector('.l-ex-head .hint'); if(h) h.textContent = 'Gasto ' + n;
-      [['l-ex-what', '.l-ex-what'], ['l-ex-amt', '.l-ex-amt'], ['l-ex-who', '.l-ex-who'], ['l-ex-other', '.l-ex-other']].forEach(([id, cls]) => { const el = row.querySelector(cls); if(el) el.id = id + '-' + n; }); });
+      [['l-ex-id', '.l-ex-id'], ['l-ex-what', '.l-ex-what'], ['l-ex-amt', '.l-ex-amt'], ['l-ex-who', '.l-ex-who'], ['l-ex-other', '.l-ex-other']].forEach(([id, cls]) => { const el = row.querySelector(cls); if(el) el.id = id + '-' + n; }); });
   }
-  function fillExRow(row, e){
+  function fillExRow(row, e, idFallback){
     const w = row.querySelector('.l-ex-what'), a = row.querySelector('.l-ex-amt'), s = row.querySelector('.l-ex-who'), o = row.querySelector('.l-ex-other'), wrap = row.querySelector('.l-ex-other-wrap');
+    const idEl = row.querySelector('.l-ex-id');
+    if(idEl) idEl.value = (e && e.id) ? String(e.id) : (idFallback || idEl.value || newExId());
     if(w) w.value = e ? (e.w || '') : ''; if(a) a.value = e ? (e.a != null ? e.a : '') : '';
     if(s) paintWhoSelect(s, e ? (e.k || 'x') : '', e ? (e.who || '') : '');
     if(o) o.value = (e && e.k === 'x') ? (e.who || '') : '';
@@ -2875,7 +2881,7 @@
   function addExRow(e){
     const box = $('#lExList'); if(!box) return null;
     const row = document.createElement('div'); row.className = 'l-ex-row'; row.innerHTML = exRowHtml(box.children.length + 1); box.appendChild(row);
-    fillExRow(row, e || null); renumberExRows(); return row;
+    fillExRow(row, e || null, (e && e.id) ? String(e.id) : newExId()); renumberExRows(); return row;
   }
   // Deja exactamente las filas que traiga la lista (minimo una, vacia).
   function setExRows(list){
@@ -2883,10 +2889,14 @@
     const want = Math.max(1, (list || []).length);
     while(box.children.length > want) box.removeChild(box.lastElementChild);
     while(box.children.length < want) addExRow();
-    exRows().forEach((row, i) => fillExRow(row, (list || [])[i] || null));
+    // Un reporte guardado antes de las llaves: la fila i conserva la llave vieja (su posicion), asi que
+    // el gasto que ya esta anotado en Finanzas sigue siendo el mismo y no se duplica.
+    exRows().forEach((row, i) => fillExRow(row, (list || [])[i] || null, String(i + 1)));
     renumberExRows();
   }
   document.addEventListener('click', e => {
+    const exPanel = (e.target.closest('#lExAdd') || e.target.closest('.l-ex-rm')) ? e.target.closest('.tab-panel') : null;
+    if(exPanel && typeof clearStepWarning === 'function') clearStepWarning(exPanel);
     if(e.target.closest('#lExAdd')){ const row = addExRow(); if(row){ const w = row.querySelector('.l-ex-what'); if(w){ w.scrollIntoView({block:'center'}); try{ w.focus(); }catch(err){} } } if(typeof saveDraft === 'function') saveDraft(); return; }
     const rm = e.target.closest('.l-ex-rm'); if(!rm) return;
     const row = rm.closest('.l-ex-row'); if(!row) return;
@@ -2899,7 +2909,8 @@
       const w = (row.querySelector('.l-ex-what') || {}).value, a = parseFloat((row.querySelector('.l-ex-amt') || {}).value); if(!w || !(a > 0)) return;
       const sel = row.querySelector('.l-ex-who'); const k = (sel && sel.value) || 'x';
       const who = k === 'x' ? ((row.querySelector('.l-ex-other') || {}).value || '').trim() : (sel && sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : '');
-      ex.push({ w, a, k, who });
+      const id = String(((row.querySelector('.l-ex-id') || {}).value || '')).replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
+      ex.push({ w, a, k, who, id: id || String(ex.length + 1) });
     });
     return ex;
   }
@@ -3108,7 +3119,8 @@
       const bad = [];
       exRows().forEach(row => {
         const n = row.dataset.n, w = (row.querySelector('.l-ex-what') || {}).value || '', a = parseFloat((row.querySelector('.l-ex-amt') || {}).value), s = row.querySelector('.l-ex-who');
-        const has = !!w || (a > 0); if(!has) return;
+        const oth = (s && s.value === 'x') ? ((row.querySelector('.l-ex-other') || {}).value || '').trim() : '';
+        const has = !!w || (a > 0) || !!oth; if(!has) return;
         if(!w) bad.push('l-ex-what-' + n);
         if(!(a > 0)) bad.push('l-ex-amt-' + n);
         if(s && !s.value) bad.push('l-ex-who-' + n);
@@ -3160,7 +3172,8 @@
       <div class="line"><span>Turnos</span><span>${cards.length}</span></div>
       ${rows}
       ${formKind() === 'mudanza' ? (function(){ const mat = matFromForm(); const ex = exFromForm();
-        return `<div class="line"><span>Materiales usados</span><span>${mat.length ? '' : 'ninguno'}</span></div>` + mat.map(m => `<div class="line"><span>&nbsp;&nbsp;${esc(m.n)}</span><span>${esc(String(m.q))}</span></div>`).join('')
+        return (loadedTr ? `<div class="line"><span>Camión</span><span>${esc(loadedTr)}</span></div>` : '')
+          + `<div class="line"><span>Materiales usados</span><span>${mat.length ? '' : 'ninguno'}</span></div>` + mat.map(m => `<div class="line"><span>&nbsp;&nbsp;${esc(m.n)}</span><span>${esc(String(m.q))}</span></div>`).join('')
           + (ex.length ? ex.map(e => `<div class="line"><span>&nbsp;&nbsp;💵 ${esc(EX_LABEL[e.w] || e.w)} · lo pagó ${esc(e.who || '—')} <span class="muted">· no se cobra al cliente</span></span><span>${finMoney(e.a)}</span></div>`).join('') : ''); })() : ''}
     </div>`;
     laborShownCfg = (formKind() === 'mudanza') ? mgClientPrice(formClient()) : null;   // lo que el manager LEYO; sendToManager lo compara con el precio fresco
@@ -4039,6 +4052,7 @@
       if(lockedRate.fixed > 0) p.r.f = +lockedRate.fixed;             // precio fijo por mudanza: se cobra una vez por reporte
     }
     if(formKind() === 'mudanza'){
+      if(loadedTr) p.tr = loadedTr;          // no se inventa ni se borra: se conserva tal cual venia
       const mat = matFromForm(); if(mat.length) p.mat = mat;
       const ex = exFromForm(); if(ex.length) p.ex = ex;
       // Mudanza: un solo precio a toda hora. Se guarda de forma que un telefono
@@ -4059,8 +4073,10 @@
     const json = decodeURIComponent(escape(atob(raw.slice(i+4).replace(/\s+/g,''))));
     loadPayload(JSON.parse(json), 'restauracion');
   }
+  let loadedTr = '';                       // Camion de un reporte viejo: ya no hay casilla, pero lo guardado se respeta
   function loadPayload(d, kind){
     openLogHadRate = !!(d && d.r && d.r.d != null);
+    loadedTr = (d && d.tr) ? String(d.tr) : '';
     kind = (kind === 'mudanza') ? 'mudanza' : 'restauracion';
     if($('#l-kind')) $('#l-kind').value = kind;
     d = d || {};
@@ -4082,6 +4098,7 @@
     if(!(d.s||[]).length) addShift();
     if($('#lMatList')){ $$('.l-mat-q').forEach(i => i.value = ''); if($('#l-mat-other')){ $('#l-mat-other').value = ''; $('#l-mat-other-q').value = ''; } if(kind === 'mudanza') paintMatList(d.mat || []); }
     setExRows((kind === 'mudanza' && Array.isArray(d.ex)) ? d.ex : []);
+    if(kind !== 'mudanza') loadedTr = '';
     if(d.r && d.r.d != null){
       // A log priced before the night-wrap existed has no `e`. It keeps the
       // old midnight-stop rule ('00:00') so its total is exactly the number
@@ -4109,7 +4126,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AN';
+  const APP_BUILD = '2026-09-06-AO';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -6931,7 +6948,8 @@
         </table>
         <table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:12px;">${shiftsHtml}</table>
         ${mg ? (function(){ const mat = matFromForm(); const ex = exFromForm();
-          return (mat.length ? `<div style="font-family:'Oswald',sans-serif; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; color:#3A4552; margin:14px 0 6px;">Materials used</div><table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:12px;"><tr><td style="padding:6px 8px; background:#EEF1EE;"><b>Item</b></td><td style="padding:6px 8px; background:#EEF1EE; text-align:right;"><b>Quantity</b></td></tr>` + mat.map(m => `<tr><td style="padding:6px 8px; border-bottom:1px solid #E3E6E3;">${esc(m.n)}</td><td style="padding:6px 8px; border-bottom:1px solid #E3E6E3; text-align:right;">${esc(String(m.q))}</td></tr>`).join('') + `</table>` : '')
+          return (loadedTr ? `<table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:12px;"><tr><td style="width:150px;"><b>Truck #</b></td><td>${esc(loadedTr)}</td></tr></table>` : '')
+            + (mat.length ? `<div style="font-family:'Oswald',sans-serif; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; color:#3A4552; margin:14px 0 6px;">Materials used</div><table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:12px;"><tr><td style="padding:6px 8px; background:#EEF1EE;"><b>Item</b></td><td style="padding:6px 8px; background:#EEF1EE; text-align:right;"><b>Quantity</b></td></tr>` + mat.map(m => `<tr><td style="padding:6px 8px; border-bottom:1px solid #E3E6E3;">${esc(m.n)}</td><td style="padding:6px 8px; border-bottom:1px solid #E3E6E3; text-align:right;">${esc(String(m.q))}</td></tr>`).join('') + `</table>` : '')
             + ((mgrView && ex.length) ? `<div style="font-family:'Oswald',sans-serif; font-size:13px; letter-spacing:0.12em; text-transform:uppercase; color:#3A4552; margin:14px 0 6px;">Crew expenses (not billed)</div><table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:12px;">` + ex.map(e => `<tr><td style="padding:6px 8px; border-bottom:1px solid #E3E6E3;">${esc(EX_LABEL[e.w] || e.w)} — paid by ${esc(e.who || '—')}</td><td style="padding:6px 8px; border-bottom:1px solid #E3E6E3; text-align:right;">$${esc((+e.a).toFixed(2))}</td></tr>`).join('') + `</table>` : ''); })() : ''}
         ${mgrView ? `<div style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700; color:#A84813;">GRAND TOTAL: ${grandTotal}</div>` : ''}
         <div style="margin-top:30px; font-size:11px; color:#3A4552;">Generated ${new Date().toLocaleString()}</div>
@@ -6961,7 +6979,7 @@
     shiftsContainer.innerHTML = '';
     addShift();
     $$('.l-mat-q').forEach(i => i.value = ''); if($('#l-mat-other')){ $('#l-mat-other').value = ''; $('#l-mat-other-q').value = ''; }
-    setExRows([]);
+    setExRows([]); loadedTr = '';
     recalcGrandTotal();
   }
 
@@ -18609,7 +18627,7 @@
       const w = whoKeyParse(e.k, e.who);
       rows.push({ company_id: SES.company_id, work_kind: workKind || 'mudanza', spent_on: logDate || localToday(), amount: amt, what: ['peaje','comida','materiales','cajas','otro'].includes(e.w) ? e.w : 'otro',
         note: 'Gasto del trabajo' + (payload.t ? ' · ' + payload.t : ''), paid_by_kind: w.kind, paid_by_id: w.id, paid_by_name: w.kind === 'e' ? 'La empresa' : (w.name || e.who || '(sin nombre)'),
-        client: payload.t || null, labor_log_client_id: clientId, shift_no: null, source_key: clientId + ':ex:' + (i+1), created_by: SES.user_id });
+        client: payload.t || null, labor_log_client_id: clientId, shift_no: null, source_key: clientId + ':ex:' + (String(e.id || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 24) || (i+1)), created_by: SES.user_id });
     });
     return rows;
   }
@@ -18789,14 +18807,34 @@
     if(d.side && d.side !== sideKind()) return;
     // Los selects de "quien pago" nacen vacios: se pintan antes de poner los valores, o el valor guardado se perderia.
     $$('.l-ex-who, .s-gas-who').forEach(sel => { if(!sel.options.length) paintWhoSelect(sel, ''); });
-    setTimeout(() => { $$('.l-ex-who').forEach(sel => { const v = (d.vals || {})[fieldKey(sel)]; if(v && sel.value !== v) paintWhoSelect(sel, v); const wrap = sel.closest('.l-ex-row') && sel.closest('.l-ex-row').querySelector('.l-ex-other-wrap'); if(wrap) wrap.hidden = sel.value !== 'x'; }); }, 0);
+    setTimeout(() => {
+      // La gasolina del turno tambien: si no se repinta, el pago se le anota a quien tiene el telefono
+      // en la mano en vez de a quien la puso.
+      $$('.l-ex-who, .s-gas-who').forEach(sel => {
+        const v = (d.vals || {})[fieldKey(sel)];
+        const row = sel.closest('.l-ex-row, .shift-card');
+        const other = row && row.querySelector(sel.classList.contains('s-gas-who') ? '.s-gas-other' : '.l-ex-other');
+        if(v && sel.value !== v) paintWhoSelect(sel, v, (other && other.value || '').trim());
+        const wrap = row && row.querySelector(sel.classList.contains('s-gas-who') ? '.s-gas-other-wrap' : '.l-ex-other-wrap');
+        if(wrap) wrap.hidden = sel.value !== 'x';
+      });
+    }, 0);
 
     // Un log recibido que quedo en pantalla NO es un borrador: las puertas ven
     // openLogId !== null y lo cierran en vez de mandarlo como propio.
     if(d.openLogId) openLogId = d.openLogId;
     const r = d.rows || {};
     while(shiftsContainer && shiftsContainer.children.length < (r.shifts||0)) addShift();
-    while($('#lExList') && $('#lExList').children.length < (r.ex||0)) addExRow();
+    // La version anterior tenia 3 filas fijas y no guardaba cuantas eran: se cuentan por las llaves
+    // del propio borrador, para no dejar en el olvido los Gastos 2 y 3 que el lider ya habia escrito.
+    let exWant = r.ex || 0;
+    if(r.ex === undefined && d.vals){
+      Object.keys(d.vals).forEach(k => {
+        const m = /\|l-ex-(?:what|amt|who|other)-(\d+)\|/.exec(k);
+        if(m && String(d.vals[k] || '').trim() !== '') exWant = Math.max(exWant, +m[1]);
+      });
+    }
+    while($('#lExList') && $('#lExList').children.length < exWant) addExRow();
     while(readingsContainer && readingsContainer.children.length < (r.readings||0)) addReading();
     while(equipmentBody && equipmentBody.children.length < (r.equipment||0)) addEquipmentRow();
     while(materialsBody && materialsBody.children.length < (r.materials||0)) addMaterialRow();
