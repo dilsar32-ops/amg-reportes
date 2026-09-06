@@ -2200,9 +2200,11 @@
       <p class="hint" id="acMsg" style="margin-top:6px;"></p>
     </section>
     <section class="card amgcard" id="acListCard">
-      <details class="whychip" style="display:block;" id="acListFold"><summary id="acListSummary"><b>Clientes que ya tenemos</b></summary><div class="whytext">
-      <p class="hint" id="acListHint">Toque uno para ver o completar sus datos.</p>
-      <div id="amgClientCards"><p class="clockhint">Cargando…</p></div></div></details>
+      <h2 id="acListTitle" style="font-size:15px; margin:0 0 4px;">Nuestros clientes</h2>
+      <p class="hint" id="acListHint">Toque un cliente para ver sus datos y ponerle el precio.</p>
+      <div id="amgClientCards"><p class="clockhint">Cargando…</p></div>
+      <p class="hint" id="acListMsg" style="margin-top:6px;"></p>
+      <button class="btn btn-outline btn-block" type="button" id="acListAdd" style="margin-top:10px;">+ Agregar un cliente</button>
     </section>
   </section>
   <section class="tab-panel" data-tab="finanzas">
@@ -2833,6 +2835,7 @@
     box.innerHTML = names.map(n => { const k = amgKeyLite(n); return '<div class="entryrow" style="align-items:center;"><span class="who">' + esc(n) + '</span><input type="number" class="l-mat-q" id="l-mat-q-' + esc(matSlug(n)) + '" data-name="' + esc(n) + '" step="1" inputmode="decimal" placeholder="0" value="' + esc(cur[k] !== undefined ? cur[k] : '') + '" style="width:96px;"></div>'; }).join('');
   }
   const amgKeyLite = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  { const idEl = document.getElementById('l-ex-id-1'); if(idEl && !idEl.value) idEl.value = newExId(); }   // la fila fija tambien nace con su llave
   paintMatList();   // desde el arranque, con los 10 de su formulario: asi el borrador guardado encuentra sus casillas
   async function loadMaterialNames(){
     if(!signedIn() || !cloudOn()) return;
@@ -2861,7 +2864,7 @@
   // Cada gasto lleva su propia llave (l-ex-id). Antes la llave era la POSICION, asi que quitar el Gasto 1
   // renombraba los demas y el gasto ya devuelto de abajo se sobreescribia: el servidor lo rechazaba y se
   // perdia el lote entero. Un reporte viejo (sin llaves) conserva las posiciones de siempre.
-  const newExId = () => 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  function newExId(){ return 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
   const exRowHtml = n => `<input type="hidden" id="l-ex-id-${n}" class="l-ex-id"><div class="l-ex-head"><span class="hint">Gasto ${n}</span><button type="button" class="icon-btn l-ex-rm">Quitar</button></div><div class="row2"><div class="field"><label>Qué fue</label><select id="l-ex-what-${n}" class="l-ex-what"><option value="">—</option><option value="peaje">Peaje</option><option value="comida">Comida</option><option value="materiales">Materiales comprados</option><option value="cajas">Cajas</option><option value="otro">Otro</option></select></div><div class="field"><label>Cuánto $</label><input type="number" id="l-ex-amt-${n}" class="l-ex-amt" step="0.01" inputmode="decimal" placeholder="0.00"></div></div>
           <div class="row2"><div class="field"><label>Quién lo pagó</label><select id="l-ex-who-${n}" class="l-ex-who"></select></div><div class="field l-ex-other-wrap" hidden><label>Nombre</label><input type="text" id="l-ex-other-${n}" class="l-ex-other" placeholder="Quién pagó" autocapitalize="words" autocomplete="off"></div></div>`;
   const exRows = () => $$('#lExList .l-ex-row');
@@ -3341,6 +3344,7 @@
       AC_MGR = mgr;
       if($('#acBillToField')) $('#acBillToField').hidden = !mgr;
       acHideDone();
+      if(mgr) acShowList();
       if($('#acPricingBox')) $('#acPricingBox').hidden = !mgr;
       if($('#acListCard')) $('#acListCard').hidden = !mgr;                 // el crew no ve la lista de clientes: solo agrega
       if($('#acTitle')) $('#acTitle').textContent = mgr ? 'Agregar cliente' : 'Agregar cliente nuevo';
@@ -4126,7 +4130,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AO';
+  const APP_BUILD = '2026-09-06-AP';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4936,11 +4940,20 @@
     const box = $('#amgClientCards'); if(!box) return;
     if(AMG_CLIENTS_STATE !== 'loaded'){ box.innerHTML = '<p class="clockhint">' + (AMG_CLIENTS_STATE === 'absent' ? 'Falta correr supabase-amg-clients.sql en Supabase.' : AMG_CLIENTS_STATE === 'error' ? 'No se pudo cargar la lista (¿sin señal?). Salga y vuelva a entrar a Clientes.' : 'Cargando…') + '</p>'; return; }
     const act = AMG_CLIENTS.filter(c => c.active !== false), off = AMG_CLIENTS.filter(c => c.active === false);
-    const sum = $('#acListSummary'); if(sum) sum.innerHTML = '<b>Clientes que ya tenemos (' + act.length + ')</b> · toque para ver';
-    const card = c => '<button type="button" class="inboxitem acCard" data-id="' + esc(c.id) + '" style="text-align:left;">'
-      + '<span class="who">' + esc(c.name) + (!AC_MGR ? '' : (c.pricing === 'fijo' && c.flat_amount > 0 ? ' <span class="kindtag amg">fijo $' + (+c.flat_amount).toFixed(2) + '</span>' : c.rate > 0 ? ' <span class="kindtag amg">$' + (+c.rate).toFixed(2) + '/h</span>' : ' <span class="muted" style="font-weight:400;font-size:12px;">precio general</span>')) + '</span>'
-      + '<span class="when">' + esc([c.bill_to ? 'invoice a: ' + c.bill_to : '', c.phone, c.address, c.contact ? 'contacto: ' + c.contact : ''].filter(Boolean).join(' · ') || 'sin datos todavía · toque para completar') + '</span></button>';
-    box.innerHTML = (act.length ? act.map(card).join('') : '<p class="clockhint">Todavía no hay clientes. Agregue el primero abajo.</p>')
+    const t = $('#acListTitle'); if(t) t.textContent = 'Nuestros clientes (' + act.length + ')';
+    const price = c => (c.pricing === 'fijo' && c.flat_amount > 0) ? 'precio fijo $' + (+c.flat_amount).toFixed(2) + ' por mudanza'
+      : (c.rate > 0 ? '$' + (+c.rate).toFixed(2) + '/hora por persona' : 'sin precio propio (usa el precio general)');
+    // El manager ve, sin abrir nada: precio, telefono, direccion, email y contacto, con su boton de quitar al lado.
+    const card = c => !AC_MGR
+      ? '<button type="button" class="inboxitem acCard" data-id="' + esc(c.id) + '" style="text-align:left;"><span class="who">' + esc(c.name) + '</span>'
+        + '<span class="when">' + esc([c.phone, c.address].filter(Boolean).join(' · ') || 'sin datos todavía') + '</span></button>'
+      : '<div class="entryrow" style="align-items:flex-start; gap:8px;">'
+        + '<button type="button" class="acCard" data-id="' + esc(c.id) + '" style="flex:1; text-align:left; background:none; border:none; padding:8px 0; color:inherit; min-height:44px;">'
+        + '<span class="who">' + esc(c.name) + (c.bill_to ? ' <span class="muted" style="font-weight:400;font-size:12px;">(invoice a ' + esc(c.bill_to) + ')</span>' : '') + '</span>'
+        + '<br><span class="kindtag amg">' + esc(price(c)) + '</span>'
+        + '<br><span class="when">' + esc([c.phone, c.address, c.email, c.contact ? 'contacto: ' + c.contact : ''].filter(Boolean).join(' · ') || 'sin teléfono ni dirección todavía') + '</span></button>'
+        + '<button type="button" class="minibtn amgcOff" data-id="' + esc(c.id) + '" title="Quitar de la lista" style="color:var(--danger);">✕ Quitar</button></div>';
+    box.innerHTML = (act.length ? act.map(card).join('') : '<p class="clockhint">Todavía no hay clientes.' + (AC_MGR ? ' Los agrega la cuadrilla desde la puerta AMG Moving.' : ' Agregue el primero abajo.') + '</p>')
       + (off.length ? '<details class="whychip" style="display:block;margin-top:6px;"><summary>Clientes quitados (' + off.length + ')</summary><div class="whytext">' + off.map(c => '<div class="entryrow"><span>' + esc(c.name) + '</span><button type="button" class="minibtn amgcOn" data-id="' + esc(c.id) + '">Volver a activar</button></div>').join('') + '</div></details>' : '');
   }
   // Pantalla de confirmacion: el trabajador ve claro que el cliente SI quedo guardado antes de irse.
@@ -4950,17 +4963,33 @@
     if(n) n.textContent = name || '';
     if(w) w.textContent = what || '';
     if($('#acDoneCard')) $('#acDoneCard').hidden = false;
+    if($('#acDoneMore')) $('#acDoneMore').hidden = AC_MGR;         // el manager no agrega clientes
+    if($('#acDoneBack')) $('#acDoneBack').textContent = AC_MGR ? 'Volver a la lista' : 'Listo';
     if($('#acFormCard')) $('#acFormCard').hidden = true;
     if($('#acListCard')) $('#acListCard').hidden = true;
     const c = $('#acDoneCard'); if(c) c.scrollIntoView({ block:'start' });
   }
+  // El manager llega a ver SU lista (agregar clientes es trabajo de la cuadrilla). El formulario aparece
+  // cuando toca un cliente, o cuando pide agregar uno a mano.
+  function acShowList(){
+    if($('#acDoneCard')) $('#acDoneCard').hidden = true;
+    if($('#acFormCard')) $('#acFormCard').hidden = true;
+    if($('#acListCard')) $('#acListCard').hidden = false;
+    const l = $('#acListCard'); if(l) l.scrollIntoView({ block:'start' });
+  }
   function acHideDone(){
     if($('#acDoneCard')) $('#acDoneCard').hidden = true;
+    if(AC_MGR){ acShowList(); return; }
     if($('#acFormCard')) $('#acFormCard').hidden = false;
-    if($('#acListCard')) $('#acListCard').hidden = !AC_MGR;      // la lista es solo del manager
+    if($('#acListCard')) $('#acListCard').hidden = true;          // la cuadrilla solo agrega: no ve la lista
   }
+  if($('#acListAdd')) $('#acListAdd').addEventListener('click', ()=>{
+    if($('#acListCard')) $('#acListCard').hidden = true;
+    if($('#acFormCard')) $('#acFormCard').hidden = false;
+    acFill(null); const n = $('#acName'); if(n){ n.focus(); n.scrollIntoView({ block:'center' }); }
+  });
   if($('#acDoneMore')) $('#acDoneMore').addEventListener('click', ()=>{ acHideDone(); acFill(null); const n = $('#acName'); if(n){ n.focus(); n.scrollIntoView({ block:'center' }); } });
-  if($('#acDoneBack')) $('#acDoneBack').addEventListener('click', ()=>{ acHideDone(); acFill(null); goBack(); });
+  if($('#acDoneBack')) $('#acDoneBack').addEventListener('click', ()=>{ acFill(null); if(AC_MGR){ acShowList(); } else { acHideDone(); goBack(); } });
   let acPricing = 'hora';
   function acSetPricing(mode){
     acPricing = mode === 'fijo' ? 'fijo' : 'hora';
@@ -4975,7 +5004,7 @@
     acEditingId = c ? c.id : null;
     acSetPricing(c && c.pricing === 'fijo' ? 'fijo' : 'hora');
     if($('#acFlat')) $('#acFlat').value = (c && c.flat_amount > 0) ? +c.flat_amount : '';
-    $('#acTitle').textContent = c ? 'Editar cliente' : 'Agregar cliente';
+    $('#acTitle').textContent = c ? 'Datos y precio de ' + (c.name || 'este cliente') : 'Agregar cliente';
     $('#acName').value = c ? (c.name || '') : ''; $('#acRate').value = (c && c.rate > 0) ? +c.rate : '';
     if($('#acBillTo')) $('#acBillTo').value = c ? (c.bill_to || '') : '';
     $('#acPhone').value = c ? (c.phone || '') : ''; $('#acAddress').value = c ? (c.address || '') : '';
@@ -4988,10 +5017,12 @@
     if(c){ const f = $('#acFormCard'); if(f) f.scrollIntoView({ block:'start', behavior:'smooth' }); }
   }
   if($('#amgClientCards')) $('#amgClientCards').addEventListener('click', async (e)=>{
-    const card = e.target.closest('.acCard'); if(card){ const c = AMG_CLIENTS.find(x => String(x.id) === card.dataset.id); if(c) acFill(c); return; }
-    const on = e.target.closest('.amgcOn'); if(on){ await onAmgClientsClick(e, $('#acMsg')); paintAmgClientCards(); }
+    const card = e.target.closest('.acCard'); if(card){ const c = AMG_CLIENTS.find(x => String(x.id) === card.dataset.id);
+      if(c){ if($('#acListCard')) $('#acListCard').hidden = true; if($('#acFormCard')) $('#acFormCard').hidden = false; acFill(c); } return; }
+    const off = e.target.closest('.amgcOff'); const on = e.target.closest('.amgcOn');
+    if(off || on){ await onAmgClientsClick(e, $('#acListMsg') || $('#acMsg')); paintAmgClientCards(); paintAmgClients(); }
   });
-  if($('#acCancel')) $('#acCancel').addEventListener('click', ()=> acFill(null));
+  if($('#acCancel')) $('#acCancel').addEventListener('click', ()=>{ acFill(null); if(AC_MGR) acShowList(); });
   if($('#acRemove')) $('#acRemove').addEventListener('click', async ()=>{
     const c = AMG_CLIENTS.find(x => String(x.id) === String(acEditingId)); if(!c) return;
     if(!confirm('¿Quitar a ' + c.name + ' de la lista? Sus reportes y pagos guardados no se tocan; solo deja de aparecer para escoger.')) return;
