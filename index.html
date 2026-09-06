@@ -3666,7 +3666,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-H';
+  const APP_BUILD = '2026-09-06-I';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -16767,15 +16767,29 @@
     }catch(e){ try{ FIN_PEOPLE = JSON.parse(localStorage.getItem('people:v1') || '[]'); }catch(e2){} }
     return FIN_PEOPLE;
   }
+  // En mudanza, quien paga y quien recibe dinero casi siempre es uno de estos
+  // tres; si no, "Otro" con el nombre escrito. Si el nombre existe en el
+  // equipo se guarda con su id (asi el dinero queda ligado a la persona).
+  const FIN_MONEY_NAMES = ['Raúl','Amilcar','Samuel'];
+  const finNorm = s => String(s||'').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  function finPersonFor(name){
+    const n = finNorm(name);
+    return FIN_PEOPLE.find(p => finNorm(p.name) === n) || FIN_PEOPLE.find(p => finNorm(p.name).startsWith(n + ' ')) || FIN_PEOPLE.find(p => finNorm(p.name).startsWith(n)) || null;
+  }
+  const finFixedOptions = () => FIN_MONEY_NAMES.map(name => { const p = finPersonFor(name); return { value: p ? (p.kind + ':' + p.id) : ('x:' + name), name }; });
   function paintWhoSelect(sel, current){
     if(!sel) return;
     const cur = current !== undefined ? current : sel.value;
     let html = '<option value="">— escoja —</option>';
-    FIN_PEOPLE.forEach(p => { html += '<option value="' + p.kind + ':' + p.id + '">' + esc(p.name) + '</option>'; });
-    html += '<option value="e">La empresa</option><option value="x">Otro nombre…</option>';
+    finFixedOptions().forEach(o => { html += '<option value="' + esc(o.value) + '">' + esc(o.name) + '</option>'; });
+    html += '<option value="x">Otro nombre…</option>';
     sel.innerHTML = html;
     if(cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
-    else if(cur && cur.includes(':')){ const o = document.createElement('option'); o.value = cur; o.textContent = '(nombre guardado)'; sel.appendChild(o); sel.value = cur; }
+    else if(cur && cur !== 'x' && cur.includes(':')){
+      const i = cur.indexOf(':'); const k = cur.slice(0, i), id = cur.slice(i+1);
+      const p = FIN_PEOPLE.find(x => x.kind === k && String(x.id) === id);
+      const o = document.createElement('option'); o.value = cur; o.textContent = p ? p.name : (k === 'x' ? id : '(nombre guardado)'); sel.appendChild(o); sel.value = cur;
+    }
     else if(!cur && SES && SES.user_id && [...sel.options].some(o => o.value === 'c:' + SES.user_id)) sel.value = 'c:' + SES.user_id;
   }
   function whoFromSelect(sel, other){
@@ -16783,9 +16797,10 @@
     if(!v) return null;
     if(v === 'e') return { kind:'e', id:null, name:'La empresa' };
     if(v === 'x'){ const n = ((other && other.value) || '').trim(); return n ? { kind:'x', id:null, name:n } : null; }
+    if(v.startsWith('x:')) return { kind:'x', id:null, name: v.slice(2) };
     const i = v.indexOf(':'); const k = v.slice(0, i), id = v.slice(i+1);
     const p = FIN_PEOPLE.find(x => x.kind === k && String(x.id) === id);
-    return { kind:k, id, name: p ? p.name : '(nombre guardado)' };
+    return { kind:k, id, name: p ? p.name : (FIN_MONEY_NAMES.find(n => finPersonFor(n) && String(finPersonFor(n).id) === id) || '(nombre guardado)') };
   }
   const whoLabel = (kind, name) => kind === 'e' ? 'la empresa' : name;
   const personKeyOf = r => (r.paid_by_kind || r.received_by_kind) + ':' + ((r.paid_by_id || r.received_by_id) || (r.paid_by_name || r.received_by_name));
@@ -17120,8 +17135,9 @@
     const sel = $('#finCPartner'); if(sel){
       const cur = sel.value || (function(){ try{ return localStorage.getItem('amgPartner') || ''; }catch(e){ return ''; } })();
       let html = '<option value="">— escoja al socio —</option>';
-      FIN_PEOPLE.filter(p => !(p.kind === 'c' && String(p.id) === String(SES && SES.user_id))).forEach(p => { html += '<option value="' + p.kind + ':' + p.id + '">' + esc(p.name) + '</option>'; });
+      finFixedOptions().filter(o => o.value !== 'c:' + (SES && SES.user_id)).forEach(o => { html += '<option value="' + esc(o.value) + '">' + esc(o.name) + '</option>'; });
       sel.innerHTML = html; if(cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
+      if(!sel.value){ const r = [...sel.options].find(o => finNorm(o.textContent) === 'raul'); if(r) sel.value = r.value; }
     }
   }
   if($('#finCPartner')) $('#finCPartner').addEventListener('change', ()=>{ try{ localStorage.setItem('amgPartner', $('#finCPartner').value); }catch(e){} });
