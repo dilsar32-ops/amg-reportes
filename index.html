@@ -834,6 +834,8 @@
   .casualtop .navbar{ flex-wrap:wrap; }
   #casualCompany{ font:700 12px/1 'Chakra Petch',sans-serif; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); margin-top:6px; }
   .entryrow.otherside{ opacity:.5; }
+  .navbar button[hidden]{display:none !important;}
+  #mgrHomeBtns[hidden]{display:none !important;}
 </style>
 </head>
 <body>
@@ -2041,9 +2043,18 @@
         <button type="button" class="menubtn" id="mgrGoApp">
           <b>Revisar la app</b>
           <small id="mgrAppHint">APAGADO &middot; toque para prender</small></button>
+        <button type="button" class="menubtn amg" id="mgrGoAmg">
+          <b>&#128666; AMG Moving</b>
+          <small>Horas, precio, c&oacute;digo y reportes de mudanza</small></button>
       </div>
 
       <p class="clockhint">Toque <b>Revisar</b> en cada pantalla para traer lo más nuevo.</p>
+      <!-- En la puerta Manager este hub ES el inicio: no hay menu de tiles de
+           restauracion detras. Lo que el menu tenia abajo vive aqui. -->
+      <div id="mgrHomeBtns" hidden style="margin-top:16px;">
+        <button type="button" class="btn btn-ghost" id="mgrSwitchSide" style="width:100%; color:var(--ink-soft);">Cambiar de empresa</button>
+        <button type="button" class="btn btn-ghost" id="mgrSignOut" style="width:100%; margin-top:6px; color:var(--ink-soft);">Cerrar sesión</button>
+      </div>
     </section>
   </section>
 
@@ -2720,6 +2731,8 @@
     const top = navStack.length ? navStack[navStack.length - 1] : null;
     const b = $('#backMenu');
     if(b) b.innerHTML = top ? '&#9664; ' + (SECTION_NAMES[top] || 'Atrás') : '&#9664; Menú';
+    const cur = document.querySelector('.tab-panel.active');
+    if(b) b.hidden = !top && SIDE === 'manager' && !!cur && cur.dataset.tab === 'manager';
     const h = $('#goHome');
     if(h) h.hidden = navStack.length === 0;
   }
@@ -2737,6 +2750,7 @@
 
   function goMenu(){
     commitPending();
+    if(SIDE === 'manager' && isManager()){ goManagerHome(); return; }
     navStack = [];
     updateNavButtons();
     document.body.classList.add('menu');
@@ -3474,7 +3488,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-B';
+  const APP_BUILD = '2026-09-06-C';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4015,6 +4029,8 @@
   // Counts on the hub, so he can see at a glance whether anything is waiting.
   async function refreshManagerHub(){
     if(!isManager()) return;
+    const hb = $('#mgrHomeBtns'); if(hb) hb.hidden = SIDE !== 'manager';
+    updateNavButtons();
     // Put the answer on the tile. It was the only one that never showed its
     // own value, and its old text hardcoded "5:00 PM" while the cutoff is
     // editable - so it could state a time that was not the one in use.
@@ -13124,7 +13140,7 @@
   // (a shared device, a different crew member borrowing it) starts
   // completely clean instead of risking leftover data in some JS variable
   // this file forgot to reset.
-  $('#menuSignOut').addEventListener('click', async ()=>{
+  async function signOutEverywhere(){
     if(!confirm('¿Cerrar sesión? Va a tener que entrar de nuevo con su código, correo o PIN.')) return;
     try{
       if(SES && SES.access_token){
@@ -13133,7 +13149,23 @@
     }catch(e){}
     try{ localStorage.removeItem('ses'); }catch(e){}
     location.reload();
-  });
+  }
+  $('#menuSignOut').addEventListener('click', signOutEverywhere);
+  if($('#mgrSignOut')) $('#mgrSignOut').addEventListener('click', signOutEverywhere);
+  if($('#mgrSwitchSide')) $('#mgrSwitchSide').addEventListener('click', ()=>{ commitPending(); saveDraft(); showDoor(true); });
+  if($('#mgrGoAmg')) $('#mgrGoAmg').addEventListener('click', ()=>{ showTab('amgmoving'); pushBack('manager'); });
+  // La puerta Manager entra DIRECTO al hub del manager y ese hub es su inicio:
+  // "manager, lo que precisa es ver solo lo del manager; para lo de
+  // restauracion esta la puerta Restoration Doctor".
+  function goManagerHome(){
+    if(typeof setMgr === 'function') setMgr(true);
+    navStack = [];
+    showTab('manager');
+    updateNavButtons();
+    refreshManagerHub();
+    document.body.classList.remove('manual-mode');
+    window.scrollTo(0,0);
+  }
 
   async function authFetch(path, opts){
     const res = await fetch(CLOUD.url + path, opts);
@@ -16100,6 +16132,7 @@
     if($('#teNameFix')) $('#teNameFix').hidden = !!(SES && SES.full_name);
     loadMyEntries();
     flushOutbox();
+    if(SIDE === 'manager' && isManager()) goManagerHome();
   }
 
   async function anonSession(){
