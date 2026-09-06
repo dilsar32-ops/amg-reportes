@@ -838,7 +838,7 @@
   #mgrHomeBtns[hidden]{display:none !important;}
   #lClientField[hidden], #lClientOtherField[hidden], #lTeamField[hidden]{display:none !important;}
   /* ---- Finanzas de AMG ---- */
-  #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acFlatField[hidden], #acPricingBox[hidden], #acCrewHint[hidden], #acRemove[hidden], #acListFold[hidden],
+  #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acFlatField[hidden], #acPricingBox[hidden], #acCrewHint[hidden], #acRemove[hidden], #acListCard[hidden],
   #finMGastos[hidden], #finMPagos[hidden], #finMCierre[hidden], #finPClients[hidden], #finPHeld[hidden], #finGMonthField[hidden], #finCPdf[hidden],
   .s-gas-row[hidden], .s-gas-other-wrap[hidden], .s-gas-hint[hidden]{display:none !important;}
   /* La pantalla es para trabajar: fuera la linea de idiomas y los avisos
@@ -2166,7 +2166,7 @@
       </div>
       <p class="hint" id="acMsg" style="margin-top:6px;"></p>
     </section>
-    <section class="card amgcard">
+    <section class="card amgcard" id="acListCard">
       <details class="whychip" style="display:block;" id="acListFold"><summary id="acListSummary"><b>Clientes que ya tenemos</b></summary><div class="whytext">
       <p class="hint" id="acListHint">Toque uno para ver o completar sus datos.</p>
       <div id="amgClientCards"><p class="clockhint">Cargando…</p></div></div></details>
@@ -2747,11 +2747,11 @@
         if(res.status === 404){ AMG_CLIENTS_STATE = 'absent'; return false; }
         if(res.ok){ const d = await res.json(); if(Array.isArray(d)) rows = d.map(r => Object.assign({}, r, { active: true, rate: null })); }
       }
-      if(!Array.isArray(rows)) return false;
+      if(!Array.isArray(rows)){ if(AMG_CLIENTS_STATE !== 'loaded') AMG_CLIENTS_STATE = 'error'; return false; }
       AMG_CLIENTS = rows; AMG_CLIENTS_STATE = 'loaded';
       paintClientOptions();
       return true;
-    }catch(e){ return false; }
+    }catch(e){ if(AMG_CLIENTS_STATE !== 'loaded') AMG_CLIENTS_STATE = 'error'; return false; }
   }
   // Los selects de cliente (reporte de mudanza, gasto, pago) se pintan desde la lista; el valor escogido se conserva.
   function paintClientSelect(sel, firstLabel){
@@ -3103,7 +3103,7 @@
     if(tab === 'amgclientes'){
       const mgr = isManager();
       if($('#acPricingBox')) $('#acPricingBox').hidden = !mgr;
-      if($('#acListFold')) $('#acListFold').hidden = !mgr;                 // el crew no ve la lista de clientes: solo agrega
+      if($('#acListCard')) $('#acListCard').hidden = !mgr;                 // el crew no ve la lista de clientes: solo agrega
       if($('#acTitle')) $('#acTitle').textContent = mgr ? 'Agregar cliente' : 'Agregar cliente nuevo';
       if($('#acCrewHint')) $('#acCrewHint').hidden = mgr;
       acFill(null); paintAmgClientCards(); loadAmgClients().then(paintAmgClientCards); paintCompanyHeader();
@@ -3712,7 +3712,7 @@
   const laborCompanyName = kind => (kind === 'mudanza') ? 'AMG Moving' : 'Restoration Doctor';
   function paintCompanyHeader(){
     const cur = document.querySelector('.tab-panel.active'); const tab = cur ? cur.dataset.tab : '';
-    const amg = isAmgSide() || (!document.body.classList.contains('menu') && (tab === 'amgmoving' || tab === 'finanzas' || (tab === 'labor' && laborMode === 'mudanza')));
+    const amg = isAmgSide() || (!document.body.classList.contains('menu') && (tab === 'amgmoving' || tab === 'finanzas' || tab === 'amgclientes' || (tab === 'labor' && laborMode === 'mudanza')));
     const el = $('#companyName'); if(el) el.value = amg ? 'AMG Moving' : 'Restoration Doctor';
   }
   function mgPriceMissing(k){
@@ -3841,7 +3841,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-X';
+  const APP_BUILD = '2026-09-06-Y';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4279,7 +4279,7 @@
   let acEditingId = null;
   function paintAmgClientCards(){
     const box = $('#amgClientCards'); if(!box) return;
-    if(AMG_CLIENTS_STATE !== 'loaded'){ box.innerHTML = '<p class="clockhint">' + (cloudOn() ? 'Cargando…' : 'Sin internet.') + '</p>'; return; }
+    if(AMG_CLIENTS_STATE !== 'loaded'){ box.innerHTML = '<p class="clockhint">' + (AMG_CLIENTS_STATE === 'absent' ? 'Falta correr supabase-amg-clients.sql en Supabase.' : AMG_CLIENTS_STATE === 'error' ? 'No se pudo cargar la lista (¿sin señal?). Salga y vuelva a entrar a Clientes.' : 'Cargando…') + '</p>'; return; }
     const act = AMG_CLIENTS.filter(c => c.active !== false), off = AMG_CLIENTS.filter(c => c.active === false);
     const sum = $('#acListSummary'); if(sum) sum.innerHTML = '<b>Clientes que ya tenemos (' + act.length + ')</b> · toque para ver';
     const card = c => '<button type="button" class="inboxitem acCard" data-id="' + esc(c.id) + '" style="text-align:left;">'
@@ -4314,7 +4314,7 @@
   }
   if($('#amgClientCards')) $('#amgClientCards').addEventListener('click', async (e)=>{
     const card = e.target.closest('.acCard'); if(card){ const c = AMG_CLIENTS.find(x => String(x.id) === card.dataset.id); if(c) acFill(c); return; }
-    const on = e.target.closest('.amgcOn'); if(on){ await onAmgClientsClick(e); paintAmgClientCards(); }
+    const on = e.target.closest('.amgcOn'); if(on){ await onAmgClientsClick(e, $('#acMsg')); paintAmgClientCards(); }
   });
   if($('#acCancel')) $('#acCancel').addEventListener('click', ()=> acFill(null));
   if($('#acRemove')) $('#acRemove').addEventListener('click', async ()=>{
@@ -4336,14 +4336,19 @@
       email: ($('#acEmail').value || '').trim() || null, contact: ($('#acContact').value || '').trim() || null, note: ($('#acNote').value || '').trim() || null, updated_at: new Date().toISOString() };
     const b = $('#acSave'); b.disabled = true; const old = b.textContent; b.textContent = 'Guardando…';
     if(!isManager()){
-      // Trabajador: por la funcion del servidor (nunca toca el precio). Si el nombre ya existe, completa los datos vacios.
+      // Trabajador: solo AGREGA, por la funcion del servidor (nunca toca el precio). Si el nombre ya existe,
+      // el servidor conserva lo que ya habia y solo llena lo vacio; si el manager lo quito, no lo revive.
       try{
+        const known = AMG_CLIENTS.find(x => amgKey(x.name) === amgKey(name));
+        if(known && !confirm('El cliente "' + known.name + '" ya está en la lista. ¿Guardar de todos modos? Solo se agregan los datos que le falten; lo que ya tiene no cambia.')){ b.disabled = false; b.textContent = old; return; }
         const res = await authFetch('/rest/v1/rpc/amg_client_save_crew', { method:'POST', headers: cloudHeaders(), body: JSON.stringify({ p_name: name, p_phone: row.phone, p_address: row.address, p_email: row.email, p_contact: row.contact, p_note: row.note }) });
         if(res.status === 404) throw new Error('Falta correr supabase-amg-clients.sql (sección 3) en Supabase. Avísele a Amilcar.');
         if(!res.ok){ let t = await res.text(); try{ t = JSON.parse(t).message || t; }catch(e){} throw new Error(String(t).slice(0, 160)); }
-        await loadAmgClients(); paintAmgClientCards();
-        const wasEdit = !!acEditingId; acFill(null);
-        msg.textContent = wasEdit ? 'Datos guardados ✓' : name + ' agregado ✓. Ya lo puede escoger en el reporte de mudanza.';
+        let out = null; try{ out = await res.json(); }catch(e){}
+        const reloaded = await loadAmgClients(); paintAmgClientCards(); acFill(null);
+        msg.textContent = (out && out.existed)
+          ? (out.name || name) + ' ya existía: se guardaron solo los datos que le faltaban.'
+          : (out && out.name ? out.name : name) + ' agregado ✓' + (reloaded ? ' Ya lo puede escoger en el reporte de mudanza.' : ' Salga y vuelva a entrar para verlo en la lista.');
       }catch(err){ msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
       b.disabled = false; b.textContent = old; return;
     }
@@ -4376,9 +4381,9 @@
     if(res.status === 409) throw new Error('Ya hay un cliente con ese nombre.');
     if(!res.ok){ const t = await res.text(); throw new Error(t.slice(0, 160)); }
   }
-  async function onAmgClientsClick(e){
+  async function onAmgClientsClick(e, msgEl){
     const b = e.target.closest('button'); if(!b || !b.dataset.id) return;
-    const msg = $('#amgClientsMsg'); const id = b.dataset.id; const c = AMG_CLIENTS.find(x => String(x.id) === id);
+    const msg = msgEl || $('#amgClientsMsg'); const id = b.dataset.id; const c = AMG_CLIENTS.find(x => String(x.id) === id);
     if(!cloudOn()){ if(msg) msg.textContent = 'Sin internet.'; return; }
     b.disabled = true;
     try{
