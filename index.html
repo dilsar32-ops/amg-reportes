@@ -542,7 +542,7 @@
   .mgrtools{display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 10px;}
   .mgrtools[hidden]{display:none !important;}
   .minibtn[hidden]{display:none !important;}
-  #casualRestPage[hidden], #casualAmgPage[hidden]{display:none !important;}
+  #casualRestPage[hidden]{display:none !important;}
   /* AMG = OTRO LUGAR, OTRO COLOR. Verde-azulado a proposito: no se parece ni
      al naranja de restauracion ni al azul de las pildoras. Cuando alguien
      toca "Horas AMG" tiene que notar de inmediato que ya no esta en Mis horas. */
@@ -809,7 +809,7 @@
   .inbox[hidden]{display:none !important;}
   .amgbanner[hidden]{display:none !important;}
   .mgrfold[hidden]{display:none !important;}
-  #myHoursAlert[hidden], #amgHoursAlert[hidden], #amgPriceWarn[hidden], #inboxAmgLine[hidden]{display:none !important;}
+  #myHoursAlert[hidden], #amgPriceWarn[hidden], #inboxAmgLine[hidden]{display:none !important;}
   .kindtag.amg{background:var(--amg);}
   .tab-panel[data-tab="labor"].amgmode .mgrpanel{border-left-color:var(--amg);}
   .tab-panel[data-tab="labor"].amgmode .convresult{border-left-color:var(--amg);}
@@ -819,20 +819,47 @@
   .tab-panel[data-tab="labor"].amgmode .stepnav [data-step-next], .tab-panel[data-tab="labor"].amgmode #laborFillBtn{background:var(--amg) !important; border-color:var(--amg) !important; color:#fff !important;}
   .tab-panel[data-tab="labor"].amgmode .minibtn.on{border-color:var(--amg); color:var(--amg);}
   .menubtn .badge{margin-left:8px; vertical-align:middle;}
+
+  /* ---- LAS TRES PUERTAS: lado AMG en verde de punta a punta ---- */
+  body.side-amg{ --accent:var(--amg); --accent-dark:var(--amg-dark); --on-accent:#fff; }
+  body.side-amg header.top, body.side-amg .casualtop{ background:linear-gradient(135deg,var(--amg),var(--amg-dark)); }
+  body.side-amg header.top::after{ border-color:#fff; }
+  body.side-amg .btn-ink{ background:var(--amg-dark); }
+  body.side-amg .menubtn{ border-left-color:var(--amg); }
+  body.side-amg #myHoursBox .card{ border-left:4px solid var(--amg); }
+  .menubtn.amg{ display:none; }
+  body.is-mgr .menubtn.amg{ display:block; }
+  #authGate.pick-trabajador [data-door="manager"]{ display:none !important; }
+  #sideBanner[hidden], #casualSideBanner[hidden], #doorHint[hidden], #doorSignOut[hidden], #menuSwitchSide[hidden], #casualCompany[hidden]{ display:none !important; }
+  .casualtop .navbar{ flex-wrap:wrap; }
+  #casualCompany{ font:700 12px/1 'Chakra Petch',sans-serif; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); margin-top:6px; }
+  .entryrow.otherside{ opacity:.5; }
 </style>
 </head>
 <body>
 
 <div id="authGate">
   <div class="authcard">
-    <div class="authbrand">Field Reports</div>
+    <div class="authbrand" id="authBrand">Field Reports</div>
     <div class="buildtag" data-buildtag style="text-align:center; margin:-16px 0 20px;"></div>
 
+    <!-- LA PUERTA. La empresa se escoge aqui, en cada apertura, y decide todo
+         lo que sigue: color, listas, y de que empresa queda cada hora. Nunca
+         se guarda en el telefono. -->
     <div class="authstep" id="authPick">
-      <h2>¿Cómo entrar?</h2>
+      <h2>¿A dónde va a entrar?</h2>
+      <p class="authhint" id="doorHint"></p>
+      <button class="btn btn-accent authbtn" type="button" data-door="restauracion">Restoration Doctor</button>
+      <button class="btn btn-amg authbtn" type="button" data-door="mudanza">&#128666; AMG Moving</button>
+      <button class="btn btn-outline authbtn" type="button" data-door="manager">Manager &mdash; ver las dos empresas</button>
+      <button class="btn btn-ghost authbtn" type="button" id="doorSignOut" hidden>No soy yo &mdash; cerrar sesión</button>
+    </div>
+    <div class="authstep" id="authRole" hidden>
+      <h2 id="authRoleTitle">Restoration Doctor</h2>
+      <p class="authhint">¿Cómo entra?</p>
       <button class="btn btn-accent authbtn" type="button" data-go="authCrew">Líder de grupo</button>
-      <button class="btn btn-outline authbtn" type="button" data-go="authMgr">Manager</button>
       <button class="btn btn-outline authbtn" type="button" data-go="authCasual">Trabajador</button>
+      <button class="btn btn-ghost authbtn" type="button" data-go="authPick">Atrás</button>
     </div>
 
     <!-- No account, no password - just the team code, the name the manager
@@ -840,13 +867,13 @@
          casualHome, not the normal app - hours only, nothing else. -->
     <div class="authstep" id="authCasual" hidden>
       <h2>Trabajador ocasional</h2>
-      <p class="authhint">Código de trabajadores, su nombre y su PIN de 4 dígitos.</p>
+      <p class="authhint" id="authCasualHint">Código de trabajadores, su nombre y su PIN de 4 dígitos.</p>
       <input type="text" id="casualJoinCode" placeholder="Código de trabajadores" autocapitalize="characters" autocomplete="off">
       <input type="text" id="casualName" placeholder="Su nombre" autocomplete="off"
              autocorrect="off" autocapitalize="words" spellcheck="false">
       <input type="text" id="casualPin" placeholder="PIN (4 dígitos)" inputmode="numeric" maxlength="4" autocomplete="off">
       <button class="btn btn-accent authbtn" type="button" id="casualLoginGo">Entrar</button>
-      <button class="btn btn-ghost authbtn" type="button" data-go="authPick">Atrás</button>
+      <button class="btn btn-ghost authbtn" type="button" data-go="authRole">Atrás</button>
     </div>
 
     <div class="authstep" id="authCrew" hidden>
@@ -857,7 +884,7 @@
              autocorrect="off" autocapitalize="words" spellcheck="false">
       <button class="btn btn-accent authbtn" type="button" id="authJoin">Entrar</button>
       <button class="btn btn-ghost authbtn" type="button" data-go="authCrewCode">¿Ya tiene código personal? Entrar</button>
-      <button class="btn btn-ghost authbtn" type="button" data-go="authPick">Atrás</button>
+      <button class="btn btn-ghost authbtn" type="button" data-go="authRole">Atrás</button>
     </div>
 
     <!-- For someone who already joined before (a different phone, or this one
@@ -879,6 +906,16 @@
       <p class="authhint">Este es su código personal. Lo va a necesitar si cambia de teléfono o borra la app - así entra otra vez sin perder sus horas ni sus pagos.</p>
       <div class="codebox" id="authCrewCodeShow">------</div>
       <button class="btn btn-accent authbtn" type="button" id="authCrewCodeDone">Ya lo guardé</button>
+    </div>
+
+    <!-- La puerta AMG para el crew: el codigo de AMG se escribe UNA vez y queda
+         en su perfil (no en el telefono). Sin el, no entra. -->
+    <div class="authstep" id="authAmgCode" hidden>
+      <h2>Código de AMG Moving</h2>
+      <p class="authhint">Pídale a su manager el código de AMG Moving. Se escribe una sola vez; después entra con un toque.</p>
+      <input type="text" id="authAmgCodeInput" placeholder="Código de AMG" autocapitalize="characters" autocomplete="off">
+      <button class="btn btn-amg authbtn" type="button" id="authAmgCodeGo">Entrar a AMG Moving</button>
+      <button class="btn btn-ghost authbtn" type="button" data-go="authPick">Atrás</button>
     </div>
 
     <!-- A dead end on purpose - no button back into the app. The manager
@@ -958,35 +995,40 @@
 </header>
 
 <main>
+  <div class="amgbanner" id="sideBanner" hidden>
+    <div class="amgbanner-t">&#128666; AMG MOVING</div>
+    <div class="amgbanner-s">Está en AMG Moving. Todo lo que guarde aquí es de mudanza y se paga a la tarifa de AMG. Para restauración toque <b>Cambiar de empresa</b> en el menú.</div>
+  </div>
   <div class="banner">Labels are shown in English / Español throughout. PDF exports are English only, for the office.</div>
 
   <!-- ===================== HOME MENU ===================== -->
   <section id="homeMenu">
     <div class="menugrid">
-      <button type="button" class="menubtn" data-go-tab="reloj">
+      <button type="button" class="menubtn" data-go-tab="reloj" data-side="restauracion mudanza manager">
         <b>Reloj / Horas</b><small>Marcar la hora que entró y la que salió</small></button>
-      <button type="button" class="menubtn" data-go-tab="labor">
-        <b>Labor / Mano de Obra</b><small>Reporte del día y enviarlo al manager</small></button>
-      <button type="button" class="menubtn amg" data-go-tab="amgmoving">
+      <button type="button" class="menubtn" data-go-tab="labor" data-side="restauracion mudanza manager">
+        <b id="laborTileTitle">Labor / Mano de Obra</b><small id="laborTileHint">Reporte del día y enviarlo al manager</small></button>
+      <button type="button" class="menubtn amg" data-go-tab="amgmoving" data-side="mudanza manager">
         <b>&#128666; AMG Moving<span class="badge" id="menuAmgBadge" hidden></span></b><small id="menuAmgHint">Todo lo de mudanza: horas, tarifas y labor logs</small></button>
-      <button type="button" class="menubtn" data-go-tab="equipment">
+      <button type="button" class="menubtn" data-go-tab="equipment" data-side="restauracion manager">
         <b>Equipment / Equipo</b><small>Contar el equipo instalado</small></button>
-      <button type="button" class="menubtn" data-go-tab="comms">
+      <button type="button" class="menubtn" data-go-tab="comms" data-side="restauracion manager">
         <b>Comms / Comunicación</b><small>Llamadas y notas del cliente</small></button>
-      <button type="button" class="menubtn" data-go-tab="drying">
+      <button type="button" class="menubtn" data-go-tab="drying" data-side="restauracion manager">
         <b>Drying / Secado</b><small>Lecturas de humedad</small></button>
-      <button type="button" class="menubtn" data-go-tab="materials">
+      <button type="button" class="menubtn" data-go-tab="materials" data-side="restauracion manager">
         <b>Materials / Materiales</b><small>Material usado en el trabajo</small></button>
-      <button type="button" class="menubtn" data-go-tab="measurements">
+      <button type="button" class="menubtn" data-go-tab="measurements" data-side="restauracion manager">
         <b>Measurements / Medidas</b><small>Medidas de piso, pared y demolición</small></button>
-      <button type="button" class="menubtn" data-go-tab="floorplan">
+      <button type="button" class="menubtn" data-go-tab="floorplan" data-side="restauracion manager">
         <b>Floor Plan / Plano</b><small>Escanear un cuarto con LiDAR</small></button>
-      <button type="button" class="menubtn" data-go-tab="manual">
+      <button type="button" class="menubtn" data-go-tab="manual" data-side="restauracion manager">
         <b>Manual</b><small>Protocolo de agua, moho y seguridad</small></button>
-      <button type="button" class="menubtn mgr" id="menuMgr">
+      <button type="button" class="menubtn mgr" id="menuMgr" data-side="restauracion manager">
         <b>Manager<span class="badge" id="menuMgrPayBadge" hidden></span></b><small id="menuMgrHint">Ver precios, pagos y todo el equipo</small></button>
     </div>
-    <button type="button" class="btn btn-ghost" id="menuSignOut" style="width:100%; margin-top:16px; color:var(--ink-soft);">Cerrar sesión</button>
+    <button type="button" class="btn btn-ghost" id="menuSwitchSide" style="width:100%; margin-top:16px; color:var(--ink-soft);">Cambiar de empresa</button>
+    <button type="button" class="btn btn-ghost" id="menuSignOut" style="width:100%; margin-top:6px; color:var(--ink-soft);">Cerrar sesión</button>
   </section>
 
   <!-- ===================== TAB 1: LABOR LOG ===================== -->
@@ -1046,6 +1088,8 @@
       <div id="mgrCodesBox" class="mgrcodes" hidden>
         <button class="btn btn-outline" type="button" id="mgrPin">Ver código del equipo</button>
         <button class="btn btn-outline" type="button" id="mgrWorkerCode">Ver código de trabajadores</button>
+        <button class="btn btn-outline" type="button" id="mgrAmgCode">Ver código de AMG Moving</button>
+        <button class="btn btn-ghost" type="button" id="mgrAmgCodeChange">Cambiar el código de AMG</button>
       </div>
     </div>
     <section class="card" data-step="job">
@@ -1701,14 +1745,11 @@
     </div>
     <div id="myHoursBox">
     <section class="card">
-      <!-- El boton de AMG va en la MISMA barra que el titulo, en la esquina
-           opuesta - lejos de los campos, para que nadie lo toque por accidente.
-           Apagado = restauracion (lo normal). NO se acuerda de la ultima vez:
-           una pildora pegajosa es como un dia normal termina guardado como AMG
-           sin que nada lo delate. -->
+      <!-- UN solo formulario de horas para las tres puertas: la puerta decide
+           de que empresa queda cada hora. En la puerta AMG el titulo dice
+           'Mis horas de AMG' y todo va en verde. -->
       <div class="inboxhead" style="margin-bottom:2px;">
-        <h2 style="margin:0;"><span class="num">1</span>Mis horas</h2>
-        <button type="button" class="minibtn" id="teKindMg" hidden style="margin-left:auto;">Horas AMG</button>
+        <h2 style="margin:0;"><span class="num">1</span>Mis horas<span id="teSideName"></span></h2>
       </div>
       <!-- Only appears for people who joined before the name was required. Without a
            name the manager sees "Sin nombre" and cannot tell whose hours these are. -->
@@ -2068,7 +2109,7 @@
         <button type="button" class="minibtn" id="amgSegInbox">&#128229; Recibidos AMG<span class="badge" id="amgInboxBadge" hidden></span></button>
         <button type="button" class="minibtn on" id="amgSegHours">&#9201; Horas AMG</button>
         <button type="button" class="minibtn" id="amgSegPrice">&#128176; Precio AMG</button>
-        <button type="button" class="minibtn" id="amgSegMine">&#8986; Mis horas AMG</button>
+        <button type="button" class="minibtn" id="amgSegCode">&#128273; Código AMG</button>
       </div>
       <p class="hint" id="amgPriceWarn" hidden style="color:var(--danger); font-weight:600; margin:0 0 8px;"></p>
       <p class="clockhint" style="margin:0 0 8px;">Todo lo que mande o guarde desde aqu&iacute; es de AMG Moving.</p>
@@ -2127,23 +2168,13 @@
         </div>
     </section>
     </div>
-    <div class="amgbox" id="amgMineBox">
+    <div class="amgbox amg-mgr" id="amgCodeBox" hidden>
     <section class="card amgcard">
-      <h2>Meter horas de AMG</h2>
-      <div class="field"><label>D&iacute;a / Fecha</label><input type="date" id="amgDate"></div>
-      <div class="row2">
-        <div class="field"><label>Entrada / Hora Desde</label><input type="time" id="amgFrom"></div>
-        <div class="field"><label>Salida / Hora Hasta</label><input type="time" id="amgTo"></div>
-      </div>
-      <div class="tetotal" id="amgTotal">&mdash;</div>
-      <button class="btn btn-amg" type="button" id="amgAdd" style="width:100%; margin-top:10px;">Agregar horas de AMG</button>
-      <p class="clockhint">Puede agregar m&aacute;s de un turno en el d&iacute;a. Para restauraci&oacute;n, regrese a Mis horas.</p>
-    </section>
-    <section class="card amgcard">
-      <h2>Mis horas de AMG</h2>
-      <div id="amgHoursAlert" hidden></div>
-      <div id="amgEntries"><p class="clockhint">Nada todav&iacute;a.</p></div>
-      <div id="amgTotalBox" hidden></div>
+      <h2 style="font-size:15px; margin:0 0 4px;">Código de AMG Moving</h2>
+      <p class="hint">Con este código se entra por la puerta <b>AMG Moving</b>: los trabajadores ocasionales lo escriben en "Trabajador", y los del crew lo escriben una sola vez. Nunca sirve para entrar a Restoration Doctor. El de restauración es otro (<span id="amgRestCodeEcho">&mdash;</span>).</p>
+      <div class="codebox" id="amgCodeShow">------</div>
+      <button class="btn btn-outline" type="button" id="amgCodeChange" style="width:100%;">Cambiar el código de AMG</button>
+      <p class="hint" id="amgCodeMsg"></p>
     </section>
     </div>
   </section>
@@ -2163,18 +2194,21 @@
   <header class="casualtop">
     <h1>Field Reports</h1>
     <div class="buildtag" data-buildtag style="margin:-4px 0 6px;"></div>
+    <div id="casualCompany">RESTORATION DOCTOR</div>
     <div class="navbar" style="display:flex;">
       <span class="secname" id="casualHomeName"></span>
-      <button type="button" id="casualLogout" style="margin-left:auto;">Salir</button>
+      <button type="button" id="casualSwitchSide" style="margin-left:auto;">Cambiar de empresa</button>
+      <button type="button" id="casualLogout">Salir</button>
     </div>
   </header>
   <main style="display:block;">
+   <div class="amgbanner" id="casualSideBanner" hidden>
+     <div class="amgbanner-t">&#128666; HORAS DE AMG MOVING</div>
+     <div class="amgbanner-s">Entró por AMG Moving. Todo lo que guarde aquí es de mudanza y se paga a la tarifa de AMG.</div>
+   </div>
    <div id="casualRestPage">
     <section class="card">
-      <div class="inboxhead" style="margin-bottom:2px;">
-        <h2 style="margin:0;">Sus horas</h2>
-        <button type="button" class="minibtn" id="cmKindMg" hidden style="margin-left:auto;">Horas AMG</button>
-      </div>
+      <div class="inboxhead" style="margin-bottom:2px;"><h2 style="margin:0;" id="casualMyTitle">Sus horas</h2></div>
       <div class="field"><label>Fecha</label><input type="date" id="casualMyDate"></div>
       <div class="row2">
         <div class="field"><label>Hora desde</label><input type="time" id="casualMyFrom"></div>
@@ -2185,31 +2219,8 @@
       <p class="clockhint" id="casualMyMsg"></p>
     </section>
     <section class="card">
-      <h2>Su historial</h2>
+      <h2 id="casualHistoryTitle">Su historial</h2>
       <div id="casualMyHistory"><p class="clockhint">Nada todavía.</p></div>
-    </section>
-   </div>
-   <!-- La pagina AMG del temporal: otro color, otro lugar. -->
-   <div id="casualAmgPage" hidden>
-    <div class="amgbanner">
-      <div class="amgbanner-t">&#128666; HORAS AMG</div>
-      <div class="amgbanner-s">AMG Moving &middot; mudanza. Lo que guarde aqu&iacute; se paga a la tarifa de AMG.</div>
-    </div>
-    <button type="button" class="btn btn-outline" id="camgBack" style="width:100%; margin-bottom:10px;">&#9664; Volver a Sus horas</button>
-    <section class="card amgcard">
-      <h2>Meter horas de AMG</h2>
-      <div class="field"><label>Fecha</label><input type="date" id="camgDate"></div>
-      <div class="row2">
-        <div class="field"><label>Hora desde</label><input type="time" id="camgFrom"></div>
-        <div class="field"><label>Hora hasta</label><input type="time" id="camgTo"></div>
-      </div>
-      <div class="tetotal" id="camgPreview">&mdash;</div>
-      <button class="btn btn-amg" type="button" id="camgSave" style="width:100%; margin-top:10px;">Guardar horas de AMG</button>
-      <p class="clockhint" id="camgMsg"></p>
-    </section>
-    <section class="card amgcard">
-      <h2>Sus horas de AMG</h2>
-      <div id="camgHistory"><p class="clockhint">Nada todav&iacute;a.</p></div>
     </section>
    </div>
   </main>
@@ -2220,6 +2231,55 @@
 <script>
 (function(){
   const $ = (sel, el=document) => el.querySelector(sel);
+  // ===== LA PUERTA: de que empresa es esta sesion. SOLO en memoria. =====
+  // Nunca en localStorage, nunca en 'ses' ni en 'casualSes': cada apertura
+  // en frio vuelve a preguntar, asi nadie hereda la empresa de ayer.
+  let SIDE = null;                       // 'restauracion' | 'mudanza' | 'manager'
+  let doorOverlay = false, hiddenAt = null;
+  const isAmgSide = () => SIDE === 'mudanza';
+  const sideKind  = () => SIDE === 'mudanza' ? 'mudanza' : 'restauracion';
+  const SIDE_NAMES = { restauracion:'Restoration Doctor', mudanza:'AMG Moving', manager:'Manager' };
+  const SIDE_REASK_MS = 2*60*60*1000;
+  const VIEW_TRABAJADOR = new URLSearchParams(location.search||'').get('view') === 'trabajador';
+  const DOOR_PARAM = new URLSearchParams(location.search||'').get('door');
+  function applySide(){
+    const teal = isAmgSide();
+    document.body.classList.toggle('side-amg', teal);
+    document.body.classList.toggle('side-manager', SIDE === 'manager');
+    const m = document.querySelector('meta[name="theme-color"]'); if(m) m.content = teal ? '#19b39a' : '#ff7a1a';
+    const put = (sel, v, prop) => { const el = $(sel); if(el) el[prop || 'textContent'] = v; };
+    put('#authBrand', SIDE ? SIDE_NAMES[SIDE] : 'Field Reports');
+    put('#authRoleTitle', teal ? 'AMG Moving' : 'Restoration Doctor');
+    put('#casualJoinCode', teal ? 'Código de AMG Moving' : 'Código de trabajadores', 'placeholder');
+    put('#authCasualHint', (teal ? 'Código de AMG Moving' : 'Código de trabajadores') + ', su nombre y su PIN de 4 dígitos.');
+    put('#teSideName', teal ? ' de AMG' : '');
+    put('#laborTileTitle', teal ? 'Labor log de AMG' : 'Labor / Mano de Obra');
+    put('#laborTileHint', teal ? 'Reporte del día de mudanza y enviarlo al manager' : 'Reporte del día y enviarlo al manager');
+    put('#casualCompany', teal ? 'AMG MOVING' : 'RESTORATION DOCTOR');
+    put('#casualMyTitle', teal ? 'Sus horas de AMG' : 'Sus horas');
+    put('#casualHistoryTitle', teal ? 'Sus horas de AMG' : 'Su historial');
+    const cs = $('#casualMySave'); if(cs){ cs.textContent = teal ? 'Guardar horas de AMG' : 'Guardar'; cs.classList.toggle('btn-amg', teal); }
+    put('#casualSideBanner', !teal, 'hidden');
+    if(typeof laborMode !== 'undefined' && SIDE !== 'manager'){ laborMode = sideKind(); if($('#l-kind')) $('#l-kind').value = laborMode; }
+    if(typeof paintCompanyHeader === 'function') paintCompanyHeader();
+    paintSideMenu(); paintSideBanner();
+  }
+  function paintSideMenu(){
+    const mgr = (typeof isManager === 'function') && isManager();
+    $$('#homeMenu .menubtn[data-side]').forEach(b => {
+      let hide = !b.dataset.side.split(' ').includes(SIDE);
+      // Los labor logs de AMG los manda el manager: un crew en la puerta AMG
+      // solo tiene Reloj.
+      if(b.dataset.goTab === 'labor' && SIDE === 'mudanza' && !mgr) hide = true;
+      b.hidden = hide;
+    });
+    const sw = $('#menuSwitchSide'); if(sw) sw.hidden = !SIDE;
+  }
+  function paintSideBanner(){
+    const el = $('#sideBanner'); if(!el) return;
+    const cur = document.querySelector('.tab-panel.active'); const tab = cur ? cur.dataset.tab : '';
+    el.hidden = !isAmgSide() || (!document.body.classList.contains('menu') && tab === 'labor');   // Labor trae su propio #laborKindBanner
+  }
   const $$ = (sel, el=document) => Array.from(el.querySelectorAll(sel));
 
   // ---------- Menu and sections ----------
@@ -2277,6 +2337,7 @@
     // so it opens already filled in, one tap from where they left off.
     if(FLOWS[name]) goStep(name, 0);
     onTabChange(name);
+    paintSideBanner();
   }
 
   /* ===================== ONE STEP AT A TIME =========================
@@ -2402,7 +2463,7 @@
   // abrir una fila que ya es de mudanza.
   function applyLaborMode(){
     const panel = document.querySelector('.tab-panel[data-tab="labor"]'); if(!panel) return;
-    if(!isManager()) laborMode = 'restauracion';               // la puerta del crew es una sola
+    if(SIDE !== 'manager') laborMode = sideKind();             // la PUERTA decide; solo la puerta Manager deja que AMG Moving -> Labor log AMG cambie laborMode
     const mg = laborMode === 'mudanza';
     if(laborModePainted !== laborMode){                        // cambio de empresa: nada de la otra queda en pantalla
       if(typeof addrMatches !== 'undefined') addrMatches = [];
@@ -2669,6 +2730,7 @@
     navStack = [];
     updateNavButtons();
     document.body.classList.add('menu');
+    paintSideBanner();
     document.body.classList.remove('manual-mode');
     if($('.banner')) $('.banner').style.display = '';
     document.querySelectorAll('.top h1, .top .company-input')
@@ -2682,12 +2744,12 @@
       // El tile del menu es la puerta de RESTAURACION. Un borrador de AMG a
       // medias no se muestra ahi: se lleva a AMG Moving para que no se mande
       // como restauracion.
-      if(isManager() && openLogId === null && formKind() === 'mudanza' && formHasContent()){
+      if(SIDE === 'manager' && isManager() && openLogId === null && formKind() === 'mudanza' && formHasContent()){
         alert('Tiene un labor log de AMG a medio llenar. Se abre en AMG Moving para que no se mande como restauración.');
         navStack = []; updateNavButtons(); showTab('amgmoving'); amgOpenLabor('form'); return;
       }
-      laborMode = 'restauracion';
-      if(openLogId !== null || formKind() !== 'restauracion') resetLabor();      // un log recibido o un formulario de otra empresa nunca se muestra bajo restauracion
+      laborMode = sideKind();
+      if(openLogId !== null || formKind() !== sideKind()) resetLabor();          // un log recibido o un formulario de otra empresa nunca se muestra bajo esta puerta
     }
     navStack = []; updateNavButtons(); showTab(btn.dataset.goTab);
   }));
@@ -2712,18 +2774,12 @@
     requestAnimationFrame(() => sigPads.forEach(p => { try{ p.ensureSize(); }catch(e){} }));
     if(tab === 'floorplan' && $('#fp-date') && !$('#fp-date').value) $('#fp-date').value = todayStr();
     if(tab === 'amgmoving'){
-      if($('#amgDate') && !$('#amgDate').value) $('#amgDate').value = todayStr();
-      teKind = 'mudanza';
       loadWorkKinds().then(() => { paintAmgPriceWarn(); });
-      loadMyEntries();
-      if(isManager()){ amgShow('hours'); refreshAmgCounts(); } else amgShow('mine');
+      amgShow('hours'); refreshAmgCounts();
       paintCompanyHeader();
     }
     if(tab === 'reloj'){
       if($('#teDate') && !$('#teDate').value) $('#teDate').value = todayStr();
-      // Siempre se vuelve a Restauracion al entrar. Una pildora pegajosa es
-      // como un dia normal termina guardado como MG sin que nada lo delate.
-      teKind = 'restauracion';
       loadWorkKinds();
       loadMyEntries();
       if(isManager()){
@@ -3284,7 +3340,7 @@
   const laborCompanyName = kind => (kind === 'mudanza') ? 'AMG Moving' : 'Restoration Doctor';
   function paintCompanyHeader(){
     const cur = document.querySelector('.tab-panel.active'); const tab = cur ? cur.dataset.tab : '';
-    const amg = !document.body.classList.contains('menu') && (tab === 'amgmoving' || (tab === 'labor' && laborMode === 'mudanza'));
+    const amg = isAmgSide() || (!document.body.classList.contains('menu') && (tab === 'amgmoving' || (tab === 'labor' && laborMode === 'mudanza')));
     const el = $('#companyName'); if(el) el.value = amg ? 'AMG Moving' : 'Restoration Doctor';
   }
   function mgPriceMissing(k){
@@ -3382,7 +3438,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-05-BZ';
+  const APP_BUILD = '2026-09-06-A';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -3407,6 +3463,15 @@
     }catch(e){}
   }
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') checkForNewVersion(); });
+  // La puerta se vuelve a preguntar si la app estuvo escondida mas de dos
+  // horas o cambio el dia: nadie amanece en la empresa de ayer.
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.hidden){ hiddenAt = Date.now(); return; }
+    if(!SIDE || !hiddenAt || !gate.classList.contains('done')) return;
+    const dayChanged = new Date(hiddenAt).toDateString() !== new Date().toDateString();
+    if((Date.now() - hiddenAt) > SIDE_REASK_MS || dayChanged){ commitPending(); saveDraft(); showDoor(true); }
+  });
+  if($('#menuSwitchSide')) $('#menuSwitchSide').addEventListener('click', ()=>{ commitPending(); saveDraft(); showDoor(true); });
   setInterval(checkForNewVersion, 10*60*1000);
   setTimeout(checkForNewVersion, 4000);
 
@@ -3796,6 +3861,30 @@
   });
 
   // Las pildoras de AMG Moving (manager). Un trabajador sin rol ve solo su caja.
+  // ---- el codigo de AMG Moving: lo ve y lo cambia el manager ----
+  function paintAmgCode(){
+    if($('#amgCodeShow')) $('#amgCodeShow').textContent = (SES && SES.amg_worker_join_code) || '------';
+    if($('#amgRestCodeEcho')) $('#amgRestCodeEcho').textContent = (SES && SES.worker_join_code) || '—';
+  }
+  function showAmgCode(code){
+    alert('Código de AMG Moving: ' + (code || '—') + '\n\nMándeselo solo a los que van a mudanza. Con este código se entra por la puerta "AMG Moving": los ocasionales lo escriben en "Trabajador" y los del crew lo escriben una sola vez. Nunca sirve para entrar a Restoration Doctor.');
+  }
+  async function changeAmgCode(){
+    if(!isManager()) return;
+    const v = prompt('Código nuevo de AMG Moving (4 a 8 letras o números). Déjelo vacío para que la app invente uno.\n\nOJO: el código viejo deja de servir en todos los teléfonos. El de restauración no cambia.', '');
+    if(v === null) return;
+    if(!confirm('¿Cambiar el código de AMG?\n\nLos trabajadores de mudanza van a tener que entrar otra vez con el código nuevo. Ninguna hora se pierde.')) return;
+    try{
+      const code = await authPost('/rest/v1/rpc/set_amg_worker_code', { p_code: v.trim() }, SES.access_token);
+      SES.amg_worker_join_code = code; saveSes(); paintAmgCode();
+      const txt = 'Código nuevo de AMG Moving: ' + code + '\nEntre por la puerta AMG Moving con este código.';
+      if(navigator.share){ try{ await navigator.share({ text: txt }); }catch(e){} }
+      alert('Listo. El código nuevo de AMG Moving es: ' + code + '\n\nMándeselo a los que van a mudanza.');
+    }catch(e){ alert((e && e.message) || 'No se pudo cambiar. ¿Ya corrió supabase-amg-door.sql?'); }
+  }
+  if($('#mgrAmgCode')) $('#mgrAmgCode').addEventListener('click', ()=>{ if(SES) showAmgCode(SES.amg_worker_join_code); });
+  if($('#mgrAmgCodeChange')) $('#mgrAmgCodeChange').addEventListener('click', changeAmgCode);
+  if($('#amgCodeChange')) $('#amgCodeChange').addEventListener('click', changeAmgCode);
   // AMG prendida pero sin precio al cliente: se dice en rojo arriba de las
   // pildoras, porque asi no se puede mandar ningun labor log de AMG.
   function paintAmgPriceWarn(){
@@ -3810,17 +3899,16 @@
   function amgShow(which){
     const map = [['hours','#amgSegHours','#amgHoursBox'],
                  ['price','#amgSegPrice','#amgPriceBox'],
-                 ['mine', '#amgSegMine', '#amgMineBox']];
-    const mgr = isManager();
+                 ['code', '#amgSegCode', '#amgCodeBox']];
     map.forEach(([key, btnSel, boxSel]) => {
       const btn = $(btnSel), box = $(boxSel);
-      const on = mgr ? key === which : key === 'mine';
+      const on = key === which;
       if(box) box.hidden = !on;
       if(btn) btn.classList.toggle('on', on);
     });
-    if(mgr && which === 'hours' && typeof loadMgHours === 'function') loadMgHours();
-    if(mgr && which === 'price' && typeof paintMgPrices === 'function') paintMgPrices();
-    if(which === 'mine' && typeof renderAmgEntries === 'function') renderAmgEntries();
+    if(which === 'hours' && typeof loadMgHours === 'function') loadMgHours();
+    if(which === 'price' && typeof paintMgPrices === 'function') paintMgPrices();
+    if(which === 'code') paintAmgCode();
     window.scrollTo(0, 0);
   }
   // LA UNICA PUERTA a mandar o recibir labor logs de AMG. El precio se revisa
@@ -3864,7 +3952,7 @@
   if($('#mgMgActivate'))  $('#mgMgActivate').addEventListener('click', activateMg);
   if($('#amgSegHours')) $('#amgSegHours').addEventListener('click', ()=> amgShow('hours'));
   if($('#amgSegPrice')) $('#amgSegPrice').addEventListener('click', ()=> amgShow('price'));
-  if($('#amgSegMine'))  $('#amgSegMine').addEventListener('click',  ()=> amgShow('mine'));
+  if($('#amgSegCode')) $('#amgSegCode').addEventListener('click', ()=> amgShow('code'));
 
   function mgrMoreShow(which){
     const map = [['rates','#mgrMoreSegRates','#mgrMoreRates'],
@@ -5334,17 +5422,6 @@
     revisar($('#inboxRefresh'), refreshInbox, () => (inboxRows || []).length));
   $('#teAdd').addEventListener('click', addEntry);
   // "Horas AMG" ya no es un interruptor: LLEVA a la ventana de AMG.
-  if($('#teKindMg')) $('#teKindMg').addEventListener('click', ()=>{ showTab('amgmoving'); pushBack('reloj'); amgShow('mine'); });
-  function paintAmgTotal(){
-    const t = $('#amgTotal'); if(!t) return;
-    const mins = hoursBetween($('#amgFrom').value, $('#amgTo').value);
-    t.textContent = mins === null ? '—' : mins === 0 ? '⚠ la entrada y la salida son la misma hora'
-      : hhmm(mins) + ' horas' + (mins > 16*60 ? '  ⚠ revise las horas' : '');
-  }
-  if($('#amgFrom')) $('#amgFrom').addEventListener('input', paintAmgTotal);
-  if($('#amgTo'))   $('#amgTo').addEventListener('input', paintAmgTotal);
-  if($('#amgAdd'))  $('#amgAdd').addEventListener('click', ()=> addEntry({
-    date:'#amgDate', from:'#amgFrom', to:'#amgTo', btn:'#amgAdd', kind:'mudanza', after: paintAmgTotal }));
   $('#teFrom').addEventListener('input', paintTeTotal);
   $('#teTo').addEventListener('input', paintTeTotal);
   $('#teamRefresh').addEventListener('click', () =>
@@ -5507,7 +5584,6 @@
     confirmEntry(b.closest('.entryrow').dataset.id, b);
   };
   $('#myEntries').addEventListener('click', onMyEntriesClick);
-  if($('#amgEntries')) $('#amgEntries').addEventListener('click', onMyEntriesClick);
   $('#myPayments').addEventListener('click', (e)=>{
     const yes = e.target.closest('.payYes'), no = e.target.closest('.payNo');
     if(yes || no){
@@ -13018,11 +13094,11 @@
     if(typeof addrQuery   !== 'undefined') addrQuery = '';
     if($('#addrSearchResults')) $('#addrSearchResults').innerHTML = '';
     if($('#addrSearchInput')) $('#addrSearchInput').value = '';
-    try{
-      gate.classList.remove('done');
-      showStep('authPick');
-      authErr('Su sesión venció. Entre otra vez.');
-    }catch(e){}
+    // Un reload suelta SIDE y todo lo medio escrito, igual que Cerrar sesion;
+    // boot vuelve a mostrar la puerta con el aviso.
+    try{ saveDraft(); }catch(e){}
+    try{ sessionStorage.setItem('expiredMsg','1'); }catch(e){}
+    location.reload();
   }
 
   // A deliberate sign-out, not an expiry - reloads the page rather than
@@ -13096,6 +13172,7 @@
       if(d.name) SES.company_name = d.name;
       if(d.join_code) SES.join_code = d.join_code;
       if(d.worker_join_code) SES.worker_join_code = d.worker_join_code;
+      if(d.amg_worker_join_code) SES.amg_worker_join_code = d.amg_worker_join_code;
       saveSes();
       if(d.rate_day != null){
         const c = payCfg();
@@ -13137,6 +13214,13 @@
     if(!rows.length) return null;
     SES.company_id = rows[0].company_id; SES.role = rows[0].role; SES.full_name = rows[0].full_name;
     saveSes();
+    // ¿Ya escribio el codigo de AMG alguna vez? Consulta aparte: si la columna
+    // no existe todavia (400) se ignora, y la app vuelve a pedir el codigo -
+    // la direccion segura.
+    try{
+      const r2 = await authFetch('/rest/v1/profiles?select=amg_unlocked_at&id=eq.' + encodeURIComponent(SES.user_id) + '&limit=1', { headers: cloudHeaders() });
+      if(r2.ok){ const rr = await r2.json(); SES.amg_unlocked = !!(rr[0] && rr[0].amg_unlocked_at); saveSes(); }
+    }catch(e){}
     return rows[0];
   }
 
@@ -13273,6 +13357,9 @@
   // Typed start/finish times. Once the person confirms, the database stops
   // accepting their edits - the lock is a policy, not a hidden button.
   let myEntries = [];
+  // Lo que se DIBUJA: solo las filas de la empresa de la puerta (el manager ve
+  // todas). Los veredictos y el encime siguen usando myEntries completo.
+  const myShown = () => SIDE === 'manager' ? (myEntries || []) : (myEntries || []).filter(e => kindOf(e) === sideKind());
 
   const two = n => String(n).padStart(2,'0');
   function hoursBetween(from, to){
@@ -13427,8 +13514,8 @@
       // The row being edited may be gone from the server now (deleted from
       // the manager's phone, or paid) - do not keep an editor open on it.
       if(fixingEntryId && !myEntries.some(x => String(x.id) === String(fixingEntryId))) fixingEntryId = null;
-      if(box) box.innerHTML = myEntries.length
-        ? myEntries.map(e=>entryRow(e,false)).join('')
+      if(box) box.innerHTML = myShown().length
+        ? myShown().map(e=>entryRow(e,false)).join('')
         : '<p class="clockhint">Nada todavía.</p>';
       restoreOpenCorrection(stash);
       // Their total is their own arithmetic - it must never depend on the
@@ -13724,21 +13811,11 @@
   // kind of number that becomes an argument on payday. What they were
   // actually handed already has its own card, "Mis pagos".
   // La lista de la ventana AMG: solo los turnos de mudanza, con su total.
-  function renderAmgEntries(){
-    const box = $('#amgEntries'), tot = $('#amgTotalBox');
-    if(!box) return;
-    const rows = (myEntries || []).filter(isMg);
-    if(!rows.length){ box.innerHTML = '<p class="clockhint">Todav\u00eda no tiene horas de AMG.</p>'; if(tot) tot.hidden = true; return; }
-    box.innerHTML = rows.map(e => entryRow(e, false)).join('');
-    let mins = 0; rows.forEach(e => { mins += hoursBetween(e.clock_in, e.clock_out) || 0; });
-    if(tot){ tot.hidden = false; tot.innerHTML = `<div class="paysum" style="margin-top:12px;"><div class="grand"><span>TOTAL DE HORAS AMG</span><span>${hhmm(mins)}</span></div></div>`; }
-  }
 
   function renderMyHoursTotal(){
-    renderAmgEntries();
     const box = $('#myHoursTotal');
     if(!box) return;
-    const rows = (myEntries || []).filter(e => hoursBetween(e.clock_in, e.clock_out) !== null);
+    const rows = myShown().filter(e => hoursBetween(e.clock_in, e.clock_out) !== null);
     if(!rows.length){ box.hidden = true; box.innerHTML = ''; return; }
     let total = 0, confirmed = 0, open = 0, openMins = 0, mgMins = 0, restMins = 0;
     rows.forEach(e => {
@@ -13755,7 +13832,7 @@
       </div>
       <div class="line" style="padding-top:6px;"><span>${days} día${days === 1 ? '' : 's'} trabajado${days === 1 ? '' : 's'}</span>
         <span>${(total/60).toFixed(2)} horas</span></div>
-      ${mgMins ? `<div class="line"><span>Restauración</span><span>${hhmm(restMins)}</span></div>
+      ${(SIDE === 'manager' && mgMins) ? `<div class="line"><span>Restauración</span><span>${hhmm(restMins)}</span></div>
       <div class="line"><span>AMG &middot; mudanza</span><span>${hhmm(mgMins)}</span></div>` : ''}
       ${open ? `<div class="line"><span style="color:#d9a021;">Falta confirmar ${open} registro${open === 1 ? '' : 's'}</span>
         <span style="color:#d9a021;">${hhmm(openMins)}</span></div>` : ''}
@@ -13773,7 +13850,7 @@
   // back to the old times and Guardar would file them as a "correction".
   // La lista donde esta el editor: Mis registros (Reloj) o Mis horas de AMG
   // (AMG Moving). Las dos usan entryRow, asi que chips y Corregir son iguales.
-  const correctionHost = () => document.querySelector('.tab-panel.active #myEntries, .tab-panel.active #amgEntries') || $('#myEntries');
+  const correctionHost = () => $('#myEntries');
   function stashOpenCorrection(){
     if(!fixingEntryId) return null;
     const host = correctionHost(); if(!host) return null;
@@ -13790,7 +13867,7 @@
   }
 
   function hideHourAlerts(){
-    ['#myHoursAlert','#amgHoursAlert'].forEach(sel => { const b = $(sel); if(b){ b.hidden = true; b.innerHTML = ''; } });
+    ['#myHoursAlert'].forEach(sel => { const b = $(sel); if(b){ b.hidden = true; b.innerHTML = ''; } });
   }
   function renderMyEntriesStatus(){
     renderMyHoursTotal();
@@ -13800,9 +13877,8 @@
     // so each day can show what the leader reported next to it.
     const rowBox = $('#myEntries');
     const stash = stashOpenCorrection();
-    if(rowBox && myEntries.length) rowBox.innerHTML = myEntries.map(e => entryRow(e, false)).join('');
+    if(rowBox && myEntries.length) rowBox.innerHTML = myShown().length ? myShown().map(e => entryRow(e, false)).join('') : '<p class="clockhint">Nada todavía.</p>';
     restoreOpenCorrection(stash);
-    renderAmgEntries();
     if(myLaborShifts === null){ hideHourAlerts(); return; }
     const days = [...new Set(myEntries.map(e => e.work_date).filter(Boolean))].sort().reverse();
     // Un problema por (dia, empresa). El encime es uno solo por dia, aunque
@@ -13872,8 +13948,10 @@
         + `<div class="whytext">${lines}<div class="muted" style="margin-top:8px;">${advice}</div></div></details>`;
       el.hidden = false;
     };
-    paint(box, problems, false);
-    paint($('#amgHoursAlert'), problems.filter(p => p.cos.includes('mudanza')), true);
+    // Cada puerta ve los problemas de SU empresa; el manager ve todos. El
+    // encime se calcula sobre TODAS las filas, asi una hora metida por la
+    // puerta equivocada se delata en la otra.
+    paint(box, problems.filter(p => SIDE === 'manager' || p.cos.includes(sideKind())), false);
   }
 
   // What this person was actually handed, receipt-style - not their rate,
@@ -13992,7 +14070,6 @@
   // = false' (o si la consulta falla, o el telefono esta sin senal) la fila
   // de pildoras NO se muestra y todo se comporta exactamente como antes.
   let WORK_KINDS = [];
-  let teKind = 'restauracion';          // nunca se persiste, a proposito
 
   const kindLabel  = k => (WORK_KINDS.find(x => x.id === k) || {}).label_short
                           || (k === 'mudanza' ? 'AMG' : '');
@@ -14007,33 +14084,18 @@
       const res = await authFetch('/rest/v1/work_kinds?select=' + cols + '&order=sort_order', { headers: cloudHeaders() });
       if(res.ok){ WORK_KINDS = await res.json(); ok = true; WORK_KINDS_OK = true; }   // tabla sin crear: silencio
     }catch(e){}
-    paintKindPills();
     return ok;
   }
 
-  function paintKindPills(){
-    const row = $('#teKindMg');
-    if(!row) return;
-    row.hidden = !mgOn();
-    if(row.hidden){ teKind = 'restauracion'; return; }
-    row.classList.remove('on'); row.textContent = 'Horas AMG';
-    return;
-    // Un solo boton: apagado = restauracion (lo normal), prendido = AMG.
-    const m = $('#teKindMg');
-    if(m){ const on = teKind === 'mudanza'; m.classList.toggle('on', on); m.textContent = on ? '✓ Horas AMG' : 'Horas AMG'; }
-  }
 
-  function setTeKind(k){
-    teKind = (k === 'mudanza') ? 'mudanza' : 'restauracion';
-    paintKindPills();
-  }
 
   // ctx dice de que pantalla vienen los campos. Sin ctx = Mis horas (restauracion).
   // La ventana AMG llama con sus propios campos y kind:'mudanza'.
   async function addEntry(ctx){
+    // La empresa de la hora la decide LA PUERTA. En la puerta Manager es
+    // restauracion: sus propias horas de AMG se meten entrando por AMG Moving.
     ctx = (ctx && ctx.date) ? ctx
-        : { date:'#teDate', from:'#teFrom', to:'#teTo', btn:'#teAdd', kind: teKind,
-            after: ()=>{ paintTeTotal(); setTeKind('restauracion'); } };
+        : { date:'#teDate', from:'#teFrom', to:'#teTo', btn:'#teAdd', kind: sideKind(), after: paintTeTotal };
     if(!signedIn()) return;
     const day = $(ctx.date).value, from = $(ctx.from).value, to = $(ctx.to).value;
     if(!day)  return alert('Escoja el día.');
@@ -15901,7 +15963,80 @@
   const gate = $('#authGate');
   const showStep = id => { $$('.authstep').forEach(e=>e.hidden = (e.id!==id)); $('#authErr').hidden = true; };
   const authErr = m => { const e=$('#authErr'); e.textContent=m; e.hidden=false; };
-  $$('[data-go]').forEach(b=>b.addEventListener('click',()=>showStep(b.dataset.go)));
+  $$('[data-go]').forEach(b => b.addEventListener('click', () => {
+    const go = b.dataset.go;
+    if(go === 'authPick') return showDoor(false);
+    if(go === 'authRole' && VIEW_TRABAJADOR) return showDoor(false);
+    showStep(go);
+  }));
+  // LA PUERTA. overlay=true es 'Cambiar de empresa' o la re-pregunta: la app
+  // sigue viva detras; la misma puerta = un toque y sigue, la otra = reload.
+  function showDoor(overlay){
+    doorOverlay = !!overlay;
+    if(!overlay){ SIDE = null; applySide(); }
+    gate.classList.toggle('pick-trabajador', VIEW_TRABAJADOR);
+    gate.classList.remove('done'); showStep('authPick');
+    const cses = loadCasualSes();
+    const who = signedIn() ? (SES.full_name || SES.company_name || '') : (cses ? cses.name : '');
+    $('#doorHint').textContent = overlay ? 'Está en ' + SIDE_NAMES[SIDE] + '. ¿A dónde va ahora?'
+      : who ? 'Entra como ' + who + '. Escoja la empresa de hoy.' : 'Escoja la empresa. Después le pedimos su código.';
+    $('#doorSignOut').hidden = !(signedIn() || cses);
+    $$('[data-door="manager"]').forEach(el => { el.hidden = signedIn() && !isManager(); });   // una cuenta de crew no se vuelve manager sin cerrar sesion
+  }
+  $('#doorSignOut').addEventListener('click', async ()=>{
+    if(!confirm('¿Cerrar sesión en este teléfono? Va a tener que entrar de nuevo con su código, correo o PIN.')) return;
+    try{ if(SES && SES.access_token) await authFetch('/auth/v1/logout', { method:'POST', headers: cloudHeaders() }); }catch(e){}
+    try{ localStorage.removeItem('ses'); }catch(e){} clearCasualSes(); location.reload();
+  });
+  async function doorTap(side){
+    if(doorOverlay){                                        // 'Cambiar de empresa' o la re-pregunta
+      if(side === SIDE){ gate.classList.add('done'); doorOverlay = false; return; }
+      commitPending(); saveDraft();
+      try{ sessionStorage.setItem('sideOnce', side); }catch(e){}
+      location.reload(); return;                            // de un solo uso, lo consume el proximo boot; JS limpio
+    }
+    if(side === 'manager'){
+      if(signedIn() && !isManager()) return authErr('Esta cuenta es de crew. Para entrar como manager, toque "No soy yo" y entre con correo y contraseña.');
+      SIDE = 'manager'; applySide();
+      if(isManager()) return enterApp();
+      return showStep('authMgr');                            // managerAuth -> enterApp (la guardia revisa el rol)
+    }
+    SIDE = side; applySide();
+    if(signedIn()){
+      if(side === 'mudanza' && !isManager()){
+        try{ await loadWorkKinds(); }catch(e){}
+        if(!signedIn()) return;                             // el refresh fallo: sessionExpired ya mostro la puerta
+        if(WORK_KINDS_OK && !mgOn()){ SIDE = null; applySide(); return authErr('AMG Moving está apagado. Pídale al manager que lo prenda en AMG Moving → Precio AMG. No apunte una mudanza en Restoration Doctor.'); }
+      }
+      return enterApp();                                    // enterApp tiene la reja del codigo
+    }
+    const cses = loadCasualSes();
+    const code = cses && (side === 'mudanza' ? cses.amgCode : cses.joinCode);
+    if(code){
+      try{
+        const d = (side === 'mudanza')
+          ? await authPost('/rest/v1/rpc/casual_login_kind', { p_join_code: code, p_name: cses.name, p_pin: cses.pin, p_kind: 'mudanza' })
+          : await authPost('/rest/v1/rpc/casual_login',      { p_join_code: code, p_name: cses.name, p_pin: cses.pin });   // 3 args, intacta
+        return enterCasualHome(cses, d.history, side);
+      }catch(e){
+        const m = String((e && e.message) || '');
+        if(/Código incorrecto|Codigo incorrecto/i.test(m)){ delete cses[side === 'mudanza' ? 'amgCode' : 'joinCode']; (cses.joinCode || cses.amgCode) ? saveCasualSes(cses) : clearCasualSes(); authErr('El código de ' + SIDE_NAMES[side] + ' cambió. Pídale el nuevo a su manager.'); }
+        else if(/apagad|Nombre o PIN|código de|codigo de/i.test(m)) return authErr(m);   // el codigo guardado se conserva
+        else return authErr('Sin señal. Intente otra vez cuando tenga internet.');
+      }
+    }
+    if(cses){ $('#casualName').value = cses.name || ''; $('#casualPin').value = cses.pin || ''; $('#casualJoinCode').value = ''; }
+    showStep((cses || VIEW_TRABAJADOR) ? 'authCasual' : 'authRole');
+  }
+  $$('[data-door]').forEach(b => b.addEventListener('click', () => doorTap(b.dataset.door)));
+  $('#authAmgCodeGo').addEventListener('click', async ()=>{
+    const code = ($('#authAmgCodeInput').value || '').trim().toUpperCase();
+    if(!code) return authErr('Escriba el código de AMG Moving.');
+    const btn = $('#authAmgCodeGo'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Entrando…';
+    try{ await authPost('/rest/v1/rpc/unlock_amg', { p_code: code }, SES.access_token); SES.amg_unlocked = true; saveSes(); $('#authAmgCodeInput').value = ''; enterApp(); }
+    catch(e){ authErr(/incorrecto/i.test(String(e && e.message)) ? 'Ese no es el código de AMG Moving. Pídaselo a su manager. No apunte una mudanza en Restoration Doctor.' : 'No se pudo entrar. Revise su internet.'); }
+    btn.disabled = false; btn.textContent = old;
+  });
 
   // Boot shows the app from the saved session, then the real profile arrives a
   // moment later. Everything that depends on the role has to be re-applied then,
@@ -15909,6 +16044,7 @@
   function applyRole(){
     const mgr = isManager();
     document.body.classList.toggle('is-mgr', mgr);
+    paintSideMenu();                       // los tiles dependen del rol Y de la puerta; el rol puede llegar despues
     $('#mgrToggle').style.display = 'none';
     // Not "on because he is a manager" - on only inside the Manager section.
     // setMgr() itself decides what "Mis horas" does, so it is not set here.
@@ -15917,6 +16053,10 @@
   }
 
   function enterApp(){
+    if(!SIDE){ showDoor(false); return; }                                   // sin puerta no hay app: imposible heredar una empresa
+    if(SIDE === 'manager' && !isManager()){ SIDE = null; showDoor(false); return; }
+    if(SIDE === 'mudanza' && !isManager() && !(SES && SES.amg_unlocked)){ gate.classList.remove('done'); showStep('authAmgCode'); return; }   // 'si no tienen ese codigo, no pueden ingresar ahi'
+    applySide();
     gate.classList.add('done');
     expiredShown = false;      // a fresh session may expire again later
     // Runs here, not once at page load - a fresh sign-in only knows who's
@@ -16185,64 +16325,41 @@
   // en ese caso la app se comporta exactamente como antes.
   let CASUAL_SHIFT_READY = true;
   let casualMyHistory = [];
-  let cmKind = 'restauracion';        // nunca se persiste, a proposito
+  // El codigo del temporal segun la puerta: 340162 para restauracion, el
+  // codigo de AMG para mudanza. Se guardan los dos en su telefono.
+  const sideCode = ses => isAmgSide() ? ses.amgCode : ses.joinCode;
 
-  function paintCmKind(){
-    const row = $('#cmKindMg');
-    if(!row) return;
-    row.hidden = !(mgOn() && CASUAL_SHIFT_READY);
-    if(row.hidden){ cmKind = 'restauracion'; return; }
-    const m = $('#cmKindMg'); if(m){ m.classList.remove('on'); m.textContent = 'Horas AMG'; }
-  }
-  function setCmKind(k){
-    cmKind = (k === 'mudanza') ? 'mudanza' : 'restauracion';
-    paintCmKind();
-  }
-
-  // El trabajador temporal NUNCA inicia sesion, asi que no puede leer
-  // work_kinds con RLS. La lista de tipos le llega en su propio login.
-  async function loadCasualKinds(){
-    try{
-      const res = await fetch(CLOUD.url + '/rest/v1/work_kinds?select=id,label_short,active',
-        { headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + CLOUD.key } });
-      if(res.ok) WORK_KINDS = await res.json();
-    }catch(e){}
-    paintCmKind();
-  }
 
   function renderCasualMyHistory(history){
     const box = $('#casualMyHistory'); if(!box) return;
     casualMyHistory = history || casualMyHistory || [];
     const rows = casualMyHistory;
     if(!rows.length){ box.innerHTML = '<p class="clockhint">Nada todavía.</p>'; return; }
-    let restH = 0, mgH = 0;
+    // Las filas de la OTRA empresa se ven apagadas, con etiqueta, sin Borrar y
+    // sin "no coincide": estan ahi para que nadie crea que se perdieron.
+    let mine = 0;
     const html = rows.map(h=>{
       const mg = (h.work_kind === 'mudanza');
+      const other = mg !== isAmgSide();
       const hrs = +h.reported_hours || 0;
-      if(mg) mgH += hrs; else restH += hrs;
-      // Los labor logs solo se mandan de restauracion: una fila de AMG no tiene
-      // con que compararse, asi que no lleva ninguna marca de "no coincide".
-      const status = casualMatchStatus(h.reported_hours, h.labor_load_hours, h.work_kind);
+      if(!other) mine += hrs;
+      const status = other ? { text:'', cls:'' } : casualMatchStatus(h.reported_hours, h.labor_load_hours, h.work_kind);
       const paid = h.paid_at ? '<br><span style="color:var(--green); font-weight:700; font-size:12px;">Pagado</span>' : '';
       const times = (h.clock_in && h.clock_out)
         ? '<br><span class="when">' + esc(fmtTime12(h.clock_in)) + ' - ' + esc(fmtTime12(h.clock_out)) + '</span>' : '';
-      const del = (!h.paid_at && h.id && CASUAL_SHIFT_READY)
+      const del = (!other && !h.paid_at && h.id && CASUAL_SHIFT_READY)
         ? `<button type="button" class="minibtn cmDel" data-cmid="${esc(h.id)}">Borrar</button>` : '';
-      return `<div class="entryrow">
-        <span><span class="who">${esc(h.work_date)}</span>${
-          mg ? '<span class="kindtag">AMG</span>' : ''}${paid}${times}
+      const tag = other ? (mg ? '<span class="kindtag amg">AMG</span>' : '<span class="kindtag">Restauración</span>') : '';
+      return `<div class="entryrow${other ? ' otherside' : ''}">
+        <span><span class="who">${esc(h.work_date)}</span>${tag}${paid}${times}
           ${status.text ? '<br><span class="matchstatus '+status.cls+'">'+status.text+'</span>' : ''}</span>
         <span style="display:flex;align-items:center;gap:10px;">
           <span class="hrs">${h.reported_hours != null ? hrs.toFixed(2) + ' hrs' : '—'}</span>${del}</span>
       </div>`;
     }).join('');
-    const split = mgH ? `<div class="paysum" style="margin-top:12px;">
-        <div class="line"><span>Restauración</span><span>${restH.toFixed(2)} hrs</span></div>
-        <div class="line"><span>AMG &middot; mudanza</span><span>${mgH.toFixed(2)} hrs</span></div>
-        <div class="grand"><span>TOTAL DE HORAS</span><span>${(restH+mgH).toFixed(2)} hrs</span></div>
-      </div>` : '';
-    box.innerHTML = html + split;
-    if(typeof renderCasualAmgHistory === 'function') renderCasualAmgHistory();
+    box.innerHTML = html + `<div class="paysum" style="margin-top:12px;">
+        <div class="grand"><span>TOTAL ${isAmgSide() ? 'DE HORAS AMG' : 'DE HORAS'}</span><span>${mine.toFixed(2)} hrs</span></div>
+      </div>`;
   }
 
   // Borrar un turno propio. La base de datos refuerza las dos reglas: solo
@@ -16259,7 +16376,7 @@
       + '\n\nEsto no se puede deshacer.')) return;
     try{
       const d = await authPost('/rest/v1/rpc/casual_delete_my_shift', {
-        p_join_code: ses.joinCode, p_name: ses.name, p_pin: ses.pin, p_id: id });
+        p_join_code: sideCode(ses), p_name: ses.name, p_pin: ses.pin, p_id: id });
       casualMyHistory = d.history || [];
       renderCasualMyHistory(casualMyHistory);
       if(msg){ msg.textContent = 'Turno borrado.'; msg.style.color = ''; }
@@ -16268,18 +16385,17 @@
     }
   }
 
-  function enterCasualHome(ses, history){
+  function enterCasualHome(ses, history, side){
+    SIDE = side || 'restauracion'; applySide();
     gate.classList.add('done');
     $('header.top').hidden = true;
     $('main').hidden = true;
     $('#casualHome').hidden = false;
     $('#casualHomeName').textContent = ses.name;
     if(!$('#casualMyDate').value) $('#casualMyDate').value = todayStr();
-    cmKind = 'restauracion';        // siempre abre en Restauracion
     casualMyPreview();
     casualMyHistory = history || [];
     renderCasualMyHistory(casualMyHistory);
-    loadCasualKinds();
   }
 
   $('#casualLoginGo').addEventListener('click', async ()=>{
@@ -16290,64 +16406,27 @@
     const btn = $('#casualLoginGo'); btn.disabled = true; const old = btn.textContent;
     btn.textContent = 'Entrando…';
     try{
-      const d = await authPost('/rest/v1/rpc/casual_login', { p_join_code: joinCode, p_name: name, p_pin: pin });
-      const ses = { joinCode, name: d.name || name, pin };
+      const side = SIDE || 'restauracion';
+      const d = (side === 'mudanza')
+        ? await authPost('/rest/v1/rpc/casual_login_kind', { p_join_code: joinCode, p_name: name, p_pin: pin, p_kind: 'mudanza' })
+        : await authPost('/rest/v1/rpc/casual_login',      { p_join_code: joinCode, p_name: name, p_pin: pin });
+      // Un solo registro por persona con los dos codigos, para que la otra
+      // puerta tambien entre de un toque la proxima vez.
+      const prev = loadCasualSes();
+      const ses = (prev && prev.name === (d.name || name) && prev.pin === pin) ? prev : {};
+      ses.name = d.name || name; ses.pin = pin;
+      ses[side === 'mudanza' ? 'amgCode' : 'joinCode'] = joinCode;
       saveCasualSes(ses);
-      enterCasualHome(ses, d.history);
+      enterCasualHome(ses, d.history, side);
     }catch(e){
-      authErr(e.message || 'No se pudo entrar. ¿Ya corrió supabase-casual-selfservice.sql?');
+      const m = String((e && e.message) || ''); const side = SIDE || 'restauracion';
+      authErr(/Código incorrecto|Codigo incorrecto/i.test(m)
+        ? (side === 'mudanza' ? 'Ese no es el código de AMG Moving. Pídaselo a su manager. No apunte una mudanza en Restoration Doctor.' : 'Ese no es el código de trabajadores de Restoration Doctor. Pídaselo a su manager.')
+        : (m || 'No se pudo entrar. Revise su internet.'));
     }
     btn.disabled = false; btn.textContent = old;
   });
 
-  function showCasualAmg(on){
-    const a = $('#casualAmgPage'), r = $('#casualRestPage');
-    if(!a || !r) return;
-    a.hidden = !on; r.hidden = on;
-    cmKind = on ? 'mudanza' : 'restauracion';
-    if(on){ if(!$('#camgDate').value) $('#camgDate').value = todayStr(); renderCasualAmgHistory(); window.scrollTo(0,0); }
-  }
-  if($('#cmKindMg')) $('#cmKindMg').addEventListener('click', ()=> showCasualAmg(true));
-  if($('#camgBack')) $('#camgBack').addEventListener('click', ()=> showCasualAmg(false));
-  function camgPreview(){
-    const t = $('#camgPreview'); if(!t) return;
-    const mins = hoursBetween($('#camgFrom').value, $('#camgTo').value);
-    t.textContent = mins == null ? '—' : hhmm(mins) + ' h';
-  }
-  if($('#camgFrom')) $('#camgFrom').addEventListener('change', camgPreview);
-  if($('#camgTo'))   $('#camgTo').addEventListener('change', camgPreview);
-  // Guardar desde la pagina AMG: los mismos pasos que "Sus horas", con kind mudanza.
-  if($('#camgSave')) $('#camgSave').addEventListener('click', async ()=>{
-    const ses = loadCasualSes(); if(!ses) return;
-    const date = $('#camgDate').value, from = $('#camgFrom').value, to = $('#camgTo').value;
-    const msg = $('#camgMsg');
-    if(!date || !from || !to){ msg.textContent = 'Escriba la fecha y las dos horas.'; return; }
-    const btn = $('#camgSave'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando…'; msg.textContent = '';
-    try{
-      const d = await authPost('/rest/v1/rpc/casual_log_shift', {
-        p_join_code: ses.joinCode, p_name: ses.name, p_pin: ses.pin,
-        p_date: date, p_from: from, p_to: to, p_kind: 'mudanza' });
-      casualMyHistory = d.history || [];
-      renderCasualMyHistory(casualMyHistory);
-      msg.textContent = 'Guardado — ' + Number(d.hours).toFixed(2) + ' horas de AMG.'; msg.style.color = '';
-      $('#camgFrom').value = ''; $('#camgTo').value = ''; camgPreview();
-    }catch(e){ msg.textContent = e.message || 'No se pudo guardar. Revise su internet.'; msg.style.color = 'var(--danger)'; }
-    btn.disabled = false; btn.textContent = old;
-  });
-  function renderCasualAmgHistory(){
-    const box = $('#camgHistory'); if(!box) return;
-    const rows = (casualMyHistory || []).filter(h => h.work_kind === 'mudanza');
-    if(!rows.length){ box.innerHTML = '<p class="clockhint">Todav\u00eda no tiene horas de AMG.</p>'; return; }
-    let tot = 0;
-    box.innerHTML = rows.map(h => { tot += (+h.reported_hours||0); const status = casualMatchStatus(h.reported_hours, h.labor_load_hours, h.work_kind); return `<div class="entryrow"><span><span class="who">${esc(h.work_date)}</span>${
-      (h.clock_in && h.clock_out) ? '<br><span class="when">' + esc(fmtTime12(h.clock_in)) + ' - ' + esc(fmtTime12(h.clock_out)) + '</span>' : ''}${
-      status.text ? '<br><span class="matchstatus ' + status.cls + '">' + status.text + '</span>' : ''}${
-      h.paid_at ? '<br><span style="color:var(--green); font-weight:700; font-size:12px;">Pagado</span>' : ''}</span>
-      <span style="display:flex;align-items:center;gap:10px;"><span class="hrs">${(+h.reported_hours||0).toFixed(2)} hrs</span>${
-      (!h.paid_at && h.id) ? `<button type="button" class="minibtn cmDel" data-cmid="${esc(h.id)}">Borrar</button>` : ''}</span></div>`; }).join('')
-      + `<div class="paysum" style="margin-top:12px;"><div class="grand"><span>TOTAL DE HORAS AMG</span><span>${tot.toFixed(2)} hrs</span></div></div>`;
-  }
-  if($('#camgHistory')) $('#camgHistory').addEventListener('click', (e)=>{ const b = e.target.closest('.cmDel'); if(b) casualDeleteMyShift(b.dataset.cmid); });
   if($('#casualMyHistory')) $('#casualMyHistory').addEventListener('click', (e)=>{
     const b = e.target.closest('.cmDel');
     if(b) casualDeleteMyShift(b.dataset.cmid);
@@ -16370,14 +16449,15 @@
       if(CASUAL_SHIFT_READY){
         try{
           d = await authPost('/rest/v1/rpc/casual_log_shift', {
-            p_join_code: ses.joinCode, p_name: ses.name, p_pin: ses.pin,
-            p_date: date, p_from: from, p_to: to, p_kind: cmKind });
+            p_join_code: sideCode(ses), p_name: ses.name, p_pin: ses.pin,
+            p_date: date, p_from: from, p_to: to, p_kind: sideKind() });
         }catch(err){
           if(/casual_log_shift|PGRST202|404/i.test(String(err.message||''))){
             CASUAL_SHIFT_READY = false;
           } else { throw err; }
         }
       }
+      if(!d && isAmgSide()) throw new Error('No se pudo guardar en AMG. Falta correr supabase-amg-door.sql.');
       if(!d){
         d = await authPost('/rest/v1/rpc/casual_log_hours', {
           p_join_code: ses.joinCode, p_name: ses.name, p_pin: ses.pin,
@@ -16385,11 +16465,9 @@
       }
       casualMyHistory = d.history || [];
       renderCasualMyHistory(casualMyHistory);
-      msg.textContent = 'Guardado — ' + Number(d.hours).toFixed(2) + ' horas'
-        + (cmKind === 'mudanza' ? ' de AMG.' : '.');
+      msg.textContent = 'Guardado — ' + Number(d.hours).toFixed(2) + (isAmgSide() ? ' horas de AMG.' : ' horas.');
       msg.style.color = '';
       $('#casualMyFrom').value = ''; $('#casualMyTo').value = '';
-      setCmKind('restauracion');   // vuelve sola despues de CADA turno
       casualMyPreview();
     }catch(e){
       msg.textContent = e.message || 'No se pudo guardar. Revise su internet.';
@@ -16399,21 +16477,22 @@
   });
 
   $('#casualLogout').addEventListener('click', ()=>{
+    if(!confirm('¿Salir? Va a tener que escribir el código, su nombre y su PIN otra vez.')) return;
     clearCasualSes();
     location.reload();
   });
+  if($('#casualSwitchSide')) $('#casualSwitchSide').addEventListener('click', ()=> showDoor(true));
 
   // The Trabajador home-screen icon opens with ?view=trabajador so it lands
   // straight on the hours screen instead of the role picker.
-  const landingStep = () => (new URLSearchParams(location.search||'').get('view') === 'trabajador') ? 'authCasual' : 'authPick';
-
   (async function boot(){
     if(!cloudOn()){ gate.classList.add('done'); return; }
     // A recovery link beats everything else, even an existing session - the
     // whole point is that the person may be locked out on another device.
     if(await checkRecoveryLink()) return;
+    let once = null, expired = null;
+    try{ once = sessionStorage.getItem('sideOnce'); sessionStorage.removeItem('sideOnce'); expired = sessionStorage.getItem('expiredMsg'); sessionStorage.removeItem('expiredMsg'); }catch(e){}
     if(signedIn()){
-      enterApp();
       const afterProfile = (prof)=>{
         applyRole();
         if($('#teNameFix')) $('#teNameFix').hidden = !!(SES && SES.full_name);
@@ -16425,27 +16504,14 @@
         // phone is ever lost, wiped, or replaced.
         else if(prof && !prof.personal_code) offerPersonalCode();
       };
-      // A flaky connection shouldn't silently skip the paused-account check -
-      // one retry covers the common transient case. Either way the server
-      // still blocks a paused account's writes on its own (every crew-facing
-      // policy also requires my_status() = 'active'), so this is a UX
-      // backstop, not the only one.
       loadProfile().then(afterProfile).catch(()=>loadProfile().then(afterProfile).catch(()=>{}));
-    } else {
-      const cses = loadCasualSes();
-      if(cses){
-        try{
-          const d = await authPost('/rest/v1/rpc/casual_login',
-            { p_join_code: cses.joinCode, p_name: cses.name, p_pin: cses.pin });
-          enterCasualHome(cses, d.history);
-        }catch(e){
-          clearCasualSes();
-          showStep(landingStep());
-        }
-      } else {
-        showStep(landingStep());
-      }
     }
+    // La puerta va ANTES de enterApp y del auto-login del temporal, en cada
+    // apertura en frio.
+    showDoor(false);
+    if(expired) authErr('Su sesión venció. Entre otra vez.');
+    if(once) doorTap(once);                                              // Cambiar de empresa -> la puerta tocada, pasando por todas las rejas
+    else if(DOOR_PARAM === 'manager' && signedIn() && isManager()) doorTap('manager');   // el toque en la notificacion cae en el hub, no en la puerta
   })();
 
   // ---------- draft: keep what they typed ----------
@@ -16453,7 +16519,9 @@
   // and everything typed that day went with it. Now every keystroke is written
   // to the phone and put back when the app reopens. Nothing here touches the
   // network - it is purely local until they press Enviar.
-  const DRAFT_KEY = 'draft1';
+  // Un borrador por empresa: 'draft1' sigue siendo el de restauracion/manager
+  // (nadie pierde un borrador al actualizar); el de AMG es aparte.
+  const draftKey = () => isAmgSide() ? 'draft1amg' : 'draft1';
   let draftReady = false;
 
   // A measurement card can itself hold a variable number of cuts, so its
@@ -16516,19 +16584,19 @@
         vals[fieldKey(el)] = (el.type === 'checkbox' || el.type === 'radio')
           ? (el.checked ? 1 : 0) : el.value;
       });
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ at: Date.now(), uid: SES && SES.user_id, rows: rowCounts(), vals, openLogId: openLogId }));
+      localStorage.setItem(draftKey(), JSON.stringify({ at: Date.now(), uid: SES && SES.user_id, side: sideKind(), rows: rowCounts(), vals, openLogId: openLogId }));
     }catch(e){ /* storage full or blocked - nothing we can do */ }
   }
 
   function restoreDraft(){
     let d = null;
-    try{ d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); }catch(e){}
+    try{ d = JSON.parse(localStorage.getItem(draftKey()) || 'null'); }catch(e){}
     if(!d || !d.vals || Array.isArray(d.vals)) return;   // ignore the old format
 
     // A draft older than 3 days is almost certainly stale - a finished job the
     // crew forgot about. Better to start clean than to send last week's work.
     if(d.at && (Date.now() - d.at) > 3*24*3600*1000){
-      try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
+      try{ localStorage.removeItem(draftKey()); }catch(e){}
       return;
     }
 
@@ -16537,9 +16605,11 @@
     // person's history. A leftover draft has no business appearing under
     // whoever is signed in now; it could get submitted under the wrong name.
     if(d.uid && SES && SES.user_id && d.uid !== SES.user_id){
-      try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
+      try{ localStorage.removeItem(draftKey()); }catch(e){}
       return;
     }
+    // Nunca vaciar un borrador de AMG en un formulario de restauracion, ni al reves.
+    if(d.side && d.side !== sideKind()) return;
 
     // Un log recibido que quedo en pantalla NO es un borrador: las puertas ven
     // openLogId !== null y lo cierran en vez de mandarlo como propio.
@@ -16588,7 +16658,7 @@
 
     recalcGrandTotal();
     // Un crew nunca conserva un borrador de mudanza: solo el manager manda AMG.
-    if(!isManager() && $('#l-kind') && $('#l-kind').value === 'mudanza'){ resetLabor(); }
+    if(SIDE !== 'manager' && formKind() !== sideKind()) resetLabor();
   }
 
   draftReady = true;

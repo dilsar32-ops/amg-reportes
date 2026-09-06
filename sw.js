@@ -13,10 +13,13 @@ self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 // any host.
 const APP_SCOPE = self.registration.scope;
 function appUrl(u) {
-  if (!u) return APP_SCOPE;
+  // A tapped notification lands in the manager's hub (?door=manager): boot()
+  // honours it only when the saved session is a manager, else the door shows.
+  const withDoor = href => { try { const x = new URL(href); x.searchParams.set('door', 'manager'); return x.href; } catch (e) { return href; } };
+  if (!u) return withDoor(APP_SCOPE);
   if (/^https?:\/\//i.test(u)) return u;
-  try { return new URL(String(u).replace(/^\/+/, ''), APP_SCOPE).href; }
-  catch (e) { return APP_SCOPE; }
+  try { return withDoor(new URL(String(u).replace(/^\/+/, ''), APP_SCOPE).href); }
+  catch (e) { return withDoor(APP_SCOPE); }
 }
 
 self.addEventListener('push', event => {
