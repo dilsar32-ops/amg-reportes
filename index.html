@@ -597,6 +597,13 @@
     border:2px solid var(--line); border-top-color:var(--blue); animation:locspin .7s linear infinite;}
   @keyframes locspin{to{transform:rotate(360deg);}}
   .locnote{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:6px;}
+  .addrsuglist{margin-top:4px; max-height:210px; overflow-y:auto; -webkit-overflow-scrolling:touch; border:1px solid var(--line); border-radius:10px; background:var(--card);}
+  .addrsuglist:empty{display:none;}
+  .addrsug{display:block; width:100%; text-align:left; padding:10px 12px; border:0; border-bottom:1px solid var(--line); background:transparent; color:var(--text); font:inherit; cursor:pointer;}
+  .addrsug:last-child{border-bottom:0;}
+  .addrsug:active{background:var(--surface-hover);}
+  .addrsug b{display:block; font-size:15px;}
+  .addrsug small{display:block; color:var(--ink-soft); font-size:12px; margin-top:2px;}
   .locnote:empty{display:none;}
   .locwarn{font-size:11.5px; color:var(--ink-soft); font-weight:500; flex:1 1 100%;}
   .chip.locchip{cursor:pointer; border-color:var(--blue);}
@@ -2156,11 +2163,9 @@
       </div>
       <div class="field"><label>Teléfono</label><input type="tel" id="acPhone" placeholder="(703) 555-1234" autocomplete="off"></div>
       <p class="hint" id="acCrewHint" hidden>Usted solo pone el cliente y sus datos; lo que se le cobra lo pone el manager después.</p>
-      <div class="field"><label>Dirección</label><input type="text" id="acAddress" placeholder="Calle, ciudad" autocomplete="off"></div>
-      <div class="row2">
-        <div class="field"><label>Email</label><input type="email" id="acEmail" placeholder="correo@ejemplo.com" autocapitalize="off" autocomplete="off"></div>
-        <div class="field"><label>Contacto <span class="hint">con quién se habla</span></label><input type="text" id="acContact" placeholder="Nombre" autocapitalize="words" autocomplete="off"></div>
-      </div>
+      <div class="field"><label>Dirección <span class="hint">escriba y escoja, o toque &#128205; para usar su ubicación</span></label><input type="text" id="acAddress" placeholder="Calle, ciudad" autocomplete="off"></div>
+      <div class="field"><label>Email</label><input type="email" id="acEmail" placeholder="correo@ejemplo.com" autocapitalize="off" autocomplete="off" inputmode="email"></div>
+      <div class="field"><label>Contacto <span class="hint">con quién se habla</span></label><input type="text" id="acContact" placeholder="Nombre" autocapitalize="words" autocomplete="off"></div>
       <div class="field"><label>Notas</label><textarea id="acNote" rows="2" placeholder="Ej: paga los sábados con cheque; llamar antes de llegar"></textarea></div>
       <button class="btn btn-amg btn-block" type="button" id="acSave">Guardar cliente</button>
       <div class="row2" id="acEditBtns" hidden style="margin-top:8px;">
@@ -3338,7 +3343,7 @@
   const SUG_FIELDS = {
     person  : ['l-leader','m-leader','e-tech','d-tech','d-pm','c-supervisor','d-sendto'],
     team    : ['l-team','c-team'],
-    address : ['e-address','c-address','d-address','m-address','x-address','fp-address','addrSearchInput'],
+    address : ['e-address','c-address','d-address','m-address','x-address','fp-address','addrSearchInput','acAddress'],
     client  : ['e-clientname','m-client'],
     room    : ['d-room'],
     cause   : ['e-cause']
@@ -3465,6 +3470,7 @@
     note.innerHTML = '';
     try{
       const r = await Loc.suggestAddress();
+      if(r && Number.isFinite(+r.lat) && Number.isFinite(+r.lng)){ LAST_FIX = { lat:+r.lat, lng:+r.lng, at: Date.now() }; try{ localStorage.setItem('lastFix', JSON.stringify(LAST_FIX)); }catch(e){} }
       const acc = Math.round(r.accuracyM || 0);
       if(!r.address){
         note.innerHTML = '<span class="locwarn">' + T.none + '</span>';
@@ -3485,6 +3491,42 @@
       btn.disabled = false; btn.classList.remove('busy');
     }
   }
+  // ---- Direcciones mientras escriben: Apple Maps (MKLocalSearchCompleter) por el plugin, cerca de donde esta el telefono ----
+  let LAST_FIX = null; try{ LAST_FIX = JSON.parse(localStorage.getItem('lastFix') || 'null'); }catch(e){}
+  const isAddressInput = el => el && el.tagName === 'INPUT' && (ADDRESS_IDS.includes(el.id) || el.classList.contains('s-address'));
+  function addrSugListFor(el){
+    const host = el.closest('.field') || el.parentElement.parentElement || el.parentElement;
+    let l = host.querySelector(':scope > .addrsuglist');
+    if(!l){ l = document.createElement('div'); l.className = 'addrsuglist'; const wrap = el.closest('.addrwrap'); (wrap && wrap.parentElement === host ? wrap : el).insertAdjacentElement('afterend', l); }
+    return l;
+  }
+  let addrSugTimer = null, addrSugSeq = 0;
+  async function addrSuggest(el){
+    const Loc = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Location;
+    if(!isNative() || !Loc || typeof Loc.searchAddress !== 'function') return;
+    const q = (el.value || '').trim(); const list = addrSugListFor(el);
+    if(q.length < 3){ list.innerHTML = ''; return; }
+    const seq = ++addrSugSeq;
+    let r = null;
+    try{ r = await Loc.searchAddress(Object.assign({ query: q }, LAST_FIX ? { lat: LAST_FIX.lat, lng: LAST_FIX.lng } : {})); }catch(e){ r = null; }
+    if(seq !== addrSugSeq || !r || r.superseded) return;                     // ya escribio mas: esta respuesta es vieja
+    if(document.activeElement !== el) return;
+    const rows = (r.results || []).filter(x => x && x.title);
+    list.innerHTML = rows.map(x => { const full = [x.title, x.subtitle].filter(Boolean).join(', ').replace(/,\s*United States$/i, ''); return '<button type="button" class="addrsug" data-addr="' + esc(full) + '"><b>' + esc(x.title) + '</b>' + (x.subtitle ? '<small>' + esc(x.subtitle) + '</small>' : '') + '</button>'; }).join('');
+  }
+  document.addEventListener('input', e => {
+    const el = e.target; if(!isAddressInput(el)) return;
+    clearTimeout(addrSugTimer); addrSugTimer = setTimeout(() => addrSuggest(el), 350);
+  });
+  document.addEventListener('focusout', e => {
+    const el = e.target; if(!isAddressInput(el)) return;
+    setTimeout(() => { const l = el.closest('.field') && el.closest('.field').querySelector(':scope > .addrsuglist'); if(l && !l.contains(document.activeElement)) l.innerHTML = ''; }, 300);
+  });
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.addrsug'); if(!b) return;
+    const host = b.closest('.field'); const input = host && host.querySelector('input[type="text"]');
+    if(input){ input.value = b.dataset.addr; input.dispatchEvent(new Event('change', {bubbles:true})); const l = host.querySelector(':scope > .addrsuglist'); if(l) l.innerHTML = ''; const n = host.querySelector(':scope > .locnote'); if(n) n.innerHTML = ''; }
+  });
   document.addEventListener('click', e => {
     const chip = e.target.closest('[data-locfill]');
     if(chip){
@@ -3921,7 +3963,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AB';
+  const APP_BUILD = '2026-09-06-AC';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
