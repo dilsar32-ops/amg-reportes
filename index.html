@@ -838,7 +838,7 @@
   #mgrHomeBtns[hidden]{display:none !important;}
   #lClientField[hidden], #lClientOtherField[hidden], #lTeamField[hidden]{display:none !important;}
   /* ---- Finanzas de AMG ---- */
-  #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden],
+  #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden],
   #finMGastos[hidden], #finMPagos[hidden], #finMCierre[hidden], #finPClients[hidden], #finPHeld[hidden], #finGMonthField[hidden], #finCPdf[hidden],
   .s-gas-row[hidden], .s-gas-other-wrap[hidden], .s-gas-hint[hidden]{display:none !important;}
   /* La pantalla es para trabajar: fuera la linea de idiomas y los avisos
@@ -2212,6 +2212,7 @@
         <button type="button" class="minibtn" id="amgSegInbox">&#128229; Mudanzas recibidas<span class="badge" id="amgInboxBadge" hidden></span></button>
         <button type="button" class="minibtn on" id="amgSegHours">&#9201; Horas AMG</button>
         <button type="button" class="minibtn" id="amgSegPrice">&#128176; Precio AMG</button>
+        <button type="button" class="minibtn" id="amgSegClients">&#128101; Clientes</button>
         <button type="button" class="minibtn" id="amgSegCode">&#128273; Código AMG</button>
         <button type="button" class="minibtn" id="amgSegFin">&#128181; Finanzas</button>
       </div>
@@ -2259,7 +2260,7 @@
           <p class="hint" id="mgMgPriceMsg" style="margin-top:6px;"></p>
           <div id="amgClientsBox" style="margin-top:14px;">
             <h2 style="font-size:15px; margin:0 0 4px;">Precio por cliente</h2>
-            <p class="hint">Cada cliente puede tener <b>su propio $/hora por persona</b> (a uno se le cobra un precio y a otro, otro). El reporte de mudanza se cobra con el precio del cliente escogido; si el cliente no tiene precio, se usa el precio general de arriba.</p>
+            <p class="hint">Cada cliente puede tener <b>su propio $/hora por persona</b> (a uno se le cobra un precio y a otro, otro). El reporte de mudanza se cobra con el precio del cliente escogido; si el cliente no tiene precio, se usa el precio general de arriba. Para agregar un cliente con todos sus datos (teléfono, dirección, contacto): pestaña <b>Clientes</b>.</p>
             <div id="amgClientsList"><p class="clockhint">Cargando…</p></div>
             <div class="row2" style="margin-top:8px;">
               <div class="field"><label>Nuevo cliente</label><input type="text" id="amgClientNewName" placeholder="Nombre" autocapitalize="words" autocomplete="off"></div>
@@ -2271,6 +2272,33 @@
           <button class="btn btn-outline" type="button" id="mgMgActivate" style="width:100%; margin-top:10px;">Prender AMG (mudanza)</button>
           <p class="hint">Cambiar el precio <b>no cambia</b> los labor logs de AMG que ya mand&oacute; &mdash; cada uno guarda el precio con el que se mand&oacute;.</p>
         </div>
+    </section>
+    </div>
+    <div class="amgbox amg-mgr" id="amgClientsWin" hidden>
+    <section class="card amgcard">
+      <h2 style="font-size:15px; margin:0 0 4px;">Clientes de AMG Moving</h2>
+      <p class="hint">Cada cliente con sus datos y <b>su precio por hora por persona</b>. Toque un cliente para editarlo. Los trabajadores solo ven los nombres.</p>
+      <div id="amgClientCards"><p class="clockhint">Cargando…</p></div>
+    </section>
+    <section class="card amgcard" id="acFormCard">
+      <h2 id="acTitle" style="font-size:15px; margin:0 0 4px;">Agregar cliente</h2>
+      <div class="field"><label>Nombre <span class="hint">como aparece en el reporte de mudanza</span></label><input type="text" id="acName" placeholder="Ej: Robert" autocapitalize="words" autocomplete="off"></div>
+      <div class="row2">
+        <div class="field"><label>$/hora por persona</label><input type="number" id="acRate" step="0.01" inputmode="decimal" placeholder="vacío = precio general"></div>
+        <div class="field"><label>Teléfono</label><input type="tel" id="acPhone" placeholder="(703) 555-1234" autocomplete="off"></div>
+      </div>
+      <div class="field"><label>Dirección</label><input type="text" id="acAddress" placeholder="Calle, ciudad" autocomplete="off"></div>
+      <div class="row2">
+        <div class="field"><label>Email</label><input type="email" id="acEmail" placeholder="correo@ejemplo.com" autocapitalize="off" autocomplete="off"></div>
+        <div class="field"><label>Contacto <span class="hint">con quién se habla</span></label><input type="text" id="acContact" placeholder="Nombre" autocapitalize="words" autocomplete="off"></div>
+      </div>
+      <div class="field"><label>Notas</label><textarea id="acNote" rows="2" placeholder="Ej: paga los sábados con cheque; llamar antes de llegar"></textarea></div>
+      <button class="btn btn-amg btn-block" type="button" id="acSave">Guardar cliente</button>
+      <div class="row2" id="acEditBtns" hidden style="margin-top:8px;">
+        <button class="btn btn-outline" type="button" id="acCancel">Cancelar</button>
+        <button class="btn btn-outline" type="button" id="acRemove" style="color:var(--danger);">Quitar de la lista</button>
+      </div>
+      <p class="hint" id="acMsg" style="margin-top:6px;"></p>
     </section>
     </div>
     <div class="amgbox amg-mgr" id="amgCodeBox" hidden>
@@ -2687,7 +2715,7 @@
     try{
       let rows = null;
       if(isManager()){
-        const res = await authFetch('/rest/v1/amg_clients?select=id,name,rate,active,note&order=name', { headers: cloudHeaders() });
+        const res = await authFetch('/rest/v1/amg_clients?select=id,name,rate,active,note,phone,address,email,contact&order=name', { headers: cloudHeaders() });
         if(res.status === 404){ AMG_CLIENTS_STATE = 'absent'; return false; }   // tabla sin crear: se queda el respaldo
         if(res.ok) rows = await res.json();
       } else {
@@ -3774,7 +3802,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-U';
+  const APP_BUILD = '2026-09-06-V';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4208,6 +4236,61 @@
   if($('#amgCodeChange')) $('#amgCodeChange').addEventListener('click', changeAmgCode);
   // AMG prendida pero sin precio al cliente: se dice en rojo arriba de las
   // pildoras, porque asi no se puede mandar ningun labor log de AMG.
+  // ---- Ventanilla Clientes (AMG Moving -> Clientes): datos completos + agregar / editar ----
+  let acEditingId = null;
+  function paintAmgClientCards(){
+    const box = $('#amgClientCards'); if(!box) return;
+    if(AMG_CLIENTS_STATE !== 'loaded'){ box.innerHTML = '<p class="clockhint">' + (cloudOn() ? 'Cargando…' : 'Sin internet.') + '</p>'; return; }
+    const act = AMG_CLIENTS.filter(c => c.active !== false), off = AMG_CLIENTS.filter(c => c.active === false);
+    const card = c => '<button type="button" class="inboxitem acCard" data-id="' + esc(c.id) + '" style="text-align:left;">'
+      + '<span class="who">' + esc(c.name) + (c.rate > 0 ? ' <span class="kindtag amg">$' + (+c.rate).toFixed(2) + '/h</span>' : ' <span class="muted" style="font-weight:400;font-size:12px;">precio general</span>') + '</span>'
+      + '<span class="when">' + esc([c.phone, c.address, c.contact ? 'contacto: ' + c.contact : ''].filter(Boolean).join(' · ') || 'sin datos todavía · toque para completar') + '</span></button>';
+    box.innerHTML = (act.length ? act.map(card).join('') : '<p class="clockhint">Todavía no hay clientes. Agregue el primero abajo.</p>')
+      + (off.length ? '<details class="whychip" style="display:block;margin-top:6px;"><summary>Clientes quitados (' + off.length + ')</summary><div class="whytext">' + off.map(c => '<div class="entryrow"><span>' + esc(c.name) + '</span><button type="button" class="minibtn amgcOn" data-id="' + esc(c.id) + '">Volver a activar</button></div>').join('') + '</div></details>' : '');
+  }
+  function acFill(c){
+    acEditingId = c ? c.id : null;
+    $('#acTitle').textContent = c ? 'Editar cliente' : 'Agregar cliente';
+    $('#acName').value = c ? (c.name || '') : ''; $('#acRate').value = (c && c.rate > 0) ? +c.rate : '';
+    $('#acPhone').value = c ? (c.phone || '') : ''; $('#acAddress').value = c ? (c.address || '') : '';
+    $('#acEmail').value = c ? (c.email || '') : ''; $('#acContact').value = c ? (c.contact || '') : ''; $('#acNote').value = c ? (c.note || '') : '';
+    $('#acSave').textContent = c ? 'Guardar cambios' : 'Guardar cliente';
+    $('#acEditBtns').hidden = !c; $('#acMsg').textContent = '';
+    if(c){ const f = $('#acFormCard'); if(f) f.scrollIntoView({ block:'start', behavior:'smooth' }); }
+  }
+  if($('#amgClientCards')) $('#amgClientCards').addEventListener('click', async (e)=>{
+    const card = e.target.closest('.acCard'); if(card){ const c = AMG_CLIENTS.find(x => String(x.id) === card.dataset.id); if(c) acFill(c); return; }
+    const on = e.target.closest('.amgcOn'); if(on){ await onAmgClientsClick(e); paintAmgClientCards(); }
+  });
+  if($('#acCancel')) $('#acCancel').addEventListener('click', ()=> acFill(null));
+  if($('#acRemove')) $('#acRemove').addEventListener('click', async ()=>{
+    const c = AMG_CLIENTS.find(x => String(x.id) === String(acEditingId)); if(!c) return;
+    if(!confirm('¿Quitar a ' + c.name + ' de la lista? Sus reportes y pagos guardados no se tocan; solo deja de aparecer para escoger.')) return;
+    try{ await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(c.id), { active: false, updated_at: new Date().toISOString() }); await loadAmgClients(); paintAmgClientCards(); paintAmgClients(); acFill(null); $('#acMsg').textContent = c.name + ' quitado (está en "Clientes quitados" por si vuelve).'; }
+    catch(err){ $('#acMsg').textContent = 'No se pudo: ' + ((err && err.message) || err); }
+  });
+  if($('#acSave')) $('#acSave').addEventListener('click', async ()=>{
+    const msg = $('#acMsg');
+    const name = ($('#acName').value || '').trim().replace(/\s+/g, ' ');
+    const rv = $('#acRate').value !== '' ? +$('#acRate').value : null;
+    if(!name){ msg.textContent = 'Escriba el nombre del cliente.'; $('#acName').focus(); return; }
+    if(rv !== null && !(rv > 0)){ msg.textContent = 'El precio tiene que ser mayor que 0, o vacío para usar el precio general.'; return; }
+    if(!cloudOn()){ msg.textContent = 'Sin internet. Intente cuando tenga señal.'; return; }
+    const row = { name, rate: rv, phone: ($('#acPhone').value || '').trim() || null, address: ($('#acAddress').value || '').trim() || null,
+      email: ($('#acEmail').value || '').trim() || null, contact: ($('#acContact').value || '').trim() || null, note: ($('#acNote').value || '').trim() || null, updated_at: new Date().toISOString() };
+    const b = $('#acSave'); b.disabled = true; const old = b.textContent; b.textContent = 'Guardando…';
+    try{
+      const dup = AMG_CLIENTS.find(x => amgKey(x.name) === amgKey(name) && String(x.id) !== String(acEditingId));
+      if(dup && dup.active !== false) throw new Error('Ya hay un cliente con ese nombre: ' + dup.name + '. Tóquelo en la lista para editarlo.');
+      if(acEditingId) await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(acEditingId), row);
+      else if(dup) await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(dup.id), Object.assign(row, { active: true }));
+      else { delete row.updated_at; await amgClientsWrite('POST', '', Object.assign(row, { active: true })); }
+      await loadAmgClients(); paintAmgClientCards(); paintAmgClients(); paintAmgPriceWarn();
+      const done = acEditingId ? 'Cambios guardados ✓' : name + ' agregado ✓' + (rv !== null ? ' a $' + rv.toFixed(2) + '/h por persona' : ' (usa el precio general)');
+      acFill(null); msg.textContent = done + ' Los reportes ya mandados no cambian de precio.';
+    }catch(err){ msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
+    b.disabled = false; b.textContent = old;
+  });
   // ---- Precio por cliente (AMG Moving -> Precio AMG) ----
   function paintAmgClients(){
     const box = $('#amgClientsList'); if(!box) return;
@@ -4278,6 +4361,7 @@
   function amgShow(which){
     const map = [['hours','#amgSegHours','#amgHoursBox'],
                  ['price','#amgSegPrice','#amgPriceBox'],
+                 ['clients','#amgSegClients','#amgClientsWin'],
                  ['code', '#amgSegCode', '#amgCodeBox'],
                  ['fin',  '#amgSegFin',  '#amgFinBox']];
     map.forEach(([key, btnSel, boxSel]) => {
@@ -4288,6 +4372,7 @@
     });
     if(which === 'hours' && typeof loadMgHours === 'function') loadMgHours();
     if(which === 'price' && typeof paintMgPrices === 'function') paintMgPrices();
+    if(which === 'clients'){ paintAmgClientCards(); loadAmgClients().then(paintAmgClientCards); }
     if(which === 'code') paintAmgCode();
     if(which === 'fin'){ finMShow('gastos'); loadFinAll(); }
     window.scrollTo(0, 0);
