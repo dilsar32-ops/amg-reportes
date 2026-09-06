@@ -845,7 +845,7 @@
   #mgrHomeBtns[hidden]{display:none !important;}
   #lClientField[hidden], #lClientOtherField[hidden], #lTeamField[hidden]{display:none !important;}
   /* ---- Finanzas de AMG ---- */
-  #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acFlatField[hidden], #acPricingBox[hidden], #acCrewHint[hidden], #acRemove[hidden], #acListCard[hidden], #acPickField[hidden], #acExistsHint[hidden], #acNameField[hidden], #invNew[hidden], #invList[hidden], #invFrom[hidden], #invPreviewWrap[hidden],
+  #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acFlatField[hidden], #acPricingBox[hidden], #acCrewHint[hidden], #acRemove[hidden], #acListCard[hidden], #acPickField[hidden], #acExistsHint[hidden], #acNameField[hidden], #acBillToField[hidden], #invNew[hidden], #invList[hidden], #invFrom[hidden], #invPreviewWrap[hidden],
   #finMGastos[hidden], #finMPagos[hidden], #finMCierre[hidden], #finPClients[hidden], #finPHeld[hidden], #finGMonthField[hidden], #finCPdf[hidden],
   .s-gas-row[hidden], .s-gas-other-wrap[hidden], .s-gas-hint[hidden]{display:none !important;}
   /* La pantalla es para trabajar: fuera la linea de idiomas y los avisos
@@ -2152,6 +2152,7 @@
         <select id="acPick"><option value="">Escoja un cliente o agregue uno nuevo</option><option value="__new">Otro cliente (nuevo)</option></select></div>
       <p class="hint" id="acExistsHint" hidden style="color:var(--ok, #2e9e5b); font-weight:600;"></p>
       <div class="field" id="acNameField"><label>Nombre <span class="hint">como aparece en el reporte de mudanza</span></label><input type="text" id="acName" placeholder="Ej: Robert" autocapitalize="words" autocomplete="off"></div>
+      <div class="field" id="acBillToField" hidden><label>Nombre en el invoice <span class="hint">la empresa del cliente, si factura a nombre de ella</span></label><input type="text" id="acBillTo" placeholder="Ej: Boxwood living" autocapitalize="words" autocomplete="off"></div>
       <div id="acPricingBox">
         <div class="field"><label>Cómo se le cobra</label>
           <div class="seg"><button type="button" class="on" id="acPricingHora">Por hora</button><button type="button" id="acPricingFijo">Precio fijo por mudanza</button></div></div>
@@ -2819,7 +2820,7 @@
     try{
       let rows = null;
       if(isManager()){
-        const res = await authFetch('/rest/v1/amg_clients?select=id,name,rate,active,note,phone,address,email,contact,pricing,flat_amount&order=name', { headers: cloudHeaders() });
+        const res = await authFetch('/rest/v1/amg_clients?select=id,name,rate,active,note,phone,address,email,contact,pricing,flat_amount,bill_to&order=name', { headers: cloudHeaders() });
         if(res.status === 404){ AMG_CLIENTS_STATE = 'absent'; return false; }   // tabla sin crear: se queda el respaldo
         if(res.ok) rows = await res.json();
       } else {
@@ -3185,6 +3186,7 @@
       const mgr = isManager() && document.body.classList.contains('mgr');   // por la puerta AMG (aunque entre el manager) es la pantalla del trabajador
       AC_MGR = mgr;
       if($('#acPickField')) $('#acPickField').hidden = mgr;
+      if($('#acBillToField')) $('#acBillToField').hidden = !mgr;
       paintAcPick();
       if($('#acPricingBox')) $('#acPricingBox').hidden = !mgr;
       if($('#acListCard')) $('#acListCard').hidden = !mgr;                 // el crew no ve la lista de clientes: solo agrega
@@ -3963,7 +3965,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AC';
+  const APP_BUILD = '2026-09-06-AD';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4552,7 +4554,7 @@
     const box = $('#invLogs'); if(!box) return;
     const c = invClient();
     if(!c){ box.innerHTML = '<p class="clockhint">Escoja un cliente.</p>'; $('#invClientInfo').textContent = ''; return; }
-    $('#invClientInfo').innerHTML = '<b>TO:</b> ' + esc(c.name) + (c.address ? ' · ' + esc(c.address) : ' · <span style="color:var(--danger);">sin dirección (póngala en Clientes)</span>') + (c.phone ? ' · ' + esc(c.phone) : '') + (c.email ? ' · ' + esc(c.email) : '')
+    $('#invClientInfo').innerHTML = '<b>TO:</b> ' + esc(c.bill_to ? c.bill_to + ' (' + c.name + ')' : c.name) + (c.address ? ' · ' + esc(c.address) : ' · <span style="color:var(--danger);">sin dirección (póngala en Clientes)</span>') + (c.phone ? ' · ' + esc(c.phone) : '') + (c.email ? ' · ' + esc(c.email) : '')
       + '<br><b>Precio:</b> ' + esc(rateStamp(mgClientPrice(c.name)));
     if(!INV_LOADED_OK){ box.innerHTML = '<p class="clockhint" style="color:var(--danger);">No se pudieron leer los invoices guardados (¿sin señal?). Salga de Invoices y vuelva a entrar antes de facturar, para no cobrar un reporte dos veces.</p>'; return; }
     const done = invInvoicedLogIds();
@@ -4607,7 +4609,7 @@
   function invCurrent(){
     const c = invClient();
     return { number: +($('#inv-number').value || invNextNumber()), issue_date: $('#inv-date').value || localToday(), payment_method: $('#inv-method').value || 'Transfer',
-      client_id: c ? c.id : null, client_name: c ? c.name : '', client_address: c ? (c.address || '') : '', client_phone: c ? (c.phone || '') : '', client_email: c ? (c.email || '') : '',
+      client_id: c ? c.id : null, client_name: c ? c.name : '', bill_to: c ? (c.bill_to || '') : '', client_address: c ? (c.address || '') : '', client_phone: c ? (c.phone || '') : '', client_email: c ? (c.email || '') : '',
       sent_by: (SES && SES.full_name) || 'Amilcar', lines: INV.lines.slice(), total: invTotalOf(INV.lines), log_ids: INV.logIds.slice(), status:'sent' };
   }
   // ---- El dibujo (mismo HTML para la vista previa y para el PDF) ----
@@ -4627,7 +4629,7 @@
       + '</div>'
       + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid #ddd;">'
       +   '<div style="padding:24px 30px;border-right:1px solid #ddd;font-size:15px;line-height:1.6;"><b style="font-size:16px;">FROM</b><br>' + esc(S.from_name||'') + '<br>' + esc(S.from_addr1||'') + '<br>' + esc(S.from_addr2||'') + '<br>' + esc(S.from_addr3||'') + '<br><br>Sent by: <b>' + esc(inv.sent_by || '') + '</b></div>'
-      +   '<div style="padding:24px 30px;border-right:1px solid #ddd;font-size:15px;line-height:1.6;"><b style="font-size:16px;">TO</b><br>' + esc(inv.client_name||'') + (addr.length ? '<br>' + addr.map(esc).join('<br>') : '') + (/united states/i.test(inv.client_address||'') ? '' : '<br>United States') + '</div>'
+      +   '<div style="padding:24px 30px;border-right:1px solid #ddd;font-size:15px;line-height:1.6;"><b style="font-size:16px;">TO</b><br>' + esc(inv.bill_to || inv.client_name || '') + (addr.length ? '<br>' + addr.map(esc).join('<br>') : '') + (/united states/i.test(inv.client_address||'') ? '' : '<br>United States') + '</div>'
       +   '<div style="padding:24px 30px;"><b style="font-size:16px;">' + (receipt ? 'Total paid' : 'Total due') + '</b><div style="font-size:40px;font-weight:800;margin-top:14px;">$' + invMoney(inv.total) + '</div>' + (receipt ? '<div style="margin-top:10px;display:inline-block;border:3px solid #15803d;color:#15803d;font-weight:900;letter-spacing:3px;padding:4px 12px;transform:rotate(-6deg);">PAID</div>' : '') + '</div>'
       + '</div>'
       + '<table style="width:100%;border-collapse:collapse;font-size:15px;"><thead><tr style="border-bottom:1px solid #ddd;">'
@@ -4784,7 +4786,7 @@
     const sum = $('#acListSummary'); if(sum) sum.innerHTML = '<b>Clientes que ya tenemos (' + act.length + ')</b> · toque para ver';
     const card = c => '<button type="button" class="inboxitem acCard" data-id="' + esc(c.id) + '" style="text-align:left;">'
       + '<span class="who">' + esc(c.name) + (!AC_MGR ? '' : (c.pricing === 'fijo' && c.flat_amount > 0 ? ' <span class="kindtag amg">fijo $' + (+c.flat_amount).toFixed(2) + '</span>' : c.rate > 0 ? ' <span class="kindtag amg">$' + (+c.rate).toFixed(2) + '/h</span>' : ' <span class="muted" style="font-weight:400;font-size:12px;">precio general</span>')) + '</span>'
-      + '<span class="when">' + esc([c.phone, c.address, c.contact ? 'contacto: ' + c.contact : ''].filter(Boolean).join(' · ') || 'sin datos todavía · toque para completar') + '</span></button>';
+      + '<span class="when">' + esc([c.bill_to ? 'invoice a: ' + c.bill_to : '', c.phone, c.address, c.contact ? 'contacto: ' + c.contact : ''].filter(Boolean).join(' · ') || 'sin datos todavía · toque para completar') + '</span></button>';
     box.innerHTML = (act.length ? act.map(card).join('') : '<p class="clockhint">Todavía no hay clientes. Agregue el primero abajo.</p>')
       + (off.length ? '<details class="whychip" style="display:block;margin-top:6px;"><summary>Clientes quitados (' + off.length + ')</summary><div class="whytext">' + off.map(c => '<div class="entryrow"><span>' + esc(c.name) + '</span><button type="button" class="minibtn amgcOn" data-id="' + esc(c.id) + '">Volver a activar</button></div>').join('') + '</div></details>' : '');
   }
@@ -4804,6 +4806,7 @@
     if($('#acFlat')) $('#acFlat').value = (c && c.flat_amount > 0) ? +c.flat_amount : '';
     $('#acTitle').textContent = c ? 'Editar cliente' : 'Agregar cliente';
     $('#acName').value = c ? (c.name || '') : ''; $('#acRate').value = (c && c.rate > 0) ? +c.rate : '';
+    if($('#acBillTo')) $('#acBillTo').value = c ? (c.bill_to || '') : '';
     $('#acPhone').value = c ? (c.phone || '') : ''; $('#acAddress').value = c ? (c.address || '') : '';
     $('#acEmail').value = c ? (c.email || '') : ''; $('#acContact').value = c ? (c.contact || '') : ''; $('#acNote').value = c ? (c.note || '') : '';
     $('#acSave').textContent = c ? 'Guardar cambios' : 'Guardar cliente';
@@ -4834,7 +4837,7 @@
     if(rv !== null && !(rv > 0)){ msg.textContent = 'El precio tiene que ser mayor que 0, o vacío para usar el precio general.'; return; }
     if(AC_MGR && acPricing === 'fijo' && !(fv > 0)){ msg.textContent = 'Escriba el precio fijo por mudanza (mayor que 0).'; $('#acFlat').focus(); return; }
     if(!cloudOn()){ msg.textContent = 'Sin internet. Intente cuando tenga señal.'; return; }
-    const row = { name, rate: rv, pricing: acPricing, flat_amount: acPricing === 'fijo' ? fv : null, phone: ($('#acPhone').value || '').trim() || null, address: ($('#acAddress').value || '').trim() || null,
+    const row = { name, rate: rv, pricing: acPricing, flat_amount: acPricing === 'fijo' ? fv : null, bill_to: (($('#acBillTo') && $('#acBillTo').value) || '').trim() || null, phone: ($('#acPhone').value || '').trim() || null, address: ($('#acAddress').value || '').trim() || null,
       email: ($('#acEmail').value || '').trim() || null, contact: ($('#acContact').value || '').trim() || null, note: ($('#acNote').value || '').trim() || null, updated_at: new Date().toISOString() };
     const b = $('#acSave'); b.disabled = true; const old = b.textContent; b.textContent = 'Guardando…';
     if(!AC_MGR){
