@@ -2651,7 +2651,7 @@
     // Mudanza: en vez de "Equipo" se escoge el CLIENTE de la mudanza.
     const tf = $('#lTeamField'); if(tf) tf.hidden = mg;
     const cf = $('#lClientField'); if(cf) cf.hidden = !mg;
-    if(mg) paintClientFromTeam(); else { const of = $('#lClientOtherField'); if(of) of.hidden = true; }
+    if(mg){ paintClientOptions(); paintClientFromTeam(); } else { const of = $('#lClientOtherField'); if(of) of.hidden = true; }
     if(mg && typeof loadPeople === 'function' && !FIN_PEOPLE.length) loadPeople().then(() => $$('.shift-card', panel).forEach(c => paintShiftLabels(c, true)));
     $$('.shift-card', panel).forEach(c => paintShiftLabels(c, mg));
     ['#mgrRateToggle','#mgrCodesToggle'].forEach(sel => { const el = $(sel); if(el) el.hidden = mg; });
@@ -2665,21 +2665,22 @@
   // ---- Cliente de la mudanza: el select escribe en #l-team (el campo de siempre) ----
   const CLIENT_OPTIONS = ['Robert','Susan','Sammy'];   // respaldo si la tabla amg_clients todavia no existe
   // ---- Clientes de AMG con su precio por hora (tabla amg_clients). El manager ve precios; el crew solo nombres. ----
-  let AMG_CLIENTS = [];
-  const AMG_CLIENTS_KEY = 'amgClients:v1';
+  let AMG_CLIENTS = [];                 // solo en memoria: nunca se guarda en el telefono (los precios son del manager)
+  let AMG_CLIENTS_STATE = 'unknown';    // 'loaded' = la tabla se leyo; 'absent' = la tabla no existe (404); 'unknown' = todavia no
   const amgKey = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
-  try{ AMG_CLIENTS = JSON.parse(localStorage.getItem(AMG_CLIENTS_KEY) || '[]') || []; }catch(e){ AMG_CLIENTS = []; }
   function amgClientNames(){
-    const a = AMG_CLIENTS.filter(c => c && c.active !== false && c.name).map(c => String(c.name).trim());
-    return a.length ? a : CLIENT_OPTIONS.slice();
+    // Con la tabla leida, la lista es la lista (aunque quede vacia). Los nombres de respaldo solo valen mientras no se ha leido.
+    if(AMG_CLIENTS_STATE === 'loaded') return AMG_CLIENTS.filter(c => c && c.active !== false && c.name).map(c => String(c.name).trim());
+    return CLIENT_OPTIONS.slice();
   }
   // El $/hora del cliente, o null si no tiene (entonces manda el precio general de AMG).
+  // Un cliente QUITADO de la lista conserva su precio: sus reportes pendientes se siguen cobrando igual.
   function amgClientRate(name){
     const n = amgKey(name); if(!n) return null;
-    const c = AMG_CLIENTS.find(x => x && x.active !== false && amgKey(x.name) === n);
+    const c = AMG_CLIENTS.find(x => x && amgKey(x.name) === n);
     return (c && c.rate !== null && c.rate !== undefined && +c.rate > 0) ? +c.rate : null;
   }
-  const amgAnyClientRate = () => AMG_CLIENTS.some(c => c && c.active !== false && +c.rate > 0);
+  const amgAnyClientRate = () => AMG_CLIENTS.some(c => c && +c.rate > 0);
   const amgClientDisplayName = name => { const n = amgKey(name); const c = AMG_CLIENTS.find(x => x && amgKey(x.name) === n); return c ? String(c.name).trim() : String(name || '').trim(); };
   async function loadAmgClients(){
     if(!signedIn() || !cloudOn()) return false;
@@ -2687,15 +2688,16 @@
       let rows = null;
       if(isManager()){
         const res = await authFetch('/rest/v1/amg_clients?select=id,name,rate,active,note&order=name', { headers: cloudHeaders() });
-        if(res.status === 404) return false;                       // tabla sin crear: se queda el respaldo
+        if(res.status === 404){ AMG_CLIENTS_STATE = 'absent'; return false; }   // tabla sin crear: se queda el respaldo
         if(res.ok) rows = await res.json();
       } else {
-        try{ rows = await authPost('/rest/v1/rpc/amg_client_names', {}); }catch(e){ rows = null; }
-        if(Array.isArray(rows)) rows = rows.map(r => ({ name: r.name, active: true }));
+        // Con la sesion del crew (nunca con la llave anonima): la funcion devuelve solo nombres.
+        const res = await authFetch('/rest/v1/rpc/amg_client_names', { method:'POST', headers: cloudHeaders(), body: '{}' });
+        if(res.status === 404){ AMG_CLIENTS_STATE = 'absent'; return false; }
+        if(res.ok){ const d = await res.json(); if(Array.isArray(d)) rows = d.map(r => ({ name: r.name, active: true })); }
       }
       if(!Array.isArray(rows)) return false;
-      AMG_CLIENTS = rows;
-      try{ localStorage.setItem(AMG_CLIENTS_KEY, JSON.stringify(rows)); }catch(e){}
+      AMG_CLIENTS = rows; AMG_CLIENTS_STATE = 'loaded';
       paintClientOptions();
       return true;
     }catch(e){ return false; }
@@ -2714,8 +2716,9 @@
     paintClientSelect($('#l-client'), 'Escoja el cliente');
     paintClientSelect($('#g-client'), '—');
     paintClientSelect($('#p-client'), 'Escoja el cliente');
-    if($('#l-client') && $('#l-team') && $('#l-team').value) paintClientFromTeam();
+    if(formKind() === 'mudanza' && $('#l-client') && $('#l-team') && $('#l-team').value) paintClientFromTeam();
   }
+  paintClientOptions();   // desde el arranque: con la lista guardada en el telefono o, si no hay, los nombres de respaldo
   // El cliente del reporte de mudanza que esta en pantalla (lo que se escogio en Move Info).
   function formClient(){ return (formKind() === 'mudanza' && $('#l-team')) ? String($('#l-team').value || '').trim() : ''; }
   function clientToTeam(){
@@ -2725,11 +2728,17 @@
     if(of) of.hidden = !otro;
     team.value = otro ? ((other && other.value) || '').trim() : sel.value;
     if(typeof saveDraft === 'function') saveDraft();
+    if(formKind() === 'mudanza'){
+      if(openLogId !== null && !openLogHadRate) lockedRate = null;          // el precio sigue al cliente hasta que se guarde
+      if(typeof recalcGrandTotal === 'function') recalcGrandTotal();
+      if(openLogId !== null && typeof showConversion === 'function') showConversion();
+    }
   }
   // Al abrir un reporte guardado (o volver de un borrador): el select refleja lo que hay en #l-team.
   function paintClientFromTeam(){
     const sel = $('#l-client'), other = $('#l-client-other'), of = $('#lClientOtherField'), team = $('#l-team');
     if(!sel || !team) return;
+    if(formKind() !== 'mudanza'){ if(of) of.hidden = true; return; }   // en restauracion el equipo es el equipo, no un cliente
     const t = (team.value || '').trim();
     if(!t){ sel.value = ''; if(other) other.value = ''; if(of) of.hidden = true; return; }
     const known = amgClientNames().find(n => amgKey(n) === amgKey(t));
@@ -3628,6 +3637,7 @@
   let laborModePainted = null;
   let laborResumeForm = false;
   let laborShownCfg = null;          // el precio que el manager LEYO en Revisar y enviar
+  let openLogHadRate = false;        // el reporte abierto ya traia precio congelado (r) - entonces no se recalcula al cambiar el cliente
   let WORK_KINDS_OK = false;         // true solo si work_kinds se leyo con exito en esta sesion
   const formKind = () => ($('#l-kind') && $('#l-kind').value === 'mudanza') ? 'mudanza' : 'restauracion';
   function formHasContent(){
@@ -3715,6 +3725,7 @@
     loadPayload(JSON.parse(json), 'restauracion');
   }
   function loadPayload(d, kind){
+    openLogHadRate = !!(d && d.r && d.r.d != null);
     kind = (kind === 'mudanza') ? 'mudanza' : 'restauracion';
     if($('#l-kind')) $('#l-kind').value = kind;
     d = d || {};
@@ -3745,8 +3756,9 @@
             cutoff:String(d.r.c||'17:00').slice(0,5),
             cutoffEnd:String(d.r.e || '00:00').slice(0,5) };
     }else if(kind === 'mudanza'){
-      // null = no hay precio AMG usable: no se cobra nada, JAMAS el de restauracion. El cliente del reporte decide el precio.
-      lockedRate = mgClientPrice(d && d.t);
+      // Sin precio congelado: NO se congela al abrir. Se cobra en vivo con el precio del cliente que este escogido
+      // y se congela al tocar "Guardar cambios", con la lista de precios fresca del servidor.
+      lockedRate = null;
     }else{
       const c = payCfg();
       lockedRate = { rateDay:+c.rateDay, rateNight:+c.rateNight,
@@ -3760,7 +3772,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-S';
+  const APP_BUILD = '2026-09-06-T';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -5667,9 +5679,20 @@
 
   $('#convSave').addEventListener('click', async ()=>{
     if(!openLogId) return;
-    if(formKind() === 'mudanza' && !lockedRate) return alert('Falta el precio de AMG. Póngalo en AMG Moving → Precio AMG y vuelva a abrir esta mudanza.');
     const btn = $('#convSave'); const old = btn.textContent;
     btn.textContent = 'Guardando…'; btn.disabled = true;
+    if(formKind() === 'mudanza' && !openLogHadRate){
+      // Esta mudanza no traia precio: se congela AHORA, con el precio fresco del cliente que quedo escogido.
+      const fail = m => { btn.textContent = old; btn.disabled = false; alert(m); };
+      if(!navigator.onLine) return fail(AMG_NO_SIGNAL);
+      const ok = await loadWorkKinds(); if(!ok) return fail(AMG_NO_SIGNAL);
+      const okC = await loadAmgClients(); if(!okC && AMG_CLIENTS_STATE !== 'absent') return fail(AMG_NO_SIGNAL);
+      const client = (($('#l-team') && $('#l-team').value) || '').trim();
+      const cfg = mgClientPrice(client);
+      if(!cfg) return fail('Falta el precio de AMG' + (client ? ' para ' + client : '') + '. Póngalo en AMG Moving → Precio AMG (general o por cliente) y vuelva a guardar.');
+      lockedRate = cfg; recalcGrandTotal();
+      if(!confirm('Esta mudanza se guarda con ' + rateStamp(cfg) + '.\n\n¿Guardar?')){ btn.textContent = old; btn.disabled = false; return; }
+    }
     try{
       const res = await authFetch('/rest/v1/labor_logs?id=eq.' + encodeURIComponent(openLogId), {
         method:'PATCH',
@@ -5685,6 +5708,7 @@
       if(!Array.isArray(saved) || !saved.length) throw new Error('no se guardo');
       const row = currentInboxRows().find(r=>String(r.id)===String(openLogId));
       if(row){ row.payload = saved[0].payload; row.crew_leader = saved[0].crew_leader; renderInbox(); }
+      openLogHadRate = !!(lockedRate);                                   // ya quedo congelado en la fila
       showConversion();
       btn.textContent = 'Guardado ✓';
       setTimeout(()=>{ btn.textContent = old; btn.disabled = false; }, 2000);
@@ -16077,10 +16101,11 @@
       if(!ready){ hideOverlay(); return alert('Falta correr supabase-amg-labor-logs.sql en Supabase antes de guardar reportes de mudanza. Avísele a Amilcar.'); }
       const ok = await loadWorkKinds();
       if(!ok){ hideOverlay(); return alert(AMG_NO_SIGNAL); }
-      await loadAmgClients();                 // el precio del cliente tambien fresco
+      const okC = await loadAmgClients();     // el precio del cliente tambien fresco; si no se pudo leer, no se congela nada
+      if(!okC && AMG_CLIENTS_STATE !== 'absent'){ hideOverlay(); return alert(AMG_NO_SIGNAL); }
       const cfg = mgClientPrice(formClient());
         if(!cfg){ hideOverlay(); return alert('No se puede guardar esta mudanza.\n\nFalta el precio por hora al cliente' + (formClient() ? ' (' + formClient() + ' no tiene precio y tampoco hay precio general)' : '') + '. Vaya a AMG Moving → Precio AMG, póngalo y vuelva a mandarla.\n\nUna mudanza nunca se guarda con precio $0.'); }
-      if(laborShownCfg && rateStamp(laborShownCfg) !== rateStamp(cfg)){
+      if(!laborShownCfg || rateStamp(laborShownCfg) !== rateStamp(cfg)){   // sin precio en pantalla = distinto de cualquier precio real
         hideOverlay(); lockedRate = null; recalcGrandTotal(); renderLaborReview();
         return alert('El precio de AMG cambió desde que abrió esta pantalla. Ahora es: ' + rateStamp(cfg) + '.\n\nRevise el total y vuelva a tocar Mandar.');
       }
