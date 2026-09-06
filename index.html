@@ -816,7 +816,7 @@
   .inbox[hidden]{display:none !important;}
   .amgbanner[hidden]{display:none !important;}
   .mgrfold[hidden]{display:none !important;}
-  #myHoursAlert[hidden], #amgPriceWarn[hidden]{display:none !important;}
+  #myHoursAlert[hidden], #amgPriceWarn[hidden], #amgMatBox[hidden], #amgClientsBox[hidden]{display:none !important;}
   .kindtag.amg{background:var(--amg);}
   .tab-panel[data-tab="labor"].amgmode .mgrpanel{border-left-color:var(--amg);}
   .tab-panel[data-tab="labor"].amgmode .convresult{border-left-color:var(--amg);}
@@ -2285,7 +2285,6 @@
          agregan con el siguiente paso. -->
     <div class="amg-mgr" id="amgTools">
       <div class="mgrtools">
-        <button type="button" class="minibtn" id="amgSegLog">&#128221; Reporte de mudanza</button>
         <button type="button" class="minibtn" id="amgSegInbox">&#128229; Mudanzas recibidas<span class="badge" id="amgInboxBadge" hidden></span></button>
         <button type="button" class="minibtn on" id="amgSegHours">&#9201; Horas AMG</button>
         <button type="button" class="minibtn" id="amgSegPrice">&#128176; Precio AMG</button>
@@ -2336,7 +2335,11 @@
               <button class="btn btn-amg" type="button" id="mgMgPriceSave" style="width:100%;">Guardar precio de AMG</button></div>
           </div>
           <p class="hint" id="mgMgPriceMsg" style="margin-top:6px;"></p>
-          <div id="amgMatBox" style="margin-top:14px;">
+          <div class="mgrtools" style="margin-top:14px;">
+            <button type="button" class="minibtn on" id="amgPriceSegClients">&#128101; Precio por cliente</button>
+            <button type="button" class="minibtn" id="amgPriceSegMat">&#128230; Precios de materiales</button>
+          </div>
+          <div id="amgMatBox" hidden style="margin-top:14px;">
             <h2 style="font-size:15px; margin:0 0 4px;">Materiales (precio al cliente)</h2>
             <p class="hint">Los materiales de su Materials Use Form, con el precio por unidad que se le cobra al cliente en el invoice. Sin precio, el material no se puede facturar.</p>
             <div id="amgMatList"><p class="clockhint">Cargando…</p></div>
@@ -2819,7 +2822,8 @@
   }
   // ---- Cliente de la mudanza: el select escribe en #l-team (el campo de siempre) ----
   // ---- Materiales del reporte de mudanza (los del Materials Use Form). El crew ve nombres; los precios son del manager. ----
-  const MAT_DEFAULTS = ['Small Boxes','Medium Boxes','Large Boxes','Wardrobe Boxes','Paper Pad','Blankets','Packing Paper','Tape','Mattress Bags','Stretch Wrap'];
+  // Las cobijas (Blankets) no estan: son de la empresa y nunca se cobran.
+  const MAT_DEFAULTS = ['Small Boxes','Medium Boxes','Large Boxes','Wardrobe Boxes','Paper Pad','Packing Paper','Tape','Mattress Bags','Stretch Wrap'];
   let MAT_NAMES = []; try{ MAT_NAMES = JSON.parse(localStorage.getItem('matNames:v1') || '[]') || []; }catch(e){ MAT_NAMES = []; }
   const matSlug = n => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   // Dibuja la lista de materiales con cantidades; conserva lo ya escrito y agrega los nombres que vengan en `extra`.
@@ -4130,7 +4134,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AP';
+  const APP_BUILD = '2026-09-06-AQ';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -5157,7 +5161,7 @@
       if(btn) btn.classList.toggle('on', on);
     });
     if(which === 'hours' && typeof loadMgHours === 'function') loadMgHours();
-    if(which === 'price' && typeof paintMgPrices === 'function') paintMgPrices();
+    if(which === 'price'){ if(typeof paintMgPrices === 'function') paintMgPrices(); amgPriceShow('clients'); }
     if(which === 'inv' && typeof invOpen === 'function') invOpen();
     if(which === 'code') paintAmgCode();
     if(which === 'fin'){ finMShow('gastos'); loadFinAll(); }
@@ -5197,10 +5201,20 @@
     if(view === 'form'){ setTimeout(() => goStep('labor', 0), 0); }              // resetLabor difirio un goStep con laborFormOpen=false; este gana y dibuja el wizard
     else { refreshInbox(); setTimeout(()=>{ const c=$('#inboxWrap'); if(c) c.scrollIntoView({block:'start'}); }, 250); }
   }
-  if($('#amgSegLog'))   $('#amgSegLog').addEventListener('click',   () => amgOpenLabor('form'));
   if($('#amgSegInbox')) $('#amgSegInbox').addEventListener('click', () => amgOpenLabor('inbox'));
   if($('#mgMgPriceSave')) $('#mgMgPriceSave').addEventListener('click', saveMgPrices);
   if($('#mgMgActivate'))  $('#mgMgActivate').addEventListener('click', activateMg);
+  // Dentro de Precio AMG: lo de cada cliente primero; los materiales, en su propia pagina.
+  function amgPriceShow(which){
+    const mat = which === 'mat';
+    if($('#amgMatBox')) $('#amgMatBox').hidden = !mat;
+    if($('#amgClientsBox')) $('#amgClientsBox').hidden = mat;
+    if($('#amgPriceSegMat')) $('#amgPriceSegMat').classList.toggle('on', mat);
+    if($('#amgPriceSegClients')) $('#amgPriceSegClients').classList.toggle('on', !mat);
+    if(mat && typeof paintAmgMaterials === 'function'){ paintAmgMaterials(); if(typeof invLoadMaterials === 'function') invLoadMaterials().then(paintAmgMaterials); }
+  }
+  if($('#amgPriceSegClients')) $('#amgPriceSegClients').addEventListener('click', ()=> amgPriceShow('clients'));
+  if($('#amgPriceSegMat')) $('#amgPriceSegMat').addEventListener('click', ()=> amgPriceShow('mat'));
   if($('#amgSegHours')) $('#amgSegHours').addEventListener('click', ()=> amgShow('hours'));
   if($('#amgSegPrice')) $('#amgSegPrice').addEventListener('click', ()=> amgShow('price'));
 
