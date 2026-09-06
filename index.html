@@ -838,7 +838,7 @@
   #mgrHomeBtns[hidden]{display:none !important;}
   #lClientField[hidden], #lClientOtherField[hidden], #lTeamField[hidden]{display:none !important;}
   /* ---- Finanzas de AMG ---- */
-  #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acCrewHint[hidden], #acRemove[hidden],
+  #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acFlatField[hidden], #acPricingBox[hidden], #acCrewHint[hidden], #acRemove[hidden], #acListFold[hidden],
   #finMGastos[hidden], #finMPagos[hidden], #finMCierre[hidden], #finPClients[hidden], #finPHeld[hidden], #finGMonthField[hidden], #finCPdf[hidden],
   .s-gas-row[hidden], .s-gas-other-wrap[hidden], .s-gas-hint[hidden]{display:none !important;}
   /* La pantalla es para trabajar: fuera la linea de idiomas y los avisos
@@ -2137,21 +2137,22 @@
   <section class="tab-panel" data-tab="amgclientes">
     <div class="amgbanner">
       <div class="amgbanner-t">&#128101; CLIENTES &middot; AMG MOVING</div>
-      <div class="amgbanner-s">Agregue aqu&iacute; al cliente nuevo antes de hacer su reporte de mudanza, para escogerlo en la lista.</div>
+      <div class="amgbanner-s">Agregue aqu&iacute; al cliente nuevo con sus datos antes de hacer su reporte de mudanza, para escogerlo en la lista.</div>
     </div>
-    <section class="card amgcard">
-      <h2 style="font-size:15px; margin:0 0 4px;">Clientes de AMG Moving</h2>
-      <p class="hint" id="acListHint">Los clientes de las mudanzas, con sus datos. Toque uno para ver o completar sus datos.</p>
-      <div id="amgClientCards"><p class="clockhint">Cargando…</p></div>
-    </section>
     <section class="card amgcard" id="acFormCard">
       <h2 id="acTitle" style="font-size:15px; margin:0 0 4px;">Agregar cliente</h2>
       <div class="field"><label>Nombre <span class="hint">como aparece en el reporte de mudanza</span></label><input type="text" id="acName" placeholder="Ej: Robert" autocapitalize="words" autocomplete="off"></div>
-      <div class="row2">
-        <div class="field" id="acRateField"><label>$/hora por persona</label><input type="number" id="acRate" step="0.01" inputmode="decimal" placeholder="vacío = precio general"></div>
-        <div class="field"><label>Teléfono</label><input type="tel" id="acPhone" placeholder="(703) 555-1234" autocomplete="off"></div>
+      <div id="acPricingBox">
+        <div class="field"><label>Cómo se le cobra</label>
+          <div class="seg"><button type="button" class="on" id="acPricingHora">Por hora</button><button type="button" id="acPricingFijo">Precio fijo por mudanza</button></div></div>
+        <div class="row2">
+          <div class="field" id="acRateField"><label>$/hora por persona</label><input type="number" id="acRate" step="0.01" inputmode="decimal" placeholder="vacío = precio general"></div>
+          <div class="field" id="acFlatField" hidden><label>Precio fijo por mudanza $</label><input type="number" id="acFlat" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+        </div>
+        <p class="hint" id="acPricingHint">Por hora: personas × horas × este precio. Precio fijo: cada reporte de mudanza de este cliente se cobra este monto, sin importar las horas.</p>
       </div>
-      <p class="hint" id="acCrewHint" hidden>El precio por hora lo pone el manager después. Usted solo agrega el cliente y sus datos.</p>
+      <div class="field"><label>Teléfono</label><input type="tel" id="acPhone" placeholder="(703) 555-1234" autocomplete="off"></div>
+      <p class="hint" id="acCrewHint" hidden>Usted solo pone el cliente y sus datos; lo que se le cobra lo pone el manager después.</p>
       <div class="field"><label>Dirección</label><input type="text" id="acAddress" placeholder="Calle, ciudad" autocomplete="off"></div>
       <div class="row2">
         <div class="field"><label>Email</label><input type="email" id="acEmail" placeholder="correo@ejemplo.com" autocapitalize="off" autocomplete="off"></div>
@@ -2164,6 +2165,11 @@
         <button class="btn btn-outline" type="button" id="acRemove" style="color:var(--danger);">Quitar de la lista</button>
       </div>
       <p class="hint" id="acMsg" style="margin-top:6px;"></p>
+    </section>
+    <section class="card amgcard">
+      <details class="whychip" style="display:block;" id="acListFold"><summary id="acListSummary"><b>Clientes que ya tenemos</b></summary><div class="whytext">
+      <p class="hint" id="acListHint">Toque uno para ver o completar sus datos.</p>
+      <div id="amgClientCards"><p class="clockhint">Cargando…</p></div></div></details>
     </section>
   </section>
   <section class="tab-panel" data-tab="finanzas">
@@ -2717,14 +2723,22 @@
     const c = AMG_CLIENTS.find(x => x && amgKey(x.name) === n);
     return (c && c.rate !== null && c.rate !== undefined && +c.rate > 0) ? +c.rate : null;
   }
-  const amgAnyClientRate = () => AMG_CLIENTS.some(c => c && +c.rate > 0);
+  // Precio fijo por mudanza del cliente (cada reporte se cobra ese monto), o null si cobra por hora.
+  function amgClientFixed(name){
+    const n = amgKey(name); if(!n) return null;
+    const c = AMG_CLIENTS.find(x => x && amgKey(x.name) === n);
+    return (c && c.pricing === 'fijo' && +c.flat_amount > 0) ? +c.flat_amount : null;
+  }
+  const amgAnyClientRate = () => AMG_CLIENTS.some(c => c && (+c.rate > 0 || (c.pricing === 'fijo' && +c.flat_amount > 0)));
+  // Lo que un reporte cobra APARTE de los turnos: el precio fijo por mudanza (si el cliente cobra asi). Una sola vez por reporte.
+  const logFixed = r => (r && +r.f > 0) ? +r.f : 0;
   const amgClientDisplayName = name => { const n = amgKey(name); const c = AMG_CLIENTS.find(x => x && amgKey(x.name) === n); return c ? String(c.name).trim() : String(name || '').trim(); };
   async function loadAmgClients(){
     if(!signedIn() || !cloudOn()) return false;
     try{
       let rows = null;
       if(isManager()){
-        const res = await authFetch('/rest/v1/amg_clients?select=id,name,rate,active,note,phone,address,email,contact&order=name', { headers: cloudHeaders() });
+        const res = await authFetch('/rest/v1/amg_clients?select=id,name,rate,active,note,phone,address,email,contact,pricing,flat_amount&order=name', { headers: cloudHeaders() });
         if(res.status === 404){ AMG_CLIENTS_STATE = 'absent'; return false; }   // tabla sin crear: se queda el respaldo
         if(res.ok) rows = await res.json();
       } else {
@@ -3088,7 +3102,9 @@
     if(tab === 'floorplan' && $('#fp-date') && !$('#fp-date').value) $('#fp-date').value = todayStr();
     if(tab === 'amgclientes'){
       const mgr = isManager();
-      if($('#acRateField')) $('#acRateField').hidden = !mgr;
+      if($('#acPricingBox')) $('#acPricingBox').hidden = !mgr;
+      if($('#acListFold')) $('#acListFold').hidden = !mgr;                 // el crew no ve la lista de clientes: solo agrega
+      if($('#acTitle')) $('#acTitle').textContent = mgr ? 'Agregar cliente' : 'Agregar cliente nuevo';
       if($('#acCrewHint')) $('#acCrewHint').hidden = mgr;
       acFill(null); paintAmgClientCards(); loadAmgClients().then(paintAmgClientCards); paintCompanyHeader();
     }
@@ -3621,8 +3637,9 @@
     const extra  = Number.isFinite(typedExtra) ? typedExtra : ((extraType && formKind() !== 'mudanza') ? EXTRA_FALLBACK : 0);
     if(!split) return { people, ok:false, regH:0, otH:0, extra, amount:extra };
     const regH = split.reg/60, otH = split.ot/60;
-    const amount = people*(regH*(+cfg.rateDay||0) + otH*(+cfg.rateNight||0)) + extra;
-    return { people, ok:true, regH, otH, extra, amount };
+    // Precio fijo por mudanza: las horas no cobran (el monto fijo lo suma el total del reporte una sola vez).
+    const amount = (cfg.fixed > 0) ? extra : people*(regH*(+cfg.rateDay||0) + otH*(+cfg.rateNight||0)) + extra;
+    return { people, ok:true, regH, otH, extra, amount, fixed: (cfg.fixed > 0) ? +cfg.fixed : 0 };
   }
 
   const h1 = n => (Math.round(n*100)/100).toString().replace(/\.00$/,'');
@@ -3663,6 +3680,8 @@
       prevEnd = renderShiftCalc(card, prevEnd);
       const m = shiftMath(card); if(m.noPrice) anyNoPrice = true; total += m.amount;
     });
+    const cfgNow = ratesInForce(); const fixedNow = (cfgNow && cfgNow.fixed > 0 && $$('.shift-card', shiftsContainer).length) ? +cfgNow.fixed : 0;
+    total += fixedNow;                                                  // precio fijo por mudanza: una vez por reporte
     $('#grandTotalDisplay').textContent = anyNoPrice ? 'Sin precio AMG' : '$' + total.toFixed(2);
     return !anyNoPrice;
   }
@@ -3704,6 +3723,8 @@
   }
   // clientName: el cliente de la mudanza. Si ese cliente tiene su $/hora, ese manda; si no, el precio general de AMG.
   function mgClientPrice(clientName){
+    const fx = (typeof amgClientFixed === 'function') ? amgClientFixed(clientName) : null;
+    if(fx !== null) return { rateDay:0, rateNight:0, cutoff:'00:00', cutoffEnd:'00:00', flat:true, fixed:fx, client: amgClientDisplayName(clientName) };
     const cr = (typeof amgClientRate === 'function') ? amgClientRate(clientName) : null;
     if(cr !== null) return { rateDay:cr, rateNight:cr, cutoff:'00:00', cutoffEnd:'00:00', flat:true, client: amgClientDisplayName(clientName) };
     const k = (typeof mgKindRow === 'function') ? mgKindRow() : null;
@@ -3717,6 +3738,7 @@
   function ratesInForce(){ return lockedRate || (formKind() === 'mudanza' ? mgClientPrice(formClient()) : payCfg()); }
   function rateStamp(c){
     if(!c) return 'sin precio de AMG';
+    if(c.fixed > 0) return 'precio fijo $' + (+c.fixed).toFixed(2) + ' por mudanza' + (c.client ? ' (precio de ' + c.client + ')' : '');
     if(c.flat) return '$' + (+c.rateDay||0).toFixed(2) + '/h por persona, un solo precio a toda hora' + (c.client ? ' (precio de ' + c.client + ')' : '');
     const end = c.cutoffEnd || '06:00';
     return '$' + (+c.rateDay||0).toFixed(2) + '/h, after hours $'
@@ -3748,8 +3770,10 @@
           sh.g = String(ga); sh.gk = gk; sh.gw = gk === 'x' ? (($('.s-gas-other',c)||{}).value || '').trim() : (gsel && gsel.options[gsel.selectedIndex] ? gsel.options[gsel.selectedIndex].textContent : ''); }
         return sh; })
     };
-    if(lockedRate) p.r = { d:lockedRate.rateDay, n:lockedRate.rateNight,
+    if(lockedRate){ p.r = { d:lockedRate.rateDay, n:lockedRate.rateNight,
                            c:lockedRate.cutoff, e:lockedRate.cutoffEnd };
+      if(lockedRate.fixed > 0) p.r.f = +lockedRate.fixed;             // precio fijo por mudanza: se cobra una vez por reporte
+    }
     if(formKind() === 'mudanza'){
       // Mudanza: un solo precio a toda hora. Se guarda de forma que un telefono
       // con la version vieja (que si parte la noche) sume exactamente lo mismo,
@@ -3796,7 +3820,7 @@
       // that was already quoted and billed - history does not move.
       lockedRate = (kind === 'mudanza')
         // Mudanza: un solo precio a toda hora, venga como venga guardado.
-        ? { rateDay:+d.r.d, rateNight:+d.r.d, cutoff:'00:00', cutoffEnd:'00:00', flat:true }
+        ? Object.assign({ rateDay:+d.r.d, rateNight:+d.r.d, cutoff:'00:00', cutoffEnd:'00:00', flat:true }, (+d.r.f > 0 ? { fixed:+d.r.f } : {}))
         : { rateDay:+d.r.d, rateNight:+d.r.n,
             cutoff:String(d.r.c||'17:00').slice(0,5),
             cutoffEnd:String(d.r.e || '00:00').slice(0,5) };
@@ -3817,7 +3841,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-W';
+  const APP_BUILD = '2026-09-06-X';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4257,14 +4281,27 @@
     const box = $('#amgClientCards'); if(!box) return;
     if(AMG_CLIENTS_STATE !== 'loaded'){ box.innerHTML = '<p class="clockhint">' + (cloudOn() ? 'Cargando…' : 'Sin internet.') + '</p>'; return; }
     const act = AMG_CLIENTS.filter(c => c.active !== false), off = AMG_CLIENTS.filter(c => c.active === false);
+    const sum = $('#acListSummary'); if(sum) sum.innerHTML = '<b>Clientes que ya tenemos (' + act.length + ')</b> · toque para ver';
     const card = c => '<button type="button" class="inboxitem acCard" data-id="' + esc(c.id) + '" style="text-align:left;">'
-      + '<span class="who">' + esc(c.name) + (!isManager() ? '' : (c.rate > 0 ? ' <span class="kindtag amg">$' + (+c.rate).toFixed(2) + '/h</span>' : ' <span class="muted" style="font-weight:400;font-size:12px;">precio general</span>')) + '</span>'
+      + '<span class="who">' + esc(c.name) + (!isManager() ? '' : (c.pricing === 'fijo' && c.flat_amount > 0 ? ' <span class="kindtag amg">fijo $' + (+c.flat_amount).toFixed(2) + '</span>' : c.rate > 0 ? ' <span class="kindtag amg">$' + (+c.rate).toFixed(2) + '/h</span>' : ' <span class="muted" style="font-weight:400;font-size:12px;">precio general</span>')) + '</span>'
       + '<span class="when">' + esc([c.phone, c.address, c.contact ? 'contacto: ' + c.contact : ''].filter(Boolean).join(' · ') || 'sin datos todavía · toque para completar') + '</span></button>';
     box.innerHTML = (act.length ? act.map(card).join('') : '<p class="clockhint">Todavía no hay clientes. Agregue el primero abajo.</p>')
       + (off.length ? '<details class="whychip" style="display:block;margin-top:6px;"><summary>Clientes quitados (' + off.length + ')</summary><div class="whytext">' + off.map(c => '<div class="entryrow"><span>' + esc(c.name) + '</span><button type="button" class="minibtn amgcOn" data-id="' + esc(c.id) + '">Volver a activar</button></div>').join('') + '</div></details>' : '');
   }
+  let acPricing = 'hora';
+  function acSetPricing(mode){
+    acPricing = mode === 'fijo' ? 'fijo' : 'hora';
+    if($('#acPricingHora')) $('#acPricingHora').classList.toggle('on', acPricing === 'hora');
+    if($('#acPricingFijo')) $('#acPricingFijo').classList.toggle('on', acPricing === 'fijo');
+    if($('#acRateField')) $('#acRateField').hidden = acPricing !== 'hora';
+    if($('#acFlatField')) $('#acFlatField').hidden = acPricing !== 'fijo';
+  }
+  if($('#acPricingHora')) $('#acPricingHora').addEventListener('click', ()=> acSetPricing('hora'));
+  if($('#acPricingFijo')) $('#acPricingFijo').addEventListener('click', ()=> acSetPricing('fijo'));
   function acFill(c){
     acEditingId = c ? c.id : null;
+    acSetPricing(c && c.pricing === 'fijo' ? 'fijo' : 'hora');
+    if($('#acFlat')) $('#acFlat').value = (c && c.flat_amount > 0) ? +c.flat_amount : '';
     $('#acTitle').textContent = c ? 'Editar cliente' : 'Agregar cliente';
     $('#acName').value = c ? (c.name || '') : ''; $('#acRate').value = (c && c.rate > 0) ? +c.rate : '';
     $('#acPhone').value = c ? (c.phone || '') : ''; $('#acAddress').value = c ? (c.address || '') : '';
@@ -4289,11 +4326,13 @@
   if($('#acSave')) $('#acSave').addEventListener('click', async ()=>{
     const msg = $('#acMsg');
     const name = ($('#acName').value || '').trim().replace(/\s+/g, ' ');
-    const rv = $('#acRate').value !== '' ? +$('#acRate').value : null;
+    const rv = (acPricing === 'hora' && $('#acRate').value !== '') ? +$('#acRate').value : null;
+    const fv = (acPricing === 'fijo' && $('#acFlat').value !== '') ? +$('#acFlat').value : null;
     if(!name){ msg.textContent = 'Escriba el nombre del cliente.'; $('#acName').focus(); return; }
     if(rv !== null && !(rv > 0)){ msg.textContent = 'El precio tiene que ser mayor que 0, o vacío para usar el precio general.'; return; }
+    if(isManager() && acPricing === 'fijo' && !(fv > 0)){ msg.textContent = 'Escriba el precio fijo por mudanza (mayor que 0).'; $('#acFlat').focus(); return; }
     if(!cloudOn()){ msg.textContent = 'Sin internet. Intente cuando tenga señal.'; return; }
-    const row = { name, rate: rv, phone: ($('#acPhone').value || '').trim() || null, address: ($('#acAddress').value || '').trim() || null,
+    const row = { name, rate: rv, pricing: acPricing, flat_amount: acPricing === 'fijo' ? fv : null, phone: ($('#acPhone').value || '').trim() || null, address: ($('#acAddress').value || '').trim() || null,
       email: ($('#acEmail').value || '').trim() || null, contact: ($('#acContact').value || '').trim() || null, note: ($('#acNote').value || '').trim() || null, updated_at: new Date().toISOString() };
     const b = $('#acSave'); b.disabled = true; const old = b.textContent; b.textContent = 'Guardando…';
     if(!isManager()){
@@ -4315,7 +4354,7 @@
       else if(dup) await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(dup.id), Object.assign(row, { active: true }));
       else { delete row.updated_at; await amgClientsWrite('POST', '', Object.assign(row, { active: true })); }
       await loadAmgClients(); paintAmgClientCards(); paintAmgClients(); paintAmgPriceWarn();
-      const done = acEditingId ? 'Cambios guardados ✓' : name + ' agregado ✓' + (rv !== null ? ' a $' + rv.toFixed(2) + '/h por persona' : ' (usa el precio general)');
+      const done = acEditingId ? 'Cambios guardados ✓' : name + ' agregado ✓' + (acPricing === 'fijo' ? ' a precio fijo $' + fv.toFixed(2) + ' por mudanza' : (rv !== null ? ' a $' + rv.toFixed(2) + '/h por persona' : ' (usa el precio general)'));
       acFill(null); msg.textContent = done + ' Los reportes ya mandados no cambian de precio.';
     }catch(err){ msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
     b.disabled = false; b.textContent = old;
@@ -4324,7 +4363,7 @@
   function paintAmgClients(){
     const box = $('#amgClientsList'); if(!box) return;
     if(!AMG_CLIENTS.length){ box.innerHTML = '<p class="clockhint">Todavía no hay clientes guardados' + (cloudOn() ? '' : ' (sin internet)') + '. Si no aparece nada después de unos segundos, falta correr supabase-amg-clients.sql.</p>'; return; }
-    const row = c => '<div class="entryrow" style="align-items:center;"><span><span class="who">' + esc(c.name) + '</span><br><span class="when">' + (c.rate > 0 ? '$' + (+c.rate).toFixed(2) + '/h por persona' : 'sin precio propio: usa el general') + '</span></span>'
+    const row = c => '<div class="entryrow" style="align-items:center;"><span><span class="who">' + esc(c.name) + '</span><br><span class="when">' + (c.pricing === 'fijo' && c.flat_amount > 0 ? 'precio fijo $' + (+c.flat_amount).toFixed(2) + ' por mudanza (cámbielo en Clientes)' : c.rate > 0 ? '$' + (+c.rate).toFixed(2) + '/h por persona' : 'sin precio propio: usa el general') + '</span></span>'
       + '<span style="display:flex;gap:6px;align-items:center;"><input type="number" class="amgcRate" data-id="' + esc(c.id) + '" step="0.01" inputmode="decimal" placeholder="general" value="' + (c.rate > 0 ? (+c.rate) : '') + '" style="width:92px;">'
       + '<button type="button" class="minibtn amgcSave" data-id="' + esc(c.id) + '">Guardar</button><button type="button" class="minibtn amgcOff" data-id="' + esc(c.id) + '" title="Quitar de la lista">✕</button></span></div>';
     const act = AMG_CLIENTS.filter(c => c.active !== false), off = AMG_CLIENTS.filter(c => c.active === false);
@@ -5755,6 +5794,7 @@
     const mg = formKind() === 'mudanza';
     let total = 0, html = '', anyNoPrice = false;
     if(mg) html += `<div style="color:var(--amg); font-weight:700; letter-spacing:.04em;">AMG MOVING &middot; reporte de mudanza</div>`;
+    const cfgC = ratesInForce(); if(cfgC && cfgC.fixed > 0 && $$('.shift-card', shiftsContainer).length){ total += +cfgC.fixed; html += `<div class="line"><span>Precio fijo por mudanza</span><span>$${(+cfgC.fixed).toFixed(2)}</span></div>`; }
     $$('.shift-card', shiftsContainer).forEach((card,i)=>{
       const m = shiftMath(card);
       if(m.noPrice) anyNoPrice = true;
@@ -16000,12 +16040,12 @@
     const people = countPeople(sh.n || '');
     const flat = kind === 'mudanza';                 // mudanza: un solo precio a toda hora
     if(r && r.d != null){
-      // Precio congelado en el log: manda, sea la empresa que sea.
-      rd = +r.d; rn = (r.n != null) ? +r.n : 0; cut = r.c || payCfg().cutoff; end = r.e || '00:00';
+      // Precio congelado en el log: manda, sea la empresa que sea. Con precio fijo (r.f) las horas no cobran.
+      rd = (+r.f > 0) ? 0 : +r.d; rn = (+r.f > 0) ? 0 : ((r.n != null) ? +r.n : 0); cut = r.c || payCfg().cutoff; end = r.e || '00:00';
     }else if(flat){
       const m = mgClientPrice(client);
       if(!m) return { people, ok:false, noPrice:true, regH:0, otH:0, extra:0, amount:0 };
-      rd = m.rateDay; rn = m.rateDay; cut = '00:00'; end = '00:00';
+      rd = (m.fixed > 0) ? 0 : m.rateDay; rn = rd; cut = '00:00'; end = '00:00';
     }else{
       const cfg = payCfg();
       rd = +cfg.rateDay || 0; rn = +cfg.rateNight || 0; cut = cfg.cutoff; end = '00:00';
@@ -16018,8 +16058,10 @@
     const amount = people*(regH*rd + otH*rn) + extra;
     return { people, ok:true, regH, otH, extra, amount };
   }
+  // El precio fijo de un reporte: el congelado (r.f) o, si el reporte no trae precio, el del cliente hoy.
+  function rowFixed(row){ const p = (row && row.payload) || {}; if(p.r && p.r.d != null) return logFixed(p.r); if(row && row.work_kind === 'mudanza'){ const m = mgClientPrice(p.t); return (m && m.fixed > 0) ? +m.fixed : 0; } return 0; }
   function addrMatchTotal(matches){
-    return matches.reduce((s,m) => s + m.shifts.reduce((s2,sh) =>
+    return matches.reduce((s,m) => s + (m.shifts.length ? rowFixed(m.row) : 0) + m.shifts.reduce((s2,sh) =>
       s2 + shiftMathData(sh, m.row && m.row.payload && m.row.payload.r, m.row && m.row.work_kind, m.row && m.row.payload && m.row.payload.t).amount, 0), 0);
   }
   const addrAnyNoPrice = matches => matches.some(m => m.shifts.some(sh => shiftMathData(sh, m.row && m.row.payload && m.row.payload.r, m.row && m.row.work_kind, m.row && m.row.payload && m.row.payload.t).noPrice));
@@ -17400,8 +17442,9 @@
     finLogs.forEach(l => {
       const p = l.payload || {}; const name = normClient(p.t) || '(sin cliente)'; const c = get(clientKey(name)); c.name = c.name || name;
       let amt = 0, np = false;
-      (p.s || []).forEach(sh => {
+      (p.s || []).forEach((sh, i) => {
         const m = shiftMathData(sh, p.r, 'mudanza', p.t); if(m.noPrice) np = true; amt += m.amount || 0; c.hours += (m.regH || 0) * (m.people || 0);
+        if(i === 0) amt += rowFixed(l);                                 // precio fijo por mudanza: una vez por reporte
         // Quien trabajo en esa mudanza: cada nombre del turno, sus horas y su tarifa de AMG.
         const mins = hoursBetween(sh.f, sh.o); const h = (mins === null) ? 0 : mins/60;
         splitNames(sh.n).forEach(nm => {
@@ -17584,7 +17627,7 @@
     const mePut = putBy(meKey); const partnerKey = partner ? partner.kind + ':' + ((partner.id === null || partner.id === undefined) ? partner.name : partner.id) : null; const partnerPut = partnerKey ? putBy(partnerKey) : 0;
     const otherPut = exps.reduce((s, r) => s + (+r.amount||0), 0) - mePut - partnerPut - putByCompany;
     const heldByPartner = partnerKey ? pays.filter(r => r.kind === 'pago' && !r.delivered_at && personKeyOf(r) === partnerKey).reduce((s, r) => s + (+r.amount||0), 0) : 0;
-    const billed = logs.reduce((s, l) => s + ((l.payload||{}).s||[]).reduce((s2, sh) => s2 + (shiftMathData(sh, (l.payload||{}).r, 'mudanza', (l.payload||{}).t).amount || 0), 0), 0);
+    const billed = logs.reduce((s, l) => s + (((l.payload||{}).s||[]).length ? rowFixed(l) : 0) + ((l.payload||{}).s||[]).reduce((s2, sh) => s2 + (shiftMathData(sh, (l.payload||{}).r, 'mudanza', (l.payload||{}).t).amount || 0), 0), 0);
     const payLines = pays.map(r => ({ date: r.paid_on, method: FIN_METHOD[r.method] || r.method, by: whoLabel(r.received_by_kind, r.received_by_name), amount: +r.amount||0, delivered: !!r.delivered_at }));
     const expLines = exps.map(r => ({ date: r.spent_on, what: FIN_WHAT[r.what] || r.what, by: whoLabel(r.paid_by_kind, r.paid_by_name), amount: +r.amount||0, fixed: FIN_FIXED.includes(r.what) }));
     lastCierre = { from, to, client, notes, cobrado, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner };
