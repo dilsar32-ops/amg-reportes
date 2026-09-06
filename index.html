@@ -2424,6 +2424,7 @@
       </div>
       <div id="finMGastos">
         <div class="mgrtools" style="margin:0 0 8px;"><button type="button" class="minibtn" id="finMAddGasto">+ Agregar gasto (seguro, storage, otro)</button></div>
+        <div id="finMGastoSlot"></div>
         <div class="seg"><button type="button" class="on" id="finGSegOpen">Por devolver</button><button type="button" id="finGSegAll">Todos por mes</button></div>
         <div class="field" id="finGMonthField" hidden><label>Mes</label><input type="month" id="finGMonth"></div>
         <div id="finGOwed"></div>
@@ -2431,6 +2432,7 @@
       </div>
       <div id="finMPagos" hidden>
         <div class="mgrtools" style="margin:0 0 8px;"><button type="button" class="minibtn" id="finMAddPago">+ Agregar pago o ajuste</button></div>
+        <div id="finMPagoSlot"></div>
         <div class="seg"><button type="button" class="on" id="finPSegClients">Por cliente</button><button type="button" id="finPSegHeld">En manos de</button></div>
         <div id="finPClients"></div>
         <div id="finPHeld" hidden></div>
@@ -2609,6 +2611,8 @@
 
   function showTab(name){
     commitPending();
+    if(typeof finCardsHome === 'function') finCardsHome();        // ningun formulario prestado se queda fuera de su pantalla
+
     if(name !== 'labor') laborFormOpen = false;
     $$('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
     $$('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === name));
@@ -4110,7 +4114,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AU';
+  const APP_BUILD = '2026-09-06-AV';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -5165,6 +5169,7 @@
   const AMG_TILE_HINT = 'Todo lo de mudanza: horas, tarifas y reportes de mudanza';
   function paintAmgTile(){ const h = $('#menuAmgHint'); if(h) h.textContent = AMG_TILE_HINT; }
   function amgShow(which){
+    if(typeof finCardsHome === 'function') finCardsHome();
     const map = [['hours','#amgSegHours','#amgHoursBox'],
                  ['price','#amgSegPrice','#amgPriceBox'],
                  ['code', '#amgSegCode', '#amgCodeBox'],
@@ -18034,6 +18039,8 @@
       msg.style.color = photoNote ? 'var(--danger)' : 'var(--green)';
       $('#g-amount').value = ''; $('#g-note').value = ''; finPhoto.g = null; paintPhoto('g');
       loadFinMine();
+      // Si lo anoto el manager desde su propia pantalla, su lista de gastos se refresca ahi mismo.
+      if($('#finGastoCard') && $('#finMGastoSlot') && $('#finGastoCard').parentNode === $('#finMGastoSlot') && typeof loadFinAll === 'function') loadFinAll();
     }catch(e){ msg.textContent = 'No se pudo guardar. ' + ((e && e.message) || 'Revise su internet.'); msg.style.color = 'var(--danger)'; }
     btn.disabled = false; btn.textContent = old;
   }
@@ -18068,6 +18075,7 @@
       msg.style.color = photoNote ? 'var(--danger)' : 'var(--green)';
       $('#p-amount').value = ''; $('#p-note').value = ''; finPhoto.p = null; paintPhoto('p');
       loadFinMine();
+      if($('#finPagoCard') && $('#finMPagoSlot') && $('#finPagoCard').parentNode === $('#finMPagoSlot') && typeof loadFinAll === 'function') loadFinAll();
     }catch(e){ msg.textContent = 'No se pudo guardar. ' + ((e && e.message) || 'Revise su internet.'); msg.style.color = 'var(--danger)'; }
     btn.disabled = false; btn.textContent = old;
   }
@@ -18156,6 +18164,7 @@
 
   // ---- lado del manager: AMG Moving -> Finanzas ----
   function finMShow(which){
+    if(typeof finCardsHome === 'function') finCardsHome();       // el formulario no se queda abierto en otra pastilla
     [['gastos','#finMSegGastos','#finMGastos'],['pagos','#finMSegPagos','#finMPagos'],['cierre','#finMSegCierre','#finMCierre']].forEach(([k, b, c]) => {
       const btn = $(b), box = $(c); const on = k === which;
       if(btn) btn.classList.toggle('on', on); if(box) box.hidden = !on;
@@ -18165,8 +18174,34 @@
   if($('#finMSegGastos')) $('#finMSegGastos').addEventListener('click', ()=> finMShow('gastos'));
   if($('#finMSegPagos'))  $('#finMSegPagos').addEventListener('click',  ()=> finMShow('pagos'));
   if($('#finMSegCierre')) $('#finMSegCierre').addEventListener('click', ()=> finMShow('cierre'));
-  if($('#finMAddGasto')) $('#finMAddGasto').addEventListener('click', ()=>{ showTab('finanzas'); pushBack('amgmoving'); finShow('gasto'); });
-  if($('#finMAddPago'))  $('#finMAddPago').addEventListener('click',  ()=>{ showTab('finanzas'); pushBack('amgmoving'); finShow('pago'); });
+  // El manager anota el gasto AQUI MISMO. Es el mismo formulario de la pantalla Finanzas (los mismos
+  // campos y el mismo Guardar): se mueve a la ranura y se regresa a su lugar al cerrarlo, para que no
+  // haya dos formularios que mantener ni dos ids iguales.
+  const FIN_HOME = {};
+  function finRememberHome(id){
+    const el = $('#' + id); if(!el || FIN_HOME[id]) return;
+    FIN_HOME[id] = { parent: el.parentNode, next: el.nextSibling };
+  }
+  function finCardHome(id){
+    const el = $('#' + id), h = FIN_HOME[id]; if(!el || !h || !h.parent) return;
+    if(el.parentNode !== h.parent) h.parent.insertBefore(el, h.next && h.next.parentNode === h.parent ? h.next : null);
+    el.hidden = true;
+  }
+  function finCardsHome(){ finCardHome('finGastoCard'); finCardHome('finPagoCard'); }
+  function finMToggle(id, slotId, btnId){
+    finRememberHome(id);
+    const el = $('#' + id), slot = $('#' + slotId), btn = $('#' + btnId); if(!el || !slot) return;
+    const open = el.parentNode === slot && !el.hidden;
+    if(open){ finCardHome(id); if(btn) btn.classList.remove('on'); return; }
+    finCardsHome();                                   // solo uno abierto a la vez
+    [['finMAddGasto'], ['finMAddPago']].forEach(([b]) => { const x = $('#' + b); if(x) x.classList.remove('on'); });
+    slot.appendChild(el); el.hidden = false; if(btn) btn.classList.add('on');
+    if(typeof paintFinForms === 'function') paintFinForms();
+    if(typeof loadPeople === 'function') loadPeople().then(()=>{ if(typeof paintFinForms === 'function') paintFinForms(); });
+    el.scrollIntoView({ block:'start' });
+  }
+  if($('#finMAddGasto')) $('#finMAddGasto').addEventListener('click', ()=> finMToggle('finGastoCard', 'finMGastoSlot', 'finMAddGasto'));
+  if($('#finMAddPago'))  $('#finMAddPago').addEventListener('click',  ()=> finMToggle('finPagoCard',  'finMPagoSlot',  'finMAddPago'));
   if($('#finGSegOpen')) $('#finGSegOpen').addEventListener('click', ()=>{ finGView = 'open'; renderFinGastos(); });
   if($('#finGSegAll'))  $('#finGSegAll').addEventListener('click',  ()=>{ finGView = 'all'; renderFinGastos(); });
   if($('#finGMonth'))   $('#finGMonth').addEventListener('change', renderFinGastos);
