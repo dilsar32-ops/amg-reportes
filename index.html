@@ -836,6 +836,7 @@
   .entryrow.otherside{ opacity:.5; }
   .navbar button[hidden]{display:none !important;}
   #mgrHomeBtns[hidden]{display:none !important;}
+  #lClientField[hidden], #lClientOtherField[hidden], #lTeamField[hidden]{display:none !important;}
 </style>
 </head>
 <body>
@@ -1010,7 +1011,7 @@
         <b>Reloj / Horas</b><small>Marcar la hora que entró y la que salió</small></button>
       <button type="button" class="menubtn" data-go-tab="labor" data-side="restauracion mudanza manager">
         <b id="laborTileTitle">Labor / Mano de Obra</b><small id="laborTileHint">Reporte del día y enviarlo al manager</small></button>
-      <button type="button" class="menubtn amg" data-go-tab="amgmoving" data-side="mudanza manager">
+      <button type="button" class="menubtn amg" data-go-tab="amgmoving" data-side="manager">
         <b>&#128666; AMG Moving<span class="badge" id="menuAmgBadge" hidden></span></b><small id="menuAmgHint">Todo lo de mudanza: horas, tarifas y reportes de mudanza</small></button>
       <button type="button" class="menubtn" data-go-tab="equipment" data-side="restauracion manager">
         <b>Equipment / Equipo</b><small>Contar el equipo instalado</small></button>
@@ -1100,8 +1101,20 @@
       <input type="hidden" id="l-kind" value="restauracion">
       <div class="row2">
         <div class="field"><label>Date / Fecha</label><input type="date" id="l-date"></div>
-        <div class="field"><label>Team / Equipo</label><input type="text" id="l-team" placeholder="Team 1 / Equipo 1"></div>
+        <div class="field" id="lTeamField"><label>Team / Equipo</label><input type="text" id="l-team" placeholder="Team 1 / Equipo 1"></div>
+        <!-- Solo en un reporte de mudanza: el cliente de la mudanza. Lo que se
+             escoge aqui se guarda en #l-team, asi el reporte, el PDF y la
+             busqueda siguen leyendo el mismo campo de siempre. -->
+        <div class="field" id="lClientField" hidden><label>Cliente</label>
+          <select id="l-client">
+            <option value="">Escoja el cliente</option>
+            <option value="Robert">Robert</option>
+            <option value="Susan">Susan</option>
+            <option value="Sami">Sami</option>
+            <option value="Otro">Otro</option>
+          </select></div>
       </div>
+      <div class="field" id="lClientOtherField" hidden><label>¿Qué cliente?</label><input type="text" id="l-client-other" placeholder="Nombre del cliente" autocomplete="off"></div>
       <div class="field"><label>Crew Leader / Líder de Cuadrilla</label><input type="text" id="l-leader" placeholder="Name / Nombre"></div>
     </section>
 
@@ -2497,8 +2510,11 @@
     if(jh) jh.innerHTML = '<span class="num">1</span>' + (mg ? 'Move Info / Información de la mudanza' : 'Job Info / Información del Trabajo');
     if(FLOWS.labor && FLOWS.labor[0]) FLOWS.labor[0].t = mg ? 'Información de la mudanza' : 'Información del trabajo';
     const setLbl = (input, txt, ph) => { if(!input) return; const fld = input.closest('.field'); const l = fld && fld.querySelector('label'); if(l) l.textContent = txt; if(ph != null) input.placeholder = ph; };
-    setLbl($('#l-team'),   mg ? 'Crew / Cuadrilla de mudanza' : 'Team / Equipo', mg ? 'Cuadrilla 1' : 'Team 1 / Equipo 1');
-    setLbl($('#l-leader'), mg ? 'Move Lead / Encargado de la mudanza' : 'Crew Leader / Líder de Cuadrilla', mg ? 'Nombre' : 'Name / Nombre');
+    setLbl($('#l-leader'), mg ? 'Líder del grupo' : 'Crew Leader / Líder de Cuadrilla', mg ? 'Nombre' : 'Name / Nombre');
+    // Mudanza: en vez de "Equipo" se escoge el CLIENTE de la mudanza.
+    const tf = $('#lTeamField'); if(tf) tf.hidden = mg;
+    const cf = $('#lClientField'); if(cf) cf.hidden = !mg;
+    if(mg) paintClientFromTeam(); else { const of = $('#lClientOtherField'); if(of) of.hidden = true; }
     $$('.shift-card', panel).forEach(c => paintShiftLabels(c, mg));
     ['#mgrRateToggle','#mgrCodesToggle'].forEach(sel => { const el = $(sel); if(el) el.hidden = mg; });
     const fold = panel.querySelector('details.mgrfold'); if(fold) fold.hidden = mg;
@@ -2508,6 +2524,27 @@
     const st = $('#secTitle'); if(st && panel.classList.contains('active') && !document.body.classList.contains('menu')) st.textContent = mg ? 'Reporte de mudanza' : SECTION_NAMES.labor;
     paintCompanyHeader();
   }
+  // ---- Cliente de la mudanza: el select escribe en #l-team (el campo de siempre) ----
+  const CLIENT_OPTIONS = ['Robert','Susan','Sami'];
+  function clientToTeam(){
+    const sel = $('#l-client'), other = $('#l-client-other'), of = $('#lClientOtherField'), team = $('#l-team');
+    if(!sel || !team) return;
+    const otro = sel.value === 'Otro';
+    if(of) of.hidden = !otro;
+    team.value = otro ? ((other && other.value) || '').trim() : sel.value;
+    if(typeof saveDraft === 'function') saveDraft();
+  }
+  // Al abrir un reporte guardado (o volver de un borrador): el select refleja lo que hay en #l-team.
+  function paintClientFromTeam(){
+    const sel = $('#l-client'), other = $('#l-client-other'), of = $('#lClientOtherField'), team = $('#l-team');
+    if(!sel || !team) return;
+    const t = (team.value || '').trim();
+    if(!t){ sel.value = ''; if(other) other.value = ''; if(of) of.hidden = true; return; }
+    if(CLIENT_OPTIONS.includes(t)){ sel.value = t; if(other) other.value = ''; if(of) of.hidden = true; }
+    else { sel.value = 'Otro'; if(other) other.value = t; if(of) of.hidden = false; }
+  }
+  if($('#l-client')) $('#l-client').addEventListener('change', clientToTeam);
+  if($('#l-client-other')) $('#l-client-other').addEventListener('input', clientToTeam);
   // Los rotulos de cada turno, segun la empresa del formulario.
   function paintShiftLabels(card, mg){
     if(!card) return;
@@ -2581,7 +2618,10 @@
     const steps = stepsFor(tab);
     const cur = steps[stepIdx[tab] || 0];
     if(panel && cur && cur.k === 'job' && !skipSteps){
-      const missing = (STEP_REQUIRED[tab] || []).filter(id => {
+      const req = (tab === 'labor' && formKind() === 'mudanza')
+        ? ['l-date', (($('#l-client')||{}).value === 'Otro' ? 'l-client-other' : 'l-client'), 'l-leader']
+        : (STEP_REQUIRED[tab] || []);
+      const missing = req.filter(id => {
         const el = $('#' + id);
         return el && !String(el.value || '').trim();
       });
@@ -2634,7 +2674,7 @@
       ${companyLine}
       <div class="line"><span>Fecha</span><span>${esc($('#l-date').value || '—')}</span></div>
       <div class="line"><span>${formKind() === 'mudanza' ? 'Encargado' : 'Líder'}</span><span>${esc($('#l-leader').value || '—')}</span></div>
-      ${$('#l-team').value ? `<div class="line"><span>Equipo</span><span>${esc($('#l-team').value)}</span></div>` : ''}
+      ${$('#l-team').value ? `<div class="line"><span>${formKind() === 'mudanza' ? 'Cliente' : 'Equipo'}</span><span>${esc($('#l-team').value)}</span></div>` : ''}
       <div class="line"><span>Turnos</span><span>${cards.length}</span></div>
       ${rows}
     </div>`;
@@ -3454,6 +3494,7 @@
     if($('#l-kind')) $('#l-kind').value = kind;
     d = d || {};
     $('#l-date').value = d.d||''; $('#l-team').value = d.t||''; $('#l-leader').value = d.l||'';
+    paintClientFromTeam();
     shiftsContainer.innerHTML = '';
     (d.s||[]).forEach(sh=>{
       addShift();
@@ -3489,7 +3530,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-D';
+  const APP_BUILD = '2026-09-06-E';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -5739,8 +5780,8 @@
       <div style="padding:28px 32px;">
         <table style="width:100%; border-collapse:collapse; margin-bottom:20px; font-size:14px;">
           <tr><td style="padding:5px 0; width:140px; color:#3A4552;"><b>Date</b></td><td style="padding:5px 0;">${date}</td>
-              <td style="padding:5px 0; width:140px; color:#3A4552;"><b>${mg ? 'Crew' : 'Team'}</b></td><td style="padding:5px 0;">${team}</td></tr>
-          <tr><td style="padding:5px 0;"><b>${mg ? 'Move Lead' : 'Crew Leader'}</b></td><td colspan="3" style="padding:5px 0;">${leader}</td></tr>
+              <td style="padding:5px 0; width:140px; color:#3A4552;"><b>${mg ? 'Client' : 'Team'}</b></td><td style="padding:5px 0;">${team}</td></tr>
+          <tr><td style="padding:5px 0;"><b>${mg ? 'Group Lead' : 'Crew Leader'}</b></td><td colspan="3" style="padding:5px 0;">${leader}</td></tr>
         </table>
         <table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:12px;">${shiftsHtml}</table>
         ${mgrView ? `<div style="text-align:right; font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700; color:#A84813;">GRAND TOTAL: ${grandTotal}</div>` : ''}
@@ -5767,6 +5808,7 @@
     $('#l-date').value = todayStr();
     $('#l-team').value = ''; $('#l-leader').value = '';
     if($('#l-kind')) $('#l-kind').value = laborMode;
+    paintClientFromTeam();
     shiftsContainer.innerHTML = '';
     addShift();
     recalcGrandTotal();
