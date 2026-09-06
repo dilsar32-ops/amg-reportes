@@ -846,7 +846,7 @@
   #lClientField[hidden], #lClientOtherField[hidden], #lTeamField[hidden]{display:none !important;}
   /* ---- Finanzas de AMG ---- */
   .l-ex-row .l-ex-head{display:flex; justify-content:space-between; align-items:center; margin:8px 0 2px;}
-  #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acFlatField[hidden], #acPricingBox[hidden], #acCrewHint[hidden], #acRemove[hidden], #acListCard[hidden], #acPickField[hidden], #acExistsHint[hidden], #acNameField[hidden], #acBillToField[hidden], .l-ex-other-wrap[hidden], #invNew[hidden], #invList[hidden], #invFrom[hidden], #invPreviewWrap[hidden],
+  #convInvoice[hidden], #convInvoiceHint[hidden], #invLogsBtns[hidden], #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acFlatField[hidden], #acPricingBox[hidden], #acCrewHint[hidden], #acRemove[hidden], #acListCard[hidden], #acPickField[hidden], #acExistsHint[hidden], #acNameField[hidden], #acBillToField[hidden], .l-ex-other-wrap[hidden], #invNew[hidden], #invList[hidden], #invFrom[hidden], #invPreviewWrap[hidden],
   #finMGastos[hidden], #finMPagos[hidden], #finMCierre[hidden], #finPClients[hidden], #finPHeld[hidden], #finGMonthField[hidden], #finCPdf[hidden],
   .s-gas-row[hidden], .s-gas-other-wrap[hidden], .s-gas-hint[hidden]{display:none !important;}
   /* La pantalla es para trabajar: fuera la linea de idiomas y los avisos
@@ -1105,6 +1105,8 @@
         <div class="convrows" id="convRows"></div>
         <button class="btn btn-ink" type="button" id="convPdf" style="width:100%; margin-top:10px;">Descargar PDF</button>
         <button class="btn btn-outline" type="button" id="convSave" style="width:100%; margin-top:6px;" hidden>Guardar cambios</button>
+        <button class="btn btn-amg" type="button" id="convInvoice" style="width:100%; margin-top:6px;" hidden>&#129534; Hacer invoice de este cliente</button>
+        <p class="hint" id="convInvoiceHint" hidden style="margin:4px 0 0;"></p>
         <button class="btn btn-outline" type="button" id="convArchive" style="width:100%; margin-top:6px;" hidden>Archivar</button>
         <button class="btn btn-outline" type="button" id="convUnarchive" style="width:100%; margin-top:6px;" hidden>Quitar del archivo</button>
         <button class="btn btn-ghost" type="button" id="convDelete" style="width:100%; margin-top:6px; color:var(--danger);" hidden>Borrar de la lista</button>
@@ -2374,8 +2376,13 @@
           <div class="field"><label>Payment method</label><select id="inv-method"><option>Transfer</option><option>Zelle</option><option>Check</option><option>Cash</option><option>Card</option><option>Other</option></select></div>
         </div>
         <p class="hint" id="invClientInfo"></p>
-        <h2 style="font-size:15px; margin:12px 0 4px;">Reportes de mudanza de este cliente</h2>
-        <p class="clockhint">Marque los reportes que van en este invoice. Cada uno se vuelve una l&iacute;nea <b>Labor service</b> con los trabajadores y las horas del reporte (precio unitario = trabajadores &times; $/hora del cliente).</p>
+        <h2 style="font-size:15px; margin:12px 0 4px;">Sacar el invoice de sus reportes de mudanza</h2>
+        <p class="clockhint">Aqu&iacute; salen <b>solo los reportes de este cliente que todav&iacute;a no est&aacute;n en ning&uacute;n invoice</b>. M&aacute;rquelos y cada uno se vuelve una l&iacute;nea <b>Labor service</b> con los trabajadores y las horas del reporte (precio unitario = trabajadores &times; $/hora del cliente). Si trabajaron seis d&iacute;as, marque los seis y salen todos en un solo invoice.</p>
+        <div class="row2" id="invLogsBtns" hidden style="margin-bottom:6px;">
+          <button type="button" class="btn btn-outline" id="invLogsAll">&#10003; Marcar todos</button>
+          <button type="button" class="btn btn-outline" id="invLogsNone">Quitar todos</button>
+        </div>
+        <p class="hint" id="invLogsSum" style="margin:0 0 6px;"></p>
         <div id="invLogs"><p class="clockhint">Escoja un cliente.</p></div>
         <h2 style="font-size:15px; margin:12px 0 4px;">Materiales</h2>
         <p class="clockhint">Los de su Materials Use Form, al precio que puso en Precio AMG &rarr; Materiales.</p>
@@ -4122,7 +4129,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AR';
+  const APP_BUILD = '2026-09-06-AS';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4607,6 +4614,32 @@
     if(!isManager() || !cloudOn()) return false;
     try{ const res = await authFetch('/rest/v1/amg_materials?select=*&order=sort_order,name', { headers: cloudHeaders() }); if(!res.ok) return false; AMG_MATERIALS = await res.json(); return true; }catch(e){ return false; }
   }
+  // Lo que se pidio desde un reporte recibido: {logId, cid, name}. invOpen lo aplica cuando ya leyo todo.
+  let invPreselect = null;
+  function invGoFromLog(){
+    if(!isManager() || openLogId === null) return;
+    const row = (typeof currentInboxRows === 'function') ? currentInboxRows().find(r => String(r.id) === String(openLogId)) : null;
+    const p = (row && row.payload) || {};
+    invPreselect = { logId: String(openLogId), cid: p.cid ? String(p.cid) : '', name: p.t || '' };
+    showTab('amgmoving'); pushBack('labor'); amgShow('inv');
+  }
+  if($('#convInvoice')) $('#convInvoice').addEventListener('click', invGoFromLog);
+  function invApplyPreselect(){
+    const pre = invPreselect; if(!pre) return; invPreselect = null;
+    const sel = $('#inv-client'); if(!sel) return;
+    const c = AMG_CLIENTS.find(x => pre.cid && String(x.id) === pre.cid)
+           || AMG_CLIENTS.find(x => amgKey(x.name) === amgKey(pre.name));
+    const msg = $('#invMsg');
+    if(!c){ if(msg) msg.textContent = 'Ese reporte no tiene un cliente guardado en la lista. Escoja el cliente a mano.'; return; }
+    if(![...sel.options].some(o => o.value === String(c.id))){ if(msg) msg.textContent = 'No se pudo escoger a ' + c.name + ' solo. Escójalo en la lista.'; return; }
+    sel.value = String(c.id);
+    INV = { lines: [], logIds: [] };
+    const done = invInvoicedLogIds();
+    if(done.has(pre.logId)){ if(msg) msg.textContent = 'Ese reporte ya está en un invoice; se abrió el cliente sin marcarlo.'; }
+    else if(INV_LOGS.some(l => String(l.id) === pre.logId)) INV.logIds = [pre.logId];
+    invPaintLogs(); invRebuildLogLines(); invRender();
+    if(msg && !msg.textContent) msg.textContent = 'Marque los demás días de ' + c.name + ' que quiera cobrar en este mismo invoice.';
+  }
   async function invOpen(){
     if(!isManager()) return;
     if($('#inv-date') && !$('#inv-date').value) $('#inv-date').value = localToday();
@@ -4616,7 +4649,7 @@
     if($('#invSave')) $('#invSave').disabled = !INV_LOADED_OK;
     invPaintClients(); invPaintMaterialSelect();
     if($('#inv-number') && !$('#inv-number').value) $('#inv-number').value = invNextNumber();
-    invPaintLogs(); invRender();
+    if(invPreselect) invApplyPreselect(); else { invPaintLogs(); invRender(); }
     if($('#invList') && !$('#invList').hidden) invRenderList();
   }
   function invPaintMaterialSelect(){
@@ -4723,6 +4756,14 @@
     // Se reconoce el cliente por su id guardado en el reporte (aunque lo hayan renombrado) o, si no, por el nombre.
     const all = INV_LOGS.filter(l => { const p = l.payload || {}; return (p.cid && String(p.cid) === String(c.id)) || clientKey(p.t) === clientKey(c.name); });
     const logs = all.filter(l => !done.has(String(l.id)));
+    const btns = $('#invLogsBtns'), sum = $('#invLogsSum');
+    if(btns) btns.hidden = !logs.length;
+    if(sum){
+      const marked = INV.logIds.length;
+      sum.innerHTML = logs.length
+        ? '<b>' + logs.length + '</b> reporte(s) sin facturar de ' + esc(c.name) + (marked ? ' · <b>' + marked + ' marcado(s)</b>' : '') + (all.length - logs.length ? ' · ' + (all.length - logs.length) + ' ya facturado(s)' : '')
+        : '';
+    }
     if(!all.length){ box.innerHTML = '<p class="clockhint">No hay reportes de mudanza guardados con este cliente.</p>'; return; }
     if(!logs.length){ box.innerHTML = '<p class="clockhint">Todos los reportes de este cliente ya están facturados (' + all.length + ').</p>'; return; }
     const cut = logs.length > 60 ? '<p class="clockhint">Mostrando los 60 reportes más recientes sin facturar de ' + logs.length + '.</p>' : '';
@@ -4743,7 +4784,17 @@
   if($('#invLogs')) $('#invLogs').addEventListener('change', (e) => {
     const chk = e.target.closest('.invLogChk'); if(!chk) return;
     const id = chk.dataset.id; INV.logIds = INV.logIds.filter(x => x !== id); if(chk.checked) INV.logIds.push(id);
+    const sum = $('#invLogsSum'); if(sum && /reporte\(s\) sin facturar/.test(sum.innerHTML)) sum.innerHTML = sum.innerHTML.replace(/ · <b>\d+ marcado\(s\)<\/b>/, '').replace(/(<\/b> reporte\(s\) sin facturar de [^·<]*)/, INV.logIds.length ? '$1· <b>' + INV.logIds.length + ' marcado(s)</b> ' : '$1');
     invRebuildLogLines();
+  });
+  // Todos los dias del cliente de un golpe: es lo normal cuando se trabaja toda la semana para el mismo.
+  if($('#invLogsAll')) $('#invLogsAll').addEventListener('click', ()=>{
+    const ids = $$('#invLogs .invLogChk').map(chk => { chk.checked = true; return chk.dataset.id; });
+    INV.logIds = ids.slice(); invRebuildLogLines(); invPaintLogs(); invRender();
+  });
+  if($('#invLogsNone')) $('#invLogsNone').addEventListener('click', ()=>{
+    $$('#invLogs .invLogChk').forEach(chk => chk.checked = false);
+    INV.logIds = []; invRebuildLogLines(); invPaintLogs(); invRender();
   });
   if($('#inv-client')) $('#inv-client').addEventListener('change', ()=>{ INV = { lines: INV.lines.filter(l => !l.src), logIds: [] }; invPaintLogs(); invRender(); });
   if($('#invAddLine')) $('#invAddLine').addEventListener('click', ()=>{
@@ -6511,6 +6562,19 @@
   function showConversion(){
     const rows = $('#convRows');
     const mg = formKind() === 'mudanza';
+    // Un reporte recibido tiene dos caminos: archivarlo, o hacerle el invoice al cliente.
+    const ib = $('#convInvoice'), ih = $('#convInvoiceHint');
+    const canInv = mg && isManager() && openLogId !== null;
+    if(ib) ib.hidden = !canInv;
+    if(ih){
+      ih.hidden = !canInv;
+      if(canInv){
+        const done = (typeof invInvoicedLogIds === 'function') ? invInvoicedLogIds() : new Set();
+        ih.textContent = done.has(String(openLogId))
+          ? 'Este reporte ya está en un invoice. Ábralo en Invoices → Invoices guardados.'
+          : 'Se abre el invoice con este cliente y este reporte ya marcado. Si trabajaron varios días (como Robert), ahí mismo marque los demás días y salen todos en un solo invoice.';
+      }
+    }
     let total = 0, html = '', anyNoPrice = false;
     if(mg) html += `<div style="color:var(--amg); font-weight:700; letter-spacing:.04em;">AMG MOVING &middot; reporte de mudanza</div>`;
     const cfgC = ratesInForce(); if(cfgC && cfgC.fixed > 0 && $$('.shift-card', shiftsContainer).length){ total += +cfgC.fixed; html += `<div class="line"><span>Precio fijo por mudanza</span><span>$${(+cfgC.fixed).toFixed(2)}</span></div>`; }
