@@ -2371,10 +2371,7 @@
           <div class="field"><label>Cliente</label><select id="inv-client"><option value="">Escoja el cliente</option></select></div>
           <div class="field"><label>Invoice no.</label><input type="number" id="inv-number" inputmode="numeric"></div>
         </div>
-        <div class="row2">
-          <div class="field"><label>Issue date</label><input type="date" id="inv-date"></div>
-          <div class="field"><label>Payment method</label><select id="inv-method"><option>Transfer</option><option>Zelle</option><option>Check</option><option>Cash</option><option>Card</option><option>Other</option></select></div>
-        </div>
+        <div class="field"><label>Issue date</label><input type="date" id="inv-date"></div>
         <p class="hint" id="invClientInfo"></p>
         <h2 style="font-size:15px; margin:12px 0 4px;">Sacar el invoice de sus reportes de mudanza</h2>
         <p class="clockhint">Aqu&iacute; salen <b>solo los reportes de este cliente que todav&iacute;a no est&aacute;n en ning&uacute;n invoice</b>. M&aacute;rquelos y cada uno se vuelve una l&iacute;nea <b>Labor service</b> con los trabajadores y las horas del reporte (precio unitario = trabajadores &times; $/hora del cliente). Si trabajaron seis d&iacute;as, marque los seis y salen todos en un solo invoice.</p>
@@ -4129,7 +4126,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AS';
+  const APP_BUILD = '2026-09-06-AT';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4562,7 +4559,7 @@
   // AMG prendida pero sin precio al cliente: se dice en rojo arriba de las
   // pildoras, porque asi no se puede mandar ningun labor log de AMG.
   // ======================= INVOICES DE AMG MOVING (manager) =======================
-  // Plantilla de Amilcar: encabezado negro AMG / Invoice, banda gris INVOICE NO. - ISSUE DATE - PAYMENT METHOD,
+  // Plantilla de Amilcar: encabezado negro AMG / Invoice, banda gris INVOICE NO. - ISSUE DATE (el metodo de pago se quito),
   // FROM / TO / Total due, tabla DESCRIPTION - QUANTITY - UNIT PRICE ($) - AMOUNT ($), Total (USD).
   // Sin due date ni descuento (su decision). "Labor service" sale del reporte de mudanza: cantidad = horas,
   // precio unitario = trabajadores x $/hora del cliente (2 x $50 = $100).
@@ -4821,7 +4818,7 @@
   // El invoice como objeto (lo que se guarda y lo que se dibuja).
   function invCurrent(){
     const c = invClient();
-    return { number: +($('#inv-number').value || invNextNumber()), issue_date: $('#inv-date').value || localToday(), payment_method: $('#inv-method').value || 'Transfer',
+    return { number: +($('#inv-number').value || invNextNumber()), issue_date: $('#inv-date').value || localToday(),
       client_id: c ? c.id : null, client_name: c ? c.name : '', bill_to: c ? (c.bill_to || '') : '', client_address: c ? (c.address || '') : '', client_phone: c ? (c.phone || '') : '', client_email: c ? (c.email || '') : '',
       sent_by: (SES && SES.full_name) || 'Amilcar', lines: INV.lines.slice(), total: invTotalOf(INV.lines), log_ids: INV.logIds.slice(), status:'sent' };
   }
@@ -4835,10 +4832,9 @@
       +   '<div style="display:flex;align-items:center;gap:14px;">' + (INV_LOGO ? '<img src="' + INV_LOGO + '" style="height:64px;">' : '<div><div style="font-size:44px;font-weight:900;letter-spacing:2px;line-height:1;">AMG</div><div style="font-size:11px;letter-spacing:3px;margin-top:4px;">SOLUTIONS AND SERVICES</div></div>') + '</div>'
       +   '<div style="text-align:right;"><div style="font-size:34px;font-weight:700;line-height:1.1;">' + (receipt ? 'Receipt' : 'Invoice') + '</div><div style="font-size:15px;margin-top:4px;">' + esc(S.from_email || '') + '</div></div>'
       + '</div>'
-      + '<div style="background:#4b5563;color:#fff;padding:14px 30px;font-size:14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 18px;">'
+      + '<div style="background:#4b5563;color:#fff;padding:14px 30px;font-size:14px;display:grid;grid-template-columns:' + (receipt ? '1fr 1fr 1fr' : '1fr 1fr') + ';gap:6px 18px;">'
       +   '<div><b>INVOICE NO.</b> <span style="float:right;">' + esc(inv.number) + '</span></div><div><b>ISSUE DATE</b> <span style="float:right;">' + esc(invDate(inv.issue_date)) + '</span></div>'
-      +   '<div><b>PAYMENT METHOD</b> <span style="float:right;">' + esc(inv.payment_method || '') + '</span></div>'
-      +   (receipt ? '<div><b>PAID ON</b> <span style="float:right;">' + esc(invDate(inv.paid_on)) + '</span></div><div><b>PAID BY</b> <span style="float:right;">' + esc(inv.paid_method || inv.payment_method || '') + '</span></div><div><b>STATUS</b> <span style="float:right;color:#86efac;font-weight:800;">PAID</span></div>' : '')
+      +   (receipt ? '<div><b>PAID ON</b> <span style="float:right;">' + esc(invDate(inv.paid_on)) + '</span></div>' + (inv.paid_method ? '<div><b>PAID BY</b> <span style="float:right;">' + esc(inv.paid_method) + '</span></div>' : '') + '<div><b>STATUS</b> <span style="float:right;color:#86efac;font-weight:800;">PAID</span></div>' : '')
       + '</div>'
       + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid #ddd;">'
       +   '<div style="padding:24px 30px;border-right:1px solid #ddd;font-size:15px;line-height:1.6;"><b style="font-size:16px;">FROM</b><br>' + esc(S.from_name||'') + '<br>' + esc(S.from_addr1||'') + '<br>' + esc(S.from_addr2||'') + '<br>' + esc(S.from_addr3||'') + '<br><br>Sent by: <b>' + esc(inv.sent_by || '') + '</b></div>'
@@ -4862,7 +4858,7 @@
     const inner = wrap.firstElementChild; requestAnimationFrame(() => { wrap.style.height = (inner.firstElementChild.offsetHeight * k) + 'px'; });
   }
   if($('#invPreview')) $('#invPreview').addEventListener('click', invPreview);
-  ['#inv-number','#inv-date','#inv-method'].forEach(sel => { const el = $(sel); if(el) el.addEventListener('change', ()=>{ const pw = $('#invPreviewWrap'); if(pw && !pw.hidden) invPreview(); }); });
+  ['#inv-number','#inv-date'].forEach(sel => { const el = $(sel); if(el) el.addEventListener('change', ()=>{ const pw = $('#invPreviewWrap'); if(pw && !pw.hidden) invPreview(); }); });
   // PDF de una pagina a partir del mismo HTML (html2canvas -> jsPDF), y compartir (Mensajes, Mail, WhatsApp) desde el telefono.
   async function invPdfBlob(inv, kind){
     const node = document.createElement('div'); node.className = 'printout'; node.innerHTML = invHtml(inv, kind); document.body.appendChild(node);
@@ -4939,7 +4935,7 @@
     if(b.classList.contains('invPaid')){
       const d = prompt('¿Qué día pagó ' + inv.client_name + '? (AAAA-MM-DD)', localToday()); if(d === null) return;
       const dd = d.trim(); const dt = new Date(dd + 'T00:00:00'); if(!/^\d{4}-\d{2}-\d{2}$/.test(dd) || isNaN(dt) || dt.toISOString().slice(0, 10) !== dd) return alert('Fecha inválida. Use AAAA-MM-DD (por ejemplo ' + localToday() + ').');
-      const m = prompt('¿Cómo pagó? (Transfer, Zelle, Check, Cash, Card…)', inv.payment_method || 'Transfer'); if(m === null) return;
+      const m = prompt('¿Cómo pagó? (Transfer, Zelle, Check, Cash, Card…) — sale en el recibo', 'Zelle'); if(m === null) return;
       b.disabled = true;
       try{
         const res = await authFetch('/rest/v1/amg_invoices?id=eq.' + encodeURIComponent(inv.id), { method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal'}), body: JSON.stringify({ status:'paid', paid_on: d.trim(), paid_method: (m || '').trim() || null, updated_at: new Date().toISOString() }) });
