@@ -2802,7 +2802,7 @@
     const tf = $('#lTeamField'); if(tf) tf.hidden = mg;
     const cf = $('#lClientField'); if(cf) cf.hidden = !mg;
     if(mg){ paintClientOptions(); paintClientFromTeam(); } else { const of = $('#lClientOtherField'); if(of) of.hidden = true; }
-    if(mg && typeof loadPeople === 'function' && !FIN_PEOPLE.length) loadPeople().then(() => $$('.shift-card', panel).forEach(c => paintShiftLabels(c, true)));
+    if(mg && typeof loadPeople === 'function' && !FIN_PEOPLE.length) loadPeople().then(() => { $$('.shift-card', panel).forEach(c => paintShiftLabels(c, true)); $$('.l-ex-who', panel).forEach(repaintWhoKeep); });
     $$('.shift-card', panel).forEach(c => paintShiftLabels(c, mg));
     ['#mgrRateToggle','#mgrCodesToggle'].forEach(sel => { const el = $(sel); if(el) el.hidden = mg; });
     const fold = panel.querySelector('details.mgrfold'); if(fold) fold.hidden = mg;
@@ -2815,16 +2815,19 @@
   // ---- Cliente de la mudanza: el select escribe en #l-team (el campo de siempre) ----
   // ---- Materiales del reporte de mudanza (los del Materials Use Form). El crew ve nombres; los precios son del manager. ----
   const MAT_DEFAULTS = ['Small Boxes','Medium Boxes','Large Boxes','Wardrobe Boxes','Paper Pad','Blankets','Packing Paper','Tape','Mattress Bags','Stretch Wrap'];
-  let MAT_NAMES = [];
+  let MAT_NAMES = []; try{ MAT_NAMES = JSON.parse(localStorage.getItem('matNames:v1') || '[]') || []; }catch(e){ MAT_NAMES = []; }
   const matSlug = n => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   // Dibuja la lista de materiales con cantidades; conserva lo ya escrito y agrega los nombres que vengan en `extra`.
   function paintMatList(extra){
     const box = document.getElementById('lMatList'); if(!box) return;
-    const cur = {}; box.querySelectorAll('.l-mat-q').forEach(i => { if(i.value !== '') cur[i.dataset.name] = i.value; });
-    (extra || []).forEach(m => { if(m && m.n && m.q > 0) cur[m.n] = m.q; });
+    // Cantidades por llave (sin importar mayusculas/espacios); si un nombre aparece dos veces, se suman.
+    const cur = {}, label = {};
+    const add = (n, q) => { const k = amgKeyLite(n); if(!k) return; const v = parseFloat(q); if(!(v > 0)) return; cur[k] = (cur[k] || 0) + v; if(!label[k]) label[k] = String(n).trim(); };
+    box.querySelectorAll('.l-mat-q').forEach(i => add(i.dataset.name, i.value));
+    (extra || []).forEach(m => { if(m && m.n) add(m.n, m.q); });
     const names = (MAT_NAMES.length ? MAT_NAMES : MAT_DEFAULTS).slice();
-    Object.keys(cur).forEach(n => { if(!names.some(x => amgKeyLite(x) === amgKeyLite(n))) names.push(n); });
-    box.innerHTML = names.map(n => '<div class="entryrow" style="align-items:center;"><span class="who">' + esc(n) + '</span><input type="number" class="l-mat-q" id="l-mat-q-' + esc(matSlug(n)) + '" data-name="' + esc(n) + '" step="1" inputmode="decimal" placeholder="0" value="' + esc(cur[n] !== undefined ? cur[n] : '') + '" style="width:96px;"></div>').join('');
+    Object.keys(cur).forEach(k => { if(!names.some(x => amgKeyLite(x) === k)) names.push(label[k]); });
+    box.innerHTML = names.map(n => { const k = amgKeyLite(n); return '<div class="entryrow" style="align-items:center;"><span class="who">' + esc(n) + '</span><input type="number" class="l-mat-q" id="l-mat-q-' + esc(matSlug(n)) + '" data-name="' + esc(n) + '" step="1" inputmode="decimal" placeholder="0" value="' + esc(cur[k] !== undefined ? cur[k] : '') + '" style="width:96px;"></div>'; }).join('');
   }
   const amgKeyLite = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
   paintMatList();   // desde el arranque, con los 10 de su formulario: asi el borrador guardado encuentra sus casillas
@@ -2834,13 +2837,20 @@
       let rows = null;
       if(isManager()){ const res = await authFetch('/rest/v1/amg_materials?select=id,name,unit_label,sort_order&active=eq.true&order=sort_order,name', { headers: cloudHeaders() }); if(res.ok) rows = await res.json(); }
       else { const res = await authFetch('/rest/v1/rpc/amg_material_names', { method:'POST', headers: cloudHeaders(), body: '{}' }); if(res.ok) rows = await res.json(); }
-      if(Array.isArray(rows) && rows.length){ MAT_NAMES = rows.map(r => String(r.name).trim()).filter(Boolean); paintMatList(); }
+      if(Array.isArray(rows) && rows.length){
+        const names = rows.map(r => String(r.name).trim()).filter(Boolean);
+        const changed = JSON.stringify(names) !== JSON.stringify(MAT_NAMES);
+        MAT_NAMES = names; try{ localStorage.setItem('matNames:v1', JSON.stringify(names)); }catch(e){}
+        const typing = document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('l-mat-q');
+        if(changed && !typing) paintMatList();               // no se le quita la casilla de las manos a nadie
+      }
     }catch(e){}
   }
   // Lo que se anoto en el paso Materiales y gastos, para el payload / la revision / el PDF.
   function matFromForm(){
     const mat = []; $$('.l-mat-q').forEach(i => { const q = +i.value; if(q > 0) mat.push({ n: i.dataset.name, q }); });
-    const on = (($('#l-mat-other') || {}).value || '').trim(), oq = +(($('#l-mat-other-q') || {}).value || 0); if(on && oq > 0) mat.push({ n: on, q: oq });
+    const on = (($('#l-mat-other') || {}).value || '').trim(), oq = +(($('#l-mat-other-q') || {}).value || 0);
+    if(on && oq > 0){ const same = mat.find(m => amgKeyLite(m.n) === amgKeyLite(on)); if(same) same.q += oq; else mat.push({ n: on, q: oq }); }
     return mat;
   }
   function exFromForm(){
@@ -3050,6 +3060,27 @@
         }
         const first = $('#' + missing[0]);
         if(first){ first.scrollIntoView({block:'center'}); try{ first.focus(); }catch(e){} }
+        return;
+      }
+    }
+    if(panel && cur && cur.k === 'mat' && !skipSteps){
+      // Un gasto a medias (monto sin tipo, tipo sin monto, sin quien pago) no se manda a medias: se avisa aqui.
+      const bad = [];
+      [1,2,3].forEach(n => {
+        const w = ($('#l-ex-what-' + n) || {}).value || '', a = parseFloat(($('#l-ex-amt-' + n) || {}).value), s = $('#l-ex-who-' + n);
+        const has = !!w || (a > 0); if(!has) return;
+        if(!w) bad.push('l-ex-what-' + n);
+        if(!(a > 0)) bad.push('l-ex-amt-' + n);
+        if(s && !s.value) bad.push('l-ex-who-' + n);
+        if(s && s.value === 'x' && !((($('#l-ex-other-' + n) || {}).value || '').trim())) bad.push('l-ex-other-' + n);
+      });
+      const on = (($('#l-mat-other') || {}).value || '').trim(), oq = +(($('#l-mat-other-q') || {}).value || 0);
+      if(on && !(oq > 0)) bad.push('l-mat-other-q'); if(!on && oq > 0) bad.push('l-mat-other');
+      if(bad.length){
+        clearStepWarning(panel);
+        bad.forEach(id => { const el = $('#' + id), f = el && el.closest('.field'); if(f){ f.classList.add('missing'); f.hidden = false; } });
+        const w = panel.querySelector('.stepwarn'); if(w){ w.textContent = 'Complete el gasto o material marcado (qué fue, cuánto y quién lo pagó), o bórrelo.'; w.hidden = false; }
+        const first = $('#' + bad[0]); if(first){ first.scrollIntoView({block:'center'}); try{ first.focus(); }catch(e){} }
         return;
       }
     }
@@ -4015,7 +4046,7 @@
     if($('#l-truck')) $('#l-truck').value = (kind === 'mudanza' && d.tr) ? d.tr : '';
     if($('#lMatList')){ $$('.l-mat-q').forEach(i => i.value = ''); if($('#l-mat-other')){ $('#l-mat-other').value = ''; $('#l-mat-other-q').value = ''; } if(kind === 'mudanza') paintMatList(d.mat || []); }
     [1,2,3].forEach(n => { const e = (kind === 'mudanza' && d.ex) ? d.ex[n-1] : null; const w = $('#l-ex-what-' + n), a = $('#l-ex-amt-' + n), s = $('#l-ex-who-' + n), o = $('#l-ex-other-' + n); if(!w) return;
-      w.value = e ? e.w : ''; a.value = e ? e.a : ''; if(s){ if(!s.options.length) paintWhoSelect(s, ''); s.value = e ? (e.k || 'x') : ''; if(e && s.value !== (e.k || 'x')){ paintWhoSelect(s, e.k); } } if(o) o.value = (e && e.k === 'x') ? (e.who || '') : ''; const wrap = s && s.closest('.l-ex-row') && s.closest('.l-ex-row').querySelector('.l-ex-other-wrap'); if(wrap) wrap.hidden = !(e && e.k === 'x'); });
+      w.value = e ? e.w : ''; a.value = e ? e.a : ''; if(s){ paintWhoSelect(s, e ? (e.k || 'x') : '', e ? (e.who || '') : ''); } if(o) o.value = (e && e.k === 'x') ? (e.who || '') : ''; const wrap = s && s.closest('.l-ex-row') && s.closest('.l-ex-row').querySelector('.l-ex-other-wrap'); if(wrap) wrap.hidden = !(e && e.k === 'x'); });
     if(d.r && d.r.d != null){
       // A log priced before the night-wrap existed has no `e`. It keeps the
       // old midnight-stop rule ('00:00') so its total is exactly the number
@@ -4043,7 +4074,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AF';
+  const APP_BUILD = '2026-09-06-AG';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4535,8 +4566,8 @@
     if(!isManager()) return;
     if($('#inv-date') && !$('#inv-date').value) $('#inv-date').value = localToday();
     invPaintClients();
-    const [, okInv, okLogs] = await Promise.all([invLoadSettings(), invLoadInvoices(), invLoadLogs(), loadAmgClients(), invLoadMaterials()]);
-    INV_LOADED_OK = !!(okInv && okLogs);
+    const [, okInv, okLogs, , okMat] = await Promise.all([invLoadSettings(), invLoadInvoices(), invLoadLogs(), loadAmgClients(), invLoadMaterials()]);
+    INV_LOADED_OK = !!(okInv && okLogs && (okMat || AMG_MATERIALS.length));
     if($('#invSave')) $('#invSave').disabled = !INV_LOADED_OK;
     invPaintClients(); invPaintMaterialSelect();
     if($('#inv-number') && !$('#inv-number').value) $('#inv-number').value = invNextNumber();
@@ -4609,7 +4640,7 @@
   const invClient = () => AMG_CLIENTS.find(c => String(c.id) === String(($('#inv-client') && $('#inv-client').value) || '')) || null;
   // Las lineas que salen de UN reporte de mudanza, con el precio congelado del reporte (o el del cliente hoy si no trae).
   function invLinesFromLog(log, client){
-    const p = (log && log.payload) || {}; const r = p.r || null; const out = [];
+    const p = (log && log.payload) || {}; const r = p.r || null; const out = []; out.unpriced = [];
     const cfg = (r && r.d != null) ? { rateDay:+r.d, fixed:(+r.f > 0 ? +r.f : 0) } : (mgClientPrice(client ? client.name : p.t) || null);
     const date = invDate(log.log_date || p.d || '');
     if(!cfg) return out;                                              // sin precio: no se factura nada (nunca $0 escondido)
@@ -4626,7 +4657,6 @@
     }
     (p.s || []).forEach(sh => { const x = parseFloat(sh.x); if(Number.isFinite(x) && x !== 0) out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + (sh.e || 'extra') + ' ' + date, q:1, u:x, a:x, src:String(log.id) }); });
     // Materiales que el lider anoto en el reporte, al precio por unidad del manager (Precio AMG -> Materiales).
-    out.unpriced = [];
     (p.mat || []).forEach(m => {
       const q = +m.q; if(!(q > 0) || !m.n) return;
       const mm = (typeof AMG_MATERIALS !== 'undefined' ? AMG_MATERIALS : []).find(x => x && amgKey(x.name) === amgKey(m.n));
@@ -4661,7 +4691,8 @@
   }
   function invRebuildLogLines(){
     const c = invClient(); const manual = INV.lines.filter(l => !l.src);
-    const fromLogs = INV.logIds.flatMap(id => { const l = INV_LOGS.find(x => String(x.id) === id); return l ? invLinesFromLog(l, c) : []; });
+    INV.unpriced = [];
+    const fromLogs = INV.logIds.flatMap(id => { const l = INV_LOGS.find(x => String(x.id) === id); if(!l) return []; const ls = invLinesFromLog(l, c); (ls.unpriced || []).forEach(u => INV.unpriced.push(u)); return ls; });
     INV.lines = fromLogs.concat(manual); invRender();
   }
   if($('#invLogs')) $('#invLogs').addEventListener('change', (e) => {
@@ -4764,6 +4795,7 @@
     if(!inv.client_name){ msg.textContent = 'Escoja el cliente.'; return; }
     if(!inv.lines.length){ msg.textContent = 'El invoice no tiene líneas: marque un reporte o agregue una línea.'; return; }
     if(!(inv.number > 0)){ msg.textContent = 'Ponga el número del invoice.'; return; }
+    if(INV.unpriced && INV.unpriced.length && !confirm('Estos materiales del reporte NO tienen precio y no van en el invoice: ' + INV.unpriced.join(', ') + '.\n\nPóngales precio en Precio AMG → Materiales y vuelva a marcar el reporte, o guarde así.\n\n¿Guardar sin ellos?')) return;
     if(!cloudOn() || !navigator.onLine){ msg.textContent = 'Sin internet. Intente cuando tenga señal.'; return; }
     const b = $('#invSave'); b.disabled = true; const old = b.textContent; b.textContent = 'Guardando…';
     try{
@@ -6463,6 +6495,7 @@
       if(!Array.isArray(saved) || !saved.length) throw new Error('no se guardo');
       const row = currentInboxRows().find(r=>String(r.id)===String(openLogId));
       if(row){ row.payload = saved[0].payload; row.crew_leader = saved[0].crew_leader; renderInbox(); }
+      if(saved[0].work_kind === 'mudanza' && (saved[0].client_id || (row && row.client_id))){ try{ await syncShiftExpenses(saved[0].client_id || row.client_id, saved[0].payload, 'mudanza', saved[0].log_date, true); }catch(e){} }
       openLogHadRate = !!(lockedRate);                                   // ya quedo congelado en la fila
       showConversion();
       btn.textContent = 'Guardado ✓';
@@ -6492,6 +6525,9 @@
         alert('No se pudo borrar. Falta correr supabase-fix-delete.sql en Supabase.');
         return;
       }
+      // Sus gastos que nadie ha devuelto se van con el; los ya devueltos son historia y se quedan.
+      const cid = gone[0].client_id || (row && row.client_id);
+      if(cid){ try{ await authFetch('/rest/v1/expenses?labor_log_client_id=eq.' + encodeURIComponent(cid) + '&reimbursed_at=is.null', { method:'DELETE', headers: cloudHeaders() }); }catch(e){} }
       inboxRows = inboxRows.filter(r=>String(r.id)!==String(openLogId));
       archivedRows = archivedRows.filter(r=>String(r.id)!==String(openLogId));
       openLogId = null;
@@ -6775,7 +6811,7 @@
     let row = inboxRows.find(r => String(r.id) === String(id)) || archivedRows.find(r => String(r.id) === String(id));
     if(!row){
       try{
-        const res = await authFetch('/rest/v1/labor_logs?select=id,created_at,crew_leader,log_date,payload,seen,archived_at,work_kind'
+        const res = await authFetch('/rest/v1/labor_logs?select=id,created_at,crew_leader,log_date,payload,seen,archived_at,work_kind,client_id'
           + '&id=eq.' + encodeURIComponent(id) + '&limit=1', { headers: cloudHeaders() });
         if(!res.ok) throw new Error('HTTP '+res.status);
         row = (await res.json())[0];
@@ -14463,6 +14499,7 @@
         try{
           await cloudPost(row);
           outbox.remove(_id);
+          try{ await syncShiftExpenses(row.client_id, row.payload, row.work_kind, row.log_date); }catch(e){}
         }catch(e){
           if(e && e.permanent){        // rechazado de plano: se marca y se sigue con el resto
             const a = outbox.all(); const it = a.find(x => x._id === _id);
@@ -14473,6 +14510,7 @@
         }
       }
       updateOutboxBadge();
+      await flushExpenseQueue();
     } finally { flushing = false; }
   }
 
@@ -16547,7 +16585,7 @@
     kind = kind || laborMode;                       // cada lista es de UNA empresa
     const filter = archived ? 'archived_at=not.is.null' : 'archived_at=is.null';
     const res = await authFetch(
-      '/rest/v1/labor_logs?select=id,created_at,crew_leader,log_date,payload,seen,archived_at,work_kind&work_kind=eq.' + encodeURIComponent(kind) + '&'
+      '/rest/v1/labor_logs?select=id,created_at,crew_leader,log_date,payload,seen,archived_at,work_kind,client_id&work_kind=eq.' + encodeURIComponent(kind) + '&'
       + filter + '&order=created_at.desc&limit=100',
       { headers: cloudHeaders() });
     if(!res.ok) throw new Error('HTTP ' + res.status);
@@ -17722,7 +17760,14 @@
     return FIN_PEOPLE.find(p => finNorm(p.name) === n) || FIN_PEOPLE.find(p => finNorm(p.name).startsWith(n + ' ')) || FIN_PEOPLE.find(p => finNorm(p.name).startsWith(n)) || null;
   }
   const finFixedOptions = () => FIN_MONEY_NAMES.map(name => { const p = finPersonFor(name); return { value: p ? (p.kind + ':' + p.id) : ('x:' + name), name }; });
-  function paintWhoSelect(sel, current){
+  // Repinta un select de "quien pago" conservando lo escogido; si lo escogido era 'x:Nombre' porque la gente aun no
+  // habia llegado y ese nombre ahora existe en la lista, se pasa a su llave real (c:id / t:id).
+  function repaintWhoKeep(sel){
+    if(!sel) return; let cur = sel.value || '';
+    if(cur.startsWith('x:')){ const p = finPersonFor(cur.slice(2)); if(p) cur = p.kind + ':' + p.id; }
+    paintWhoSelect(sel, cur, sel.dataset.whoName || '');
+  }
+  function paintWhoSelect(sel, current, fallbackName){
     if(!sel) return;
     const cur = current !== undefined ? current : sel.value;
     let html = '<option value="">— escoja —</option>';
@@ -17733,7 +17778,8 @@
     else if(cur && cur !== 'x' && cur.includes(':')){
       const i = cur.indexOf(':'); const k = cur.slice(0, i), id = cur.slice(i+1);
       const p = FIN_PEOPLE.find(x => x.kind === k && String(x.id) === id);
-      const o = document.createElement('option'); o.value = cur; o.textContent = p ? p.name : (k === 'x' ? id : '(nombre guardado)'); sel.appendChild(o); sel.value = cur;
+      const o = document.createElement('option'); o.value = cur; o.textContent = p ? p.name : (k === 'x' ? id : (fallbackName || '(nombre guardado)')); sel.appendChild(o); sel.value = cur;
+      if(!p && fallbackName) sel.dataset.whoName = fallbackName;
     }
     else if(!cur && SES && SES.user_id && [...sel.options].some(o => o.value === 'c:' + SES.user_id)) sel.value = 'c:' + SES.user_id;
   }
@@ -18500,30 +18546,62 @@
   if($('#finMPagos')) $('#finMPagos').addEventListener('click', (e) => { const b = e.target.closest('.finClientPdf'); if(b){ try{ buildClientPdf(b.dataset.ckey); }catch(err){ alert('No se pudo hacer el PDF.\n\n' + ((err && err.message) || err)); } } });
 
   // ---- gasolina del turno -> gasto a nombre de quien la puso (una sola vez por turno) ----
-  async function syncShiftExpenses(clientId, payload, workKind, logDate){
-    if(!clientId || !payload || !Array.isArray(payload.s) || !signedIn()) return;
+  // La llave de "quien pago" viene del select: 'c:<uuid>' / 't:<uuid>' / 'e' / 'x' / 'x:Nombre' (cuando la lista de gente
+  // no habia llegado). paid_by_id es uuid: un nombre NUNCA va ahi.
+  function whoKeyParse(k, fallbackName){
+    k = String(k || 'x');
+    if(k === 'e') return { kind:'e', id:null, name:'La empresa' };
+    if(k.startsWith('x:')) return { kind:'x', id:null, name: k.slice(2) || fallbackName || '(sin nombre)' };
+    if(/^[ct]:[0-9a-f-]{20,}$/i.test(k)){ const i = k.indexOf(':'); return { kind:k.slice(0, i), id:k.slice(i+1), name: fallbackName || '' }; }
+    return { kind:'x', id:null, name: fallbackName || '(sin nombre)' };
+  }
+  function expenseRowsOf(clientId, payload, workKind, logDate){
     const rows = [];
-    payload.s.forEach((sh, i) => {
+    (payload.s || []).forEach((sh, i) => {
       const amt = parseFloat(sh.g); if(!(amt > 0)) return;
-      const gk = sh.gk || 'x'; const name = sh.gw || '(sin nombre)';
-      let kind = 'x', id = null;
-      if(gk === 'e') kind = 'e'; else if(gk.includes(':')){ kind = gk.slice(0, gk.indexOf(':')); id = gk.slice(gk.indexOf(':')+1); }
+      const w = whoKeyParse(sh.gk, sh.gw);
       rows.push({ company_id: SES.company_id, work_kind: workKind || 'mudanza', spent_on: logDate || localToday(), amount: amt, what:'gasolina',
-        note: 'Turno ' + (i+1) + (payload.t ? ' · ' + payload.t : ''), paid_by_kind: kind, paid_by_id: id, paid_by_name: kind === 'e' ? 'La empresa' : name,
+        note: 'Turno ' + (i+1) + (payload.t ? ' · ' + payload.t : ''), paid_by_kind: w.kind, paid_by_id: w.id, paid_by_name: w.kind === 'e' ? 'La empresa' : (w.name || sh.gw || '(sin nombre)'),
         client: payload.t || null, labor_log_client_id: clientId, shift_no: i+1, source_key: clientId + ':' + (i+1), created_by: SES.user_id });
     });
     (payload.ex || []).forEach((e, i) => {
       const amt = parseFloat(e.a); if(!(amt > 0) || !e.w) return;
-      const k = e.k || 'x'; let kind = 'x', id = null;
-      if(k === 'e') kind = 'e'; else if(k.includes(':')){ kind = k.slice(0, k.indexOf(':')); id = k.slice(k.indexOf(':')+1); }
+      const w = whoKeyParse(e.k, e.who);
       rows.push({ company_id: SES.company_id, work_kind: workKind || 'mudanza', spent_on: logDate || localToday(), amount: amt, what: ['peaje','comida','materiales','cajas','otro'].includes(e.w) ? e.w : 'otro',
-        note: 'Gasto del trabajo' + (payload.t ? ' · ' + payload.t : ''), paid_by_kind: kind, paid_by_id: id, paid_by_name: kind === 'e' ? 'La empresa' : (e.who || '(sin nombre)'),
+        note: 'Gasto del trabajo' + (payload.t ? ' · ' + payload.t : ''), paid_by_kind: w.kind, paid_by_id: w.id, paid_by_name: w.kind === 'e' ? 'La empresa' : (w.name || e.who || '(sin nombre)'),
         client: payload.t || null, labor_log_client_id: clientId, shift_no: null, source_key: clientId + ':ex:' + (i+1), created_by: SES.user_id });
     });
+    return rows;
+  }
+  // Los gastos que no se pudieron anotar (sin señal, servidor ocupado) quedan en una cola y se reintentan con el outbox.
+  const EXQ_KEY = 'exq:v1';
+  const exqAll = () => { try{ return JSON.parse(localStorage.getItem(EXQ_KEY) || '[]'); }catch(e){ return []; } };
+  const exqSet = a => { try{ localStorage.setItem(EXQ_KEY, JSON.stringify(a)); }catch(e){} };
+  async function postExpenseRows(rows){
+    const res = await authFetch('/rest/v1/expenses?on_conflict=company_id,source_key', { method:'POST', headers: Object.assign(cloudHeaders(), {'Prefer':'resolution=merge-duplicates,return=minimal'}), body: JSON.stringify(rows) });
+    if(!res.ok){ let t = ''; try{ t = await res.text(); }catch(e){} throw new Error('expenses HTTP ' + res.status + ' ' + t.slice(0, 120)); }
+  }
+  async function syncShiftExpenses(clientId, payload, workKind, logDate, removeStale){
+    if(!clientId || !payload || !Array.isArray(payload.s) || !signedIn()) return;
+    const rows = expenseRowsOf(clientId, payload, workKind, logDate);
+    if(removeStale){
+      // El reporte se volvio a guardar: los gastos que ya no estan (y que nadie ha devuelto) se quitan.
+      try{
+        const keep = rows.map(r => r.source_key);
+        let url = '/rest/v1/expenses?labor_log_client_id=eq.' + encodeURIComponent(clientId) + '&reimbursed_at=is.null';
+        if(keep.length) url += '&source_key=not.in.(' + keep.map(k => '"' + k.replace(/"/g, '') + '"').join(',') + ')';
+        await authFetch(url, { method:'DELETE', headers: cloudHeaders() });
+      }catch(e){}
+    }
     if(!rows.length) return;
-    try{
-      await authFetch('/rest/v1/expenses?on_conflict=company_id,source_key', { method:'POST', headers: Object.assign(cloudHeaders(), {'Prefer':'resolution=merge-duplicates,return=minimal'}), body: JSON.stringify(rows) });
-    }catch(e){}
+    try{ await postExpenseRows(rows); }
+    catch(e){ console.warn('gastos en cola:', e && e.message); const q = exqAll().filter(x => x.clientId !== clientId); q.push({ clientId, rows, at: Date.now() }); exqSet(q); }
+  }
+  async function flushExpenseQueue(){
+    const q = exqAll(); if(!q.length || !signedIn() || !navigator.onLine) return;
+    const left = [];
+    for(const it of q){ try{ await postExpenseRows(it.rows); }catch(e){ left.push(it); } }
+    exqSet(left);
   }
 
   // En la web (no en el iPhone), una pestaña abierta hace días sigue con la versión vieja hasta que alguien
@@ -18668,6 +18746,9 @@
     }
     // Nunca vaciar un borrador de AMG en un formulario de restauracion, ni al reves.
     if(d.side && d.side !== sideKind()) return;
+    // Los selects de "quien pago" nacen vacios: se pintan antes de poner los valores, o el valor guardado se perderia.
+    $$('.l-ex-who, .s-gas-who').forEach(sel => { if(!sel.options.length) paintWhoSelect(sel, ''); });
+    setTimeout(() => { $$('.l-ex-who').forEach(sel => { const v = (d.vals || {})[fieldKey(sel)]; if(v && sel.value !== v) paintWhoSelect(sel, v); const wrap = sel.closest('.l-ex-row') && sel.closest('.l-ex-row').querySelector('.l-ex-other-wrap'); if(wrap) wrap.hidden = sel.value !== 'x'; }); }, 0);
 
     // Un log recibido que quedo en pantalla NO es un borrador: las puertas ven
     // openLogId !== null y lo cierran en vez de mandarlo como propio.
