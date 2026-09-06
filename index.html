@@ -4125,7 +4125,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-BC';
+  const APP_BUILD = '2026-09-06-BD';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -5031,7 +5031,7 @@
         + '<br><span class="when">' + esc([c.phone, c.address, c.email, c.contact ? 'contacto: ' + c.contact : ''].filter(Boolean).join(' · ') || 'sin teléfono ni dirección todavía') + '</span></button>'
         + '<button type="button" class="minibtn amgcOff" data-id="' + esc(c.id) + '" title="Quitar de la lista" style="color:var(--danger);">✕ Quitar</button></div>';
     box.innerHTML = (act.length ? act.map(card).join('') : '<p class="clockhint">Todavía no hay clientes.' + (AC_MGR ? ' Los agrega la cuadrilla desde la puerta AMG Moving.' : ' Agregue el primero abajo.') + '</p>')
-      + (off.length ? '<details class="whychip" style="display:block;margin-top:6px;"><summary>Clientes quitados (' + off.length + ')</summary><div class="whytext">' + off.map(c => '<div class="entryrow"><span>' + esc(c.name) + '</span><button type="button" class="minibtn amgcOn" data-id="' + esc(c.id) + '">Volver a activar</button></div>').join('') + '</div></details>' : '');
+      + (off.length ? '<details class="whychip" style="display:block;margin-top:6px;"><summary>Clientes quitados (' + off.length + ')</summary><div class="whytext">' + off.map(c => '<div class="entryrow"><span>' + esc(c.name) + '</span><span style="display:flex;gap:6px;"><button type="button" class="minibtn amgcOn" data-id="' + esc(c.id) + '">Volver a activar</button><button type="button" class="minibtn amgcDel" data-id="' + esc(c.id) + '" style="color:var(--danger);">Borrar</button></span></div>').join('') + '</div></details>' : '');
   }
   // Pantalla de confirmacion: el trabajador ve claro que el cliente SI quedo guardado antes de irse.
   function acShowDone(name, what, editing){
@@ -5096,8 +5096,8 @@
   if($('#amgClientCards')) $('#amgClientCards').addEventListener('click', async (e)=>{
     const card = e.target.closest('.acCard'); if(card){ const c = AMG_CLIENTS.find(x => String(x.id) === card.dataset.id);
       if(c){ if($('#acListCard')) $('#acListCard').hidden = true; if($('#acFormCard')) $('#acFormCard').hidden = false; acFill(c); } return; }
-    const off = e.target.closest('.amgcOff'); const on = e.target.closest('.amgcOn');
-    if(off || on){ await onAmgClientsClick(e, $('#acListMsg') || $('#acMsg')); paintAmgClientCards(); paintAmgClients(); }
+    const off = e.target.closest('.amgcOff'); const on = e.target.closest('.amgcOn'); const del = e.target.closest('.amgcDel');
+    if(off || on || del){ await onAmgClientsClick(e, $('#acListMsg') || $('#acMsg')); paintAmgClientCards(); paintAmgClients(); }
   });
   if($('#acCancel')) $('#acCancel').addEventListener('click', ()=>{ acFill(null); if(AC_MGR) acShowList(); });
   if($('#acRemove')) $('#acRemove').addEventListener('click', async ()=>{
@@ -5163,13 +5163,33 @@
       + '<button type="button" class="minibtn amgcSave" data-id="' + esc(c.id) + '">Guardar</button><button type="button" class="minibtn amgcOff" data-id="' + esc(c.id) + '" title="Quitar de la lista">✕</button></span></div>';
     const act = AMG_CLIENTS.filter(c => c.active !== false), off = AMG_CLIENTS.filter(c => c.active === false);
     box.innerHTML = (act.length ? act.map(row).join('') : '<p class="clockhint">Ningún cliente activo.</p>')
-      + (off.length ? '<details class="whychip" style="display:block;margin-top:6px;"><summary>Clientes quitados (' + off.length + ')</summary><div class="whytext">' + off.map(c => '<div class="entryrow"><span>' + esc(c.name) + '</span><button type="button" class="minibtn amgcOn" data-id="' + esc(c.id) + '">Volver a activar</button></div>').join('') + '</div></details>' : '');
+      + (off.length ? '<details class="whychip" style="display:block;margin-top:6px;"><summary>Clientes quitados (' + off.length + ')</summary><div class="whytext">' + off.map(c => '<div class="entryrow"><span>' + esc(c.name) + '</span><span style="display:flex;gap:6px;"><button type="button" class="minibtn amgcOn" data-id="' + esc(c.id) + '">Volver a activar</button><button type="button" class="minibtn amgcDel" data-id="' + esc(c.id) + '" style="color:var(--danger);">Borrar</button></span></div>').join('') + '</div></details>' : '');
   }
   async function amgClientsWrite(method, path, body){
     const res = await authFetch('/rest/v1/amg_clients' + path, { method, headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal'}), body: body ? JSON.stringify(body) : undefined });
     if(res.status === 404) throw new Error('Falta correr supabase-amg-clients.sql en Supabase.');
     if(res.status === 409) throw new Error('Ya hay un cliente con ese nombre.');
     if(!res.ok){ const t = await res.text(); throw new Error(t.slice(0, 160)); }
+  }
+  // Que tiene guardado este cliente. Se busca por su id (los reportes nuevos lo llevan) y por su
+  // nombre (los viejos y el dinero se guardan con el nombre escrito).
+  async function amgClientUsage(id, name){
+    const out = []; const H = { headers: cloudHeaders() };
+    const cnt = async (url) => { try{ const r = await authFetch(url + '&limit=1', H); if(!r.ok) return 0; const j = await r.json(); return Array.isArray(j) ? j.length : 0; }catch(e){ return -1; } };
+    const nm = encodeURIComponent(String(name || '').trim());
+    const checks = [
+      ['reportes de mudanza', '/rest/v1/labor_logs?select=id&work_kind=eq.mudanza&payload->>cid=eq.' + encodeURIComponent(id)],
+      ['reportes de mudanza', '/rest/v1/labor_logs?select=id&work_kind=eq.mudanza&payload->>t=eq.' + nm],
+      ['invoices',            '/rest/v1/amg_invoices?select=id&client_name=eq.' + nm],
+      ['pagos de cliente',    '/rest/v1/client_payments?select=id&client=eq.' + nm],
+      ['gastos',              '/rest/v1/expenses?select=id&client=eq.' + nm]
+    ];
+    for(const [label, url] of checks){
+      const n = await cnt(url);
+      if(n === -1) throw new Error('No se pudo revisar si ' + name + ' tiene ' + label + ' (¿sin señal?). No se borró nada.');
+      if(n > 0 && !out.includes(label)) out.push(label);
+    }
+    return out;
   }
   async function onAmgClientsClick(e, msgEl){
     const b = e.target.closest('button'); if(!b || !b.dataset.id) return;
@@ -5186,6 +5206,15 @@
         if(!confirm('¿Quitar a ' + (c ? c.name : 'este cliente') + ' de la lista? Sus reportes y pagos guardados no se tocan; solo deja de aparecer para escoger.')) { b.disabled = false; return; }
         await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(id), { active: false, updated_at: new Date().toISOString() });
         if(msg) msg.textContent = (c ? c.name : 'Cliente') + ' quitado.';
+      } else if(b.classList.contains('amgcDel')){
+        // Borrar de verdad. Antes se revisa que no tenga nada colgando: un cliente con reportes o
+        // dinero guardado no se borra, porque esos papeles quedarian sin dueno.
+        const nm = c ? c.name : '';
+        const usos = await amgClientUsage(id, nm);
+        if(usos.length) throw new Error(nm + ' no se puede borrar: tiene ' + usos.join(', ') + '. Déjelo quitado o borre primero eso.');
+        if(!confirm('¿BORRAR a ' + nm + ' para siempre?\n\nNo tiene reportes ni dinero guardado. Esto no se puede deshacer.')) { b.disabled = false; return; }
+        await amgClientsWrite('DELETE', '?id=eq.' + encodeURIComponent(id), null);
+        if(msg) msg.textContent = nm + ' borrado.';
       } else if(b.classList.contains('amgcOn')){
         await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(id), { active: true, updated_at: new Date().toISOString() });
         if(msg) msg.textContent = (c ? c.name : 'Cliente') + ' activo otra vez.';
