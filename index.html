@@ -3693,7 +3693,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-O';
+  const APP_BUILD = '2026-09-06-P';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -16237,6 +16237,8 @@
   // keep the badge honest while the app is open
   if(cloudOn()){
     refreshInbox();
+    setTimeout(checkWebUpdate, 4000); setInterval(checkWebUpdate, 10*60*1000);
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') checkWebUpdate(); });
     setInterval(()=>{ if(document.visibilityState==='visible') refreshInbox(); }, 60000);
     document.addEventListener('visibilitychange', ()=>{
       if(document.visibilityState==='visible'){ flushOutbox(); refreshInbox(); }
@@ -17604,6 +17606,23 @@
     }catch(e){}
   }
 
+  // En la web (no en el iPhone), una pestaña abierta hace días sigue con la versión vieja hasta que alguien
+  // la recargue. Cada rato se pregunta al servidor qué versión hay y, si cambió, se ofrece actualizar.
+  function checkWebUpdate(){
+    if(typeof isNative === 'function' && isNative()) return;
+    if(!navigator.onLine) return;
+    fetch('version.txt?cb=' + Date.now(), { cache:'no-store' }).then(r => r.ok ? r.text() : '').then(v => {
+      v = String(v || '').trim(); if(!v || v === APP_BUILD) return;
+      let b = document.getElementById('webUpdateBar');
+      if(!b){
+        b = document.createElement('div'); b.id = 'webUpdateBar';
+        b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:400;background:#1f6f5b;color:#fff;padding:10px 14px;font-weight:700;display:flex;gap:10px;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.35);';
+        b.innerHTML = '<span>Hay una versión nueva de la app (' + esc(v) + ').</span><button type="button" style="background:#fff;color:#1f6f5b;border:0;border-radius:8px;padding:8px 12px;font-weight:800;">Actualizar</button>';
+        b.querySelector('button').addEventListener('click', ()=>{ const u = new URL(location.href); u.searchParams.set('cb', String(Date.now())); location.replace(u.toString()); });
+        document.body.appendChild(b);
+      }
+    }).catch(()=>{});
+  }
   (async function boot(){
     if(!cloudOn()){ gate.classList.add('done'); return; }
     // A recovery link beats everything else, even an existing session - the
