@@ -2283,11 +2283,9 @@
   function paintSideMenu(){
     const mgr = (typeof isManager === 'function') && isManager();
     $$('#homeMenu .menubtn[data-side]').forEach(b => {
-      let hide = !b.dataset.side.split(' ').includes(SIDE);
-      // Los labor logs de AMG los manda el manager: un crew en la puerta AMG
-      // solo tiene Reloj.
-      if(b.dataset.goTab === 'labor' && SIDE === 'mudanza' && !mgr) hide = true;
-      b.hidden = hide;
+      // El reporte de mudanza lo manda el lider de grupo (Raul) con el cliente
+      // del dia; el manager lo abre y lo cobra con el precio de AMG.
+      b.hidden = !b.dataset.side.split(' ').includes(SIDE);
     });
     const sw = $('#menuSwitchSide'); if(sw) sw.hidden = !SIDE;
   }
@@ -3530,7 +3528,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-F';
+  const APP_BUILD = '2026-09-06-G';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -15760,10 +15758,23 @@
     // Entrada = salida no es un turno: un telefono viejo lo cobraria como 24 h.
     const sameHour = $$('.shift-card', shiftsContainer).find(c => { const f = $('.s-from', c).value, o = $('.s-to', c).value; return f && o && hoursBetween(f, o) === 0; });
     if(sameHour) return alert('Un turno tiene la hora de entrada igual a la de salida. Corríjalo antes de mandar.');
+    if(formKind() === 'mudanza' && !isManager()){
+      // El lider manda el reporte sin precio (como en restauracion): el
+      // manager lo abre en Mudanzas recibidas y ahi se cobra con el precio de
+      // AMG de ese momento. Sin internet no se manda: no hay codigo RD1 de mudanza.
+      if(!cloudOn()) return alert('Sin internet no se puede mandar el reporte de mudanza. Vuelva a intentarlo cuando haya señal.');
+      lockedRate = null;
+      showOverlay('Enviando… / Sending…');
+      const outcome = await submitToCloud();
+      hideOverlay();
+      if(outcome === 'sent'){ alert('Reporte de mudanza enviado. El manager lo ve en Mudanzas recibidas.'); resetLabor(); laborFormOpen = false; return; }
+      if(outcome === 'rejected') return alert('El servidor NO aceptó este reporte de mudanza. No se guardó.\n\nPara mandar reportes de mudanza necesita haber entrado por la puerta AMG Moving con el código de AMG. Si ya lo hizo, pídale al manager que revise que AMG esté prendido.');
+      if(outcome === 'already-queued') return alert('Este reporte ya está guardado esperando señal. No lo mande otra vez.');
+      return alert('Se fue la señal justo al mandar. Se guardó y se manda solo cuando haya señal.');
+    }
     if(formKind() === 'mudanza'){
       // Un labor log de AMG se congela con el precio FRESCO de hoy, leido del
       // servidor en este momento: nunca con un precio viejo ni con $0.
-      if(!isManager()) return alert('Solo el manager puede guardar un reporte de mudanza.');
       if(!navigator.onLine) return alert(AMG_NO_SIGNAL);
       showOverlay('Revisando el precio de AMG…');
       const ready = await amgDbReady();
