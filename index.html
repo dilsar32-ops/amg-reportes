@@ -2181,7 +2181,7 @@
         <div class="field"><label>Cómo se le cobra</label>
           <div class="seg"><button type="button" class="on" id="acPricingHora">Por hora</button><button type="button" id="acPricingFijo">Precio fijo por mudanza</button></div></div>
         <div class="row2">
-          <div class="field" id="acRateField"><label>$/hora por persona</label><input type="number" id="acRate" step="0.01" inputmode="decimal" placeholder="vacío = precio general"></div>
+          <div class="field" id="acRateField"><label>$/hora por persona</label><input type="number" id="acRate" step="0.01" inputmode="decimal" placeholder="0.00"></div>
           <div class="field" id="acFlatField" hidden><label>Precio fijo por mudanza $</label><input type="number" id="acFlat" step="0.01" inputmode="decimal" placeholder="0.00"></div>
         </div>
         <p class="hint" id="acPricingHint">Por hora: personas × horas × este precio. Precio fijo: cada reporte de mudanza de este cliente se cobra este monto, sin importar las horas.</p>
@@ -2325,16 +2325,7 @@
              la casilla del precio este vacia, MUDANZA SIGUE APAGADA: nadie puede
              apuntar horas de AMG hasta que valgan algo. -->
         <div id="mgrPriceMgBox">
-          <h2 style="font-size:15px; margin:0 0 4px;">Precio de la mudanza al cliente</h2>
           <p class="hint" id="mgrMgPriceState" style="margin:0 0 8px;"></p>
-          <p class="hint"><b>Esto es lo que se le COBRA AL CLIENTE</b> por persona, por hora, en una mudanza. <b>Un solo precio a toda hora:</b> el mismo $/hora por persona, sea la hora que sea. Lo que usted le PAGA a cada trabajador va en Horas AMG.</p>
-          <div class="row2">
-            <div class="field"><label>Al cliente $/hora por persona</label>
-              <input type="number" id="mgMgRateDay" step="0.01" inputmode="decimal" placeholder="0.00"></div>
-            <div class="field"><label>&nbsp;</label>
-              <button class="btn btn-amg" type="button" id="mgMgPriceSave" style="width:100%;">Guardar precio de AMG</button></div>
-          </div>
-          <p class="hint" id="mgMgPriceMsg" style="margin-top:6px;"></p>
           <div class="mgrtools" style="margin-top:14px;">
             <button type="button" class="minibtn on" id="amgPriceSegClients">&#128101; Precio por cliente</button>
             <button type="button" class="minibtn" id="amgPriceSegMat">&#128230; Precios de materiales</button>
@@ -2352,7 +2343,7 @@
           </div>
           <div id="amgClientsBox" style="margin-top:14px;">
             <h2 style="font-size:15px; margin:0 0 4px;">Precio por cliente</h2>
-            <p class="hint">Cada cliente puede tener <b>su propio $/hora por persona</b> (a uno se le cobra un precio y a otro, otro). El reporte de mudanza se cobra con el precio del cliente escogido; si el cliente no tiene precio, se usa el precio general de arriba. Para agregar un cliente con todos sus datos (teléfono, dirección, contacto): pestaña <b>Clientes</b>.</p>
+            <p class="hint">Cada cliente puede tener <b>su propio $/hora por persona</b> (a uno se le cobra un precio y a otro, otro). El reporte de mudanza se cobra con el precio del cliente escogido; si el cliente no tiene precio, su mudanza no se puede cobrar. Para agregar un cliente con todos sus datos (teléfono, dirección, contacto): pestaña <b>Clientes</b>.</p>
             <div id="amgClientsList"><p class="clockhint">Cargando…</p></div>
             <div class="row2" style="margin-top:8px;">
               <div class="field"><label>Nuevo cliente</label><input type="text" id="amgClientNewName" placeholder="Nombre" autocapitalize="words" autocomplete="off"></div>
@@ -2933,7 +2924,7 @@
     if(AMG_CLIENTS_STATE === 'loaded') return AMG_CLIENTS.filter(c => c && c.active !== false && c.name).map(c => String(c.name).trim());
     return CLIENT_OPTIONS.slice();
   }
-  // El $/hora del cliente, o null si no tiene (entonces manda el precio general de AMG).
+  // El $/hora del cliente, o null si no tiene (sin precio del cliente no se cobra).
   // Un cliente QUITADO de la lista conserva su precio: sus reportes pendientes se siguen cobrando igual.
   function amgClientRate(name){
     const n = amgKey(name); if(!n) return null;
@@ -4005,17 +3996,14 @@
     if(!k || !(+k.rate_day > 0)) m.push('Al cliente $/hora');
     return m;
   }
-  // clientName: el cliente de la mudanza. Si ese cliente tiene su $/hora, ese manda; si no, el precio general de AMG.
+  // clientName: el cliente de la mudanza. El precio es SIEMPRE el de ese cliente (por hora o fijo).
+  // Ya no hay precio general: sin precio del cliente no se cobra nada (nunca un $0 escondido).
   function mgClientPrice(clientName){
     const fx = (typeof amgClientFixed === 'function') ? amgClientFixed(clientName) : null;
     if(fx !== null) return { rateDay:0, rateNight:0, cutoff:'00:00', cutoffEnd:'00:00', flat:true, fixed:fx, client: amgClientDisplayName(clientName) };
     const cr = (typeof amgClientRate === 'function') ? amgClientRate(clientName) : null;
     if(cr !== null) return { rateDay:cr, rateNight:cr, cutoff:'00:00', cutoffEnd:'00:00', flat:true, client: amgClientDisplayName(clientName) };
-    const k = (typeof mgKindRow === 'function') ? mgKindRow() : null;
-    if(!k || mgPriceMissing(k).length) return null;
-    // flat: un solo precio a toda hora (rateNight/cutoff solo existen para
-    // que un telefono viejo lea el mismo total).
-    return { rateDay:+k.rate_day, rateNight:+k.rate_day, cutoff:'00:00', cutoffEnd:'00:00', flat:true };
+    return null;
   }
   // PASO 13: el precio en vigor depende de la empresa del formulario. Para
   // restauracion payCfg() nunca es null -> identico a hoy.
@@ -4134,7 +4122,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AQ';
+  const APP_BUILD = '2026-09-06-AR';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4351,19 +4339,16 @@
       if(act) act.hidden = true;
       return;
     }
-    if($('#mgMgRateDay') && k.rate_day != null) $('#mgMgRateDay').value = k.rate_day;
-    const missing = mgPriceMissing(k); const done = !missing.length;
+    const done = amgAnyClientRate();                       // el precio vive en cada cliente
     if(st){
       st.textContent = k.active
-        ? (done ? 'MUDANZA ESTÁ PRENDIDA. Los trabajadores ya pueden apuntar horas de AMG y usted puede mandar labor logs de AMG.'
-                : 'MUDANZA ESTÁ PRENDIDA, pero falta el precio por hora al cliente. Hasta que esté no se puede mandar ningún labor log de AMG.')
-        : (done ? 'El precio está puesto. Falta prenderla.'
-                : 'MUDANZA ESTÁ APAGADA. Nadie puede apuntar horas de AMG hasta que esté el precio por hora al cliente.');
+        ? (done ? 'MUDANZA ESTÁ PRENDIDA. El precio se cobra por cliente.'
+                : 'MUDANZA ESTÁ PRENDIDA, pero ningún cliente tiene precio todavía. Póngaselo abajo: sin precio no se puede cobrar su mudanza.')
+        : (done ? 'MUDANZA ESTÁ APAGADA. Falta prenderla.'
+                : 'MUDANZA ESTÁ APAGADA y ningún cliente tiene precio todavía.');
       st.style.color = (k.active && done) ? 'var(--green)' : (done ? '' : 'var(--danger)');
       st.style.fontWeight = '600';
     }
-    const f = $('#mgMgRateDay') && $('#mgMgRateDay').closest('.field');
-    if(f) f.classList.toggle('missing', !done);
     paintAmgPriceWarn();
     // Interruptor de ellos, sin candado: igual que en restauracion, las tarifas
     // las ponen cuando quieran. Lo que si esta protegido es el CIERRE: un turno
@@ -4946,7 +4931,7 @@
     const act = AMG_CLIENTS.filter(c => c.active !== false), off = AMG_CLIENTS.filter(c => c.active === false);
     const t = $('#acListTitle'); if(t) t.textContent = 'Nuestros clientes (' + act.length + ')';
     const price = c => (c.pricing === 'fijo' && c.flat_amount > 0) ? 'precio fijo $' + (+c.flat_amount).toFixed(2) + ' por mudanza'
-      : (c.rate > 0 ? '$' + (+c.rate).toFixed(2) + '/hora por persona' : 'sin precio propio (usa el precio general)');
+      : (c.rate > 0 ? '$' + (+c.rate).toFixed(2) + '/hora por persona' : '⚠ falta ponerle el precio');
     // El manager ve, sin abrir nada: precio, telefono, direccion, email y contacto, con su boton de quitar al lado.
     const card = c => !AC_MGR
       ? '<button type="button" class="inboxitem acCard" data-id="' + esc(c.id) + '" style="text-align:left;"><span class="who">' + esc(c.name) + '</span>'
@@ -5039,7 +5024,7 @@
     const rv = (acPricing === 'hora' && $('#acRate').value !== '') ? +$('#acRate').value : null;
     const fv = (acPricing === 'fijo' && $('#acFlat').value !== '') ? +$('#acFlat').value : null;
     if(!name){ msg.textContent = 'Escriba el nombre del cliente.'; $('#acName').focus(); return; }
-    if(rv !== null && !(rv > 0)){ msg.textContent = 'El precio tiene que ser mayor que 0, o vacío para usar el precio general.'; return; }
+    if(rv !== null && !(rv > 0)){ msg.textContent = 'El precio tiene que ser mayor que 0.'; return; }
     if(AC_MGR && acPricing === 'fijo' && !(fv > 0)){ msg.textContent = 'Escriba el precio fijo por mudanza (mayor que 0).'; $('#acFlat').focus(); return; }
     if(!cloudOn()){ msg.textContent = 'Sin internet. Intente cuando tenga señal.'; return; }
     const row = { name, rate: rv, pricing: acPricing, flat_amount: acPricing === 'fijo' ? fv : null, bill_to: (($('#acBillTo') && $('#acBillTo').value) || '').trim() || null, phone: ($('#acPhone').value || '').trim() || null, address: ($('#acAddress').value || '').trim() || null,
@@ -5074,7 +5059,7 @@
       else if(dup) await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(dup.id), Object.assign(row, { active: true }));
       else { delete row.updated_at; await amgClientsWrite('POST', '', Object.assign(row, { active: true })); }
       await loadAmgClients(); paintAmgClientCards(); paintAmgClients(); paintAmgPriceWarn();
-      const done = acEditingId ? 'Cambios guardados ✓' : name + ' agregado ✓' + (acPricing === 'fijo' ? ' a precio fijo $' + fv.toFixed(2) + ' por mudanza' : (rv !== null ? ' a $' + rv.toFixed(2) + '/h por persona' : ' (usa el precio general)'));
+      const done = acEditingId ? 'Cambios guardados ✓' : name + ' agregado ✓' + (acPricing === 'fijo' ? ' a precio fijo $' + fv.toFixed(2) + ' por mudanza' : (rv !== null ? ' a $' + rv.toFixed(2) + '/h por persona' : ' (todavía sin precio)'));
       const wasEditing = !!acEditingId;
       acFill(null); msg.textContent = '';
       acShowDone(name, done.replace(/^.*?✓\s*/, '').trim() || 'Guardado.', wasEditing);
@@ -5086,7 +5071,7 @@
     const box = $('#amgClientsList'); if(!box) return;
     if(!AMG_CLIENTS.length){ box.innerHTML = '<p class="clockhint">Todavía no hay clientes guardados' + (cloudOn() ? '' : ' (sin internet)') + '. Si no aparece nada después de unos segundos, falta correr supabase-amg-clients.sql.</p>'; return; }
     const row = c => '<div class="entryrow" style="align-items:center;"><span><span class="who">' + esc(c.name) + '</span><br><span class="when">' + (c.pricing === 'fijo' && c.flat_amount > 0 ? 'precio fijo $' + (+c.flat_amount).toFixed(2) + ' por mudanza (cámbielo en Clientes)' : c.rate > 0 ? '$' + (+c.rate).toFixed(2) + '/h por persona' : 'sin precio propio: usa el general') + '</span></span>'
-      + '<span style="display:flex;gap:6px;align-items:center;"><input type="number" class="amgcRate" data-id="' + esc(c.id) + '" step="0.01" inputmode="decimal" placeholder="general" value="' + (c.rate > 0 ? (+c.rate) : '') + '" style="width:92px;">'
+      + '<span style="display:flex;gap:6px;align-items:center;"><input type="number" class="amgcRate" data-id="' + esc(c.id) + '" step="0.01" inputmode="decimal" placeholder="0.00" value="' + (c.rate > 0 ? (+c.rate) : '') + '" style="width:92px;">'
       + '<button type="button" class="minibtn amgcSave" data-id="' + esc(c.id) + '">Guardar</button><button type="button" class="minibtn amgcOff" data-id="' + esc(c.id) + '" title="Quitar de la lista">✕</button></span></div>';
     const act = AMG_CLIENTS.filter(c => c.active !== false), off = AMG_CLIENTS.filter(c => c.active === false);
     box.innerHTML = (act.length ? act.map(row).join('') : '<p class="clockhint">Ningún cliente activo.</p>')
@@ -5108,7 +5093,7 @@
         const inp = b.parentElement.querySelector('.amgcRate'); const v = (inp && inp.value !== '') ? +inp.value : null;
         if(v !== null && !(v > 0)) throw new Error('El precio tiene que ser mayor que 0, o vacío para usar el general.');
         await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(id), { rate: v, updated_at: new Date().toISOString() });
-        if(msg) msg.textContent = (c ? c.name : 'Cliente') + ': ' + (v === null ? 'usa el precio general' : '$' + v.toFixed(2) + '/h por persona') + ' ✓ (los reportes ya mandados no cambian).';
+        if(msg) msg.textContent = (c ? c.name : 'Cliente') + ': ' + (v === null ? 'todavía sin precio' : '$' + v.toFixed(2) + '/h por persona') + ' ✓ (los reportes ya mandados no cambian).';
       } else if(b.classList.contains('amgcOff')){
         if(!confirm('¿Quitar a ' + (c ? c.name : 'este cliente') + ' de la lista? Sus reportes y pagos guardados no se tocan; solo deja de aparecer para escoger.')) { b.disabled = false; return; }
         await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(id), { active: false, updated_at: new Date().toISOString() });
@@ -5134,7 +5119,7 @@
       if(dup && dup.active === false){ await amgClientsWrite('PATCH', '?id=eq.' + encodeURIComponent(dup.id), { active: true, rate: rv, updated_at: new Date().toISOString() }); }
       else await amgClientsWrite('POST', '', { name, rate: rv, active: true });
       $('#amgClientNewName').value = ''; $('#amgClientNewRate').value = '';
-      if(msg) msg.textContent = name + ' agregado' + (rv !== null ? ' a $' + rv.toFixed(2) + '/h por persona' : ' (usa el precio general)') + ' ✓';
+      if(msg) msg.textContent = name + ' agregado' + (rv !== null ? ' a $' + rv.toFixed(2) + '/h por persona' : ' (todavía sin precio)') + ' ✓';
       await loadAmgClients(); paintAmgClients(); paintAmgPriceWarn();
     }catch(err){ if(msg) msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
     b.disabled = false;
@@ -5142,9 +5127,9 @@
   function paintAmgPriceWarn(){
     const w = $('#amgPriceWarn'); if(!w || !isManager()) return;
     const k = mgKindRow();
-    const bad = !!(k && k.active && !mgClientPrice() && !amgAnyClientRate());
+    const bad = !!(k && k.active && !amgAnyClientRate());
     w.hidden = !bad;
-    w.textContent = bad ? 'AMG está prendida, pero no hay precio por hora al cliente (ni general ni por cliente). No se puede mandar ningún reporte de mudanza hasta ponerlo en Precio AMG.' : '';
+    w.textContent = bad ? 'AMG está prendida, pero ningún cliente tiene precio. No se puede cobrar ninguna mudanza hasta ponérselo en Precio AMG → Precio por cliente.' : '';
   }
   const AMG_TILE_HINT = 'Todo lo de mudanza: horas, tarifas y reportes de mudanza';
   function paintAmgTile(){ const h = $('#menuAmgHint'); if(h) h.textContent = AMG_TILE_HINT; }
@@ -5174,7 +5159,7 @@
     if(!isManager()) return;
     if(view === 'form'){
       if(!WORK_KINDS_OK){ const ok = await loadWorkKinds(); if(!ok){ alert('No se pudo leer el precio de AMG. Revise su internet y vuelva a intentar.'); return; } }
-      if(!mgClientPrice() && !amgAnyClientRate()){
+      if(!amgAnyClientRate()){
         if(confirm('Antes de llenar un reporte de mudanza hay que poner el precio por hora al cliente (general o por cliente).\n\n¿Ir a Precio AMG?')) amgShow('price');
         return;
       }
@@ -5202,7 +5187,6 @@
     else { refreshInbox(); setTimeout(()=>{ const c=$('#inboxWrap'); if(c) c.scrollIntoView({block:'start'}); }, 250); }
   }
   if($('#amgSegInbox')) $('#amgSegInbox').addEventListener('click', () => amgOpenLabor('inbox'));
-  if($('#mgMgPriceSave')) $('#mgMgPriceSave').addEventListener('click', saveMgPrices);
   if($('#mgMgActivate'))  $('#mgMgActivate').addEventListener('click', activateMg);
   // Dentro de Precio AMG: lo de cada cliente primero; los materiales, en su propia pagina.
   function amgPriceShow(which){
@@ -17009,7 +16993,7 @@
       const okC = await loadAmgClients();     // el precio del cliente tambien fresco; si no se pudo leer, no se congela nada
       if(!okC && AMG_CLIENTS_STATE !== 'absent'){ hideOverlay(); return alert(AMG_NO_SIGNAL); }
       const cfg = mgClientPrice(formClient());
-        if(!cfg){ hideOverlay(); return alert('No se puede guardar esta mudanza.\n\nFalta el precio por hora al cliente' + (formClient() ? ' (' + formClient() + ' no tiene precio y tampoco hay precio general)' : '') + '. Vaya a AMG Moving → Precio AMG, póngalo y vuelva a mandarla.\n\nUna mudanza nunca se guarda con precio $0.'); }
+        if(!cfg){ hideOverlay(); return alert('No se puede guardar esta mudanza.\n\nFalta el precio por hora al cliente' + (formClient() ? ' (' + formClient() + ' no tiene precio puesto)' : '') + '. Vaya a AMG Moving → Precio AMG, póngalo y vuelva a mandarla.\n\nUna mudanza nunca se guarda con precio $0.'); }
       if(!laborShownCfg || rateStamp(laborShownCfg) !== rateStamp(cfg)){   // sin precio en pantalla = distinto de cualquier precio real
         hideOverlay(); lockedRate = null; recalcGrandTotal(); renderLaborReview();
         return alert('El precio de AMG cambió desde que abrió esta pantalla. Ahora es: ' + rateStamp(cfg) + '.\n\nRevise el total y vuelva a tocar Mandar.');
