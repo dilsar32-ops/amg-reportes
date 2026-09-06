@@ -3671,7 +3671,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-K';
+  const APP_BUILD = '2026-09-06-L';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -16761,7 +16761,7 @@
   }
   const finDate = d => { const s = String(d||''); const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); return m ? (m[3] + '/' + m[2]) : s; };
   let FIN_PEOPLE = [];
-  let finExpenses = [], finPayments = [], finLogs = [];
+  let finExpenses = [], finPayments = [], finLogs = [], finClock = [];
   let finGView = 'open', finPView = 'clients', finMineOpen = false;
 
   async function loadPeople(){
@@ -17060,13 +17060,19 @@
     try{
       await loadPeople();
       if(typeof loadKindRates === 'function') await loadKindRates();
-      const [a, b, c] = await Promise.all([
+      const since = (() => { const d = new Date(); d.setDate(d.getDate() - 180); return d.toISOString().slice(0, 10); })();
+      const [a, b, c, d1, d2] = await Promise.all([
         authFetch('/rest/v1/expenses?select=*&order=spent_on.desc,created_at.desc&limit=5000', { headers: cloudHeaders() }),
         authFetch('/rest/v1/client_payments?select=*&order=paid_on.desc,created_at.desc&limit=5000', { headers: cloudHeaders() }),
-        authFetch('/rest/v1/labor_logs?select=id,client_id,log_date,crew_leader,payload,archived_at,work_kind&work_kind=eq.mudanza&order=log_date.desc&limit=2000', { headers: cloudHeaders() })
+        authFetch('/rest/v1/labor_logs?select=id,client_id,log_date,crew_leader,payload,archived_at,work_kind&work_kind=eq.mudanza&order=log_date.desc&limit=2000', { headers: cloudHeaders() }),
+        authFetch('/rest/v1/time_entries?select=user_id,work_date,clock_in,clock_out&work_kind=eq.mudanza&work_date=gte.' + since + '&limit=5000', { headers: cloudHeaders() }),
+        authFetch('/rest/v1/casual_hours?select=casual_worker_id,work_date,reported_hours&work_kind=eq.mudanza&work_date=gte.' + since + '&limit=5000', { headers: cloudHeaders() })
       ]);
       finExpenses = a.ok ? await a.json() : []; finPayments = b.ok ? await b.json() : []; finLogs = c.ok ? await c.json() : [];
-    }catch(e){ finExpenses = []; finPayments = []; finLogs = []; }
+      const te = d1.ok ? await d1.json() : [], ch = d2.ok ? await d2.json() : [];
+      finClock = te.map(r => { const mins = hoursBetween(r.clock_in, r.clock_out); return { key:'c:' + r.user_id, date:String(r.work_date).slice(0, 10), h: mins === null ? 0 : mins/60 }; })
+        .concat(ch.map(r => ({ key:'t:' + r.casual_worker_id, date:String(r.work_date).slice(0, 10), h: +r.reported_hours || 0 })));
+    }catch(e){ finExpenses = []; finPayments = []; finLogs = []; finClock = []; }
     renderFinGastos(); renderFinPagos();
   }
   function groupBy(rows, keyFn){ const m = new Map(); rows.forEach(r => { const k = keyFn(r); if(!m.has(k)) m.set(k, []); m.get(k).push(r); }); return m; }
@@ -17105,13 +17111,15 @@
         String(sh.n || '').split(',').map(x => x.trim()).filter(Boolean).forEach(nm => {
           const { person, rate } = finRateForName(nm);
           const key = person ? (person.kind + ':' + person.id) : ('x:' + finNorm(nm));
-          if(!c.people.has(key)) c.people.set(key, { name: person ? person.name : nm, hours:0, rate, amount:0, days:new Set() });
+          if(!c.people.has(key)) c.people.set(key, { name: person ? person.name : nm, hours:0, rate, amount:0, days:new Set(), key });
           const pp = c.people.get(key); pp.hours += h; pp.days.add(l.log_date);
           if(rate === null) c.laborNoRate += h; else { pp.amount += h * rate; c.labor += h * rate; }
         });
       });
       c.days.add(l.log_date); c.billed += amt; if(np) c.noPrice++; c.logs.push({ date: l.log_date, amt, np, leader: l.crew_leader, id: l.id, names: ((p.s||[])[0]||{}).n || '' });
     });
+    // Cruce: lo que marcó el reloj esa persona en los días de este cliente (si trabajó para dos clientes el mismo día, se avisa, no se reparte).
+    byClient.forEach(c => c.people.forEach(pp => { pp.clock = finClock.filter(r => r.key === pp.key && c.days.has(r.date)).reduce((s, r) => s + r.h, 0); pp.clockDiff = Math.round((pp.clock - pp.hours) * 100) / 100; }));
     finPayments.forEach(r => { const name = normClient(r.client) || '(sin cliente)'; const c = get(clientKey(name)); c.name = c.name || name; c.paid += (+r.amount||0); c.payments.push(r); });
     finExpenses.forEach(r => { if(!r.client) return; const name = normClient(r.client); const c = get(clientKey(name)); c.name = c.name || name; c.expenses.push(r); c.gastos += (+r.amount||0); });
     return [...byClient.values()].sort((a, b) => (b.billed - b.paid) - (a.billed - a.paid));
@@ -17129,7 +17137,8 @@
     const a = clientAccount(c);
     const line = (x, y, cls) => '<div class="' + (cls || 'line') + '"><span>' + x + '</span><span>' + y + '</span></div>';
     const paidLines = c.payments.length ? c.payments.map(r => line('&nbsp;&nbsp;' + esc(finDate(r.paid_on)) + ' · ' + esc(FIN_METHOD[r.method] || r.method) + (r.kind === 'ajuste' ? ' · ajuste' : '') + ' · lo tiene ' + esc(r.delivered_at ? a.meName : whoLabel(r.received_by_kind, r.received_by_name)), finMoney(r.amount))).join('') : line('&nbsp;&nbsp;<span style="color:var(--danger);">Todavía no ha pagado</span>', '');
-    const peopleLines = [...c.people.values()].sort((x, y) => y.amount - x.amount).map(pp => line('&nbsp;&nbsp;' + esc(pp.name) + ' · ' + pp.days.size + ' día' + (pp.days.size===1?'':'s') + ' · ' + (Math.round(pp.hours*100)/100).toFixed(2) + ' h' + (pp.rate === null ? ' · <span style="color:var(--danger);">sin tarifa AMG</span>' : ' × ' + finMoney(pp.rate)), pp.rate === null ? '—' : finMoney(pp.amount))).join('');
+    const clockNote = pp => pp.clock === undefined ? '' : (Math.abs(pp.clockDiff) <= 0.26 ? ' · <span style="color:var(--ok, #2e9e5b);">reloj ✓</span>' : (pp.clock === 0 ? ' · <span style="color:var(--danger);">⚠ no marcó reloj esos días</span>' : ' · <span style="color:var(--danger);">⚠ reloj ' + (Math.round(pp.clock*100)/100).toFixed(2) + ' h</span>'));
+    const peopleLines = [...c.people.values()].sort((x, y) => y.amount - x.amount).map(pp => line('&nbsp;&nbsp;' + esc(pp.name) + ' · ' + pp.days.size + ' día' + (pp.days.size===1?'':'s') + ' · ' + (Math.round(pp.hours*100)/100).toFixed(2) + ' h' + (pp.rate === null ? ' · <span style="color:var(--danger);">sin tarifa AMG</span>' : ' × ' + finMoney(pp.rate)) + clockNote(pp), pp.rate === null ? '—' : finMoney(pp.amount))).join('');
     const expLines = c.expenses.map(r => line('&nbsp;&nbsp;' + esc(finDate(r.spent_on)) + ' · ' + esc(FIN_WHAT[r.what] || r.what) + ' · lo puso ' + esc(whoLabel(r.paid_by_kind, r.paid_by_name)) + (r.reimbursed_at ? ' ✓' : ''), finMoney(r.amount))).join('');
     return '<div class="paysum" style="margin-top:10px;"><div class="grand" style="border-top:0;"><span>CUENTA DE ESTA MUDANZA</span><span></span></div>'
       + line('<b>Pagó el cliente</b>', '<b>' + finMoney(c.paid) + '</b>') + paidLines
@@ -17144,7 +17153,7 @@
           + (a.net >= 0 ? line('<b>' + esc(a.partner.name) + ' le entrega a ' + esc(a.meName) + '</b>', '<b>' + finMoney(a.net) + '</b>', 'grand') : line('<b>' + esc(a.meName) + ' le da a ' + esc(a.partner.name) + '</b>', '<b>' + finMoney(-a.net) + '</b>', 'grand'))
         : '')
       + '</div><button type="button" class="btn btn-outline btn-block finClientPdf" data-ckey="' + esc(c.key) + '" style="margin-top:8px;">PDF de la cuenta de ' + esc(c.name) + '</button>'
-      + '<p class="clockhint">Los trabajadores se pagan en Horas del equipo y pagos como siempre; aquí se ve cuánto de lo que pagó el cliente es de ellos. Un gasto entra aquí si al guardarlo se escogió este cliente.</p>';
+      + '<p class="clockhint">Las horas salen del reporte de mudanza que mandó el líder; "reloj" es lo que cada uno marcó en Reloj esos días (si difiere, alguien se equivocó: el reporte o el reloj). Los trabajadores se pagan en Horas del equipo y pagos como siempre. Un gasto entra aquí si al guardarlo se escogió este cliente.</p>';
   }
   function renderFinPagos(){
     const cl = $('#finPClients'), held = $('#finPHeld'); if(!cl || !held) return;
@@ -17201,9 +17210,13 @@
   }
   // Tarifa de AMG de un nombre del reporte (crew o temporal), o null si no tiene.
   function finRateForName(name){
-    const p = finPersonFor(name); if(!p) return { person:null, rate:null };
-    const rate = p.kind === 'c' ? mgRateCrew(p.id) : mgRateTemp(p.id);
-    return { person:p, rate };
+    // Si el mismo nombre existe dos veces (perfil de crew y temporal), gana el que TIENE tarifa de AMG.
+    const n = finNorm(name); if(!n) return { person:null, rate:null };
+    const exact = FIN_PEOPLE.filter(p => finNorm(p.name) === n);
+    const cands = exact.length ? exact : (FIN_PEOPLE.filter(p => finNorm(p.name).startsWith(n + ' ')).length ? FIN_PEOPLE.filter(p => finNorm(p.name).startsWith(n + ' ')) : FIN_PEOPLE.filter(p => finNorm(p.name).startsWith(n)));
+    if(!cands.length) return { person:null, rate:null };
+    const withRate = cands.map(p => ({ person:p, rate: p.kind === 'c' ? mgRateCrew(p.id) : mgRateTemp(p.id) }));
+    return withRate.find(x => x.rate !== null) || withRate[0];
   }
   let lastCierre = null;
   async function runCierre(){
@@ -17327,7 +17340,7 @@
     if(!c.payments.length) row('   (not paid yet)', '');
     const bal = Math.round((c.billed - c.paid) * 100) / 100; row('   Balance vs billed / Saldo', finMoney(bal) + (Math.abs(bal) < 0.01 ? '  (matches)' : '')); y += 6;
     row('WORKERS / TRABAJADORES (hours from the reports x AMG rate)', '-' + finMoney(c.labor), true);
-    [...c.people.values()].sort((x, z) => z.amount - x.amount).forEach(pp => row('   ' + pp.name + ' · ' + pp.days.size + ' day(s) · ' + (Math.round(pp.hours*100)/100).toFixed(2) + ' h' + (pp.rate === null ? ' · NO AMG RATE' : ' x ' + finMoney(pp.rate)), pp.rate === null ? '—' : finMoney(pp.amount)));
+    [...c.people.values()].sort((x, z) => z.amount - x.amount).forEach(pp => row('   ' + pp.name + ' · ' + pp.days.size + ' day(s) · ' + (Math.round(pp.hours*100)/100).toFixed(2) + ' h' + (pp.rate === null ? ' · NO AMG RATE' : ' x ' + finMoney(pp.rate)) + (pp.clock === undefined ? '' : (Math.abs(pp.clockDiff) <= 0.26 ? ' · clock OK' : (pp.clock === 0 ? ' · NO CLOCK HOURS those days' : ' · CLOCK ' + (Math.round(pp.clock*100)/100).toFixed(2) + ' h (differs)'))), pp.rate === null ? '—' : finMoney(pp.amount)));
     if(c.laborNoRate > 0) row('   hours without AMG rate (not subtracted)', (Math.round(c.laborNoRate*100)/100).toFixed(2) + ' h');
     y += 6; row('EXPENSES FOR THIS MOVE / GASTOS', '-' + finMoney(c.gastos), true);
     c.expenses.forEach(r => row('   ' + r.spent_on + ' · ' + (FIN_WHAT[r.what] || r.what) + ' · paid by ' + whoLabel(r.paid_by_kind, r.paid_by_name) + (r.reimbursed_at ? ' (reimbursed)' : ''), finMoney(r.amount)));
@@ -17341,7 +17354,7 @@
       row(a.net >= 0 ? '   ' + a.partner.name + ' hands over to ' + a.meName : '   ' + a.meName + ' pays ' + a.partner.name, finMoney(Math.abs(a.net)), true);
     }
     y += 10; pdf.setFontSize(9); pdf.setFont('helvetica','normal');
-    pdf.text('Workers are paid through the payroll screen as always; this shows how much of what the client paid is theirs. An expense counts here when it was saved with this client.', L, y, { maxWidth: 500 });
+    pdf.text('Hours come from the moving reports sent by the crew leader; "clock" is what each worker clocked in the app on those days. Workers are paid through the payroll screen as always; this shows how much of what the client paid is theirs. An expense counts here when it was saved with this client.', L, y, { maxWidth: 500 });
     const safe = c.name.replace(/[^A-Za-z0-9]+/g, '_');
     const filename = 'AMG_Cuenta_' + safe + '_' + localToday() + '.pdf';
     if(isNative()) saveAndShareNative(pdf.output('blob'), filename); else pdf.save(filename);
