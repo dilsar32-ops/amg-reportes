@@ -2164,6 +2164,15 @@
       <div class="amgbanner-t">&#128101; CLIENTES &middot; AMG MOVING</div>
       <div class="amgbanner-s">Agregue aqu&iacute; al cliente nuevo con sus datos antes de hacer su reporte de mudanza, para escogerlo en la lista.</div>
     </div>
+    <section class="card amgcard" id="acDoneCard" hidden style="text-align:center;">
+      <div style="font-size:44px; line-height:1; margin:6px 0 4px;">&#9989;</div>
+      <h2 id="acDoneTitle" style="justify-content:center; font-size:19px; border-bottom:none; margin-bottom:4px;">&#161;Cliente guardado!</h2>
+      <p id="acDoneName" style="font-size:22px; font-weight:700; margin:0 0 6px;"></p>
+      <p id="acDoneWhat" class="hint" style="margin:0 auto 14px; max-width:320px;"></p>
+      <button class="btn btn-amg btn-block" type="button" id="acDoneBack">Listo</button>
+      <button class="btn btn-outline btn-block" type="button" id="acDoneMore" style="margin-top:8px;">Agregar otro cliente</button>
+    </section>
+
     <section class="card amgcard" id="acFormCard">
       <h2 id="acTitle" style="font-size:15px; margin:0 0 4px;">Agregar cliente</h2>
       <div class="field" id="acNameField"><label>Cliente <span class="hint">nombre, como aparece en el reporte de mudanza</span></label><input type="text" id="acName" placeholder="Ej: Robert" autocapitalize="words" autocomplete="off"></div>
@@ -3318,6 +3327,7 @@
       const mgr = isManager() && document.body.classList.contains('mgr');   // por la puerta AMG (aunque entre el manager) es la pantalla del trabajador
       AC_MGR = mgr;
       if($('#acBillToField')) $('#acBillToField').hidden = !mgr;
+      acHideDone();
       if($('#acPricingBox')) $('#acPricingBox').hidden = !mgr;
       if($('#acListCard')) $('#acListCard').hidden = !mgr;                 // el crew no ve la lista de clientes: solo agrega
       if($('#acTitle')) $('#acTitle').textContent = mgr ? 'Agregar cliente' : 'Agregar cliente nuevo';
@@ -4099,7 +4109,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-AM';
+  const APP_BUILD = '2026-09-06-AN';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4916,6 +4926,24 @@
     box.innerHTML = (act.length ? act.map(card).join('') : '<p class="clockhint">Todavía no hay clientes. Agregue el primero abajo.</p>')
       + (off.length ? '<details class="whychip" style="display:block;margin-top:6px;"><summary>Clientes quitados (' + off.length + ')</summary><div class="whytext">' + off.map(c => '<div class="entryrow"><span>' + esc(c.name) + '</span><button type="button" class="minibtn amgcOn" data-id="' + esc(c.id) + '">Volver a activar</button></div>').join('') + '</div></details>' : '');
   }
+  // Pantalla de confirmacion: el trabajador ve claro que el cliente SI quedo guardado antes de irse.
+  function acShowDone(name, what, editing){
+    const t = $('#acDoneTitle'), n = $('#acDoneName'), w = $('#acDoneWhat');
+    if(t) t.innerHTML = editing ? '¡Cambios guardados!' : '¡Cliente guardado!';
+    if(n) n.textContent = name || '';
+    if(w) w.textContent = what || '';
+    if($('#acDoneCard')) $('#acDoneCard').hidden = false;
+    if($('#acFormCard')) $('#acFormCard').hidden = true;
+    if($('#acListCard')) $('#acListCard').hidden = true;
+    const c = $('#acDoneCard'); if(c) c.scrollIntoView({ block:'start' });
+  }
+  function acHideDone(){
+    if($('#acDoneCard')) $('#acDoneCard').hidden = true;
+    if($('#acFormCard')) $('#acFormCard').hidden = false;
+    if($('#acListCard')) $('#acListCard').hidden = !AC_MGR;      // la lista es solo del manager
+  }
+  if($('#acDoneMore')) $('#acDoneMore').addEventListener('click', ()=>{ acHideDone(); acFill(null); const n = $('#acName'); if(n){ n.focus(); n.scrollIntoView({ block:'center' }); } });
+  if($('#acDoneBack')) $('#acDoneBack').addEventListener('click', ()=>{ acHideDone(); acFill(null); goBack(); });
   let acPricing = 'hora';
   function acSetPricing(mode){
     acPricing = mode === 'fijo' ? 'fijo' : 'hora';
@@ -4979,9 +5007,11 @@
         if(!res.ok){ let t = await res.text(); try{ t = JSON.parse(t).message || t; }catch(e){} throw new Error(String(t).slice(0, 160)); }
         let out = null; try{ out = await res.json(); }catch(e){}
         const reloaded = await loadAmgClients(); paintAmgClientCards(); acFill(null);
-        msg.textContent = ((out && out.existed) || known)
-          ? (out && out.name ? out.name : name) + ' ya existía: se guardaron solo los datos que le faltaban.'
-          : (out && out.name ? out.name : name) + ' agregado ✓' + (reloaded ? ' Ya lo puede escoger en el reporte de mudanza.' : ' Salga y vuelva a entrar para verlo en la lista.');
+        const nm = (out && out.name) ? out.name : name;
+        acShowDone(nm, ((out && out.existed) || known)
+          ? nm + ' ya estaba en los archivos. Se guardaron solo los datos que le faltaban.'
+          : (reloaded ? 'Ya lo puede escoger en el reporte de mudanza.' : 'Guardado. Salga y vuelva a entrar para verlo en la lista.'), false);
+        msg.textContent = '';
       }catch(err){ msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
       b.disabled = false; b.textContent = old; return;
     }
@@ -4993,7 +5023,9 @@
       else { delete row.updated_at; await amgClientsWrite('POST', '', Object.assign(row, { active: true })); }
       await loadAmgClients(); paintAmgClientCards(); paintAmgClients(); paintAmgPriceWarn();
       const done = acEditingId ? 'Cambios guardados ✓' : name + ' agregado ✓' + (acPricing === 'fijo' ? ' a precio fijo $' + fv.toFixed(2) + ' por mudanza' : (rv !== null ? ' a $' + rv.toFixed(2) + '/h por persona' : ' (usa el precio general)'));
-      acFill(null); msg.textContent = done + ' Los reportes ya mandados no cambian de precio.';
+      const wasEditing = !!acEditingId;
+      acFill(null); msg.textContent = '';
+      acShowDone(name, done.replace(/^.*?✓\s*/, '').trim() || 'Guardado.', wasEditing);
     }catch(err){ msg.textContent = 'No se pudo: ' + ((err && err.message) || err); }
     b.disabled = false; b.textContent = old;
   });
