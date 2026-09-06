@@ -3671,7 +3671,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-J';
+  const APP_BUILD = '2026-09-06-K';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -17094,15 +17094,57 @@
   // Cuenta por cliente: lo que se le facturo (reportes de mudanza) contra lo que pago.
   function clientStatements(){
     const byClient = new Map();
-    const get = k => { if(!byClient.has(k)) byClient.set(k, { name:'', days:new Set(), hours:0, billed:0, noPrice:0, logs:[], paid:0, payments:[] }); return byClient.get(k); };
+    const get = k => { if(!byClient.has(k)) byClient.set(k, { key:k, name:'', days:new Set(), hours:0, billed:0, noPrice:0, logs:[], paid:0, payments:[], people:new Map(), labor:0, laborNoRate:0, expenses:[], gastos:0 }); return byClient.get(k); };
     finLogs.forEach(l => {
       const p = l.payload || {}; const name = normClient(p.t) || '(sin cliente)'; const c = get(clientKey(name)); c.name = c.name || name;
       let amt = 0, np = false;
-      (p.s || []).forEach(sh => { const m = shiftMathData(sh, p.r, 'mudanza'); if(m.noPrice) np = true; amt += m.amount || 0; c.hours += (m.regH || 0) * (m.people || 0); });
-      c.days.add(l.log_date); c.billed += amt; if(np) c.noPrice++; c.logs.push({ date: l.log_date, amt, np, leader: l.crew_leader, id: l.id });
+      (p.s || []).forEach(sh => {
+        const m = shiftMathData(sh, p.r, 'mudanza'); if(m.noPrice) np = true; amt += m.amount || 0; c.hours += (m.regH || 0) * (m.people || 0);
+        // Quien trabajo en esa mudanza: cada nombre del turno, sus horas y su tarifa de AMG.
+        const mins = hoursBetween(sh.f, sh.o); const h = (mins === null) ? 0 : mins/60;
+        String(sh.n || '').split(',').map(x => x.trim()).filter(Boolean).forEach(nm => {
+          const { person, rate } = finRateForName(nm);
+          const key = person ? (person.kind + ':' + person.id) : ('x:' + finNorm(nm));
+          if(!c.people.has(key)) c.people.set(key, { name: person ? person.name : nm, hours:0, rate, amount:0, days:new Set() });
+          const pp = c.people.get(key); pp.hours += h; pp.days.add(l.log_date);
+          if(rate === null) c.laborNoRate += h; else { pp.amount += h * rate; c.labor += h * rate; }
+        });
+      });
+      c.days.add(l.log_date); c.billed += amt; if(np) c.noPrice++; c.logs.push({ date: l.log_date, amt, np, leader: l.crew_leader, id: l.id, names: ((p.s||[])[0]||{}).n || '' });
     });
     finPayments.forEach(r => { const name = normClient(r.client) || '(sin cliente)'; const c = get(clientKey(name)); c.name = c.name || name; c.paid += (+r.amount||0); c.payments.push(r); });
+    finExpenses.forEach(r => { if(!r.client) return; const name = normClient(r.client); const c = get(clientKey(name)); c.name = c.name || name; c.expenses.push(r); c.gastos += (+r.amount||0); });
     return [...byClient.values()].sort((a, b) => (b.billed - b.paid) - (a.billed - a.paid));
+  }
+  // El reparto de UNA mudanza: lo que pago el cliente, menos la gente y los gastos de esa mudanza.
+  function clientAccount(c){
+    const partner = finPartner(); const meKey = 'c:' + (SES && SES.user_id); const meName = (SES && SES.full_name) || 'Manager';
+    const queda = c.paid - c.labor - c.gastos; const mitad = queda / 2;
+    const put = key => c.expenses.filter(r => personKeyOf(r) === key).reduce((s, r) => s + (+r.amount||0), 0);
+    const mePut = put(meKey), partnerPut = partner ? put(partner.key) : 0;
+    const held = partner ? c.payments.filter(r => r.kind === 'pago' && !r.delivered_at && personKeyOf(r) === partner.key).reduce((s, r) => s + (+r.amount||0), 0) : 0;
+    return { partner, meName, queda, mitad, mePut, partnerPut, held, meTotal: c.labor + mePut + mitad, partnerTotal: partnerPut + mitad, net: held - (partnerPut + mitad) };
+  }
+  function clientAccountHtml(c){
+    const a = clientAccount(c);
+    const line = (x, y, cls) => '<div class="' + (cls || 'line') + '"><span>' + x + '</span><span>' + y + '</span></div>';
+    const paidLines = c.payments.length ? c.payments.map(r => line('&nbsp;&nbsp;' + esc(finDate(r.paid_on)) + ' · ' + esc(FIN_METHOD[r.method] || r.method) + (r.kind === 'ajuste' ? ' · ajuste' : '') + ' · lo tiene ' + esc(r.delivered_at ? a.meName : whoLabel(r.received_by_kind, r.received_by_name)), finMoney(r.amount))).join('') : line('&nbsp;&nbsp;<span style="color:var(--danger);">Todavía no ha pagado</span>', '');
+    const peopleLines = [...c.people.values()].sort((x, y) => y.amount - x.amount).map(pp => line('&nbsp;&nbsp;' + esc(pp.name) + ' · ' + pp.days.size + ' día' + (pp.days.size===1?'':'s') + ' · ' + (Math.round(pp.hours*100)/100).toFixed(2) + ' h' + (pp.rate === null ? ' · <span style="color:var(--danger);">sin tarifa AMG</span>' : ' × ' + finMoney(pp.rate)), pp.rate === null ? '—' : finMoney(pp.amount))).join('');
+    const expLines = c.expenses.map(r => line('&nbsp;&nbsp;' + esc(finDate(r.spent_on)) + ' · ' + esc(FIN_WHAT[r.what] || r.what) + ' · lo puso ' + esc(whoLabel(r.paid_by_kind, r.paid_by_name)) + (r.reimbursed_at ? ' ✓' : ''), finMoney(r.amount))).join('');
+    return '<div class="paysum" style="margin-top:10px;"><div class="grand" style="border-top:0;"><span>CUENTA DE ESTA MUDANZA</span><span></span></div>'
+      + line('<b>Pagó el cliente</b>', '<b>' + finMoney(c.paid) + '</b>') + paidLines
+      + line('− Trabajadores (horas del reporte × tarifa AMG)', '− ' + finMoney(c.labor)) + peopleLines
+      + (c.laborNoRate > 0 ? line('<span style="color:var(--danger);">&nbsp;&nbsp;⚠ ' + (Math.round(c.laborNoRate*100)/100).toFixed(2) + ' h sin tarifa (no restadas)</span>', '') : '')
+      + line('− Gastos de esta mudanza', '− ' + finMoney(c.gastos)) + expLines
+      + line('<b>QUEDA</b>', '<b>' + finMoney(a.queda) + '</b>', 'grand')
+      + line('Mitad ' + esc(a.meName), finMoney(a.mitad)) + line('Mitad ' + (a.partner ? esc(a.partner.name) : 'socio'), finMoney(a.mitad))
+      + line('<b>Total para ' + esc(a.meName) + '</b> (trabajadores + lo suyo + mitad)', '<b>' + finMoney(a.meTotal) + '</b>')
+      + (a.partner ? line('<b>Total para ' + esc(a.partner.name) + '</b> (lo suyo + mitad)', '<b>' + finMoney(a.partnerTotal) + '</b>')
+          + line('Dinero de este cliente que tiene ' + esc(a.partner.name), finMoney(a.held))
+          + (a.net >= 0 ? line('<b>' + esc(a.partner.name) + ' le entrega a ' + esc(a.meName) + '</b>', '<b>' + finMoney(a.net) + '</b>', 'grand') : line('<b>' + esc(a.meName) + ' le da a ' + esc(a.partner.name) + '</b>', '<b>' + finMoney(-a.net) + '</b>', 'grand'))
+        : '')
+      + '</div><button type="button" class="btn btn-outline btn-block finClientPdf" data-ckey="' + esc(c.key) + '" style="margin-top:8px;">PDF de la cuenta de ' + esc(c.name) + '</button>'
+      + '<p class="clockhint">Los trabajadores se pagan en Horas del equipo y pagos como siempre; aquí se ve cuánto de lo que pagó el cliente es de ellos. Un gasto entra aquí si al guardarlo se escogió este cliente.</p>';
   }
   function renderFinPagos(){
     const cl = $('#finPClients'), held = $('#finPHeld'); if(!cl || !held) return;
@@ -17117,7 +17159,8 @@
           : saldo > 0 ? '<span class="matchstatus mismatch">Le falta ' + finMoney(saldo) + '</span>' : '<span class="matchstatus partial">Pagó ' + finMoney(-saldo) + ' de más</span>';
         return '<details class="whychip" style="margin:0 0 8px;"><summary>' + esc(c.name) + ' · facturado ' + finMoney(c.billed) + ' · pagó ' + finMoney(c.paid) + '</summary><div class="whytext">'
           + '<div class="paysum" style="margin-top:0;"><div class="line"><span>Días trabajados</span><span>' + c.days.size + '</span></div><div class="line"><span>Horas (personas × horas)</span><span>' + (Math.round(c.hours*100)/100).toFixed(2) + '</span></div><div class="line"><span>Facturado (reportes)</span><span>' + finMoney(c.billed) + '</span></div><div class="line"><span>Pagado</span><span>' + finMoney(c.paid) + '</span></div><div class="grand"><span>SALDO</span><span>' + finMoney(saldo) + '</span></div></div>' + state
-          + (c.logs.length ? '<div style="margin-top:8px;"><b>Reportes</b>' + c.logs.slice(0, 40).map(l => '<div class="line"><span>' + esc(finDate(l.date)) + (l.leader ? ' · ' + esc(l.leader) : '') + '</span><span>' + (l.np ? 'sin precio' : finMoney(l.amt)) + '</span></div>').join('') + '</div>' : '')
+          + clientAccountHtml(c)
+          + (c.logs.length ? '<div style="margin-top:8px;"><b>Reportes</b>' + c.logs.slice(0, 40).map(l => '<div class="line"><span>' + esc(finDate(l.date)) + (l.leader ? ' · ' + esc(l.leader) : '') + (l.names ? '<br><span class="muted" style="font-size:12px;">' + esc(l.names) + '</span>' : '') + '</span><span>' + (l.np ? 'sin precio' : finMoney(l.amt)) + '</span></div>').join('') + '</div>' : '')
           + (c.payments.length ? '<div style="margin-top:8px;"><b>Pagos</b>' + c.payments.map(r => pagoRowHtml(r, true)).join('') + '</div>' : '')
           + '</div></details>';
       }).join('') : '<p class="clockhint">Todavía no hay reportes de mudanza ni pagos de clientes.</p>';
@@ -17146,6 +17189,22 @@
     }
   }
   if($('#finCPartner')) $('#finCPartner').addEventListener('change', ()=>{ try{ localStorage.setItem('amgPartner', $('#finCPartner').value); }catch(e){} });
+  function finPartner(){
+    let v = ($('#finCPartner') && $('#finCPartner').value) || '';
+    if(!v){ try{ v = localStorage.getItem('amgPartner') || ''; }catch(e){} }
+    if(!v){ const r = finFixedOptions().find(o => finNorm(o.name) === 'raul'); v = r ? r.value : ''; }
+    if(!v) return null;
+    if(v.startsWith('x:')) return { key: v, name: v.slice(2) };
+    const i = v.indexOf(':'); const k = v.slice(0, i), id = v.slice(i+1);
+    const p = FIN_PEOPLE.find(x => x.kind === k && String(x.id) === id);
+    return { key: k + ':' + id, name: p ? p.name : (FIN_MONEY_NAMES.find(n => { const q = finPersonFor(n); return q && String(q.id) === id; }) || 'Socio') };
+  }
+  // Tarifa de AMG de un nombre del reporte (crew o temporal), o null si no tiene.
+  function finRateForName(name){
+    const p = finPersonFor(name); if(!p) return { person:null, rate:null };
+    const rate = p.kind === 'c' ? mgRateCrew(p.id) : mgRateTemp(p.id);
+    return { person:p, rate };
+  }
   let lastCierre = null;
   async function runCierre(){
     const from = $('#finCFrom').value, to = $('#finCTo').value, out = $('#finCOut');
@@ -17253,6 +17312,41 @@
     if(isNative()) saveAndShareNative(pdf.output('blob'), filename); else pdf.save(filename);
   }
   if($('#finCPdf')) $('#finCPdf').addEventListener('click', ()=>{ try{ buildCierrePdf(); }catch(e){ alert('No se pudo hacer el PDF.\n\n' + ((e && e.message) || e)); } });
+  function buildClientPdf(ckey){
+    const c = clientStatements().find(x => x.key === ckey); if(!c) return;
+    const a = clientAccount(c);
+    const { jsPDF } = window.jspdf; const pdf = new jsPDF('p','pt','a4'); const L = 48; let y = 60;
+    const row = (t, v, bold) => { if(y > 760){ pdf.addPage(); y = 60; } pdf.setFont('helvetica', bold ? 'bold' : 'normal'); pdf.text(String(t), L, y); if(v !== '') pdf.text(String(v), 548, y, { align:'right' }); y += 16; };
+    pdf.setFont('helvetica','bold'); pdf.setFontSize(18); pdf.text('AMG MOVING — CLIENT ACCOUNT / CUENTA DEL CLIENTE', L, y); y += 22;
+    pdf.setFont('helvetica','normal'); pdf.setFontSize(11); pdf.text('Client / Cliente: ' + c.name + '  ·  ' + c.days.size + ' day(s)  ·  Printed ' + new Date().toLocaleString(), L, y); y += 26;
+    row('WORK / TRABAJO (moving reports)', '', true);
+    c.logs.slice().sort((x, z) => String(x.date).localeCompare(String(z.date))).forEach(l => row('   ' + l.date + (l.leader ? ' · ' + l.leader : '') + (l.names ? ' · ' + l.names : ''), l.np ? 'no price' : finMoney(l.amt)));
+    row('   Billed / Facturado', finMoney(c.billed), true); y += 6;
+    row('PAID BY CLIENT / PAGO EL CLIENTE', finMoney(c.paid), true);
+    c.payments.forEach(r => row('   ' + r.paid_on + ' · ' + (FIN_METHOD[r.method] || r.method) + (r.kind === 'ajuste' ? ' · adjustment' : '') + ' · received by ' + whoLabel(r.received_by_kind, r.received_by_name) + (r.delivered_at ? ' (delivered)' : ''), finMoney(r.amount)));
+    if(!c.payments.length) row('   (not paid yet)', '');
+    const bal = Math.round((c.billed - c.paid) * 100) / 100; row('   Balance vs billed / Saldo', finMoney(bal) + (Math.abs(bal) < 0.01 ? '  (matches)' : '')); y += 6;
+    row('WORKERS / TRABAJADORES (hours from the reports x AMG rate)', '-' + finMoney(c.labor), true);
+    [...c.people.values()].sort((x, z) => z.amount - x.amount).forEach(pp => row('   ' + pp.name + ' · ' + pp.days.size + ' day(s) · ' + (Math.round(pp.hours*100)/100).toFixed(2) + ' h' + (pp.rate === null ? ' · NO AMG RATE' : ' x ' + finMoney(pp.rate)), pp.rate === null ? '—' : finMoney(pp.amount)));
+    if(c.laborNoRate > 0) row('   hours without AMG rate (not subtracted)', (Math.round(c.laborNoRate*100)/100).toFixed(2) + ' h');
+    y += 6; row('EXPENSES FOR THIS MOVE / GASTOS', '-' + finMoney(c.gastos), true);
+    c.expenses.forEach(r => row('   ' + r.spent_on + ' · ' + (FIN_WHAT[r.what] || r.what) + ' · paid by ' + whoLabel(r.paid_by_kind, r.paid_by_name) + (r.reimbursed_at ? ' (reimbursed)' : ''), finMoney(r.amount)));
+    y += 4; pdf.setLineWidth(0.7); pdf.line(L, y, 548, y); y += 14;
+    row('REMAINDER / QUEDA', finMoney(a.queda), true);
+    row('   Half ' + a.meName, finMoney(a.mitad)); row('   Half ' + (a.partner ? a.partner.name : 'partner'), finMoney(a.mitad)); y += 6;
+    row('TOTAL ' + a.meName + ' (workers + own expenses + half)', finMoney(a.meTotal), true);
+    if(a.partner){
+      row('TOTAL ' + a.partner.name + ' (own expenses + half)', finMoney(a.partnerTotal), true);
+      row('   Client money held by ' + a.partner.name, finMoney(a.held));
+      row(a.net >= 0 ? '   ' + a.partner.name + ' hands over to ' + a.meName : '   ' + a.meName + ' pays ' + a.partner.name, finMoney(Math.abs(a.net)), true);
+    }
+    y += 10; pdf.setFontSize(9); pdf.setFont('helvetica','normal');
+    pdf.text('Workers are paid through the payroll screen as always; this shows how much of what the client paid is theirs. An expense counts here when it was saved with this client.', L, y, { maxWidth: 500 });
+    const safe = c.name.replace(/[^A-Za-z0-9]+/g, '_');
+    const filename = 'AMG_Cuenta_' + safe + '_' + localToday() + '.pdf';
+    if(isNative()) saveAndShareNative(pdf.output('blob'), filename); else pdf.save(filename);
+  }
+  if($('#finMPagos')) $('#finMPagos').addEventListener('click', (e) => { const b = e.target.closest('.finClientPdf'); if(b){ try{ buildClientPdf(b.dataset.ckey); }catch(err){ alert('No se pudo hacer el PDF.\n\n' + ((err && err.message) || err)); } } });
 
   // ---- gasolina del turno -> gasto a nombre de quien la puso (una sola vez por turno) ----
   async function syncShiftExpenses(clientId, payload, workKind, logDate){
