@@ -399,6 +399,9 @@
   }
   .clockhint{font-size:12.5px; color:var(--ink-soft); margin:8px 0 0;}
   #casualAddBox[hidden], #casualPinNote[hidden]{display:none !important;}
+  #casualPayAlert{background:var(--danger); color:#fff; font-weight:700; font-size:14px;
+    padding:12px 14px; border-radius:12px; margin:0 0 12px; line-height:1.35;}
+  #casualPayAlert[hidden]{display:none !important;}
   .entryrow{
     display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline; gap:10px;
     padding:9px 0; border-bottom:1px solid var(--line); font-size:14px;
@@ -2482,6 +2485,10 @@
      <div class="amgbanner-s">Entró por AMG Moving. Todo lo que guarde aquí es de mudanza y se paga a la tarifa de AMG.</div>
    </div>
    <div id="casualRestPage">
+    <!-- Un trabajador temporal no tiene cuenta, asi que no se le puede mandar
+         una notificacion al telefono cerrado: el aviso vive aqui arriba y es
+         lo primero que ve al abrir la app. -->
+    <div id="casualPayAlert" hidden></div>
     <section class="card">
       <div class="inboxhead" style="margin-bottom:2px;"><h2 style="margin:0;" id="casualMyTitle">Sus horas</h2></div>
       <div class="field"><label>Fecha</label><input type="date" id="casualMyDate"></div>
@@ -2497,6 +2504,13 @@
       <h2 id="casualHistoryTitle">Su historial</h2>
       <div id="casualMyHistory"><p class="clockhint">Nada todavía.</p></div>
     </section>
+    <section class="card" id="casualPaysCard" hidden>
+      <h2>Sus pagos</h2>
+      <p class="clockhint">Lo que su manager anotó que le entregó. Revise cada uno y diga si está bien.</p>
+      <div id="casualPaysList"><p class="clockhint">Nada todavía.</p></div>
+      <p class="clockhint" id="casualPaysMsg"></p>
+    </section>
+
     <section class="card" id="casualCierresCard" hidden>
       <h2>Cierres para revisar</h2>
       <p class="clockhint">El manager le mandó copia de un cierre de AMG Moving. Revíselo y responda si está de acuerdo o no; puede escribir una nota.</p>
@@ -4120,7 +4134,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-BP';
+  const APP_BUILD = '2026-09-07-BQ';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -5651,6 +5665,8 @@
   let casualWorkers = [];   // roster cache: id, name, status, rate
   let casualHoursAll = [];  // every casual_hours row for the company - a small table, cheap to hold in full
   let casualPayments = [];  // every casual_payments row - the cash ledger
+  // Se apaga sola si supabase-casual-confirm.sql todavia no ha corrido.
+  let CASUAL_CONFIRM_READY = true;
   let CASUAL_PAY_READY = true;   // false until supabase-casual-payments.sql is run
   let casualPersonKey = null;
   let casualPaidView = false;
@@ -5758,6 +5774,7 @@
         authFetch('/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount,work_kind,clock_in,clock_out'
           + '&company_id=eq.' + SES.company_id + '&order=work_date.desc&limit=5000', { headers: cloudHeaders() }),
         authFetch('/rest/v1/casual_payments?select=id,casual_worker_id,paid_on,amount,kind,note,settle_key,created_at'
+          + (CASUAL_CONFIRM_READY ? ',accepted,responded_at,response_note,balance_after,confirm_needed' : '')
           + '&company_id=eq.' + SES.company_id + '&order=paid_on.desc&limit=5000', { headers: cloudHeaders() })
       ]);
       if(!wRes.ok){
@@ -5768,6 +5785,12 @@
       // a 404/400 just means no adelantos exist yet, not that the screen is
       // broken. CASUAL_PAY_READY keeps every "give money" control hidden
       // rather than letting him tap something that silently does nothing.
+      // 400 = las columnas de confirmacion todavia no existen (falta correr
+      // supabase-casual-confirm.sql). Se pide otra vez sin ellas, para que la
+      // pantalla del dinero siga funcionando igual que antes.
+      if(pRes && !pRes.ok && pRes.status === 400 && CASUAL_CONFIRM_READY){
+        CASUAL_CONFIRM_READY = false; return loadCasualTeam();
+      }
       CASUAL_PAY_READY = !!(pRes && pRes.ok);
       casualPayments = CASUAL_PAY_READY ? await pRes.json() : [];
       casualWorkers = await wRes.json();
@@ -5806,10 +5829,19 @@
                                 : money(Math.max(0, b.balance)));
         const badge = w.status === 'removed'
           ? '<br><span style="color:var(--danger); font-weight:700; font-size:12px;">Sacado &mdash; queda dinero pendiente</span>' : '';
+        // Solo los que tienen codigo pueden contestar; a los demas no se les
+        // pregunta nada, asi que este aviso no tiene sentido en su lista.
+        const suyos = CASUAL_CONFIRM_READY && w.pin ? casualPaymentsFor(w.id).filter(p => p.confirm_needed !== false) : [];
+        const rech = suyos.filter(p => p.accepted === false).length;
+        const espera = suyos.filter(p => p.accepted === null || p.accepted === undefined).length;
+        const resp = rech
+          ? '<br><span style="color:var(--danger); font-weight:700; font-size:12px;">&#10007; Rechazó ' + rech + ' pago(s)</span>'
+          : espera
+            ? '<br><span class="when" style="color:var(--ink-soft);">&#8987; Falta que confirme ' + espera + ' pago(s)</span>' : '';
         const given = (b.plus || b.favor)
           ? ' &middot; entregado ' + money(b.net) : '';
         return `<div class="entryrow" data-casualid="${esc(w.id)}">
-          <span><span class="who">${esc(w.name)}${badge}</span><br>
+          <span><span class="who">${esc(w.name)}${badge}${resp}</span><br>
             <span class="when">${hhmm(b.openMins)} sin pagar${
               b.unpriced ? ' &middot; falta la tarifa' : (b.rate !== null ? ' &middot; ' + money(b.rate) + '/hora' : '')}${given}</span></span>
           <span class="hrs">${owedTxt}</span>
@@ -6286,10 +6318,19 @@
     box.innerHTML = list.map(p => {
       const a = +p.amount || 0;
       const favour = a < 0;
+      // Que contesto el trabajador desde su telefono. Un pago rechazado se ve
+      // en rojo aqui mismo: es lo primero que hay que atender.
+      const estado = !CASUAL_CONFIRM_READY || p.confirm_needed === false ? ''
+        : p.accepted === true
+          ? '<br><span class="matchstatus ok">&#10003; Él confirmó que lo recibió</span>'
+          : p.accepted === false
+            ? '<br><span class="matchstatus mismatch">&#10007; Él dice que NO está bien'
+              + (p.response_note ? ' &middot; ' + esc(p.response_note) : '') + '</span>'
+            : '<br><span class="matchstatus partial">&#8987; Esperando que él conteste</span>';
       return `<div class="entryrow" data-casualpay="${esc(p.id)}">
         <span><span class="who">${esc(KIND[p.kind] || p.kind)}</span><br>
           <span class="when">${esc(p.paid_on || '')}${p.note ? ' &middot; ' + esc(p.note) : ''}${
-            p.settle_key ? ' &middot; cierre' : ''}</span></span>
+            p.settle_key ? ' &middot; cierre' : ''}</span>${estado}</span>
         <span style="display:flex;align-items:center;gap:10px;">
           <span class="hrs"${favour ? ' style="color:#3ddc84;"' : ''}>${favour ? '+' : '&minus;'}${money(Math.abs(a))}</span>
           <button type="button" class="icon-btn casualPayDel">Borrar</button></span>
@@ -6315,8 +6356,14 @@
       const res = await authFetch('/rest/v1/casual_payments', {
         method:'POST',
         headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
-        body: JSON.stringify({ company_id: SES.company_id, casual_worker_id: casualPersonKey,
-                               paid_on, amount, kind, note, created_by: SES.user_id })
+        body: JSON.stringify(Object.assign({ company_id: SES.company_id, casual_worker_id: casualPersonKey,
+                               paid_on, amount, kind, note, created_by: SES.user_id },
+          // El saldo que queda DESPUES de este movimiento queda congelado en la
+          // fila: es lo unico que el telefono del trabajador puede leer sin
+          // saber su tarifa. Sin esto su pantalla diria "Al dia".
+          CASUAL_CONFIRM_READY
+            ? { balance_after: Math.round((casualBalanceOf(casualPersonKey).balance - amount)*100)/100 }
+            : {}))
       });
       if(!res.ok) throw new Error('HTTP ' + res.status);
       const saved = await res.json();
@@ -6420,10 +6467,15 @@
         const res = await authFetch('/rest/v1/casual_payments', {
           method:'POST',
           headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation,resolution=merge-duplicates'}),
-          body: JSON.stringify({ company_id: SES.company_id, casual_worker_id: casualPersonKey,
+          body: JSON.stringify(Object.assign({ company_id: SES.company_id, casual_worker_id: casualPersonKey,
                                  paid_on: todayStr(), amount: cash, kind: 'pago',
                                  note: 'Entregado al cerrar ' + rows.length + ' día(s)',
-                                 settle_key: key, created_by: SES.user_id })
+                                 settle_key: key, created_by: SES.user_id },
+            // Cerrar dias no cambia el saldo (mueve valor de un lado al otro):
+            // lo que lo baja es el efectivo entregado.
+            CASUAL_CONFIRM_READY
+              ? { balance_after: Math.round((casualBalanceOf(casualPersonKey).balance - cash)*100)/100 }
+              : {}))
         });
         if(!res.ok) throw new Error('HTTP '+res.status);
       }
@@ -17884,15 +17936,109 @@
   const sideCode = ses => isAmgSide() ? ses.amgCode : ses.joinCode;
 
 
+  // ---- SUS PAGOS (trabajador con codigo) ----
+  // Se apaga sola si supabase-casual-confirm.sql todavia no ha corrido: en ese
+  // caso la tarjeta no aparece y la pantalla queda igual que antes.
+  let CASUAL_PAYS_READY = true;
+  let casualMyPays = [];
+
+  async function loadCasualMyPays(){
+    if(!CASUAL_PAYS_READY) return;
+    const ses = loadCasualSes(); if(!ses) return;
+    try{
+      casualMyPays = await authPost('/rest/v1/rpc/casual_my_payments',
+        { p_join_code: sideCode(ses), p_name: ses.name, p_pin: ses.pin }) || [];
+      renderCasualMyPays();
+    }catch(e){
+      // Solo se apaga cuando la funcion no existe. Un problema de internet no
+      // debe esconderle sus pagos para siempre.
+      if(/does not exist|404|PGRST202/i.test(e.message || '')) CASUAL_PAYS_READY = false;
+      const card = $('#casualPaysCard'); if(card && !CASUAL_PAYS_READY) card.hidden = true;
+    }
+  }
+
+  function renderCasualMyPays(){
+    const card = $('#casualPaysCard'), box = $('#casualPaysList'), aviso = $('#casualPayAlert');
+    if(!card || !box) return;
+    const list = casualMyPays || [];
+    card.hidden = !list.length;
+    if(aviso) aviso.hidden = true;
+    if(!list.length){ box.innerHTML = '<p class="clockhint">Nada todavía.</p>'; return; }
+    const KIND = { pago:'Pago', adelanto:'Adelanto', extra:'Extra / bono',
+                   devolucion:'Devolución', ajuste:'Ajuste' };
+    const faltan = list.filter(p => p.confirm_needed !== false && (p.accepted === null || p.accepted === undefined));
+    if(aviso && faltan.length){
+      aviso.hidden = false;
+      aviso.innerHTML = '&#9888; Su manager anotó ' + faltan.length + ' pago'
+        + (faltan.length === 1 ? '' : 's') + '. Bájele a <b>Sus pagos</b> y diga si está bien.';
+    }
+    box.innerHTML = list.map(p => {
+      const a = +p.amount || 0, favor = a < 0;
+      // El saldo viene congelado de cuando el manager lo anoto: el telefono no
+      // sabe su tarifa. Si viene vacio NO se inventa un "Al dia".
+      const bal = (p.balance_after === null || p.balance_after === undefined) ? null : +p.balance_after;
+      const linea = bal === null ? 'Pregúntele a su manager cuánto queda'
+        : bal > 0.005 ? 'Le falta ' + money(bal)
+        : bal < -0.005 ? 'Crédito a su favor: ' + money(-bal)
+        : 'Al día';
+      const contestar = p.confirm_needed === false
+        ? '<span class="telock">Anotado antes</span>'
+        : p.accepted === true
+          ? '<span class="telock">&#10003; Usted dijo que está bien</span>'
+          : p.accepted === false
+            ? '<span class="telock" style="color:var(--danger);">&#10007; Usted dijo que NO'
+              + (p.response_note ? ' &middot; ' + esc(p.response_note) : '') + '</span>'
+            : `<div style="display:flex; gap:8px; margin-top:6px;">
+                 <button type="button" class="btn btn-ink cpYes" data-cpid="${esc(p.id)}" style="flex:1; padding:8px;">Sí, lo recibí</button>
+                 <button type="button" class="btn btn-outline cpNo" data-cpid="${esc(p.id)}" style="flex:1; padding:8px;">No es correcto</button>
+               </div>`;
+      return `<div class="entryrow">
+          <span><span class="who">${esc(KIND[p.kind] || p.kind)}</span><br>
+            <span class="when">${esc(p.paid_on || '')}${p.note ? ' &middot; ' + esc(p.note) : ''}</span></span>
+          <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+            <span class="hrs"${favor ? ' style="color:#3ddc84;"' : ''}>${money(Math.abs(a))}</span>
+            <span class="clockhint" style="margin:0;">${esc(linea)}</span></span>
+        </div>
+        <div style="padding:0 2px 12px;">${contestar}</div>`;
+    }).join('');
+  }
+
+  async function casualRespondPay(id, agree){
+    const ses = loadCasualSes(); if(!ses) return;
+    const msg = $('#casualPaysMsg');
+    let note = null;
+    if(!agree){
+      note = prompt('¿Qué está mal? Escríbalo y su manager lo va a ver.');
+      if(note === null) return;                    // cancelo: no se manda nada
+    }
+    if(agree && !confirm('¿Confirma que sí recibió ese dinero?\n\nDespués ya no se puede cambiar.')) return;
+    try{
+      casualMyPays = await authPost('/rest/v1/rpc/casual_respond_payment', {
+        p_join_code: sideCode(ses), p_name: ses.name, p_pin: ses.pin,
+        p_payment: id, p_agree: agree, p_note: note }) || [];
+      renderCasualMyPays();
+      if(msg){ msg.textContent = agree ? 'Gracias, quedó confirmado.' : 'Listo, su manager ya lo va a ver.'; msg.style.color = ''; }
+    }catch(e){
+      if(msg){ msg.textContent = e.message || 'No se pudo mandar su respuesta.'; msg.style.color = 'var(--danger)'; }
+    }
+  }
+
+  if($('#casualPaysList')) $('#casualPaysList').addEventListener('click', (e)=>{
+    const yes = e.target.closest('.cpYes'), no = e.target.closest('.cpNo');
+    if(yes) return casualRespondPay(yes.dataset.cpid, true);
+    if(no)  return casualRespondPay(no.dataset.cpid, false);
+  });
+
   function renderCasualMyHistory(history){
     const box = $('#casualMyHistory'); if(!box) return;
     casualMyHistory = history || casualMyHistory || [];
     const rows = casualMyHistory;
     if(!rows.length){ box.innerHTML = '<p class="clockhint">Nada todavía.</p>'; return; }
-    // Lo que ve el trabajador son SUS HORAS PENDIENTES. Los dias ya pagados no
-    // estorban arriba: se guardan detras de un toque, porque siguen siendo su
-    // comprobante de lo que se le pago (no se borran nunca).
-    let mine = 0, minePaid = 0;
+    // Lo que ve el trabajador son SUS HORAS PENDIENTES, y NADA MAS - igual que
+    // el crew, a quien la app ni siquiera le descarga los dias ya pagados. Su
+    // comprobante de lo que se le pago vive ahora en "Sus pagos", con el monto
+    // y su propia confirmacion, que es mejor prueba que una lista de horas.
+    let mine = 0;
     const fila = h => {
       const mg = (h.work_kind === 'mudanza');
       const other = mg !== isAmgSide();
@@ -17911,23 +18057,18 @@
           <span class="hrs">${h.reported_hours != null ? hrs.toFixed(2) + ' hrs' : '—'}</span>${del}</span>
       </div>`;
     };
-    const pend = [], pag = [];
+    const pend = [];
     rows.forEach(h => {
+      if(h.paid_at) return;                       // ya pagado: fuera de su telefono
       const other = (h.work_kind === 'mudanza') !== isAmgSide();
-      const hrs = +h.reported_hours || 0;
-      if(h.paid_at){ if(!other) minePaid += hrs; pag.push(h); }
-      else { if(!other) mine += hrs; pend.push(h); }
+      if(!other) mine += (+h.reported_hours || 0);
+      pend.push(h);
     });
     const arriba = pend.length ? pend.map(fila).join('')
       : '<p class="clockhint">No tiene horas pendientes. Todo lo que trabajó ya se le pagó.</p>';
-    const abajo = pag.length
-      ? `<details class="whychip" style="display:block;margin-top:10px;">
-           <summary>Días ya pagados (${minePaid.toFixed(2)} hrs)</summary>
-           <div class="whytext">${pag.map(fila).join('')}</div>
-         </details>` : '';
     box.innerHTML = arriba + `<div class="paysum" style="margin-top:12px;">
         <div class="grand"><span>${isAmgSide() ? 'HORAS DE AMG SIN PAGAR' : 'HORAS SIN PAGAR'}</span><span>${mine.toFixed(2)} hrs</span></div>
-      </div>` + abajo;
+      </div>`;
   }
 
 
@@ -17966,6 +18107,7 @@
     casualMyHistory = history || [];
     renderCasualMyHistory(casualMyHistory);
     loadCasualCierres(ses);
+    loadCasualMyPays();
   }
 
   $('#casualLoginGo').addEventListener('click', async ()=>{
