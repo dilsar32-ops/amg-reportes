@@ -398,6 +398,7 @@
     background:var(--accent); color:var(--on-accent);
   }
   .clockhint{font-size:12.5px; color:var(--ink-soft); margin:8px 0 0;}
+  #casualAddBox[hidden], #casualPinNote[hidden]{display:none !important;}
   .entryrow{
     display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline; gap:10px;
     padding:9px 0; border-bottom:1px solid var(--line); font-size:14px;
@@ -1857,7 +1858,8 @@
     <div class="mgr-only" id="mgrHoursTools">
       <div class="mgrtools">
         <button type="button" class="minibtn on" id="mgrHoursSegCrew">&#128101; Crew</button>
-        <button type="button" class="minibtn" id="mgrHoursSegCasual">&#128339; Trabajadores temporales</button>
+        <button type="button" class="minibtn" id="mgrHoursSegWorkers">&#127380; Trabajadores</button>
+        <button type="button" class="minibtn" id="mgrHoursSegCasual">&#128339; Temporales</button>
       </div>
     </div>
     <section class="card mgr-only" id="teamCard">
@@ -1939,24 +1941,26 @@
          this is where the manager types both in and pays them. Same idea as
          "Todo el equipo" above, just for people without a login yet. -->
     <section class="card mgr-only" id="casualTeamCard">
-      <h2>Trabajadores temporales</h2>
-      <p class="clockhint">Gente que no tiene cuenta en la app y avisa sus horas por WhatsApp.</p>
+      <h2 id="casualTeamTitle">Temporales</h2>
+      <p class="clockhint" id="casualTeamHint">Todav&iacute;a no tienen c&oacute;digo. Usted o la asistente les apunta las horas.</p>
       <div class="inboxhead" style="margin-bottom:2px;">
         <span>Lista</span>
         <button type="button" class="btn btn-outline" id="casualTeamRefresh">Revisar</button>
       </div>
       <div id="casualTeamEntries"><p class="clockhint">Toque Revisar.</p></div>
-      <div class="row2" style="margin-top:12px;">
-        <div class="field">
-          <label>Nombre del nuevo trabajador</label>
-          <input type="text" id="casualNewWorkerName" placeholder="Ej. Rodrigo">
+      <div id="casualAddBox">
+        <div class="row2" style="margin-top:12px;">
+          <div class="field">
+            <label>Nombre del nuevo trabajador</label>
+            <input type="text" id="casualNewWorkerName" placeholder="Ej. Rodrigo">
+          </div>
+          <div class="field">
+            <label>Tarifa por hora $</label>
+            <input type="number" id="casualNewWorkerRate" step="0.01" inputmode="decimal" placeholder="0.00">
+          </div>
         </div>
-        <div class="field">
-          <label>Tarifa por hora $</label>
-          <input type="number" id="casualNewWorkerRate" step="0.01" inputmode="decimal" placeholder="0.00">
-        </div>
+        <button type="button" class="btn btn-accent" id="casualAddWorker" style="width:100%;">+ Agregar trabajador</button>
       </div>
-      <button type="button" class="btn btn-accent" id="casualAddWorker" style="width:100%;">+ Agregar trabajador</button>
     </section>
 
     <!-- One occasional worker's hours, pay math and PDF. Simpler than
@@ -1983,6 +1987,7 @@
             <button class="btn btn-outline" type="button" id="casualPersonPinSave" style="width:100%;">Guardar PIN</button></div>
         </div>
         <p class="clockhint">Con el código del equipo, su nombre (igual a como está escrito aquí) y este PIN, puede entrar en Field Reports y poner sus propias horas — sin ver precios ni nada más.</p>
+        <p class="clockhint" id="casualPinNote" style="color:var(--accent); font-weight:600;" hidden></p>
       </div>
 
       <!-- Que empresa esta metiendo el manager por esta persona. Igual que en
@@ -4115,7 +4120,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-BO';
+  const APP_BUILD = '2026-09-07-BP';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4218,6 +4223,9 @@
   // is opened and closed by the existing code, and this only decides which
   // PAIR of cards is on screen.
   let mgrHoursView = 'crew';
+  // Declaracion de funcion a proposito (no const): applyMgrHoursView y
+  // loadCasualTeam la llaman desde arriba del archivo.
+  function casualWantsCode(){ return mgrHoursView === 'trabajadores'; }
   function applyMgrHoursView(){
     const team   = $('#teamCard'),        person = $('#personCard');
     const cTeam  = $('#casualTeamCard'),  cPerson = $('#casualPersonCard');
@@ -4233,20 +4241,33 @@
       if(person) person.hidden = true;
       if(cPerson && cPerson.hidden) cTeam.hidden = false;
     }
-    const a = $('#mgrHoursSegCrew'), b = $('#mgrHoursSegCasual');
+    // Trabajadores y Temporales comparten la MISMA tarjeta: solo cambia a
+    // quien enseña, como se llama, y si deja agregar gente nueva.
+    const conCodigo = casualWantsCode();
+    const t = $('#casualTeamTitle'), h = $('#casualTeamHint'), addBox = $('#casualAddBox');
+    if(t) t.textContent = conCodigo ? 'Trabajadores' : 'Temporales';
+    if(h) h.innerHTML = conCodigo
+      ? 'Ya tienen c&oacute;digo y se apuntan sus propias horas desde la app. Usted revisa y paga.'
+      : 'Todav&iacute;a no tienen c&oacute;digo. Usted o la asistente les apunta las horas. Al ponerle un c&oacute;digo pasa a <b>Trabajadores</b>.';
+    // Gente nueva siempre entra por Temporales: nace sin codigo.
+    if(addBox) addBox.hidden = conCodigo;
+    const a = $('#mgrHoursSegCrew'), b = $('#mgrHoursSegWorkers'), c = $('#mgrHoursSegCasual');
     if(a) a.classList.toggle('on', crew);
-    if(b) b.classList.toggle('on', !crew);
+    if(b) b.classList.toggle('on', mgrHoursView === 'trabajadores');
+    if(c) c.classList.toggle('on', mgrHoursView === 'temporales');
   }
   function setMgrHoursView(v){
-    mgrHoursView = v;
+    // 'casual' es el nombre viejo de esta vista: sigue valiendo y cae en Temporales.
+    mgrHoursView = (v === 'casual') ? 'temporales' : v;
     applyMgrHoursView();
-    if(v === 'crew'){ if(typeof loadTeamEntries === 'function') loadTeamEntries(); }
+    if(mgrHoursView === 'crew'){ if(typeof loadTeamEntries === 'function') loadTeamEntries(); }
     else { if(typeof loadCasualTeam === 'function') loadCasualTeam(); }
-    const anchor = $(v === 'crew' ? '#mgrHoursTools' : '#mgrHoursTools');
+    const anchor = $('#mgrHoursTools');
     if(anchor) anchor.scrollIntoView({block:'start'});
   }
-  if($('#mgrHoursSegCrew'))   $('#mgrHoursSegCrew').addEventListener('click',   ()=> setMgrHoursView('crew'));
-  if($('#mgrHoursSegCasual')) $('#mgrHoursSegCasual').addEventListener('click', ()=> setMgrHoursView('casual'));
+  if($('#mgrHoursSegCrew'))    $('#mgrHoursSegCrew').addEventListener('click',    ()=> setMgrHoursView('crew'));
+  if($('#mgrHoursSegWorkers')) $('#mgrHoursSegWorkers').addEventListener('click', ()=> setMgrHoursView('trabajadores'));
+  if($('#mgrHoursSegCasual'))  $('#mgrHoursSegCasual').addEventListener('click',  ()=> setMgrHoursView('temporales'));
 
   // Each pill opens its own drawer and closes the other two, so only one
   // thing is ever expanded above the inbox.
@@ -5759,7 +5780,11 @@
       // us - owed to him OR owed by him. The old test only looked at gross
       // unpaid hours, so a man carrying an adelanto (a negative balance)
       // vanished off the list and the company quietly lost the record of it.
+      // Cada lista enseña solo a los suyos: con codigo = Trabajadores (se
+      // apuntan solos), sin codigo = Temporales (se las apunta el manager).
+      const conCodigo = casualWantsCode();
       const visible = casualWorkers.filter(w => {
+        if(!!w.pin !== conCodigo) return false;
         if(w.status !== 'removed') return true;
         return Math.abs(casualBalanceOf(w.id).balance) > 0.004;
       });
@@ -5798,7 +5823,9 @@
           + (creditPeople ? `<div class="entryrow" style="border:none;">
             <span class="when" style="color:#3ddc84;">Adelantos a su favor &middot; ${creditPeople} persona${creditPeople===1?'':'s'}</span>
             <span class="hrs" style="color:#3ddc84;">${money(Math.round(credit*100)/100)}</span></div>` : '')
-        : '<p class="clockhint">Todavía no hay trabajadores temporales.</p>';
+        : '<p class="clockhint">' + (conCodigo
+            ? 'Nadie tiene c&oacute;digo todav&iacute;a. P&oacute;ngale un PIN a alguien en <b>Temporales</b> y aparece aqu&iacute;.'
+            : 'Todav&iacute;a no hay temporales.') + '</p>';
     }catch(e){ box.innerHTML = '<p class="clockhint">No se pudo revisar.</p>'; }
   }
   $('#casualTeamRefresh').addEventListener('click', () =>
@@ -5923,6 +5950,10 @@
       });
       if(!res.ok) throw new Error('HTTP '+res.status);
       const w = casualWorkers.find(w => w.id === casualPersonKey); if(w) w.pin = val;
+      // Poner el codigo ES el paso de Temporal a Trabajador: hay que decirlo,
+      // porque al volver la persona ya no esta en la lista de donde salio.
+      const note = $('#casualPinNote');
+      if(note){ note.textContent = 'Listo. Ahora aparece en la lista de TRABAJADORES, no en Temporales.'; note.hidden = false; }
       btn.textContent = 'Guardado';
       setTimeout(()=>{ btn.textContent = old; }, 1500);
     }catch(e){
