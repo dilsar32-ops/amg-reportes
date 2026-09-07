@@ -1274,8 +1274,19 @@
       </div>
     </section>
 
+    <!-- Preguntas que el manager quiera agregar a mano. Nacen vacias: son
+         extras, no obligatorias. El boton de agregar va FUERA de la lista,
+         porque rowCounts cuenta los hijos del contenedor y un hijo de mas
+         inventaria una pregunta en blanco cada vez que se abre el borrador. -->
+    <section class="card" data-step="notes">
+      <h2><span class="num">6</span>Other Questions / Otras Preguntas</h2>
+      <p class="hint" style="margin-top:0;">Anything else this job needs answered. Write the question and the answer. / Cualquier otra cosa que este trabajo necesite. Escriba la pregunta y la respuesta.</p>
+      <div id="cQList"></div>
+      <button type="button" class="btn btn-outline btn-block" id="cQAdd" style="margin-top:8px;">&#65291; Agregar otra pregunta</button>
+    </section>
+
     <section class="card" data-step="photos">
-      <h2><span class="num">6</span>Photos / Fotos</h2>
+      <h2><span class="num">7</span>Photos / Fotos</h2>
       <p class="hint" style="margin-top:0;">Proof of anything unusual — client interference, damage, equipment tampered with, etc. / Prueba de cualquier cosa fuera de lo normal &mdash; interferencia del cliente, daños, equipo manipulado, etc.</p>
       <input type="file" id="c-photoInput" accept="image/*" capture="environment" multiple style="display:none;">
       <div class="photo-grid" id="c-photoGrid">
@@ -4351,7 +4362,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CD';
+  const APP_BUILD = '2026-09-07-CE';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -14924,6 +14935,9 @@
         <div style="font-family:'Oswald',sans-serif; text-transform:uppercase; font-size:15px; color:#2E5C74; border-bottom:2px solid #EEF1EE; padding-bottom:6px; margin:20px 0 6px;">Things to Check at the Job</div>
         ${section('checklist', $('#c-checklist').value)}
 
+        ${cQuestions().map(x => '<div style="font-family:\'Oswald\',sans-serif; text-transform:uppercase; font-size:15px; color:#2E5C74; border-bottom:2px solid #EEF1EE; padding-bottom:6px; margin:20px 0 6px;">'
+            + (esc(x.q) || 'Question') + '</div>' + section('q', x.a)).join('')}
+
         ${cPhotosHtml}
 
         <div style="margin-top:30px; font-size:11px; color:#3A4552;">Generated ${new Date().toLocaleString()}</div>
@@ -14933,13 +14947,79 @@
     return wrap;
   }
 
+  // ---- Preguntas extra de Comunicaciones -----------------------------------
+  // Se numeran por ID (c-q-t-1, c-q-a-1...) y NO por posicion, igual que los
+  // gastos del labor log: asi quitar la pregunta 1 no le mueve la llave del
+  // borrador a las demas.
+  const cQRows = () => $('#cQList') ? $$('.c-q-row', $('#cQList')) : [];
+  function renumberCQRows(){
+    cQRows().forEach((row, i) => {
+      const n = i + 1;
+      row.dataset.n = n;
+      const h = row.querySelector('.c-q-head .hint');
+      if(h) h.textContent = 'Pregunta ' + n;
+      const t = row.querySelector('.c-q-t'); if(t) t.id = 'c-q-t-' + n;
+      const a = row.querySelector('.c-q-a'); if(a) a.id = 'c-q-a-' + n;
+    });
+  }
+  function cQRowHtml(n){
+    return '<div class="c-q-head" style="display:flex; align-items:center; justify-content:space-between; margin:10px 0 2px;">'
+         + '<span class="hint">Pregunta ' + n + '</span>'
+         + '<button type="button" class="teedit c-q-del">Quitar</button></div>'
+         + '<div class="field" style="margin-bottom:6px;">'
+         + '<input type="text" class="c-q-t" id="c-q-t-' + n + '" placeholder="La pregunta / The question"></div>'
+         + '<div class="field">'
+         + '<textarea class="c-q-a" id="c-q-a-' + n + '" rows="3" placeholder="La respuesta / The answer"></textarea></div>';
+  }
+  function addCQRow(q){
+    const box = $('#cQList'); if(!box) return null;
+    const row = document.createElement('div');
+    row.className = 'c-q-row';
+    row.style.borderTop = '1px solid var(--line)';
+    row.innerHTML = cQRowHtml(box.children.length + 1);
+    box.appendChild(row);
+    if(q){
+      const t = row.querySelector('.c-q-t'), a = row.querySelector('.c-q-a');
+      if(t) t.value = q.q || ''; if(a) a.value = q.a || '';
+    }
+    renumberCQRows();
+    return row;
+  }
+  // Lo escrito, sin las preguntas vacias. Lo usan la pantalla y el PDF.
+  function cQuestions(){
+    return cQRows().map(row => ({
+      q: (row.querySelector('.c-q-t') || {}).value || '',
+      a: (row.querySelector('.c-q-a') || {}).value || ''
+    })).filter(x => String(x.q).trim() || String(x.a).trim());
+  }
+  if($('#cQAdd')) $('#cQAdd').addEventListener('click', ()=>{
+    const row = addCQRow();
+    const t = row && row.querySelector('.c-q-t');
+    if(t){ t.focus(); t.scrollIntoView({ block:'center' }); }
+    saveDraft();
+  });
+  if($('#cQList')) $('#cQList').addEventListener('click', (e)=>{
+    const del = e.target.closest('.c-q-del'); if(!del) return;
+    const row = del.closest('.c-q-row'); if(!row) return;
+    const t = (row.querySelector('.c-q-t') || {}).value || '';
+    const a = (row.querySelector('.c-q-a') || {}).value || '';
+    if((t.trim() || a.trim()) && !confirm('¿Quitar esta pregunta?\n\nSe borra lo que escribió en ella.')) return;
+    row.remove();
+    renumberCQRows();
+    saveDraft();
+  });
+
   function resetComms(){
     // Clearing the form takes them back to the first screen too - the
     // alternative is an empty form opened on step 4 of 5.
     if(typeof flowChoice !== 'undefined') flowChoice = 'both';
     setTimeout(() => goStep('comms', 0), 0);
+    // El cliente NO se limpiaba: el nombre del trabajo anterior se quedaba en el
+    // reporte siguiente.
+    if($('#c-client')) $('#c-client').value='';
     $('#c-address').value=''; $('#c-date').value = todayStr(); $('#c-team').value=''; $('#c-supervisor').value='';
     $('#c-requests').value=''; $('#c-problems').value=''; $('#c-removed-early').value=''; $('#c-checklist').value='';
+    if($('#cQList')) $('#cQList').innerHTML = '';
     cPhotos = []; renderCPhotos();
   }
 
@@ -20025,6 +20105,7 @@
     // Cuantos extras EXTRA trae cada turno (el primero siempre esta).
     xs: shiftsContainer ? $$('.shift-card', shiftsContainer).map(c => $$('.s-extra-row', c).length) : [],
     ex: $('#lExList') ? $('#lExList').children.length : 0,
+    cq: $('#cQList') ? $('#cQList').children.length : 0,
     equipment: equipmentBody ? equipmentBody.children.length : 0,
     materials: materialsBody ? materialsBody.children.length : 0,
     readings: readingsContainer ? readingsContainer.children.length : 0,
@@ -20158,6 +20239,9 @@
       });
     }
     while($('#lExList') && $('#lExList').children.length < exWant) addExRow();
+    // Las preguntas extra se recrean antes de repartir los valores, o lo que el
+    // manager escribio en la Pregunta 2 se queda sin casilla donde caer.
+    while($('#cQList') && $('#cQList').children.length < (r.cq||0)) addCQRow();
     while(readingsContainer && readingsContainer.children.length < (r.readings||0)) addReading();
     while(equipmentBody && equipmentBody.children.length < (r.equipment||0)) addEquipmentRow();
     while(materialsBody && materialsBody.children.length < (r.materials||0)) addMaterialRow();
