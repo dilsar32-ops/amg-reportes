@@ -4115,7 +4115,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-BM';
+  const APP_BUILD = '2026-09-06-BN';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -17860,12 +17860,14 @@
     if(!rows.length){ box.innerHTML = '<p class="clockhint">Nada todavía.</p>'; return; }
     // Las filas de la OTRA empresa se ven apagadas, con etiqueta, sin Borrar y
     // sin "no coincide": estan ahi para que nadie crea que se perdieron.
-    let mine = 0;
+    // El total tiene que decir QUE es. Antes sumaba todo, pagado y sin pagar, y
+    // el trabajador leia ese numero como lo que se le debe.
+    let mine = 0, minePaid = 0;
     const html = rows.map(h=>{
       const mg = (h.work_kind === 'mudanza');
       const other = mg !== isAmgSide();
       const hrs = +h.reported_hours || 0;
-      if(!other) mine += hrs;
+      if(!other){ if(h.paid_at) minePaid += hrs; else mine += hrs; }
       const status = other ? { text:'', cls:'' } : casualMatchStatus(h.reported_hours, h.labor_load_hours, h.work_kind);
       const paid = h.paid_at ? '<br><span style="color:var(--green); font-weight:700; font-size:12px;">Pagado</span>' : '';
       const times = (h.clock_in && h.clock_out)
@@ -17881,7 +17883,9 @@
       </div>`;
     }).join('');
     box.innerHTML = html + `<div class="paysum" style="margin-top:12px;">
-        <div class="grand"><span>TOTAL ${isAmgSide() ? 'DE HORAS AMG' : 'DE HORAS'}</span><span>${mine.toFixed(2)} hrs</span></div>
+        <div class="grand"><span>${isAmgSide() ? 'HORAS DE AMG SIN PAGAR' : 'HORAS SIN PAGAR'}</span><span>${mine.toFixed(2)} hrs</span></div>
+        ${minePaid > 0 ? `<div class="line"><span>Ya pagadas</span><span>${minePaid.toFixed(2)} hrs</span></div>
+        <div class="line"><span class="muted">Todo lo que trabajó</span><span class="muted">${(mine + minePaid).toFixed(2)} hrs</span></div>` : ''}
       </div>`;
   }
 
