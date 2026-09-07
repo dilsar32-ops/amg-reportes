@@ -4115,7 +4115,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-BN';
+  const APP_BUILD = '2026-09-06-BO';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -17858,17 +17858,15 @@
     casualMyHistory = history || casualMyHistory || [];
     const rows = casualMyHistory;
     if(!rows.length){ box.innerHTML = '<p class="clockhint">Nada todavía.</p>'; return; }
-    // Las filas de la OTRA empresa se ven apagadas, con etiqueta, sin Borrar y
-    // sin "no coincide": estan ahi para que nadie crea que se perdieron.
-    // El total tiene que decir QUE es. Antes sumaba todo, pagado y sin pagar, y
-    // el trabajador leia ese numero como lo que se le debe.
+    // Lo que ve el trabajador son SUS HORAS PENDIENTES. Los dias ya pagados no
+    // estorban arriba: se guardan detras de un toque, porque siguen siendo su
+    // comprobante de lo que se le pago (no se borran nunca).
     let mine = 0, minePaid = 0;
-    const html = rows.map(h=>{
+    const fila = h => {
       const mg = (h.work_kind === 'mudanza');
       const other = mg !== isAmgSide();
       const hrs = +h.reported_hours || 0;
-      if(!other){ if(h.paid_at) minePaid += hrs; else mine += hrs; }
-      const status = other ? { text:'', cls:'' } : casualMatchStatus(h.reported_hours, h.labor_load_hours, h.work_kind);
+      const status = (other || h.paid_at) ? { text:'', cls:'' } : casualMatchStatus(h.reported_hours, h.labor_load_hours, h.work_kind);
       const paid = h.paid_at ? '<br><span style="color:var(--green); font-weight:700; font-size:12px;">Pagado</span>' : '';
       const times = (h.clock_in && h.clock_out)
         ? '<br><span class="when">' + esc(fmtTime12(h.clock_in)) + ' - ' + esc(fmtTime12(h.clock_out)) + '</span>' : '';
@@ -17881,13 +17879,26 @@
         <span style="display:flex;align-items:center;gap:10px;">
           <span class="hrs">${h.reported_hours != null ? hrs.toFixed(2) + ' hrs' : '—'}</span>${del}</span>
       </div>`;
-    }).join('');
-    box.innerHTML = html + `<div class="paysum" style="margin-top:12px;">
+    };
+    const pend = [], pag = [];
+    rows.forEach(h => {
+      const other = (h.work_kind === 'mudanza') !== isAmgSide();
+      const hrs = +h.reported_hours || 0;
+      if(h.paid_at){ if(!other) minePaid += hrs; pag.push(h); }
+      else { if(!other) mine += hrs; pend.push(h); }
+    });
+    const arriba = pend.length ? pend.map(fila).join('')
+      : '<p class="clockhint">No tiene horas pendientes. Todo lo que trabajó ya se le pagó.</p>';
+    const abajo = pag.length
+      ? `<details class="whychip" style="display:block;margin-top:10px;">
+           <summary>Días ya pagados (${minePaid.toFixed(2)} hrs)</summary>
+           <div class="whytext">${pag.map(fila).join('')}</div>
+         </details>` : '';
+    box.innerHTML = arriba + `<div class="paysum" style="margin-top:12px;">
         <div class="grand"><span>${isAmgSide() ? 'HORAS DE AMG SIN PAGAR' : 'HORAS SIN PAGAR'}</span><span>${mine.toFixed(2)} hrs</span></div>
-        ${minePaid > 0 ? `<div class="line"><span>Ya pagadas</span><span>${minePaid.toFixed(2)} hrs</span></div>
-        <div class="line"><span class="muted">Todo lo que trabajó</span><span class="muted">${(mine + minePaid).toFixed(2)} hrs</span></div>` : ''}
-      </div>`;
+      </div>` + abajo;
   }
+
 
   // Borrar un turno propio. La base de datos refuerza las dos reglas: solo
   // suyo, y solo si NO esta pagado.
