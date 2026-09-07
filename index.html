@@ -4115,7 +4115,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-BL';
+  const APP_BUILD = '2026-09-06-BM';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -15794,8 +15794,20 @@
       });
       owed = Math.round(owed*100)/100;
     }
+    // Cuando alguien tiene horas de las DOS empresas, cada una se paga a su
+    // tarifa. Se devuelven por separado para que la pantalla no imprima una
+    // cuenta que no cuadra ("82.50 x $20.00 = $1,673.00").
+    let minsRest = 0, minsMg = 0, owedRest = 0, owedMg = 0;
+    rows.forEach(r => {
+      if(r.paid_at) return;
+      const m = hoursBetween(r.clock_in, r.clock_out) || 0; const rr = rateForRow(r);
+      if(rr === null || rr === undefined) return;
+      if(r.work_kind === 'mudanza'){ minsMg += m; owedMg += Math.round((m/60)*(+rr||0)*100)/100; }
+      else { minsRest += m; owedRest += Math.round((m/60)*(+rr||0)*100)/100; }
+    });
     return { minutes, hours, rate, wasPaid: allPaid,
-             amount: allPaid ? paid : owed, sinPrecio, sinPrecioMins };
+             amount: allPaid ? paid : owed, sinPrecio, sinPrecioMins,
+             minsRest, minsMg, owedRest: Math.round(owedRest*100)/100, owedMg: Math.round(owedMg*100)/100 };
   }
 
   async function loadRates(){
@@ -16193,8 +16205,11 @@
       : rate === null
       ? `<div class="line"><span>Total de horas</span><span>${hhmm(pay.minutes)}</span></div>
          <div class="line"><span><b>Escriba la tarifa por hora arriba para calcular el pago.</b></span><span></span></div>`
-      : `<div class="line"><span>Horas &nbsp;<b>${pay.hours.toFixed(2)}</b> &times; ${money(rate)} por hora</span>
-           <span>${money(pay.amount)}</span></div>
+      : `${(pay.minsMg > 0 && pay.minsRest > 0)
+           ? `<div class="line"><span>Restauración &nbsp;<b>${(pay.minsRest/60).toFixed(2)}</b> h &times; ${money(rate)}</span><span>${money(pay.owedRest)}</span></div>
+              <div class="line"><span>Mudanza (AMG) &nbsp;<b>${(pay.minsMg/60).toFixed(2)}</b> h &times; ${money(mgRateCrew(personKey))}</span><span>${money(pay.owedMg)}</span></div>`
+           : `<div class="line"><span>Horas &nbsp;<b>${pay.hours.toFixed(2)}</b> &times; ${money(pay.minsMg > 0 ? mgRateCrew(personKey) : rate)} por hora</span>
+           <span>${money(pay.amount)}</span></div>`}
          <div class="line"><span>Total de horas</span><span>${hhmm(pay.minutes)}</span></div>
          ${partialPaid > 0 ? `<div class="line"><span>Pagos parciales ya dados</span><span>-${money(partialPaid)}</span></div>
          ${balance > 0.005
