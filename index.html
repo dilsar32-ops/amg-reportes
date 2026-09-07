@@ -2139,6 +2139,10 @@
       <h2>Pagos por confirmar</h2>
       <p class="clockhint" id="mgrPaymentsHint">Pagos esperando respuesta o rechazados</p>
       <div id="mgrPayList"></div>
+      <div class="mgrtools" id="autoOkTools" style="margin-top:12px;">
+        <button type="button" class="minibtn" id="autoOkToggle">&#9203; Aprobar solo</button>
+      </div>
+      <p class="clockhint" id="autoOkHint"></p>
       <button type="button" class="btn btn-ink btn-block" id="mgrGoPayments" style="margin-top:10px;">Abrir horas y pagos</button>
     </section>
 
@@ -4134,7 +4138,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-BR';
+  const APP_BUILD = '2026-09-07-BS';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4271,6 +4275,10 @@
     if(c) c.classList.toggle('on', mgrHoursView === 'temporales');
   }
   function setMgrHoursView(v){
+    // Cambiar de lista con una ficha abierta dejaba en pantalla a la persona
+    // anterior, que ya ni pertenece a la lista nueva.
+    if($('#casualPersonCard')) $('#casualPersonCard').hidden = true;
+    if($('#personCard')) $('#personCard').hidden = true;
     // 'casual' es el nombre viejo de esta vista: sigue valiendo y cae en Temporales.
     mgrHoursView = (v === 'casual') ? 'temporales' : v;
     applyMgrHoursView();
@@ -5667,6 +5675,14 @@
   let casualPayments = [];  // every casual_payments row - the cash ledger
   // Se apaga sola si supabase-casual-confirm.sql todavia no ha corrido.
   let CASUAL_CONFIRM_READY = true;
+  // Igual con supabase-auto-ok.sql (la aprobacion sola a los 3 dias).
+  let AUTO_OK_READY = true;
+  // Cuantos dias espera la app antes de aprobar sola. 0 = apagado.
+  let AUTO_OK_DAYS = 0;
+  // Un pago aprobado por silencio NUNCA dice "el confirmo": dice quien lo aprobo.
+  function autoOkTxt(){
+    return '&#10003; Aprobado solo &middot; no contest&oacute; en ' + (AUTO_OK_DAYS || 3) + ' d&iacute;as';
+  }
   let CASUAL_PAY_READY = true;   // false until supabase-casual-payments.sql is run
   let casualPersonKey = null;
   let casualPaidView = false;
@@ -5774,7 +5790,7 @@
         authFetch('/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount,work_kind,clock_in,clock_out'
           + '&company_id=eq.' + SES.company_id + '&order=work_date.desc&limit=5000', { headers: cloudHeaders() }),
         authFetch('/rest/v1/casual_payments?select=id,casual_worker_id,paid_on,amount,kind,note,settle_key,created_at'
-          + (CASUAL_CONFIRM_READY ? ',accepted,responded_at,response_note,balance_after,confirm_needed' : '')
+          + (CASUAL_CONFIRM_READY ? ',accepted,responded_at,response_note,balance_after,confirm_needed' + (AUTO_OK_READY ? ',auto_ok_at' : '') : '')
           + '&company_id=eq.' + SES.company_id + '&order=paid_on.desc&limit=5000', { headers: cloudHeaders() })
       ]);
       if(!wRes.ok){
@@ -5788,6 +5804,9 @@
       // 400 = las columnas de confirmacion todavia no existen (falta correr
       // supabase-casual-confirm.sql). Se pide otra vez sin ellas, para que la
       // pantalla del dinero siga funcionando igual que antes.
+      if(pRes && !pRes.ok && pRes.status === 400 && AUTO_OK_READY){
+        AUTO_OK_READY = false; return loadCasualTeam();
+      }
       if(pRes && !pRes.ok && pRes.status === 400 && CASUAL_CONFIRM_READY){
         CASUAL_CONFIRM_READY = false; return loadCasualTeam();
       }
@@ -5910,6 +5929,9 @@
     document.querySelectorAll('.mgrateRow').forEach(r => { r.hidden = !mgOn(); });
     $('#casualPersonPin').value = (w && w.pin != null) ? w.pin : '';
     $('#casualPersonSettings').hidden = true;
+    // Sin esto, el aviso "ahora es TRABAJADOR" se queda pegado en la ficha de
+    // todos los demas temporales que abra despues.
+    if($('#casualPinNote')){ $('#casualPinNote').hidden = true; $('#casualPinNote').textContent = ''; }
     const removed = w && w.status === 'removed';
     $('#casualWorkerRemove').hidden = removed;
     $('#casualWorkerResume').hidden = !removed;
@@ -6321,6 +6343,8 @@
       // Que contesto el trabajador desde su telefono. Un pago rechazado se ve
       // en rojo aqui mismo: es lo primero que hay que atender.
       const estado = !CASUAL_CONFIRM_READY || p.confirm_needed === false ? ''
+        : p.auto_ok_at
+          ? '<br><span class="matchstatus partial">' + autoOkTxt() + '</span>'
         : p.accepted === true
           ? '<br><span class="matchstatus ok">&#10003; Él confirmó que lo recibió</span>'
           : p.accepted === false
@@ -14732,6 +14756,8 @@
       if(d.join_code) SES.join_code = d.join_code;
       if(d.worker_join_code) SES.worker_join_code = d.worker_join_code;
       if(d.amg_worker_join_code) SES.amg_worker_join_code = d.amg_worker_join_code;
+      if(d.pay_auto_ok_days !== undefined){ AUTO_OK_DAYS = +d.pay_auto_ok_days || 0; renderAutoOk(); }
+      else AUTO_OK_READY = false;
       saveSes();
       if(d.rate_day != null){
         const c = payCfg();
@@ -14748,6 +14774,33 @@
       }
     }catch(e){}
   }
+
+  // Aprobacion sola a los N dias. El servidor es quien la ejecuta (un trabajo
+  // programado cada hora); aqui solo se prende, se apaga y se explica.
+  function renderAutoOk(){
+    const b = $('#autoOkToggle'), h = $('#autoOkHint');
+    if(!b || !h) return;
+    const on = AUTO_OK_DAYS > 0;
+    b.classList.toggle('on', on);
+    b.innerHTML = '&#9203; Aprobar solo &middot; ' + (on ? 'PRENDIDO' : 'APAGADO');
+    h.innerHTML = on
+      ? 'Un pago que nadie conteste en <b>' + AUTO_OK_DAYS + ' d&iacute;as</b> queda aprobado solo. En la pantalla dice "Aprobado solo &middot; no contest&oacute;", nunca que la persona lo confirm&oacute;.'
+      : 'Los pagos se quedan en "Esperando respuesta" hasta que la persona conteste, aunque pasen semanas.';
+  }
+  if($('#autoOkToggle')) $('#autoOkToggle').addEventListener('click', async ()=>{
+    if(!AUTO_OK_READY) return alert('Falta correr supabase-auto-ok.sql en Supabase.');
+    const nuevo = AUTO_OK_DAYS > 0 ? 0 : 3;
+    const b = $('#autoOkToggle'); b.disabled = true;
+    try{
+      const res = await authFetch('/rest/v1/companies?id=eq.' + encodeURIComponent(SES.company_id), {
+        method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal'}),
+        body: JSON.stringify({ pay_auto_ok_days: nuevo }) });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      AUTO_OK_DAYS = nuevo; renderAutoOk();
+    }catch(e){
+      alert('No se pudo cambiar. Revise su internet.');
+    }finally{ b.disabled = false; }
+  });
 
   async function saveCompanySettings(c){
     if(!cloudOn() || !isManager() || !SES.company_id) return false;
@@ -15524,6 +15577,7 @@
     try{
       const res = await authFetch(
         '/rest/v1/crew_payments?select=id,hours,amount,note,balance_after,accepted,settlement,credit_consumed,resolved_at,resolved_accepted,resolved_responded_at,created_at'
+        + (AUTO_OK_READY ? ',auto_ok_at' : '')
         + '&user_id=eq.' + SES.user_id + '&order=created_at.desc&limit=500',
         { headers: cloudHeaders() });
       const card = $('#myPaymentsCard'), box = $('#myPayments');
@@ -15552,7 +15606,9 @@
                      <button type="button" class="btn btn-outline resNo" data-id="${esc(p.id)}" style="flex:1; padding:8px;">No, todavía no</button>
                    </div>
                  </div>`;
-        const respond = p.accepted === true
+        const respond = p.auto_ok_at
+          ? '<span class="telock" style="color:var(--ink-soft);">' + autoOkTxt() + '</span>'
+          : p.accepted === true
           ? '<span class="telock">&#10003; Usted confirmó</span>'
           : p.accepted === false
             ? '<span class="telock" style="color:var(--danger);">&#10007; Usted dijo que no</span>' + resolution
@@ -16093,6 +16149,7 @@
     try{
       const res = await authFetch(
         '/rest/v1/crew_payments?select=id,hours,amount,note,balance_after,accepted,settlement,credit_consumed,resolved_at,resolved_accepted,resolved_responded_at,created_at'
+        + (AUTO_OK_READY ? ',auto_ok_at' : '')
         + '&user_id=eq.' + encodeURIComponent(key) + '&order=created_at.desc&limit=500',
         { headers: cloudHeaders() });
       if(!res.ok) return;   // supabase-crew-payments.sql not run yet - box just stays empty
@@ -16342,7 +16399,8 @@
                 : p.resolved_accepted === false
                   ? ' &middot; <span style="color:var(--danger);">dijo que no está resuelto</span>'
                   : ' &middot; <span style="color:#e0a83e;">esperando que confirme la resolución</span>';
-            const status = p.accepted === true ? '<span class="telock">&#10003; Aceptado</span>'
+            const status = p.auto_ok_at ? '<span class="telock" style="color:var(--ink-soft);">' + autoOkTxt() + '</span>'
+                         : p.accepted === true ? '<span class="telock">&#10003; Aceptado</span>'
                          : disputed
                            ? '<span class="telock" style="color:var(--danger);">&#10007; Dijo que no</span>' + resolveNote
                            : '<span class="clockhint" style="margin:0;">Esperando respuesta</span>';
@@ -17987,6 +18045,8 @@
         : 'Al día';
       const contestar = p.confirm_needed === false
         ? '<span class="telock">Anotado antes</span>'
+        : p.auto_ok_at
+          ? '<span class="telock" style="color:var(--ink-soft);">' + autoOkTxt() + '</span>'
         : p.accepted === true
           ? '<span class="telock">&#10003; Usted dijo que está bien</span>'
           : p.accepted === false
