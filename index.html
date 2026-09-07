@@ -341,6 +341,7 @@
      work unaided; it is listed to say so on purpose. */
   .action-bar[hidden], .stepnav[hidden], .exports[hidden], .card[hidden], .stepcap[hidden]{display:none !important;}
   .resetrow[hidden]{display:none !important;}
+  .card h2 .num[hidden]{display:none !important;}
   /* A tap used to produce nothing at all: -webkit-tap-highlight-color is
      transparent (line 39) and the only feedback declared was :hover, which
      never fires on a touch screen. No acknowledgement is what makes people
@@ -2862,7 +2863,8 @@
     const sl = $('#addrSearchInput') && $('#addrSearchInput').closest('.field') && $('#addrSearchInput').closest('.field').querySelector('label');
     if(sl) sl.textContent = mg ? 'Buscar dirección en todas las mudanzas' : 'Buscar dirección en todo el archivo';
     // El formulario habla de mudanza: titulo, paso, y cada rotulo.
-    const sn = panel.querySelector('.card[data-step="send"] h2 .num'); if(sn) sn.textContent = mg ? '4' : '3';
+    // El numero de "Revisar y enviar" lo pone numberStepCards, que ya sabe si el
+    // paso de materiales entra o no en este flujo.
     if(mg){ paintMatList(); loadMaterialNames(); $$('.l-ex-who', panel).forEach(sel => { if(!sel.options.length) paintWhoSelect(sel, ''); else repaintWhoKeep(sel); }); }
     const jh = panel.querySelector('.card[data-step="job"] h2');
     if(jh) jh.innerHTML = '<span class="num">1</span>' + (mg ? 'Move Info / Información de la mudanza' : 'Job Info / Información del Trabajo');
@@ -3310,6 +3312,31 @@
     });
   }
 
+  // El numero grande de cada tarjeta prometia "una tarjeta = una ventana", y hay
+  // pantallas que llevan varias juntas a proposito (Drying une Job Info con la
+  // cronologia porque el nombre del archivo sale de la segunda; Comunicaciones
+  // junta las notas; Medidas junta Piso/Pared/Techo/Cocina). Al ver el 1 y el 2
+  // en la misma pantalla parece que se mezclaron dos ventanas. Ahora el numero
+  // ES el numero del paso, y solo lo lleva la PRIMERA tarjeta de cada paso: las
+  // demas se leen como secciones de esa misma pantalla.
+  function numberStepCards(tab){
+    const panel = document.querySelector('.tab-panel[data-tab="' + tab + '"]');
+    if(!panel) return;
+    const steps = stepsFor(tab);
+    const seen = new Set();
+    panel.querySelectorAll(':scope > .card[data-step]').forEach(card => {
+      const badge = card.querySelector('h2 .num');
+      if(!badge) return;
+      const k = card.dataset.step;
+      const i = steps.findIndex(s => s.k === k);
+      if(i < 0) return;                     // paso que este flujo no usa
+      if(seen.has(k)){ badge.hidden = true; return; }
+      seen.add(k);
+      badge.hidden = false;
+      badge.textContent = String(i + 1);
+    });
+  }
+
   function paintDock(tab){
     const panel = document.querySelector('.tab-panel[data-tab="' + tab + '"]');
     const bar = panel && panel.querySelector(':scope > .action-bar.dock');
@@ -3330,6 +3357,7 @@
     next.hidden = last;
     // On the last step the buttons that finish the job take the whole row.
     bar.querySelector('.exports').hidden = !last;
+    numberStepCards(tab);
   }
 
   // The Materials chooser. Three options, not two: a real job often has both,
@@ -4375,7 +4403,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CF';
+  const APP_BUILD = '2026-09-07-CG';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
