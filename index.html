@@ -4138,7 +4138,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-BS';
+  const APP_BUILD = '2026-09-07-BT';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4346,7 +4346,19 @@
   // it lives for this run of the app only. If it survived a restart he could
   // forget it was on and file a real labor log with no date or leader - the
   // gate exists because log_date is a database column the inbox sorts on.
-  let skipSteps = false;
+  // Cambiar de empresa hace location.reload(), asi que el modo revision NO puede
+  // vivir en una variable suelta: se apagaba solo al cruzar de puerta, que es
+  // justo cuando el lo necesita. Va en sessionStorage: aguanta el reload y las
+  // tres puertas, pero se muere cuando la app se cierra del todo - que era el
+  // seguro que no queremos perder (nadie debe mandar un reporte sin fecha
+  // porque el modo se quedo prendido de ayer).
+  const SKIP_KEY = 'skipSteps1';
+  let skipSteps = (()=>{ try{ return sessionStorage.getItem(SKIP_KEY) === '1'; }catch(e){ return false; } })();
+  function setSkipSteps(on){
+    skipSteps = !!on;
+    try{ on ? sessionStorage.setItem(SKIP_KEY,'1') : sessionStorage.removeItem(SKIP_KEY); }catch(e){}
+    renderSkipSteps();
+  }
   function renderSkipSteps(){
     const banner = $('#skipStepsBanner');
     if(banner) banner.hidden = !skipSteps;
@@ -5583,10 +5595,7 @@
   // time I send a change, so it should not be two taps deep.
   // The bar itself is the switch. One tap prende, one tap apaga - he asked
   // for exactly that and nothing else.
-  if($('#mgrGoApp')) $('#mgrGoApp').addEventListener('click', ()=>{
-    skipSteps = !skipSteps;
-    renderSkipSteps();
-  });
+  if($('#mgrGoApp')) $('#mgrGoApp').addEventListener('click', ()=> setSkipSteps(!skipSteps));
 
   $('#mgrGoPayments').addEventListener('click', ()=>{
     showTab('reloj'); pushBack('mgrmore');
@@ -19440,6 +19449,9 @@
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden) saveDraft(); });
 
   updateOutboxBadge();
+  // El aviso naranja tiene que salir en la puerta a la que llegue despues del
+  // reload, no solo cuando pase por el menu del manager.
+  renderSkipSteps();
   if(!cloudOn()){
     const _h=$('#sendHint');
     if(_h) _h.textContent='Manda la foto y los datos juntos. Elija WhatsApp y mande al manager.';
