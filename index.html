@@ -846,7 +846,7 @@
   #lClientField[hidden], #lClientOtherField[hidden], #lTeamField[hidden]{display:none !important;}
   /* ---- Finanzas de AMG ---- */
   .l-ex-row .l-ex-head{display:flex; justify-content:space-between; align-items:center; margin:8px 0 2px;}
-  #convInvoice[hidden], #convInvoiceHint[hidden], #invLogsBtns[hidden], #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acFlatField[hidden], #acPricingBox[hidden], #acCrewHint[hidden], #acRemove[hidden], #acListCard[hidden], #acPickField[hidden], #acExistsHint[hidden], #acNameField[hidden], #acBillToField[hidden], .l-ex-other-wrap[hidden], #invNew[hidden], #invList[hidden], #invFrom[hidden], #invPreviewWrap[hidden],
+  #convInvoice[hidden], #convInvoiceHint[hidden], #invLogsBtns[hidden], #fpScansTools[hidden], #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acFlatField[hidden], #acPricingBox[hidden], #acCrewHint[hidden], #acRemove[hidden], #acListCard[hidden], #acPickField[hidden], #acExistsHint[hidden], #acNameField[hidden], #acBillToField[hidden], .l-ex-other-wrap[hidden], #invNew[hidden], #invList[hidden], #invFrom[hidden], #invPreviewWrap[hidden],
   #finMGastos[hidden], #finMPagos[hidden], #finMCierre[hidden], #finPClients[hidden], #finPHeld[hidden], #finGMonthField[hidden], #finCPdf[hidden],
   .s-gas-row[hidden], .s-gas-other-wrap[hidden], .s-gas-hint[hidden]{display:none !important;}
   /* La pantalla es para trabajar: fuera la linea de idiomas y los avisos
@@ -1485,6 +1485,12 @@
 
   <!-- ===================== TAB: FLOOR PLAN ===================== -->
   <section class="tab-panel" data-tab="floorplan">
+    <!-- Para volver a ENTRAR a un plano ya escaneado no hay que llenar nada otra vez:
+         esta pastilla salta derecho al plano guardado. Solo aparece cuando hay uno. -->
+    <div class="mgrtools" id="fpScansTools" hidden style="margin:2px 0 10px;">
+      <button type="button" class="minibtn" id="fpOpenSaved">&#128207; Escaneos</button>
+      <span class="hint" id="fpSavedWhat" style="align-self:center;"></span>
+    </div>
     <section class="card" data-step="job">
       <h2><span class="num">1</span>Job Information</h2>
       <p class="hint" style="margin-top:0;">Who and where this plan is for. It prints on the plan itself, so the office can tell one job from another.</p>
@@ -4109,7 +4115,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-06-BK';
+  const APP_BUILD = '2026-09-06-BL';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8406,6 +8412,17 @@
     });
   }
 
+  // Que hay guardado, para el rotulo de la pastilla "Escaneos".
+  function paintFpSaved(){
+    const box = $('#fpScansTools'), lab = $('#fpSavedWhat');
+    const hay = !!(floorplanData && floorplanData.rooms && floorplanData.rooms.length);
+    if(box) box.hidden = !hay;
+    if(lab && hay){
+      const j = floorplanData.job || {};
+      const cuartos = floorplanData.rooms.filter(r => !r.deleted).length;
+      lab.textContent = (j.client ? j.client + ' · ' : '') + cuartos + (cuartos === 1 ? ' cuarto' : ' cuartos') + (j.date ? ' · ' + j.date : '');
+    }
+  }
   function loadFloorplanDraft(){
     try{ floorplanData = JSON.parse(localStorage.getItem(FLOORPLAN_DRAFT_KEY) || 'null'); }catch(e){ floorplanData = null; }
     if(floorplanData && floorplanData.rooms){
@@ -8420,12 +8437,14 @@
       }
       renderFloorplan(floorplanData);
     }
+    paintFpSaved();
   }
   function clearFloorplanDraft(){
     floorplanData = null;
     fpResetUndoStack();
     try{ localStorage.removeItem(FLOORPLAN_DRAFT_KEY); }catch(e){}
     $('#floorplanResultCard').hidden = true;
+    paintFpSaved();
   }
 
   if(!isNative()){
@@ -13625,6 +13644,16 @@
   // Who and where this plan is for. Typed on the Job Information screen
   // before scanning, and printed on the plan itself - a floor plan with no
   // name on it is worth very little to the office three jobs later.
+  // "Escaneos": abre el plano guardado tal cual, sin la reja de Job Information. Editar un plano
+  // que ya existe no necesita volver a escribir el cliente: eso ya viaja dentro del plano.
+  if($('#fpOpenSaved')) $('#fpOpenSaved').addEventListener('click', ()=>{
+    if(!(floorplanData && floorplanData.rooms && floorplanData.rooms.length)){
+      const st = $('#floorplanStatus'); if(st) st.textContent = 'There is no saved scan yet. Fill in the job information and tap New Scan.';
+      return;
+    }
+    goStep('floorplan', 1);                          // paso 2 = Scan; la reja vive en Continuar, no aqui
+    const card = $('#floorplanResultCard'); if(card){ card.hidden = false; card.scrollIntoView({ block:'start' }); }
+  });
   function fpJobInfo(){
     const g = id => { const e = $('#' + id); return e ? String(e.value || '').trim() : ''; };
     return { client:g('fp-client'), address:g('fp-address'), date:g('fp-date'),
