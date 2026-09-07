@@ -1498,6 +1498,17 @@
     </div>
   </section>
 
+  <!-- ===================== TAB: SAVED SCANS =====================
+       Su propia ventana, no un cajon que empuja el resto de la pantalla
+       para abajo. Se entra con la pastilla "Escaneos" y se sale con Atras. -->
+  <section class="tab-panel" data-tab="fpscans">
+    <section class="card">
+      <h2>Saved Scans</h2>
+      <p class="hint" style="margin-top:0;">Tap a scan to open it and keep editing. A plan you do not open for 3 days deletes itself, and only the last 3 are kept.</p>
+      <div id="fpScansRows"></div>
+    </section>
+  </section>
+
   <!-- ===================== TAB: FLOOR PLAN ===================== -->
   <section class="tab-panel" data-tab="floorplan">
     <!-- Para volver a ENTRAR a un plano ya escaneado no hay que llenar nada otra vez:
@@ -1505,10 +1516,6 @@
     <div class="mgrtools" id="fpScansTools" hidden style="margin:2px 0 10px;">
       <button type="button" class="minibtn" id="fpOpenSaved">&#128207; Escaneos</button>
       <span class="hint" id="fpSavedWhat" style="align-self:center;"></span>
-    </div>
-    <div class="card" id="fpScansList" hidden style="margin:0 0 10px; padding:12px 14px;">
-      <p class="hint" style="margin:0 0 8px;">Saved plans. Tap one to open and keep editing. A plan you do not touch for 3 days deletes itself, and only the last 3 are kept.</p>
-      <div id="fpScansRows"></div>
     </div>
     <section class="card" data-step="job">
       <h2><span class="num">1</span>Job Information</h2>
@@ -2622,7 +2629,8 @@
     materials:'Materials / Materiales', measurements:'Measurements / Medidas',
     floorplan:'Floor Plan / Plano',
     manual:'Manual', manager:'Manager',
-    mgrmore:'Precios, pagos y equipo', finanzas:'Finanzas', amgclientes:'Clientes de AMG'
+    mgrmore:'Precios, pagos y equipo', finanzas:'Finanzas', amgclientes:'Clientes de AMG',
+    fpscans:'Saved Scans'
   };
 
   // A manager is only IN manager mode while he is inside the Manager
@@ -3099,19 +3107,20 @@
     const want = steps[i].k;
     const panel = document.querySelector('.tab-panel[data-tab="' + tab + '"]');
     if(!panel) return;
-    // En modo revision se ven TODAS las tarjetas de corrido: recorrer la app
-    // entera eran ~25 toques de Continuar, uno por pantalla.
+    // UNA pantalla a la vez, SIEMPRE. El modo revision solo se salta las
+    // preguntas obligatorias; apilar todas las tarjetas de corrido mezclaba dos
+    // pantallas en una sola y se veia mal.
     panel.querySelectorAll(':scope > .card[data-step]').forEach(c => {
-      c.hidden = skipSteps ? false : (c.dataset.step !== want);
+      c.hidden = (c.dataset.step !== want);
     });
     clearStepWarning(panel);
     // The finished plan is not a step of its own - it belongs under the Scan
     // screen, and only once there is actually a plan to show.
     if(tab === 'floorplan'){
       const res = $('#floorplanResultCard');
-      if(res) res.hidden = (!skipSteps && want !== 'scan') || !floorplanData;
+      if(res) res.hidden = (want !== 'scan') || !floorplanData;
     }
-    if(tab === 'labor' && (want === 'send' || skipSteps)) renderLaborReview();
+    if(tab === 'labor' && want === 'send') renderLaborReview();
     paintDock(tab);
     // A signature pad cannot measure itself while its step is hidden, and
     // revealing a step is not a tab change, so onTabChange's own pass never
@@ -3269,9 +3278,8 @@
     const i = stepIdx[tab] || 0;
     const last = i >= steps.length - 1;
     const en = !!STEP_EN[tab];
-    bar.querySelector('.stepcap').textContent = skipSteps
-      ? (en ? 'Review mode · all ' + steps.length + ' screens shown' : 'Modo revisión · las ' + steps.length + ' pantallas a la vez')
-      : (en ? 'Step ' : 'Paso ') + (i + 1) + (en ? ' of ' : ' de ') + steps.length + ' · ' + steps[i].t;
+    bar.querySelector('.stepcap').textContent =
+      (en ? 'Step ' : 'Paso ') + (i + 1) + (en ? ' of ' : ' de ') + steps.length + ' · ' + steps[i].t;
     bar.querySelector('.stepdots').innerHTML =
       steps.map((s, n) => '<i class="' + (n === i ? 'on' : (n < i ? 'done' : '')) + '"></i>').join('');
     const back = bar.querySelector('[data-step-back]');
@@ -3281,8 +3289,7 @@
     back.hidden = (i === 0);
     next.hidden = last;
     // On the last step the buttons that finish the job take the whole row.
-    // En modo revision estan siempre, porque todas las pantallas estan a la vista.
-    bar.querySelector('.exports').hidden = !last && !skipSteps;
+    bar.querySelector('.exports').hidden = !last;
   }
 
   // The Materials chooser. Three options, not two: a real job often has both,
@@ -4316,7 +4323,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CB';
+  const APP_BUILD = '2026-09-07-CC';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8586,6 +8593,15 @@
     if(!floorplanData._handEdited){ floorplanRectifyWalls(floorplanData); floorplanRefineGeometry(floorplanData); }
     renderFloorplan(floorplanData);
     $('#floorplanResultCard').hidden = false;
+    // Se puede llegar desde la lista de escaneos: hay que volver a la ventana
+    // del plano, no quedarse en la lista con el plano cargado por detras.
+    const act = document.querySelector('.tab-panel.active');
+    if(!act || act.dataset.tab !== 'floorplan'){
+      // Se quita de la pila el 'floorplan' que puso la lista, para no dejar un
+      // Atras que regrese al mismo sitio; lo que hubiera mas abajo se respeta.
+      if(navStack[navStack.length-1] === 'floorplan') navStack.pop();
+      showTab('floorplan');
+    }
     goStep('floorplan', 1);
     paintFpSaved();
   }
@@ -8955,17 +8971,25 @@
     }).join('') || '<p class="clockhint">Nothing saved yet.</p>';
   }
   if($('#fpOpenSaved')) $('#fpOpenSaved').addEventListener('click', ()=>{
-    const list = fpListLive(), card = $('#fpScansList');
-    // Con uno solo no vale la pena una lista: entra derecho, como antes.
-    if(list.length === 1){ if(card) card.hidden = true; return fpOpenSaved(list[0].id); }
-    if(card){ card.hidden = !card.hidden; if(!card.hidden) paintFpSaved(); }
-    $('#fpOpenSaved').classList.toggle('on', card && !card.hidden);
+    const list = fpListLive();
+    // Con uno solo no hay lista que escoger: se entra derecho a ese plano.
+    if(list.length === 1) return fpOpenSaved(list[0].id);
+    paintFpSaved();
+    showTab('fpscans'); pushBack('floorplan');
   });
   if($('#fpScansRows')) $('#fpScansRows').addEventListener('click', (e)=>{
     const del = e.target.closest('.fpDelSaved');
-    if(del){ if(confirm('¿Borrar ese plano guardado?\n\nNo se puede deshacer.')) fpDeleteSaved(del.dataset.fpid); return; }
+    if(del){
+      if(confirm('¿Borrar ese plano guardado?\n\nNo se puede deshacer.')){
+        fpDeleteSaved(del.dataset.fpid);
+        // Sin escaneos esta ventana no ofrece nada: se regresa sola.
+        if(!fpListLive().length) goBack();
+      }
+      return;
+    }
     const row = e.target.closest('[data-fpid]');
-    if(row){ $('#fpScansList').hidden = true; $('#fpOpenSaved').classList.remove('on'); fpOpenSaved(row.dataset.fpid); }
+    // Tocar un escaneo lo abre y lleva de vuelta al plano, listo para editar.
+    if(row) fpOpenSaved(row.dataset.fpid);
   });
   function loadFloorplanDraft(){
     // Antes esta llave guardaba UN plano entero; ahora guarda el id del abierto.
@@ -14247,16 +14271,9 @@
   // Who and where this plan is for. Typed on the Job Information screen
   // before scanning, and printed on the plan itself - a floor plan with no
   // name on it is worth very little to the office three jobs later.
-  // "Escaneos": abre el plano guardado tal cual, sin la reja de Job Information. Editar un plano
-  // que ya existe no necesita volver a escribir el cliente: eso ya viaja dentro del plano.
-  if($('#fpOpenSaved')) $('#fpOpenSaved').addEventListener('click', ()=>{
-    if(!(floorplanData && floorplanData.rooms && floorplanData.rooms.length)){
-      const st = $('#floorplanStatus'); if(st) st.textContent = 'There is no saved scan yet. Fill in the job information and tap New Scan.';
-      return;
-    }
-    goStep('floorplan', 1);                          // paso 2 = Scan; la reja vive en Continuar, no aqui
-    const card = $('#floorplanResultCard'); if(card){ card.hidden = false; card.scrollIntoView({ block:'start' }); }
-  });
+  // "Escaneos" tiene UN SOLO manejador, y vive junto a la lista de planos
+  // guardados (buscar #fpScansRows). Aqui habia un segundo listener del mismo
+  // boton que abria el plano en el sitio: los dos corrian con cada toque.
   function fpJobInfo(){
     const g = id => { const e = $('#' + id); return e ? String(e.value || '').trim() : ''; };
     return { client:g('fp-client'), address:g('fp-address'), date:g('fp-date'),
