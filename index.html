@@ -398,7 +398,7 @@
     background:var(--accent); color:var(--on-accent);
   }
   .clockhint{font-size:12.5px; color:var(--ink-soft); margin:8px 0 0;}
-  #casualAddBox[hidden], #casualPinNote[hidden]{display:none !important;}
+  #casualAddBox[hidden], #casualPinNote[hidden], #fpScansList[hidden]{display:none !important;}
   #casualPayAlert{background:var(--danger); color:#fff; font-weight:700; font-size:14px;
     padding:12px 14px; border-radius:12px; margin:0 0 12px; line-height:1.35;}
   #casualPayAlert[hidden]{display:none !important;}
@@ -1496,6 +1496,10 @@
     <div class="mgrtools" id="fpScansTools" hidden style="margin:2px 0 10px;">
       <button type="button" class="minibtn" id="fpOpenSaved">&#128207; Escaneos</button>
       <span class="hint" id="fpSavedWhat" style="align-self:center;"></span>
+    </div>
+    <div class="card" id="fpScansList" hidden style="margin:0 0 10px; padding:12px 14px;">
+      <p class="hint" style="margin:0 0 8px;">Saved plans. Tap one to open and keep editing. A plan you do not touch for 3 days deletes itself, and only the last 3 are kept.</p>
+      <div id="fpScansRows"></div>
     </div>
     <section class="card" data-step="job">
       <h2><span class="num">1</span>Job Information</h2>
@@ -3618,12 +3622,47 @@
     task:   ['Pick up','New job','Warehouse','Check up','Organization','Inventory','Trash']
   };
 
+  // Cuanto vive una sugerencia. Los CLIENTES caducan a los 2 dias: son muchos y
+  // distintos cada semana, y la lista se hacia larguisima. Los demas (nombres de
+  // la gente, tareas, cuartos) son casi siempre los mismos y se quedan.
+  const SUG_TTL = { client: 2*24*3600*1000 };
   const sugStore = (()=>{ let ok=true;
     try{ localStorage.setItem('_s','1'); localStorage.removeItem('_s'); }catch(e){ ok=false; }
     const mem={};
+    const raw = k => { try{ return JSON.parse((ok?localStorage.getItem('sug:'+k):mem[k])||'[]'); }catch(e){ return []; } };
+    const put = (k,v) => { const j=JSON.stringify(v); ok?localStorage.setItem('sug:'+k,j):mem[k]=j; };
+    // Las fechas viven APARTE, en su propio mapa, para que la lista siga siendo
+    // de texto puro y ninguna de las pantallas que ya la usan tenga que cambiar.
+    const stamps = k => { try{ return JSON.parse((ok?localStorage.getItem('sugt:'+k):mem['t:'+k])||'{}'); }catch(e){ return {}; } };
+    const putStamps = (k,v) => { const j=JSON.stringify(v); ok?localStorage.setItem('sugt:'+k,j):mem['t:'+k]=j; };
     return {
-      get:k=>{ try{ return JSON.parse((ok?localStorage.getItem('sug:'+k):mem[k])||'[]'); }catch(e){ return []; } },
-      set:(k,v)=>{ const j=JSON.stringify(v); ok?localStorage.setItem('sug:'+k,j):mem[k]=j; }
+      get:k=>{
+        const list = raw(k), ttl = SUG_TTL[k];
+        if(!ttl) return list;
+        const now = Date.now(), t = stamps(k);
+        let changed = false;
+        // Lo que ya estaba guardado sin fecha se le pone la de hoy: no se le
+        // borra de golpe algo que el escribio antes de este cambio.
+        list.forEach(v => { const kk = String(v).toLowerCase(); if(!t[kk]){ t[kk] = now; changed = true; } });
+        const keep = list.filter(v => (now - t[String(v).toLowerCase()]) <= ttl);
+        if(changed || keep.length !== list.length){
+          Object.keys(t).forEach(kk => { if(!keep.some(v => String(v).toLowerCase() === kk)) delete t[kk]; });
+          putStamps(k, t); if(keep.length !== list.length) put(k, keep);
+        }
+        return keep;
+      },
+      set:(k,v)=>{
+        put(k,v);
+        if(!SUG_TTL[k]) return;
+        const now = Date.now(), t = stamps(k);
+        v.forEach(x => { const kk = String(x).toLowerCase(); if(!t[kk]) t[kk] = now; });
+        Object.keys(t).forEach(kk => { if(!v.some(x => String(x).toLowerCase() === kk)) delete t[kk]; });
+        putStamps(k, t);
+      },
+      touch:(k,v)=>{
+        if(!SUG_TTL[k]) return;
+        const t = stamps(k); t[String(v).toLowerCase()] = Date.now(); putStamps(k, t);
+      }
     };})();
 
   function sugKeyFor(el){
@@ -3638,6 +3677,7 @@
     let list=sugStore.get(key).filter(x=>x.toLowerCase()!==v.toLowerCase());
     list.unshift(v);
     sugStore.set(key, list.slice(0,sugMax(key)));
+    sugStore.touch(key, v);            // vuelve a escribirlo = dos dias mas desde hoy
     sugRenderAll(key);
   }
   // ---- "Use my location" on every address box -------------------------
@@ -4245,7 +4285,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-BW';
+  const APP_BUILD = '2026-09-07-BX';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8296,11 +8336,55 @@
   // succeeded) - when false, rooms are drawn separately rather than
   // pretending they connect. No cloud sync yet, same as every other draft
   // in this app - just one localStorage key, held until overwritten/cleared.
-  const FLOORPLAN_DRAFT_KEY = 'floorplan1';
+  const FLOORPLAN_DRAFT_KEY = 'floorplan1';      // ahora guarda el ID del plano abierto
+  const FLOORPLAN_LIST_KEY  = 'floorplans1';     // los planos guardados
+  const FP_MAX = 3;                              // cuantos se guardan
+  const FP_TTL = 3*24*3600*1000;                 // y por cuanto tiempo sin tocarlos
   let floorplanData = null;
+  let floorplanId = null;
+
+  const fpListRaw = () => { try{ return JSON.parse(localStorage.getItem(FLOORPLAN_LIST_KEY) || '[]'); }catch(e){ return []; } };
+  // Los que siguen vivos: no vencidos y como maximo FP_MAX, del mas reciente al mas viejo.
+  const fpListLive = () => { const now = Date.now();
+    return fpListRaw().filter(e => e && e.data && e.data.rooms && (now - (+e.at || 0)) <= FP_TTL).slice(0, FP_MAX); };
+  function fpListSave(list){
+    try{ localStorage.setItem(FLOORPLAN_LIST_KEY, JSON.stringify(list.slice(0, FP_MAX))); }
+    catch(e){ // si no cabe, se sacrifica el mas viejo antes que perderlo todo
+      try{ localStorage.setItem(FLOORPLAN_LIST_KEY, JSON.stringify(list.slice(0, Math.max(1, list.length - 1)))); }catch(e2){}
+    }
+  }
+  const fpDaysLeft = e => Math.max(0, Math.ceil((FP_TTL - (Date.now() - (+e.at||0))) / (24*3600*1000)));
 
   function saveFloorplanDraft(){
-    try{ localStorage.setItem(FLOORPLAN_DRAFT_KEY, JSON.stringify(floorplanData)); }catch(e){}
+    if(!floorplanData){ return; }
+    if(!floorplanId) floorplanId = 'fp' + Date.now() + Math.floor(Math.random()*1000);
+    // La fecha se renueva cada vez que lo toca: los 3 dias cuentan desde la
+    // ULTIMA vez que trabajo en el, no desde que lo escaneo.
+    const list = fpListLive().filter(e => e.id !== floorplanId);
+    list.unshift({ id: floorplanId, at: Date.now(), job: floorplanData.job || {}, data: floorplanData });
+    fpListSave(list);
+    try{ localStorage.setItem(FLOORPLAN_DRAFT_KEY, floorplanId); }catch(e){}
+    paintFpSaved();
+  }
+  // Abrir uno de los guardados.
+  function fpOpenSaved(id){
+    const e = fpListLive().find(x => x.id === id); if(!e) return;
+    floorplanData = e.data; floorplanId = e.id;
+    try{ localStorage.setItem(FLOORPLAN_DRAFT_KEY, e.id); }catch(e2){}
+    fpResetUndoStack();
+    floorplanAlignRooms(floorplanData);
+    if(!floorplanData._handEdited){ floorplanRectifyWalls(floorplanData); floorplanRefineGeometry(floorplanData); }
+    renderFloorplan(floorplanData);
+    $('#floorplanResultCard').hidden = false;
+    goStep('floorplan', 1);
+    paintFpSaved();
+  }
+  function fpDeleteSaved(id){
+    fpListSave(fpListLive().filter(e => e.id !== id));
+    if(floorplanId === id){ floorplanData = null; floorplanId = null;
+      try{ localStorage.removeItem(FLOORPLAN_DRAFT_KEY); }catch(e){}
+      $('#floorplanResultCard').hidden = true; }
+    paintFpSaved();
   }
   // A LiDAR scan's raw coordinates are relative to wherever the AR
   // session's tracking origin/orientation happened to be facing when
@@ -8642,17 +8726,51 @@
 
   // Que hay guardado, para el rotulo de la pastilla "Escaneos".
   function paintFpSaved(){
-    const box = $('#fpScansTools'), lab = $('#fpSavedWhat');
-    const hay = !!(floorplanData && floorplanData.rooms && floorplanData.rooms.length);
-    if(box) box.hidden = !hay;
-    if(lab && hay){
-      const j = floorplanData.job || {};
-      const cuartos = floorplanData.rooms.filter(r => !r.deleted).length;
-      lab.textContent = (j.client ? j.client + ' · ' : '') + cuartos + (cuartos === 1 ? ' cuarto' : ' cuartos') + (j.date ? ' · ' + j.date : '');
-    }
+    const box = $('#fpScansTools'), lab = $('#fpSavedWhat'), rows = $('#fpScansRows');
+    const list = fpListLive();
+    if(box) box.hidden = !list.length;
+    if(lab) lab.textContent = list.length
+      ? (list.length === 1 ? '1 saved plan' : list.length + ' saved plans')
+      : '';
+    if(!rows) return;
+    rows.innerHTML = list.map(e => {
+      const j = e.job || {}, n = (e.data.rooms || []).filter(r => !r.deleted).length;
+      const dias = fpDaysLeft(e);
+      return `<div class="entryrow" data-fpid="${esc(e.id)}" style="cursor:pointer;">
+        <span><span class="who">${esc(j.client || 'No client')}${e.id === floorplanId ? ' &middot; <span style="color:var(--accent);">open now</span>' : ''}</span><br>
+          <span class="when">${esc(j.address || '')}${j.address ? ' &middot; ' : ''}${n} room${n===1?'':'s'}${j.date ? ' &middot; ' + esc(j.date) : ''}</span><br>
+          <span class="when" style="color:var(--ink-soft);">deletes itself in ${dias} day${dias===1?'':'s'} if not opened</span></span>
+        <button type="button" class="icon-btn fpDelSaved" data-fpid="${esc(e.id)}">Delete</button>
+      </div>`;
+    }).join('') || '<p class="clockhint">Nothing saved yet.</p>';
   }
+  if($('#fpOpenSaved')) $('#fpOpenSaved').addEventListener('click', ()=>{
+    const list = fpListLive(), card = $('#fpScansList');
+    // Con uno solo no vale la pena una lista: entra derecho, como antes.
+    if(list.length === 1){ if(card) card.hidden = true; return fpOpenSaved(list[0].id); }
+    if(card){ card.hidden = !card.hidden; if(!card.hidden) paintFpSaved(); }
+    $('#fpOpenSaved').classList.toggle('on', card && !card.hidden);
+  });
+  if($('#fpScansRows')) $('#fpScansRows').addEventListener('click', (e)=>{
+    const del = e.target.closest('.fpDelSaved');
+    if(del){ if(confirm('¿Borrar ese plano guardado?\n\nNo se puede deshacer.')) fpDeleteSaved(del.dataset.fpid); return; }
+    const row = e.target.closest('[data-fpid]');
+    if(row){ $('#fpScansList').hidden = true; $('#fpOpenSaved').classList.remove('on'); fpOpenSaved(row.dataset.fpid); }
+  });
   function loadFloorplanDraft(){
-    try{ floorplanData = JSON.parse(localStorage.getItem(FLOORPLAN_DRAFT_KEY) || 'null'); }catch(e){ floorplanData = null; }
+    // Antes esta llave guardaba UN plano entero; ahora guarda el id del abierto.
+    // Lo que estuviera guardado con el formato viejo se pasa a la lista.
+    let cur = null;
+    try{ cur = localStorage.getItem(FLOORPLAN_DRAFT_KEY); }catch(e){}
+    if(cur && cur.charAt(0) === '{'){
+      try{ const viejo = JSON.parse(cur);
+        if(viejo && viejo.rooms){ floorplanData = viejo; floorplanId = null; saveFloorplanDraft(); cur = floorplanId; }
+      }catch(e){}
+    }
+    const list = fpListLive(); fpListSave(list);          // de paso, borra los vencidos
+    const pick = list.find(e => e.id === cur) || list[0] || null;
+    floorplanData = pick ? pick.data : null;
+    floorplanId   = pick ? pick.id : null;
     if(floorplanData && floorplanData.rooms){
       fpResetUndoStack();
       floorplanAlignRooms(floorplanData); // retroactively straightens drafts saved before this fix existed
@@ -8668,7 +8786,8 @@
     paintFpSaved();
   }
   function clearFloorplanDraft(){
-    floorplanData = null;
+    if(floorplanId) fpListSave(fpListLive().filter(e => e.id !== floorplanId));
+    floorplanData = null; floorplanId = null;
     fpResetUndoStack();
     try{ localStorage.removeItem(FLOORPLAN_DRAFT_KEY); }catch(e){}
     $('#floorplanResultCard').hidden = true;
@@ -8776,6 +8895,7 @@
         }
       });
       floorplanData = result;
+      floorplanId = null;          // escaneo nuevo = plano nuevo, no pisa al que estaba abierto
       fpResetUndoStack();
       saveFloorplanDraft();
       renderFloorplan(floorplanData);
