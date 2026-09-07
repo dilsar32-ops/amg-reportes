@@ -399,6 +399,15 @@
   }
   .clockhint{font-size:12.5px; color:var(--ink-soft); margin:8px 0 0;}
   #casualAddBox[hidden], #casualPinNote[hidden], #fpScansList[hidden]{display:none !important;}
+  /* Estaba DENTRO de <main>, entre dos paneles: en labor, equipment, comms,
+     drying, materials, measurements y el plano quedaba DEBAJO de todo el
+     contenido, o sea fuera de pantalla justo donde se saltan las rejas. Ahora
+     va fijo arriba de todo, por encima de la barra de version nueva (z:400). */
+  #skipStepsBanner{position:fixed; top:0; left:0; right:0; z-index:500; margin:0;
+    padding:10px 14px; background:var(--accent); color:var(--on-accent);
+    font-size:12.5px; font-weight:700; line-height:1.35; text-align:center; cursor:pointer;
+    box-shadow:0 2px 8px rgba(0,0,0,.35);}
+  #skipStepsBanner[hidden]{display:none !important;}
   #casualPayAlert{background:var(--danger); color:#fff; font-weight:700; font-size:14px;
     padding:12px 14px; border-radius:12px; margin:0 0 12px; line-height:1.35;}
   #casualPayAlert[hidden]{display:none !important;}
@@ -1801,7 +1810,7 @@
   </section>
 
   <!-- ===================== TAB: RELOJ ===================== -->
-  <p id="skipStepsBanner" hidden style="margin:0 0 10px; padding:8px 12px; border-radius:8px; background:var(--accent); color:var(--on-accent); font-size:12.5px; font-weight:700;">MODO REVISIÓN — el app no le está pidiendo los datos obligatorios. No mande un reporte así.</p>
+  <p id="skipStepsBanner" hidden>MODO REVISIÓN — el app no le está pidiendo los datos obligatorios. No mande un reporte así. <b>Toque aquí para apagarlo.</b></p>
   <section class="tab-panel active" data-tab="reloj">
     <!-- A manager doesn't clock in for pay - this stays out of the way
          behind a small button for them, but shows normally for crew, who
@@ -3135,7 +3144,11 @@
         return;
       }
     }
-    if(panel && cur && cur.k === 'mat' && !skipSteps){
+    // Solo en labor: la llave 'mat' tambien existe en Materiales, y la
+    // validacion lee campos del panel de Labor. Un gasto a medias en el
+    // borrador de mudanza dejaba al crew trabado en Materiales con un aviso
+    // sobre una casilla que no esta en pantalla.
+    if(panel && cur && cur.k === 'mat' && tab === 'labor' && !skipSteps){
       // Un gasto a medias (monto sin tipo, tipo sin monto, sin quien pago) no se manda a medias: se avisa aqui.
       const bad = [];
       exRows().forEach(row => {
@@ -4285,7 +4298,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-BX';
+  const APP_BUILD = '2026-09-07-BY';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4495,20 +4508,45 @@
   // gate exists because log_date is a database column the inbox sorts on.
   // Cambiar de empresa hace location.reload(), asi que el modo revision NO puede
   // vivir en una variable suelta: se apagaba solo al cruzar de puerta, que es
-  // justo cuando el lo necesita. Va en sessionStorage: aguanta el reload y las
-  // tres puertas, pero se muere cuando la app se cierra del todo - que era el
-  // seguro que no queremos perder (nadie debe mandar un reporte sin fecha
-  // porque el modo se quedo prendido de ayer).
+  // justo cuando el lo necesita. Vive en sessionStorage, pero con DUEÑO Y HORA,
+  // porque sessionStorage aguanta el reload de cerrar sesion y un iPhone puede
+  // tener la app suspendida dias: sin eso se le quedaba prendido al lider al
+  // que le devuelven el telefono, y el lider no tiene ni como verlo ni como
+  // apagarlo (la pastilla solo existe en el menu del manager).
   const SKIP_KEY = 'skipSteps1';
-  let skipSteps = (()=>{ try{ return sessionStorage.getItem(SKIP_KEY) === '1'; }catch(e){ return false; } })();
+  const SKIP_TTL = 6*3600*1000;      // seis horas y se apaga solo
+  let skipSteps = false;             // se prende en el arranque, ya con SES leida
+  function readSkipSteps(){
+    try{
+      const o = JSON.parse(sessionStorage.getItem(SKIP_KEY) || 'null');
+      if(!o || !o.on) return false;
+      if(Date.now() - (+o.at || 0) > SKIP_TTL) return false;          // telefono suspendido
+      if(o.uid && !(SES && SES.user_id === o.uid)) return false;      // otra cuenta, o nadie
+      return true;
+    }catch(e){ return false; }
+  }
   function setSkipSteps(on){
     skipSteps = !!on;
-    try{ on ? sessionStorage.setItem(SKIP_KEY,'1') : sessionStorage.removeItem(SKIP_KEY); }catch(e){}
+    try{
+      if(on) sessionStorage.setItem(SKIP_KEY, JSON.stringify({ on:1, uid: (SES && SES.user_id) || null, at: Date.now() }));
+      else sessionStorage.removeItem(SKIP_KEY);
+    }catch(e){}
     renderSkipSteps();
   }
+  // Cerrar sesion SIEMPRE lo apaga, pase lo que pase despues.
+  function clearSkipSteps(){ skipSteps = false; try{ sessionStorage.removeItem(SKIP_KEY); }catch(e){} }
   function renderSkipSteps(){
     const banner = $('#skipStepsBanner');
-    if(banner) banner.hidden = !skipSteps;
+    if(banner){
+      banner.hidden = !skipSteps;
+      // Va fijo arriba: hay que devolverle su alto al contenido, y se mide
+      // despues de mostrarlo porque el texto se parte en un telefono angosto.
+      // Con tope: si se mide antes de que la pantalla tenga tamano (app recien
+      // abierta, ventana en segundo plano) el alto sale absurdo y ese relleno
+      // se quedaria pegado. Se vuelve a medir cuando la pantalla cambia.
+      const alto = Math.min(banner.offsetHeight || 0, 120);
+      document.body.style.paddingTop = skipSteps ? ((alto > 8 ? alto : 44) + 'px') : '';
+    }
     const btn = $('#mgrGoApp');
     if(btn){ btn.innerHTML = '&#128260; Revisar la app &middot; ' + (skipSteps ? 'PRENDIDO' : 'APAGADO'); btn.classList.toggle('on', skipSteps); btn.title = skipSteps ? 'Toque para apagar' : 'Toque para prender (salta las preguntas del crew)'; }
     const ah = $('#mgrAppHint');
@@ -5510,7 +5548,7 @@
     if(!isManager()) return;
     if(view === 'form'){
       if(!WORK_KINDS_OK){ const ok = await loadWorkKinds(); if(!ok){ alert('No se pudo leer el precio de AMG. Revise su internet y vuelva a intentar.'); return; } }
-      if(!amgAnyClientRate()){
+      if(!amgAnyClientRate() && !skipSteps){
         if(confirm('Antes de llenar un reporte de mudanza hay que poner el precio por hora al cliente (general o por cliente).\n\n¿Ir a Precio AMG?')) amgShow('price');
         return;
       }
@@ -5746,6 +5784,12 @@
   // The bar itself is the switch. One tap prende, one tap apaga - he asked
   // for exactly that and nothing else.
   if($('#mgrGoApp')) $('#mgrGoApp').addEventListener('click', ()=> setSkipSteps(!skipSteps));
+  // El propio aviso lo apaga: la pastilla solo existe en el menu del manager, y
+  // quien se lo encuentre prendido en otra pantalla no tenia como quitarlo.
+  window.addEventListener('resize', ()=>{ if(skipSteps) renderSkipSteps(); });
+  if($('#skipStepsBanner')) $('#skipStepsBanner').addEventListener('click', ()=>{
+    if(confirm('¿Apagar el modo revisión?\n\nLa app vuelve a pedirle los datos obligatorios.')) setSkipSteps(false);
+  });
 
   $('#mgrGoPayments').addEventListener('click', ()=>{
     showTab('reloj'); pushBack('mgrmore');
@@ -14891,6 +14935,7 @@
   // and the app looks broken when the real fix is to sign in again.
   let expiredShown = false;
   function sessionExpired(){
+    clearSkipSteps();
     if(expiredShown) return;
     expiredShown = true;
     SES = null;
@@ -14917,6 +14962,7 @@
   // completely clean instead of risking leftover data in some JS variable
   // this file forgot to reset.
   async function signOutEverywhere(){
+    clearSkipSteps();
     if(!confirm('¿Cerrar sesión? Va a tener que entrar de nuevo con su código, correo o PIN.')) return;
     try{
       if(SES && SES.access_token){
@@ -17556,6 +17602,13 @@
     // Entrada = salida no es un turno: un telefono viejo lo cobraria como 24 h.
     const sameHour = $$('.shift-card', shiftsContainer).find(c => { const f = $('.s-from', c).value, o = $('.s-to', c).value; return f && o && hoursBetween(f, o) === 0; });
     if(sameHour) return alert('Un turno tiene la hora de entrada igual a la de salida. Corríjalo antes de mandar.');
+    // Una mudanza SIN CLIENTE no se puede cobrar: el invoice busca los reportes
+    // por cliente, y uno con el nombre en blanco no aparece bajo ninguno. Queda
+    // huerfano para siempre, con horas y nomina reales. Esta reja NO mira el
+    // modo revision: mandar de verdad es mandar de verdad.
+    if(formKind() === 'mudanza' && !String(formClient() || '').trim()){
+      return alert('Este reporte de mudanza no tiene cliente.\n\nSin cliente no se puede cobrar: no va a aparecer bajo ningún cliente a la hora de hacer el invoice. Escoja el cliente en la primera pantalla.');
+    }
     if(formKind() === 'mudanza' && !isManager()){
       // El lider manda el reporte sin precio (como en restauracion): el
       // manager lo abre en Mudanzas recibidas y ahi se cobra con el precio de
@@ -17895,6 +17948,7 @@
   }
   $('#doorSignOut').addEventListener('click', async ()=>{
     if(!confirm('¿Cerrar sesión en este teléfono? Va a tener que entrar de nuevo con su código, correo o PIN.')) return;
+    clearSkipSteps();
     try{ if(SES && SES.access_token) await authFetch('/auth/v1/logout', { method:'POST', headers: cloudHeaders() }); }catch(e){}
     try{ localStorage.removeItem('ses'); }catch(e){} clearCasualSes(); location.reload();
   });
@@ -18496,6 +18550,7 @@
   });
 
   $('#casualLogout').addEventListener('click', ()=>{
+    clearSkipSteps();
     if(!confirm('¿Salir? Va a tener que escribir el código, su nombre y su PIN otra vez.')) return;
     clearCasualSes();
     location.reload();
@@ -19705,8 +19760,10 @@
   document.addEventListener('visibilitychange', ()=>{ if(document.hidden) saveDraft(); });
 
   updateOutboxBadge();
-  // El aviso naranja tiene que salir en la puerta a la que llegue despues del
-  // reload, no solo cuando pase por el menu del manager.
+  // Se prende aqui, no arriba: readSkipSteps necesita SES, que se lee mas abajo.
+  // Y el aviso tiene que salir en la puerta a la que llegue despues del reload,
+  // no solo cuando pase por el menu del manager.
+  skipSteps = readSkipSteps();
   renderSkipSteps();
   if(!cloudOn()){
     const _h=$('#sendHint');
