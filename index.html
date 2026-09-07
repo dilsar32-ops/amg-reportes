@@ -3435,7 +3435,7 @@
       </div>
       <div class="field"><label>Task / Tarea</label><input type="text" class="s-task" placeholder="What was done / Qué se hizo"></div>
       <div class="field"><label>Address / Dirección</label><input type="text" class="s-address" placeholder="Job address / Dirección del trabajo"></div>
-      <div class="row2">
+      <div class="row2 s-extra-first">
         <div class="field">
           <label>Extra</label>
           <select class="s-extra">
@@ -3449,6 +3449,8 @@
         </div>
         <div class="field"><label>Extra $</label><input type="number" class="s-extra-amt" placeholder="0.00"></div>
       </div>
+      <div class="s-extra-more"></div>
+      <button type="button" class="minibtn s-extra-add" style="margin:0 0 10px;">+ Agregar otro extra</button>
       <div class="shift-calc"></div>
       <div class="shift-total-row mgr-only"><label>Shift Total $ / Total del Turno $</label><input type="number" class="s-total mono" placeholder="0.00" readonly></div>
       <div class="row2 s-gas-row" hidden>
@@ -3499,9 +3501,72 @@
   // amount is somehow still blank (never typed, or cleared after auto-fill) -
   // an extra that happened shouldn't silently total as $0.
   const EXTRA_FALLBACK = 150;
+
+  // ---- VARIOS EXTRAS POR TURNO ----
+  // El PRIMER extra se queda exactamente donde estaba (mismas clases, misma
+  // posicion) y sigue viajando como e/x en el payload: asi un reporte viejo y
+  // un telefono viejo se siguen leyendo igual, y ningun borrador a medias se
+  // descoloca. Los demas se agregan abajo y viajan en xs.
+  const extraBoxes = card => [card.querySelector('.s-extra-first')]
+      .concat($$('.s-extra-row', card)).filter(Boolean);
+  // Los extras escritos de un turno, en orden. Un turno sin extra devuelve [].
+  function extraItemsOf(card){
+    return extraBoxes(card).map(b => ({
+      e: ((b.querySelector('.s-extra') || {}).value) || '',
+      x: ((b.querySelector('.s-extra-amt') || {}).value)
+    })).filter(it => it.e || String(it.x == null ? '' : it.x).trim() !== '');
+  }
+  // Lo mismo pero leyendo un turno ya guardado. xs cuando lo trae; si no, el e/x de siempre.
+  function extraItemsOfShift(sh){
+    if(Array.isArray(sh.xs) && sh.xs.length) return sh.xs;
+    return (sh.e || String(sh.x == null ? '' : sh.x).trim() !== '') ? [{ e: sh.e || '', x: sh.x }] : [];
+  }
+  // Cuanto suman. Regla por extra, igual que siempre: si escribio monto vale eso;
+  // si solo escogio el tipo vale el respaldo de $150, y en mudanza vale 0.
+  function extrasTotal(items, isMudanza){
+    return (items || []).reduce((sum, it) => {
+      const t = parseFloat(it.x);
+      return sum + (Number.isFinite(t) ? t : ((it.e && !isMudanza) ? EXTRA_FALLBACK : 0));
+    }, 0);
+  }
+  function sExtraRowHtml(){
+    return '<div class="row2 s-extra-row">'
+      + '<div class="field"><label>Extra</label><select class="s-extra"></select></div>'
+      + '<div class="field"><label>Extra $</label>'
+      +   '<div style="display:flex; gap:8px; align-items:center;">'
+      +     '<input type="number" class="s-extra-amt" placeholder="0.00" style="flex:1;">'
+      +     '<button type="button" class="icon-btn s-extra-del">Quitar</button>'
+      +   '</div></div></div>';
+  }
+  function addExtraRow(card){
+    const box = card && card.querySelector('.s-extra-more'); if(!box) return null;
+    box.insertAdjacentHTML('beforeend', sExtraRowHtml());
+    const row = box.lastElementChild;
+    const sel = row.querySelector('.s-extra');
+    // El select nace vacio, y paintExtraOptions guarda como "las originales" lo
+    // que encuentra la primera vez: de un select vacio guardaria vacio y la
+    // fila se quedaria sin opciones. Se le copian las del primer extra.
+    const first = card.querySelector('.s-extra-first .s-extra');
+    if(first){
+      sel.dataset.restOptions = first.dataset.restOptions || first.innerHTML;
+      sel.innerHTML = sel.dataset.restOptions;
+    }
+    paintExtraOptions(sel, formKind() === 'mudanza');
+    return row;
+  }
+  shiftsContainer.addEventListener('click', (e) => {
+    const add = e.target.closest('.s-extra-add');
+    if(add){ const c = add.closest('.shift-card'); if(c){ const r = addExtraRow(c); if(r) r.querySelector('.s-extra').focus(); saveDraft(); } return; }
+    const del = e.target.closest('.s-extra-del');
+    if(del){ const row = del.closest('.s-extra-row'), c = del.closest('.shift-card');
+      if(row){ row.remove(); recalcGrandTotal(); saveDraft(); } }
+  });
   shiftsContainer.addEventListener('change', (e) => {
     if(!e.target.classList.contains('s-extra')) return;
-    const amt = $('.s-extra-amt', e.target.closest('.shift-card'));
+    // A SU propia fila: antes, escoger el tipo en el Extra 2 le escribia el
+    // precio en la casilla del Extra 1.
+    const box = e.target.closest('.s-extra-row') || e.target.closest('.s-extra-first') || e.target.closest('.shift-card');
+    const amt = box.querySelector('.s-extra-amt');
     const price = EXTRA_PRICES[e.target.value];
     // Los $150/$200 son precios de restauracion: en una mudanza el monto del
     // extra lo escribe el manager, nunca lo pone la app.
@@ -3920,12 +3985,11 @@
     const flat = cfg.flat || formKind() === 'mudanza';
     const split  = flat ? flatSplit($('.s-from', card).value, $('.s-to', card).value)
                         : splitMinutes($('.s-from', card).value, $('.s-to', card).value, cfg.cutoff, cfg.cutoffEnd);
-    const extraType = $('.s-extra', card).value;
+    // Todos los extras del turno, no solo el primero.
     // `|| fallback` treated a typed 0 as "nothing entered" and billed the
     // client the $150 default for an extra he had explicitly zeroed.
-    const typedExtra = parseFloat($('.s-extra-amt', card).value);
     // En AMG un extra sin monto escrito vale 0: el $150 es un precio de restauracion.
-    const extra  = Number.isFinite(typedExtra) ? typedExtra : ((extraType && formKind() !== 'mudanza') ? EXTRA_FALLBACK : 0);
+    const extra = extrasTotal(extraItemsOf(card), formKind() === 'mudanza');
     if(!split) return { people, ok:false, regH:0, otH:0, extra, amount:extra };
     const regH = split.reg/60, otH = split.ot/60;
     // Precio fijo por mudanza: las horas no cobran (el monto fijo lo suma el total del reporte una sola vez).
@@ -4049,9 +4113,14 @@
     const p = {
       d:$('#l-date').value, t:$('#l-team').value, l:$('#l-leader').value,
       s:$$('.shift-card', shiftsContainer).map(c=>{
+        const xs = extraItemsOf(c);
         const sh = { f:$('.s-from',c).value, o:$('.s-to',c).value, n:$('.s-names',c).value,
                      k:$('.s-task',c).value, a:$('.s-address',c).value,
-                     e:$('.s-extra',c).value, x:$('.s-extra-amt',c).value };
+                     // El primero se queda en e/x (lo que entiende cualquier version);
+                     // xs solo viaja cuando de verdad hay mas de uno.
+                     e: xs.length ? (xs[0].e || '') : '',
+                     x: xs.length ? String(xs[0].x == null ? '' : xs[0].x) : '' };
+        if(xs.length > 1) sh.xs = xs.map(it => ({ e: it.e || '', x: String(it.x == null ? '' : it.x) }));
         // Gasolina del turno: solo viaja cuando hay monto (sin gasolina el payload es identico al de siempre).
         const ga = parseFloat(($('.s-gas-amt',c)||{}).value);
         if(ga > 0){ const gsel = $('.s-gas-who',c); const gk = (gsel && gsel.value) || 'x';
@@ -4071,7 +4140,10 @@
       // con la version vieja (que si parte la noche) sume exactamente lo mismo,
       // y un extra sin monto queda en 0 explicito (nunca el $150 de restauracion).
       if(p.r){ p.r.n = p.r.d; p.r.c = '00:00'; p.r.e = '00:00'; }
-      p.s.forEach(sh => { if(sh.e && (sh.x === '' || sh.x == null)) sh.x = '0'; });
+      p.s.forEach(sh => {
+        if(sh.e && (sh.x === '' || sh.x == null)) sh.x = '0';
+        if(Array.isArray(sh.xs)) sh.xs.forEach(it => { if(it.e && (it.x === '' || it.x == null)) it.x = '0'; });
+      });
     }
     return p;
   }
@@ -4100,7 +4172,12 @@
       const c = shiftsContainer.lastElementChild;
       $('.s-from',c).value=sh.f||''; $('.s-to',c).value=sh.o||''; setNames(c, sh.n||'');
       $('.s-task',c).value=sh.k||'';  $('.s-address',c).value=sh.a||'';
-      $('.s-extra',c).value=sh.e||''; $('.s-extra-amt',c).value=sh.x||'';
+      const xs = extraItemsOfShift(sh);
+      $('.s-extra',c).value = (xs[0] && xs[0].e) || '';
+      $('.s-extra-amt',c).value = (xs[0] && xs[0].x != null) ? String(xs[0].x) : '';
+      xs.slice(1).forEach(it => { const row = addExtraRow(c);
+        if(row){ row.querySelector('.s-extra').value = it.e || '';
+                 row.querySelector('.s-extra-amt').value = (it.x != null) ? String(it.x) : ''; } });
       const ga = $('.s-gas-amt',c), gw = $('.s-gas-who',c), go = $('.s-gas-other',c);
       if(ga) ga.value = sh.g || '';
       if(gw){ if(typeof paintWhoSelect === 'function') paintWhoSelect(gw, sh.gk || ''); else gw.value = sh.gk || ''; }
@@ -4138,7 +4215,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-BT';
+  const APP_BUILD = '2026-09-07-BU';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4835,7 +4912,10 @@
         out.push({ d:'Labor service\n' + people + ' worker' + (people===1?'':'s') + '\n' + invQty(hours) + ' hours total\n(Time worked by the team) ' + date, q:hours, u:unit, a:Math.round(hours * unit * 100)/100, src:String(log.id) });
       });
     }
-    (p.s || []).forEach(sh => { const x = parseFloat(sh.x); if(Number.isFinite(x) && x !== 0) out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + (sh.e || 'extra') + ' ' + date, q:1, u:x, a:x, src:String(log.id) }); });
+    (p.s || []).forEach(sh => extraItemsOfShift(sh).forEach(it => {
+      const x = parseFloat(it.x);
+      if(Number.isFinite(x) && x !== 0) out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + (it.e || 'extra') + ' ' + date, q:1, u:x, a:x, src:String(log.id) });
+    }));
     // Materiales que el lider anoto en el reporte, al precio por unidad del manager (Precio AMG -> Materiales).
     (p.mat || []).forEach(m => {
       const q = +m.q; if(!(q > 0) || !m.n) return;
@@ -7235,7 +7315,9 @@
         <tr><td><b>${mg ? 'Movers' : 'Names'}</b></td><td>${esc($('.s-names', card).value)}</td></tr>
         <tr><td><b>${mg ? 'Work' : 'Task'}</b></td><td>${esc($('.s-task', card).value)}</td></tr>
         <tr><td><b>${mg ? 'From → To' : 'Address'}</b></td><td>${esc($('.s-address', card).value)}</td></tr>
-        ${$('.s-extra', card).value ? `<tr><td><b>Extra</b></td><td>${esc($('.s-extra', card).value)} ($${m.extra.toFixed(2)})</td></tr>` : ''}
+        ${extraItemsOf(card).map((it, i, arr) => `<tr><td><b>Extra${arr.length > 1 ? ' ' + (i+1) : ''}</b></td><td>${
+            esc(it.e || 'Extra')} ($${(Number.isFinite(parseFloat(it.x)) ? parseFloat(it.x)
+              : ((it.e && formKind() !== 'mudanza') ? EXTRA_FALLBACK : 0)).toFixed(2)})</td></tr>`).join('')}
         ${mgrView ? `<tr><td><b>Shift Total</b></td><td>${m.noPrice ? 'NO PRICE' : '$' + esc($('.s-total', card).value || '0.00')}</td></tr>` : ''}
         ${(mgrView && parseFloat(($('.s-gas-amt', card)||{}).value) > 0) ? `<tr><td><b>Crew expense</b></td><td>Gas $${esc((+$('.s-gas-amt', card).value).toFixed(2))} — paid by ${esc((function(){ const gs = $('.s-gas-who', card); return gs ? (gs.value === 'x' ? (($('.s-gas-other', card)||{}).value || '') : ((gs.options[gs.selectedIndex]||{}).textContent || '')) : ''; })())} (not billed, reimbursable)</td></tr>` : ''}
       `;
@@ -17137,8 +17219,7 @@
       rd = +cfg.rateDay || 0; rn = +cfg.rateNight || 0; cut = cfg.cutoff; end = '00:00';
     }
     const split  = flat ? flatSplit(sh.f, sh.o) : splitMinutes(sh.f, sh.o, cut, end);
-    const typed  = parseFloat(sh.x);
-    const extra  = Number.isFinite(typed) ? typed : ((sh.e && !flat) ? EXTRA_FALLBACK : 0);   // el $150 es de restauracion
+    const extra  = extrasTotal(extraItemsOfShift(sh), flat);   // el $150 es de restauracion
     if(!split) return { people, ok:false, regH:0, otH:0, extra, amount:extra };
     const regH = split.reg/60, otH = split.ot/60;
     const amount = people*(regH*rd + otH*rn) + extra;
@@ -17222,7 +17303,8 @@
           <tr><td><b>${kind === 'mudanza' ? 'Movers' : 'Names'}</b></td><td>${esc(sh.n||'')}</td></tr>
           <tr><td><b>${kind === 'mudanza' ? 'Work' : 'Task'}</b></td><td>${esc(sh.k||'')}</td></tr>
           <tr><td><b>${kind === 'mudanza' ? 'From → To' : 'Address'}</b></td><td>${esc(sh.a||'')}</td></tr>
-          ${sh.e ? `<tr><td><b>Extra</b></td><td>${esc(sh.e)}</td></tr>` : ''}
+          ${extraItemsOfShift(sh).map((it, i, arr) => `<tr><td><b>Extra${arr.length > 1 ? ' ' + (i+1) : ''}</b></td><td>${
+              esc(it.e || 'Extra')}${(it.x != null && String(it.x).trim() !== '') ? ' ($' + (parseFloat(it.x)||0).toFixed(2) + ')' : ''}</td></tr>`).join('')}
         `;
       });
       const reportTotal = m.shifts.reduce((s,sh)=>
@@ -19271,6 +19353,8 @@
   const cutCounts = (container) => container ? $$('.measure-card', container).map(c => $$('.meas-cut', c).length) : [];
   const rowCounts = () => ({
     shifts:   shiftsContainer ? shiftsContainer.children.length : 0,
+    // Cuantos extras EXTRA trae cada turno (el primero siempre esta).
+    xs: shiftsContainer ? $$('.shift-card', shiftsContainer).map(c => $$('.s-extra-row', c).length) : [],
     ex: $('#lExList') ? $('#lExList').children.length : 0,
     equipment: equipmentBody ? equipmentBody.children.length : 0,
     materials: materialsBody ? materialsBody.children.length : 0,
@@ -19301,7 +19385,7 @@
     // con una llave que nadie vuelve a leer.
     const home  = el.closest('[data-drafttab]');
     const tab   = home ? home.dataset.drafttab : (panel ? panel.dataset.tab : '?');
-    const row   = el.closest('tr, .shift-card, .reading-card, .measure-card, .meas-cut');
+    const row   = el.closest('tr, .shift-card, .reading-card, .measure-card, .meas-cut, .s-extra-row');
     let where = '';
     if(row && row.parentElement){
       where = '#' + Array.prototype.indexOf.call(row.parentElement.children, row);
@@ -19309,14 +19393,19 @@
       // several cards in its section - fold the card's own position in
       // too, or card 2's first cut would collide with card 1's first cut
       // (both would otherwise just be "cut index 0").
-      const card = row.classList.contains('meas-cut') ? row.closest('.measure-card') : null;
+      const card = row.classList.contains('meas-cut') ? row.closest('.measure-card')
+                 : row.classList.contains('s-extra-row') ? row.closest('.shift-card') : null;
       if(card && card.parentElement){
         where = '#' + Array.prototype.indexOf.call(card.parentElement.children, card) + '.' + where;
       }
     }
     const what = el.id || (el.className || '').split(/\s+/).filter(Boolean).join('.') || el.tagName;
     // several boxes in one row can share a class, so add its position in the row
-    const peers = row ? $$('input,select,textarea', row) : [];
+    // Los extras agregados NO cuentan para la posicion de los demas campos del
+    // turno: si contaran, agregar un extra le cambiaria la llave a la gasolina
+    // y lo escrito volveria a la casilla equivocada.
+    const peers = row ? $$('input,select,textarea', row)
+      .filter(x => (x.closest('.s-extra-row') || null) === (el.closest('.s-extra-row') || null)) : [];
     const nth   = peers.length ? peers.indexOf(el) : 0;
     return tab + '|' + where + '|' + what + '|' + nth;
   }
@@ -19375,6 +19464,14 @@
     if(d.openLogId) openLogId = d.openLogId;
     const r = d.rows || {};
     while(shiftsContainer && shiftsContainer.children.length < (r.shifts||0)) addShift();
+    // Las filas de extra se vuelven a crear ANTES de poner los valores, o lo que
+    // el lider escribio en el Extra 2 se queda sin casilla donde caer.
+    if(shiftsContainer && Array.isArray(r.xs)){
+      $$('.shift-card', shiftsContainer).forEach((c, i) => {
+        const want = +r.xs[i] || 0;
+        while($$('.s-extra-row', c).length < want) addExtraRow(c);
+      });
+    }
     // La version anterior tenia 3 filas fijas y no guardaba cuantas eran: se cuentan por las llaves
     // del propio borrador, para no dejar en el olvido los Gastos 2 y 3 que el lider ya habia escrito.
     let exWant = r.ex || 0;
