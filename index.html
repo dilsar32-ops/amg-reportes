@@ -1932,14 +1932,26 @@
 
       <div id="partialPayBox" style="margin-top:16px; padding-top:14px; border-top:1px solid var(--line);">
         <div id="ppForm">
-          <h3 style="margin:0 0 8px;">Pago parcial</h3>
-          <p class="clockhint" style="margin-top:0;">Pague menos de lo que se le debe hoy. Se descuenta del balance, queda en su historial, y esa persona lo ve en su teléfono.</p>
+          <h3 style="margin:0 0 8px;">Dinero</h3>
+          <div class="field"><label>¿Qué fue?</label>
+            <select id="ppKind">
+              <option value="pago">Pago &mdash; le pagamos parte de lo que le debemos</option>
+              <option value="adelanto">Adelanto &mdash; le dimos dinero antes del trabajo</option>
+              <option value="descuento">Descuento &mdash; algo que él nos debe (daño, multa)</option>
+              <option value="extra">Extra / bono &mdash; le debemos más</option>
+              <option value="devolucion">Devolución &mdash; él nos regresó dinero</option>
+            </select></div>
           <div class="row2">
-            <div class="field"><label>Horas</label><input type="number" id="ppHours" step="0.01" inputmode="decimal" placeholder="0"></div>
             <div class="field"><label>Monto $</label><input type="number" id="ppAmount" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+            <div class="field"><label>¿Qué día se le paga?</label><input type="date" id="ppDate"></div>
           </div>
-          <div class="field"><label>Nota (opcional)</label><input type="text" id="ppNote" placeholder="Ej. adelanto del viernes"></div>
-          <button class="btn btn-ink" type="button" id="ppSave" style="width:100%;">Registrar pago</button>
+          <div class="field"><label>¿Por qué? <span class="hint">Sale en el PDF</span></label>
+            <input type="text" id="ppNote" placeholder="Ej. gasolina del viernes"></div>
+          <div class="field"><label>Horas <span class="hint">Opcional</span></label><input type="number" id="ppHours" step="0.01" inputmode="decimal" placeholder="0"></div>
+          <p class="clockhint" id="ppSignHint" style="margin:0 0 8px;"></p>
+          <button class="btn btn-ink" type="button" id="ppSave" style="width:100%;">Guardar y mandar el pago</button>
+          <p class="clockhint">Le llega al teléfono de esa persona y tiene que aceptarlo o decir que no.
+            Cada renglón sale en el PDF con su fecha y su razón, y todos se suman.</p>
         </div>
         <div id="ppHistory" style="margin-top:10px;"></div>
       </div>
@@ -2049,9 +2061,11 @@
             <option value="extra">Extra / bono &mdash; le debemos más</option>
             <option value="devolucion">Devolución &mdash; él nos regresó dinero</option>
           </select></div>
-        <div class="field"><label>Nota <span class="hint">Opcional</span></label>
-          <input type="text" id="casualPayNote" placeholder="Ej. efectivo, Zelle"></div>
-        <button type="button" class="btn btn-outline btn-block" id="casualPayAdd">Guardar</button>
+        <div class="field"><label>¿Por qué? <span class="hint">Sale en el PDF</span></label>
+          <input type="text" id="casualPayNote" placeholder="Ej. gasolina, efectivo, Zelle"></div>
+        <button type="button" class="btn btn-outline btn-block" id="casualPayAdd">Guardar y mandar el pago</button>
+        <p class="clockhint">Le llega a su teléfono y tiene que aceptarlo o decir que no.
+          Cada renglón sale en el PDF con su fecha y su razón, y todos se suman.</p>
         <div id="casualMoneyList" style="margin-top:10px;"></div>
       </div>
       <button class="btn btn-ink" type="button" id="casualPayPdf" style="width:100%; margin-top:10px;">Descargar PDF</button>
@@ -4302,7 +4316,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-BZ';
+  const APP_BUILD = '2026-09-07-CA';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -6123,6 +6137,7 @@
     if($('#casualPayKind'))   $('#casualPayKind').value = 'pago';
     if($('#casualPayDate'))   $('#casualPayDate').value = todayStr();
     casualOpenPayGroups.clear();
+    casualFixingId = null;
     if($('#casualSettleBox')) $('#casualSettleBox').hidden = true;
     casualPersonKey = id;
     casualPaidView = false;
@@ -6447,14 +6462,133 @@
     const reviewable = status.cls === 'mismatch' || status.cls === 'partial';
     const times = (r.clock_in && r.clock_out) ? ' &middot; ' + esc(fmtTime12(r.clock_in)) + ' - ' + esc(fmtTime12(r.clock_out)) : '';
     const src = mg ? 'mudanza' : 'líder';
+    // Solo se corrige lo que todavia no se ha pagado.
+    const fixable = !r.paid_at;
+    const editing = fixable && String(casualFixingId) === String(r.id);
     return `<div class="entryrow${reviewable ? ' reviewable' : ''}"${reviewable ? ' data-review-date="'+esc(r.work_date)+'" data-review-kind="' + (mg ? 'mudanza' : 'restauracion') + '"' : ''}>
       <span><span class="who">${esc(r.work_date)}</span>${mg ? '<span class="kindtag">AMG</span>' : ''}${times ? '<span class="when">' + times + '</span>' : ''}
         ${status.text ? '<br><span class="matchstatus '+status.cls+'">'+status.text+'</span>' : ''}
         ${r.labor_load_hours != null
           ? '<br><span class="when">' + src + ': ' + esc(String(r.labor_load_hours)) + ' hrs</span>'
           : '<br><span class="when">' + src + ': no hay dato</span>'}</span>
-      <span class="hrs">${r.reported_hours != null ? r.reported_hours + ' hrs' : '—'}</span>
+      <span style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+        <span class="hrs">${r.reported_hours != null ? r.reported_hours + ' hrs' : '—'}</span>
+        ${fixable ? '<button type="button" class="teedit" data-cffix="' + esc(r.id) + '">' + (editing ? 'Cerrar' : 'Corregir') + '</button>' : ''}
+      </span>
+    </div>${editing ? casualFixPanel(r) : ''}`;
+  }
+
+  // Corregir un turno de un trabajador. Solo los que NO estan pagados: la base
+  // rechaza cambiarle las horas a un dia ya cerrado (guard_casual_paid_hours),
+  // y ese dia ya es el comprobante de lo que se le pago.
+  let casualFixingId = null, casualFixKind = 'restauracion';
+
+  function casualFixPanel(r){
+    const mgNow  = casualFixKind === 'mudanza';
+    const others = casualRowsFor(casualPersonKey)
+      .filter(x => x.work_date === r.work_date && String(x.id) !== String(r.id));
+    const t = v => String(v || '').slice(0,5);
+    const otherTxt = others.map(o => esc(
+        (o.clock_in && o.clock_out) ? fmtTime12(o.clock_in) + ' - ' + fmtTime12(o.clock_out)
+                                    : (o.reported_hours != null ? o.reported_hours + ' hrs' : '—'))
+      + (o.paid_at ? ' (ya pagado)' : '')).join(' &middot; ');
+    return `<div class="tefixbox" style="display:block; width:100%; padding:12px; border:1px solid var(--line); border-radius:10px; margin:6px 0 10px;">
+      <h3 style="margin:0 0 8px; font-size:14px;">Corregir el ${esc(r.work_date)}</h3>
+      ${others.length ? '<p class="clockhint" style="margin-top:0;">Ese d&iacute;a tiene ' + (others.length+1)
+          + ' turnos: ' + otherTxt + '. Si es el mismo turno repetido, borre el que sobra.</p>' : ''}
+      <div class="mgrtools" style="margin-bottom:8px;">
+        <button type="button" class="minibtn${mgNow ? '' : ' on'}" data-cfkind="restauracion">Restauraci&oacute;n</button>
+        <button type="button" class="minibtn${mgNow ? ' on' : ''}" data-cfkind="mudanza">Horas AMG</button>
+      </div>
+      <div class="field"><label>D&iacute;a</label><input type="date" id="cfDate" value="${esc(r.work_date||'')}"></div>
+      <div class="row2">
+        <div class="field"><label>Hora desde</label><input type="time" id="cfFrom" value="${esc(t(r.clock_in))}"></div>
+        <div class="field"><label>Hora hasta</label><input type="time" id="cfTo" value="${esc(t(r.clock_out))}"></div>
+      </div>
+      <div class="field"><label>${mgNow ? 'Horas en el reporte de mudanza' : 'Horas del l&iacute;der'} <span class="hint">Opcional</span></label>
+        <input type="number" step="0.25" min="0" inputmode="decimal" id="cfLoad" value="${r.labor_load_hours != null ? esc(String(r.labor_load_hours)) : ''}" placeholder="0"></div>
+      <div class="row2" style="margin-top:8px;">
+        <button class="btn btn-ink" type="button" data-cfsave="${esc(r.id)}" style="width:100%; margin:0;">Guardar</button>
+        <button class="btn btn-outline" type="button" data-cfcancel="1" style="width:100%; margin:0;">Cancelar</button>
+      </div>
+      <button class="btn btn-outline" type="button" data-cfdel="${esc(r.id)}" style="width:100%; margin-top:8px; color:var(--danger); border-color:var(--danger);">Borrar este turno</button>
+      <p class="clockhint">El pago se calcula con las horas del trabajador. Un d&iacute;a ya pagado no se puede corregir aqu&iacute;.</p>
     </div>`;
+  }
+
+  async function casualFixSave(id){
+    const r = casualHoursAll.find(x => String(x.id) === String(id));
+    if(!r) return;
+    const date = $('#cfDate').value, from = $('#cfFrom').value, to = $('#cfTo').value;
+    if(!date) return alert('Escriba la fecha.');
+    const mins = hoursBetween(from, to);
+    if(mins == null) return alert('Escriba la hora de entrada y la de salida.');
+    if(mins === 0)   return alert('La hora de entrada y la de salida son iguales.');
+    const loadVal = $('#cfLoad').value;
+    const laborLoad = loadVal === '' ? null : parseFloat(loadVal);
+    // Misma regla que al agregar: varios turnos al dia si, dos a la misma hora no.
+    const span = shiftSpan(from, to);
+    const clash = span ? casualRowsFor(casualPersonKey)
+      .filter(x => String(x.id) !== String(id) && x.work_date === date && x.clock_in && x.clock_out)
+      .find(o => { const s2 = shiftSpan(o.clock_in, o.clock_out); return s2 && s2.start < span.end - 1 && span.start < s2.end - 1; }) : null;
+    if(clash) return alert('Ese día ya tiene un turno a esa misma hora:\n\n'
+      + fmtTime12(clash.clock_in) + ' - ' + fmtTime12(clash.clock_out)
+      + (clash.work_kind === 'mudanza' ? ' (AMG)' : '') + '\n\nNadie trabaja dos turnos a la vez.');
+
+    const btn = document.querySelector('[data-cfsave="' + id + '"]');
+    if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
+    try{
+      const body = { work_date: date, clock_in: from, clock_out: to,
+                     reported_hours: mins/60, labor_load_hours: laborLoad,
+                     work_kind: casualFixKind };
+      const patch = b => authFetch('/rest/v1/casual_hours?id=eq.' + encodeURIComponent(id)
+          + '&paid_at=is.null',
+        { method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
+          body: JSON.stringify(b) });
+      let res = await patch(body);
+      // El CHECK viejo (fila de mudanza con horas del lider) sigue vivo en
+      // bases donde no se corrio supabase-amg-labor-logs.sql.
+      let dropped = false;
+      if(!res.ok && res.status === 400 && casualFixKind === 'mudanza' && laborLoad != null){
+        res = await patch(Object.assign({}, body, { labor_load_hours: null }));
+        dropped = res.ok;
+      }
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const saved = await res.json();
+      if(!Array.isArray(saved) || !saved.length){
+        alert('No se cambió nada. Puede que ese turno ya se haya pagado o que alguien lo haya borrado.');
+      } else if(dropped){
+        alert('Se guardó el turno de AMG, pero SIN las horas del reporte de mudanza: falta correr supabase-amg-labor-logs.sql.');
+      }
+      casualFixingId = null;
+      await loadCasualHoursAll();
+      renderCasualPerson();
+      loadCasualTeam();
+    }catch(e){
+      alert('No se pudo guardar el cambio.\n\nDetalle: ' + ((e && e.message) || 'sin detalle') + '\nVersión: ' + APP_BUILD);
+      if(btn){ btn.disabled = false; btn.textContent = 'Guardar'; }
+    }
+  }
+
+  async function casualFixDelete(id){
+    const r = casualHoursAll.find(x => String(x.id) === String(id));
+    if(!r) return;
+    if(!confirm('¿Borrar el turno del ' + r.work_date + '?\n\nEsto no se puede deshacer.')) return;
+    try{
+      const res = await authFetch('/rest/v1/casual_hours?id=eq.' + encodeURIComponent(id)
+          + '&paid_at=is.null',
+        { method:'DELETE', headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}) });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const gone = await res.json();
+      if(!Array.isArray(gone) || !gone.length)
+        return alert('No se borró. Puede que ese turno ya se haya pagado.');
+      casualFixingId = null;
+      await loadCasualHoursAll();
+      renderCasualPerson();
+      loadCasualTeam();
+    }catch(e){
+      alert('No se pudo borrar.\n\nDetalle: ' + ((e && e.message) || 'sin detalle'));
+    }
   }
 
   // The paid history as PAYMENTS, not as a wall of days. Days settled in the
@@ -6734,6 +6868,27 @@
   // was first typed - so the manager can see who the leader said worked
   // that day (and when) without having to dig through Labor herself.
   $('#casualPersonEntries').addEventListener('click', (e)=>{
+    // Los botones de corregir van PRIMERO: viven dentro de la misma fila que
+    // abre el labor log, y si no, el toque se lo llevaria esa revision.
+    const fix = e.target.closest('[data-cffix]');
+    if(fix){
+      const id = fix.dataset.cffix;
+      if(String(casualFixingId) === String(id)){ casualFixingId = null; }
+      else {
+        const r = casualHoursAll.find(x => String(x.id) === String(id));
+        casualFixingId = id;
+        casualFixKind = (r && r.work_kind === 'mudanza') ? 'mudanza' : 'restauracion';
+      }
+      renderCasualPerson();
+      return;
+    }
+    const kindBtn = e.target.closest('[data-cfkind]');
+    if(kindBtn){ casualFixKind = kindBtn.dataset.cfkind; renderCasualPerson(); return; }
+    if(e.target.closest('[data-cfcancel]')){ casualFixingId = null; renderCasualPerson(); return; }
+    const sv = e.target.closest('[data-cfsave]');
+    if(sv){ casualFixSave(sv.dataset.cfsave); return; }
+    const dl = e.target.closest('[data-cfdel]');
+    if(dl){ casualFixDelete(dl.dataset.cfdel); return; }
     // A payment header opens or closes its own days. Checked BEFORE the
     // review handler, since an expanded day row lives inside the group.
     const head = e.target.closest('[data-paygroup]');
@@ -15914,7 +16069,7 @@
     if(!cloudOn() || !signedIn()) return;
     try{
       const res = await authFetch(
-        '/rest/v1/crew_payments?select=id,hours,amount,note,balance_after,accepted,settlement,credit_consumed,resolved_at,resolved_accepted,resolved_responded_at,created_at'
+        '/rest/v1/crew_payments?select=id,hours,amount,kind,note,balance_after,accepted,settlement,credit_consumed,resolved_at,resolved_accepted,resolved_responded_at,created_at'
         + (AUTO_OK_READY ? ',auto_ok_at' : '')
         + '&user_id=eq.' + SES.user_id + '&order=created_at.desc&limit=500',
         { headers: cloudHeaders() });
@@ -16436,6 +16591,8 @@
     $('#mergeBox').hidden = true;
     $('#personSettings').hidden = true;
     personPayments = [];
+    if($('#ppDate')) $('#ppDate').value = todayStr();
+    renderPpHint();
     renderPerson();
     loadPersonPayments(key);
     loadPersonCode(key);
@@ -16486,7 +16643,7 @@
     if(!cloudOn() || !isManager()) return;
     try{
       const res = await authFetch(
-        '/rest/v1/crew_payments?select=id,hours,amount,note,balance_after,accepted,settlement,credit_consumed,resolved_at,resolved_accepted,resolved_responded_at,created_at'
+        '/rest/v1/crew_payments?select=id,hours,amount,kind,note,balance_after,accepted,settlement,credit_consumed,resolved_at,resolved_accepted,resolved_responded_at,created_at'
         + (AUTO_OK_READY ? ',auto_ok_at' : '')
         + '&user_id=eq.' + encodeURIComponent(key) + '&order=created_at.desc&limit=500',
         { headers: cloudHeaders() });
@@ -16691,7 +16848,7 @@
            : `<div class="line"><span>Horas &nbsp;<b>${pay.hours.toFixed(2)}</b> &times; ${money(pay.minsMg > 0 ? mgRateCrew(personKey) : rate)} por hora</span>
            <span>${money(pay.amount)}</span></div>`}
          <div class="line"><span>Total de horas</span><span>${hhmm(pay.minutes)}</span></div>
-         ${Math.abs(partialPaid) > 0.005 ? `<div class="line"><span>${partialPaid > 0 ? 'Pagos parciales ya dados' : 'Saldo que viene de antes'}</span><span>${partialPaid > 0 ? '&minus;' : '+'}${money(Math.abs(partialPaid))}</span></div>
+         ${Math.abs(partialPaid) > 0.005 ? `<div class="line"><span>${partialPaid > 0 ? 'Dinero y descuentos ya anotados' : 'Saldo que viene de antes'}</span><span>${partialPaid > 0 ? '&minus;' : '+'}${money(Math.abs(partialPaid))}</span></div>
          ${balance > 0.005
              ? `<div class="grand"><span>LE FALTA</span><span>${money(balance)}</span></div>`
              : balance < -0.005
@@ -16747,7 +16904,8 @@
             const canPropose = disputed && (!p.resolved_at || p.resolved_accepted === false);
             return `
           <div class="entryrow" data-pid="${esc(p.id)}">
-            <span><span class="when">${esc(dayOf(p.created_at))}</span>${p.note ? '<br><span class="clockhint" style="margin:2px 0 0;">' + esc(p.note) + '</span>' : ''}<br>${status}</span>
+            <span><span class="who">${esc(PP_KINDS[p.kind] || 'Pago')}</span><br>
+              <span class="when">${esc(dayOf(p.created_at))}</span>${p.note ? '<br><span class="clockhint" style="margin:2px 0 0;">' + esc(p.note) + '</span>' : ''}<br>${status}</span>
             <span style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
               <span class="hrs"${(+p.amount || 0) < 0 ? ' style="color:#3ddc84;"' : ''}>${
                 (+p.amount || 0) < 0 ? '+' + money(-(+p.amount)) : money(p.amount)
@@ -16763,12 +16921,36 @@
       : '';
   }
 
+  // Que significa cada tipo, y para donde va el signo. Igual que en temporales:
+  // positivo BAJA lo que le debemos, negativo lo SUBE.
+  const PP_KINDS = { pago:'Pago', adelanto:'Adelanto', descuento:'Descuento',
+                     extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste' };
+  const ppNegative = k => (k === 'extra' || k === 'devolucion');
+  function renderPpHint(){
+    const h = $('#ppSignHint'), k = ($('#ppKind') || {}).value || 'pago';
+    if(!h) return;
+    h.textContent = ppNegative(k)
+      ? 'Esto SUBE lo que se le debe.'
+      : (k === 'descuento' ? 'Esto BAJA lo que se le debe, sin que usted le entregue dinero.'
+                           : 'Esto BAJA lo que se le debe.');
+  }
+  if($('#ppKind')) $('#ppKind').addEventListener('change', renderPpHint);
+
   async function savePartialPay(){
     if(!personKey) return;
     const hoursVal = parseFloat($('#ppHours').value);
-    const amount   = Math.round((parseFloat($('#ppAmount').value) || 0) * 100) / 100;
+    const kind     = ($('#ppKind') && $('#ppKind').value) || 'pago';
+    const raw      = parseFloat($('#ppAmount').value);
     const note     = ($('#ppNote').value || '').trim();
-    if(!(amount > 0)) return alert('Escriba las horas o el monto que va a pagar.');
+    // El dia del pago lo escoge el manager: a veces se anota despues, y a
+    // veces se deja listo para el viernes. Se guarda a MEDIODIA de ese dia
+    // para que ningun huso horario lo corra un dia atras.
+    const payDay   = ($('#ppDate') && $('#ppDate').value) || todayStr();
+    const createdAt = new Date(payDay + 'T12:00:00');
+    if(!Number.isFinite(raw) || Math.abs(raw) < 0.005) return alert('Escriba cuánto.');
+    // El signo NUNCA lo escribe el: lo decide el tipo, y la base lo revisa otra vez.
+    const mag = Math.round(Math.abs(raw)*100)/100;
+    const amount = ppNegative(kind) ? -mag : mag;
 
     const rate = rateOf(personKey);
     // Always the CURRENT unpaid hours, regardless of which tab (Sin pagar /
@@ -16791,7 +16973,8 @@
         body: JSON.stringify({
           user_id: personKey, company_id: SES.company_id,
           hours: hoursVal >= 0 ? hoursVal : null,
-          amount, note: note || null,
+          amount, kind, note: note || null,
+          created_at: isNaN(createdAt) ? undefined : createdAt.toISOString(),
           balance_after: balanceAfter, created_by: SES.user_id
         })
       });
@@ -16800,6 +16983,8 @@
       if(!Array.isArray(saved) || !saved.length) throw new Error('no se guardo');
       personPayments.unshift(saved[0]);
       $('#ppHours').value = ''; $('#ppAmount').value = ''; $('#ppNote').value = '';
+      if($('#ppDate')) $('#ppDate').value = todayStr();
+      if($('#ppKind')) { $('#ppKind').value = 'pago'; renderPpHint(); }
       renderPerson();
     }catch(e){
       alert('No se pudo registrar el pago. Esta parte todavía no está instalada en el servidor: falta correr supabase-crew-payments.sql. Mándele este mensaje a quien le ayuda con la app.');
@@ -17066,16 +17251,64 @@
       }
     }
     pdf.text('Total hours  ' + hhmm(pay.minutes), L, y); y += 24;
+
+    // ---- El dinero, renglon por renglon. El trabajador tiene que poder ver
+    // QUE se le esta pagando y POR QUE, no solo un total. Mismo formato que
+    // el PDF de los temporales, que ya funcionaba asi.
     const partialPaid = (!pay.wasPaid && rate !== null) ? personPaymentsSum() : 0;
-    if(partialPaid > 0){
-      pdf.text('Partial payments already given', L, y); pdf.text('-' + money(partialPaid), 470, y); y += 20;
+    const ledger = personPayments.filter(p => !p.settlement);
+    const consumed = personPayments.filter(p => p.settlement)
+                       .reduce((t,p)=> t + (+p.credit_consumed||0), 0);
+    if(!pay.wasPaid && ledger.length){
+      const KIND = { pago:'Pago / payment', adelanto:'Adelanto / advance',
+                     descuento:'Descuento / deduction', extra:'Extra / bonus',
+                     devolucion:'Devolucion / returned', ajuste:'Ajuste / adjustment' };
+      y += 6;
+      if(y > 690){ pdf.addPage(); y = 60; }
+      pdf.setFont('helvetica','bold'); pdf.setFontSize(12);
+      pdf.text('DINERO / MONEY', L, y); y += 16;
+      pdf.setFont('helvetica','bold'); pdf.setFontSize(10);
+      pdf.text('DATE', L, y); pdf.text('WHAT / QUE', L+90, y);
+      pdf.text('NOTE / NOTA', L+250, y); pdf.text('AMOUNT', 460, y); y += 6;
+      pdf.setLineWidth(0.7); pdf.line(L, y, 548, y); y += 14;
+      pdf.setFont('helvetica','normal');
+      let given = 0, favor = 0;
+      ledger.forEach(p => {
+        if(y > 760){ pdf.addPage(); y = 60; }
+        const a = +p.amount || 0;
+        // Un renglon rechazado NO se suma - se imprime para que se vea que
+        // existe y que esta en discusion, no para cuadrar con el.
+        const dead = p.accepted === false;
+        if(!dead){ if(a > 0) given += a; else favor += -a; }
+        pdf.text(dayOf(p.created_at), L, y);
+        pdf.text(String(KIND[p.kind] || p.kind || 'Pago') + (dead ? ' (rejected)' : ''), L+90, y);
+        pdf.text(String(p.note || '').slice(0, 26), L+250, y);
+        pdf.text((a < 0 ? '+' : '-') + money(Math.abs(a)).replace('$',''), 460, y);
+        y += 15;
+      });
+      y += 6; pdf.line(L, y, 548, y); y += 18;
+      given = Math.round(given*100)/100; favor = Math.round(favor*100)/100;
+      if(given) { pdf.text('Total given / total entregado', L, y); pdf.text('-' + money(given).replace('$',''), 460, y); y += 15; }
+      if(favor) { pdf.text('In his favour / a su favor', L, y);    pdf.text('+' + money(favor).replace('$',''), 460, y); y += 15; }
+      if(Math.abs(consumed) > 0.005){
+        pdf.text('Credit used at the last payment', L, y);
+        pdf.text('+' + money(consumed).replace('$',''), 460, y); y += 15;
+      }
+      y += 8;
     }
+
+    if(y > 720){ pdf.addPage(); y = 60; }
     pdf.setFont('helvetica','bold'); pdf.setFontSize(16);
     if(rate === null && !pay.wasPaid){
       pdf.text('TOTAL HOURS', L, y); pdf.text(hhmm(pay.minutes), 440, y);
-    } else if(partialPaid > 0){
-      pdf.text('BALANCE DUE', L, y);
-      pdf.text(money(Math.max(0, Math.round((pay.amount-partialPaid)*100)/100)), 440, y);
+    } else if(Math.abs(partialPaid) > 0.005){
+      // Nunca se aplasta en cero: un adelanto a su favor tiene que verse.
+      const bal = Math.round((pay.amount - partialPaid)*100)/100;
+      if(bal < -0.005){
+        pdf.text('ADELANTO A SU FAVOR', L, y); pdf.text(money(-bal), 420, y);
+      } else {
+        pdf.text('BALANCE DUE', L, y); pdf.text(money(bal), 440, y);
+      }
     } else {
       pdf.text('TOTAL', L, y); pdf.text(money(pay.amount), 440, y);
     }
