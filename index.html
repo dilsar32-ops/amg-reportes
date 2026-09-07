@@ -4316,7 +4316,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CA';
+  const APP_BUILD = '2026-09-07-CB';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -6734,7 +6734,12 @@
       const saved = await res.json();
       if(!Array.isArray(saved) || !saved.length) throw new Error('no guardo');
       casualPayments.push(saved[0]);
+      // El menu y la fecha se reponen SIEMPRE. Si se quedan pegados, el
+      // siguiente movimiento se guarda con el tipo anterior: un pago anotado
+      // como "extra" se guarda en negativo y el saldo se mueve al reves.
       $('#casualPayAmount').value = ''; $('#casualPayNote').value = '';
+      $('#casualPayKind').value = 'pago';
+      $('#casualPayDate').value = todayStr();
       renderCasualPerson();
       loadCasualTeam();
     }catch(e){
@@ -6834,7 +6839,9 @@
           headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation,resolution=merge-duplicates'}),
           body: JSON.stringify(Object.assign({ company_id: SES.company_id, casual_worker_id: casualPersonKey,
                                  paid_on: todayStr(), amount: cash, kind: 'pago',
-                                 note: 'Entregado al cerrar ' + rows.length + ' día(s)',
+                                 note: 'Entregado al cerrar ' + rows.length + ' día(s) · trabajo de esos días '
+                                       + money(rows.reduce((t,r) => t + Math.round((+r.reported_hours||0)
+                                           * (+((r.work_kind === 'mudanza') ? mgR : rate)||0) * 100)/100, 0)),
                                  settle_key: key, created_by: SES.user_id },
             // Cerrar dias no cambia el saldo (mueve valor de un lado al otro):
             // lo que lo baja es el efectivo entregado.
@@ -16111,7 +16118,8 @@
                </div>`;
         return `
         <div class="entryrow">
-          <span><span class="when">${esc(dayOf(p.created_at))}</span>${p.note ? '<br><span class="clockhint" style="margin:2px 0 0;">' + esc(p.note) + '</span>' : ''}</span>
+          <span><span class="who">${esc(PP_KINDS[p.kind] || 'Pago')}</span><br>
+            <span class="when">${esc(dayOf(p.created_at))}</span>${p.note ? '<br><span class="clockhint" style="margin:2px 0 0;">' + esc(p.note) + '</span>' : ''}</span>
           <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
             <span class="hrs"${(+p.amount || 0) < 0 ? ' style="color:#3ddc84;"' : ''}>${
               (+p.amount || 0) < 0 ? '+' + money(-(+p.amount)) : money(p.amount)
@@ -16120,8 +16128,38 @@
           </span>
         </div>
         <div style="padding:0 2px 12px;">${respond}</div>`;
-      }).join('');
+      }).join('') + myPaysFooter(rows);
     }catch(e){}
+  }
+
+  // El pie de "Mis pagos". Sumar TODOS los renglones daria un numero que no es
+  // nada (un extra ya cobrado dentro de un cierre se restaria del cierre), asi
+  // que solo se suma lo que todavia no ha contestado - que es sobre lo que
+  // tiene que decidir - y se separa lo que se le ENTREGA de lo que va A SU
+  // FAVOR, igual que en el PDF. El saldo es el del movimiento mas nuevo, que
+  // es el unico numero que su telefono puede saber sin conocer su tarifa.
+  function myPaysFooter(rows, isPending){
+    if(!rows || !rows.length) return '';
+    const pend = rows.filter(isPending || (p => p.accepted === null || p.accepted === undefined));
+    let given = 0, favor = 0;
+    pend.forEach(p => { const a = +p.amount || 0; if(a > 0) given += a; else favor += -a; });
+    given = Math.round(given*100)/100; favor = Math.round(favor*100)/100;
+    // Un saldo vacio es +null = 0, y eso pintaba "AL DIA" inventando un saldo
+    // que nadie guardo. Misma regla que la pantalla del temporal: si no vino,
+    // se dice que no vino.
+    const raw = rows[0].balance_after;
+    const bal = (raw === null || raw === undefined || raw === '') ? NaN : +raw;
+    const state = !Number.isFinite(bal)
+      ? `<div class="line"><span>Saldo</span><span>preg&uacute;ntele a su manager</span></div>`
+      : bal > 0.005  ? `<div class="grand"><span>LE FALTA</span><span>${money(bal)}</span></div>`
+      : bal < -0.005 ? `<div class="grand" style="color:#3ddc84;"><span>CRÉDITO A SU FAVOR</span><span>${money(-bal)}</span></div>`
+                     : `<div class="grand"><span>AL DÍA</span><span>${money(0)}</span></div>`;
+    return `<div class="paysum">
+      ${pend.length ? `<div class="line"><span>Falta que usted conteste</span><span>${pend.length} movimiento${pend.length===1?'':'s'}</span></div>` : ''}
+      ${given ? `<div class="line"><span>Le entregamos</span><span>${money(given)}</span></div>` : ''}
+      ${favor ? `<div class="line" style="color:#3ddc84;"><span>A su favor</span><span>+${money(favor)}</span></div>` : ''}
+      ${state}
+    </div>`;
   }
 
   async function respondToPayment(id, accepted, btnRow){
@@ -17256,17 +17294,22 @@
     // QUE se le esta pagando y POR QUE, no solo un total. Mismo formato que
     // el PDF de los temporales, que ya funcionaba asi.
     const partialPaid = (!pay.wasPaid && rate !== null) ? personPaymentsSum() : 0;
-    const ledger = personPayments.filter(p => !p.settlement);
+    // En "Sin pagar" se listan los movimientos abiertos. En "Historial pagado"
+    // el papel es el RECIBO, asi que se listan los CIERRES - cuya nota ya trae
+    // el desglose ("horas $500 + extras $80"), que es justo lo que uno quiere
+    // ver despues de pagar y lo que antes se perdia.
+    const ledger = pay.wasPaid ? personPayments.filter(p => p.settlement)
+                               : personPayments.filter(p => !p.settlement);
     const consumed = personPayments.filter(p => p.settlement)
                        .reduce((t,p)=> t + (+p.credit_consumed||0), 0);
-    if(!pay.wasPaid && ledger.length){
+    if(ledger.length){
       const KIND = { pago:'Pago / payment', adelanto:'Adelanto / advance',
                      descuento:'Descuento / deduction', extra:'Extra / bonus',
                      devolucion:'Devolucion / returned', ajuste:'Ajuste / adjustment' };
       y += 6;
       if(y > 690){ pdf.addPage(); y = 60; }
       pdf.setFont('helvetica','bold'); pdf.setFontSize(12);
-      pdf.text('DINERO / MONEY', L, y); y += 16;
+      pdf.text(pay.wasPaid ? 'PAGOS ENTREGADOS / PAYMENTS MADE' : 'DINERO / MONEY', L, y); y += 16;
       pdf.setFont('helvetica','bold'); pdf.setFontSize(10);
       pdf.text('DATE', L, y); pdf.text('WHAT / QUE', L+90, y);
       pdf.text('NOTE / NOTA', L+250, y); pdf.text('AMOUNT', 460, y); y += 6;
@@ -17282,15 +17325,15 @@
         if(!dead){ if(a > 0) given += a; else favor += -a; }
         pdf.text(dayOf(p.created_at), L, y);
         pdf.text(String(KIND[p.kind] || p.kind || 'Pago') + (dead ? ' (rejected)' : ''), L+90, y);
-        pdf.text(String(p.note || '').slice(0, 26), L+250, y);
+        pdf.text(String(p.note || '').slice(0, pay.wasPaid ? 34 : 26), L+250, y);
         pdf.text((a < 0 ? '+' : '-') + money(Math.abs(a)).replace('$',''), 460, y);
         y += 15;
       });
       y += 6; pdf.line(L, y, 548, y); y += 18;
       given = Math.round(given*100)/100; favor = Math.round(favor*100)/100;
-      if(given) { pdf.text('Total given / total entregado', L, y); pdf.text('-' + money(given).replace('$',''), 460, y); y += 15; }
-      if(favor) { pdf.text('In his favour / a su favor', L, y);    pdf.text('+' + money(favor).replace('$',''), 460, y); y += 15; }
-      if(Math.abs(consumed) > 0.005){
+      if(given && !pay.wasPaid) { pdf.text('Total given / total entregado', L, y); pdf.text('-' + money(given).replace('$',''), 460, y); y += 15; }
+      if(favor && !pay.wasPaid) { pdf.text('In his favour / a su favor', L, y);    pdf.text('+' + money(favor).replace('$',''), 460, y); y += 15; }
+      if(!pay.wasPaid && Math.abs(consumed) > 0.005){
         pdf.text('Credit used at the last payment', L, y);
         pdf.text('+' + money(consumed).replace('$',''), 460, y); y += 15;
       }
@@ -17396,10 +17439,18 @@
     // shift actually earned. Partial payments were cash already handed over
     // toward that same total, so what he still owes right now is the
     // difference, and the confirm dialog should say that, not the full total.
+    // Un extra/devolucion queda guardado en NEGATIVO, asi que partialPaid puede
+    // ser menor que cero: eso es dinero que le debemos ADEMAS de las horas, y
+    // sube lo que se le entrega hoy. El aviso tiene que decir esa cifra, no la
+    // de las horas peladas - antes preguntaba "$500" y guardaba "$580".
+    const extraCredit = partialPaid < -0.005 ? Math.round(-partialPaid*100)/100 : 0;
     if(!confirm((partialPaid > 0
           ? 'Total de estas horas: ' + money(pay.amount) + '.\nYa le dio ' + money(partialPaid) + ' en pagos parciales.\n\n'
             + 'Le falta darle ' + money(remaining) + ' para cerrar todo.'
-          : 'Marcar ' + money(pay.amount) + ' como pagado a ' + (any?nameOf(any):'') + '?')
+          : extraCredit
+            ? 'Horas: ' + money(pay.amount) + '\nExtras que le debemos: ' + money(extraCredit)
+              + '\n\nSe le entregan hoy ' + money(remaining) + ' a ' + (any?nameOf(any):'') + '.'
+            : 'Marcar ' + money(pay.amount) + ' como pagado a ' + (any?nameOf(any):'') + '?')
               + '\n\n'
               + (open ? '⚠ ' + open + ' turno(s) todavía SIN CONFIRMAR. Esa persona '
                       + 'todavía no ha dicho que sus horas están bien.\n\n' : '')
@@ -17434,7 +17485,11 @@
         // Only fold the ledger away if this settlement actually covered it all.
         // If there was more credit than this settlement needed (a real advance),
         // leave it standing - it's owed to them against future hours, not gone.
-        const clearedOldPartials = partialPaid > 0 && partialPaid <= pay.amount + 0.005;
+        // Este cierre cubre TODO el libro cuando lo que ya se movio no pasa del
+        // valor de las horas. Un extra (negativo) siempre queda cubierto: sube
+        // el monto entregado hoy. Antes esta condicion pedia "> 0", asi que un
+        // extra sobrevivia al cierre y se volvia a cobrar en la pantalla.
+        const clearedOldPartials = Math.abs(partialPaid) > 0.005 && partialPaid <= pay.amount + 0.005;
         const leftoverCredit = partialPaid > pay.amount ? Math.round((partialPaid - pay.amount)*100)/100 : 0;
         // How much of the OLD credit this settlement used up. clearPersonPayments
         // only deletes rows nobody has answered yet - an already-accepted row is
@@ -17463,7 +17518,9 @@
               body: JSON.stringify({
                 user_id: personKey, company_id: SES.company_id,
                 hours: pay.hours, amount: remaining,
-                note: 'Pago completo · ' + rows.length + ' turno(s)',
+                note: 'Pago completo · ' + rows.length + ' turno(s)'
+                      + (extraCredit ? ' · horas ' + money(pay.amount) + ' + extras ' + money(extraCredit) : '')
+                      + (partialPaid > 0.005 ? ' · ya le habíamos dado ' + money(partialPaid) : ''),
                 balance_after: -leftoverCredit, created_by: SES.user_id,
                 settlement: true, credit_consumed: creditConsumed
               })
@@ -18632,18 +18689,22 @@
             ? '<span class="telock" style="color:var(--danger);">&#10007; Usted dijo que NO'
               + (p.response_note ? ' &middot; ' + esc(p.response_note) : '') + '</span>'
             : `<div style="display:flex; gap:8px; margin-top:6px;">
-                 <button type="button" class="btn btn-ink cpYes" data-cpid="${esc(p.id)}" style="flex:1; padding:8px;">Sí, lo recibí</button>
+                 <button type="button" class="btn btn-ink cpYes" data-cpid="${esc(p.id)}" style="flex:1; padding:8px;">${favor ? 'Sí, está bien' : 'Sí, lo recibí'}</button>
                  <button type="button" class="btn btn-outline cpNo" data-cpid="${esc(p.id)}" style="flex:1; padding:8px;">No es correcto</button>
                </div>`;
       return `<div class="entryrow">
           <span><span class="who">${esc(KIND[p.kind] || p.kind)}</span><br>
             <span class="when">${esc(p.paid_on || '')}${p.note ? ' &middot; ' + esc(p.note) : ''}</span></span>
           <span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
-            <span class="hrs"${favor ? ' style="color:#3ddc84;"' : ''}>${money(Math.abs(a))}</span>
+            <span class="hrs"${favor ? ' style="color:#3ddc84;"' : ''}>${favor ? '+' : ''}${money(Math.abs(a))}</span>
             <span class="clockhint" style="margin:0;">${esc(linea)}</span></span>
         </div>
         <div style="padding:0 2px 12px;">${contestar}</div>`;
-    }).join('');
+    }).join('')
+    // Las dos pantallas traen el mismo pie. La lista viene ordenada de mas
+    // nueva a mas vieja (paid_on desc, created_at desc en casual_my_payments),
+    // asi que el saldo del pie es el del movimiento mas nuevo, igual que en planta.
+    + myPaysFooter(list, p => p.confirm_needed !== false && (p.accepted === null || p.accepted === undefined));
   }
 
   async function casualRespondPay(id, agree){
@@ -18654,7 +18715,11 @@
       note = prompt('¿Qué está mal? Escríbalo y su manager lo va a ver.');
       if(note === null) return;                    // cancelo: no se manda nada
     }
-    if(agree && !confirm('¿Confirma que sí recibió ese dinero?\n\nDespués ya no se puede cambiar.')) return;
+    const mov = (casualMyPays || []).find(x => String(x.id) === String(id));
+    const esFavor = mov && (+mov.amount || 0) < 0;
+    if(agree && !confirm((esFavor
+        ? '¿Confirma que está bien ese monto a su favor?'
+        : '¿Confirma que sí recibió ese dinero?') + '\n\nDespués ya no se puede cambiar.')) return;
     try{
       casualMyPays = await authPost('/rest/v1/rpc/casual_respond_payment', {
         p_join_code: sideCode(ses), p_name: ses.name, p_pin: ses.pin,
