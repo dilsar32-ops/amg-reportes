@@ -3527,7 +3527,14 @@
   function linesToRows(text){
     return (text || '').split('\n').map(l => l.trim()).filter(Boolean);
   }
-  function todayStr(){ return new Date().toISOString().slice(0,10); }
+  // HOY, en la hora del telefono. Con toISOString (UTC) despues de las 8 PM aqui
+  // ya era MAÑANA: un turno apuntado el viernes en la noche se guardaba con la
+  // fecha del sabado, y al apuntar el sabado la app contestaba "ese turno ya
+  // esta guardado" - un dia trabajado que nadie paga.
+  function todayStr(){
+    const d = new Date(), p = n => String(n).padStart(2,'0');
+    return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate());
+  }
   function fmtTime12(t){
     if(!t) return '';
     const parts = t.split(':');
@@ -4403,7 +4410,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CG';
+  const APP_BUILD = '2026-09-07-CH';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -6897,10 +6904,16 @@
   // he says how much money actually changed hands.
   $('#casualPayMark').addEventListener('click', ()=>{
     const rate = casualRateOf(casualPersonKey);
-    const rows = casualPersonRows().filter(r => r.reported_hours != null && !r.paid_at);
-    if(!rows.length || rate === null) return;
-    const work = Math.round(rows.reduce((s2, r) =>
-      s2 + Math.round((+r.reported_hours||0) * (+rate||0) * 100) / 100, 0) * 100) / 100;
+    const mgR  = mgRateTemp(casualPersonKey);
+    // Los mismos dias que csConfirm va a cerrar de verdad: una fila cuyo tipo no
+    // tiene tarifa no se cierra, asi que tampoco se cuenta aqui.
+    const rows = casualPersonRows().filter(r => r.reported_hours != null && !r.paid_at
+      && ((r.work_kind === 'mudanza') ? mgR !== null : rate !== null));
+    if(!rows.length) return;
+    // Cada fila a la tarifa de SU empresa. Antes todo se multiplicaba por la de
+    // restauracion, asi que "Trabajo de esos dias" contradecia a "LE TOCA HOY"
+    // dos renglones abajo, en la misma caja.
+    const work = payForCasual(rows, rate, mgR).amount;
     const bal = casualBalanceOf(casualPersonKey);
     const due = Math.round(Math.max(0, bal.balance) * 100) / 100;
     $('#csDays').textContent  = rows.length + ' día' + (rows.length===1?'':'s');
@@ -16852,6 +16865,10 @@
     $('#mergeBox').hidden = true;
     $('#personSettings').hidden = true;
     personPayments = [];
+    // Un monto que quedo de la persona anterior es exactamente como se le paga
+    // al equivocado. Mismo cuidado que openCasualPerson.
+    ['#ppAmount','#ppNote','#ppHours'].forEach(sel => { const e = $(sel); if(e) e.value = ''; });
+    if($('#ppKind')) $('#ppKind').value = 'pago';
     if($('#ppDate')) $('#ppDate').value = todayStr();
     renderPpHint();
     renderPerson();
@@ -17135,7 +17152,10 @@
     // visible there too, since that's exactly where a disputed payment on
     // an already-settled person would otherwise be unreachable.
     const form = $('#ppForm');
-    if(form) form.style.display = (personPaidView || !hasRows || rate === null) ? 'none' : '';
+    // Sin "!hasRows": un adelanto contra horas futuras es precisamente el caso de
+    // alguien que acaba de cobrar y no tiene nada abierto. Antes no habia donde
+    // anotarlo y el dinero se entregaba sin quedar escrito.
+    if(form) form.style.display = (personPaidView || rate === null) ? 'none' : '';
     box.style.display = '';
     const hist = $('#ppHistory');
     if(!hist) return;
@@ -17306,8 +17326,14 @@
     const form = $('#ppForm');
     if(form) form.style.display = '';
     $('#ppHours').value = p.hours != null ? p.hours : '';
-    $('#ppAmount').value = p.amount != null ? p.amount : '';
-    $('#ppNote').value = 'Corrección';
+    // El monto se guarda con signo, pero la casilla pide la CANTIDAD y el signo
+    // lo decide el tipo. Sin reponer el tipo, un extra de -80 volvia como un
+    // pago de +80 y el saldo se movia $160 al reves - y a los 3 dias la
+    // aprobacion automatica ya no deja borrar esa fila.
+    if($('#ppKind')) $('#ppKind').value = p.kind || 'pago';
+    $('#ppAmount').value = p.amount != null ? Math.abs(+p.amount) : '';
+    $('#ppNote').value = p.note ? String(p.note) : 'Corrección';
+    if(typeof renderPpHint === 'function') renderPpHint();
     const box = $('#partialPayBox');
     if(box) box.scrollIntoView({ block:'start' });
     $('#ppAmount').focus();
@@ -17723,7 +17749,16 @@
         const survivingOldCredit = personPayments
           .filter(p => !p.settlement && p.accepted === true)
           .reduce((s,p)=>s+(+p.amount||0), 0);
-        const creditConsumed = clearedOldPartials ? survivingOldCredit : (partialPaid > 0 ? pay.amount : 0);
+        // ...MENOS lo que los cierres anteriores YA compensaron. Sin esta resta,
+        // cada cierre nuevo volvia a consumir el adelanto viejo: al tercer cierre
+        // la app pedia entregar $500 por $400 de trabajo, y la diferencia crecia
+        // en cada ciclo.
+        const consumedSoFar = personPayments
+          .filter(p => p.settlement)
+          .reduce((s,p)=>s+(+p.credit_consumed||0), 0);
+        const creditConsumed = clearedOldPartials
+          ? Math.round((survivingOldCredit - consumedSoFar)*100)/100
+          : (partialPaid > 0 ? pay.amount : 0);
         if(clearedOldPartials) await clearPersonPayments(personKey);
         // A full "Marcar como pagado" is money too - it gets the same yes/no
         // proof trail as a partial payment, not just a note on the manager's
@@ -17767,7 +17802,17 @@
             ? 'Pagado. ' + already + ' turno(s) ya los había pagado alguien más - no se pagaron dos veces.'
             : 'Pagado. Ya no aparece en el teléfono de esa persona.');
     }catch(e){
-      alert('No se pudo marcar todo como pagado. Revise su internet y vuelva a intentar.');
+      // "done" son los turnos que YA quedaron estampados antes del corte. Decir
+      // "no se pudo" a secas hacia que no se entregara nada por horas que en la
+      // base ya figuran pagadas y que ya desaparecieron del telefono de esa
+      // persona: trabajo hecho que nadie vuelve a cobrar.
+      const hechos = Math.max(0, done - 1);
+      alert(hechos > 0
+        ? '⚠ Se cortó a la mitad.\n\n' + hechos + ' de ' + rows.length + ' turno(s) YA quedaron marcados como pagados '
+          + 'y ya no aparecen en el teléfono de esa persona, pero NO se guardó el recibo.\n\n'
+          + 'Esas horas hay que pagarlas igual. Vuelva a tocar Marcar como pagado para cerrar los que faltan, '
+          + 'y anote a mano lo que le entregue por los ' + hechos + ' de arriba.'
+        : 'No se pudo marcar nada como pagado. Revise su internet y vuelva a intentar.');
       await loadTeamEntries();
     }
     btn.textContent = old; btn.disabled = false;
@@ -19140,7 +19185,7 @@
   const finMoney = n => '$' + (Math.round((+n||0)*100)/100).toFixed(2);
   const normClient = s => String(s||'').trim().replace(/\s+/g,' ');
   const clientKey = s => normClient(s).toLowerCase();
-  function localToday(){ const d = new Date(); const p = n => String(n).padStart(2,'0'); return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()); }
+  function localToday(){ return todayStr(); }   // eran dos funciones para lo mismo; una sola, o se vuelve a abrir la brecha
   function finUuid(){
     try{ if(crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random()*16|0; return (c === 'x' ? r : (r&3|8)).toString(16); });
