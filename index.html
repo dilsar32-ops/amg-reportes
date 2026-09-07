@@ -853,6 +853,7 @@
   #convInvoice[hidden], #convInvoiceHint[hidden], #invLogsBtns[hidden], #fpScansTools[hidden], #recibosViewer[hidden], #gWhoOtherField[hidden], #pWhoOtherField[hidden], #pClientOtherField[hidden], #gClientOtherField[hidden], #p-kind-field[hidden], #finCSendBox[hidden], #finCSendOtherField[hidden], #finCierresCard[hidden], #casualCierresCard[hidden], #acEditBtns[hidden], #acRateField[hidden], #acFlatField[hidden], #acPricingBox[hidden], #acCrewHint[hidden], #acRemove[hidden], #acListCard[hidden], #acPickField[hidden], #acExistsHint[hidden], #acNameField[hidden], #acBillToField[hidden], .l-ex-other-wrap[hidden], #invNew[hidden], #invList[hidden], #invFrom[hidden], #invPreviewWrap[hidden],
   #finMGastos[hidden], #finMPagos[hidden], #finMCierre[hidden], #finPClients[hidden], #finPHeld[hidden], #finGMonthField[hidden], #finCPdf[hidden],
   .s-gas-row[hidden], .s-gas-other-wrap[hidden], .s-gas-hint[hidden]{display:none !important;}
+  .s-extra-other-wrap[hidden]{display:none !important;}
   /* La pantalla es para trabajar: fuera la linea de idiomas y los avisos
      verdes grandes en la puerta AMG (el encabezado ya esta en verde y dice AMG Moving). */
   .banner{display:none !important;}
@@ -3448,6 +3449,7 @@
           </select>
         </div>
         <div class="field"><label>Extra $</label><input type="number" class="s-extra-amt" placeholder="0.00"></div>
+        <div class="field s-extra-other-wrap" hidden style="grid-column:1/-1;"><label>¿Qué fue ese extra? / What was it?</label><input type="text" class="s-extra-other" placeholder="Escríbalo aquí / Write it here" autocomplete="off"></div>
       </div>
       <div class="s-extra-more"></div>
       <button type="button" class="minibtn s-extra-add" style="margin:0 0 10px;">+ Agregar otro extra</button>
@@ -3509,17 +3511,28 @@
   // descoloca. Los demas se agregan abajo y viajan en xs.
   const extraBoxes = card => [card.querySelector('.s-extra-first')]
       .concat($$('.s-extra-row', card)).filter(Boolean);
+  // "Otro" abre una casilla para escribir QUE fue. Sin eso, en el invoice del
+  // cliente aparecia un renglon que solo decia "Other".
+  function syncExtraOther(box){
+    if(!box) return;
+    const sel = box.querySelector('.s-extra'), wrap = box.querySelector('.s-extra-other-wrap');
+    if(wrap) wrap.hidden = !(sel && sel.value === 'Other');
+  }
+  // Lo que se le ensena al cliente: lo escrito a mano cuando es "Otro".
+  const extraLabel = it => ((it && it.e === 'Other' && String(it.eo || '').trim()) ? String(it.eo).trim() : ((it && it.e) || 'Extra'));
   // Los extras escritos de un turno, en orden. Un turno sin extra devuelve [].
   function extraItemsOf(card){
     return extraBoxes(card).map(b => ({
       e: ((b.querySelector('.s-extra') || {}).value) || '',
-      x: ((b.querySelector('.s-extra-amt') || {}).value)
+      x: ((b.querySelector('.s-extra-amt') || {}).value),
+      eo: (((b.querySelector('.s-extra-other') || {}).value) || '').trim()
     })).filter(it => it.e || String(it.x == null ? '' : it.x).trim() !== '');
   }
   // Lo mismo pero leyendo un turno ya guardado. xs cuando lo trae; si no, el e/x de siempre.
   function extraItemsOfShift(sh){
     if(Array.isArray(sh.xs) && sh.xs.length) return sh.xs;
-    return (sh.e || String(sh.x == null ? '' : sh.x).trim() !== '') ? [{ e: sh.e || '', x: sh.x }] : [];
+    return (sh.e || String(sh.x == null ? '' : sh.x).trim() !== '')
+      ? [{ e: sh.e || '', x: sh.x, eo: sh.eo || '' }] : [];
   }
   // Cuanto suman. Regla por extra, igual que siempre: si escribio monto vale eso;
   // si solo escogio el tipo vale el respaldo de $150, y en mudanza vale 0.
@@ -3536,7 +3549,10 @@
       +   '<div style="display:flex; gap:8px; align-items:center;">'
       +     '<input type="number" class="s-extra-amt" placeholder="0.00" style="flex:1;">'
       +     '<button type="button" class="icon-btn s-extra-del">Quitar</button>'
-      +   '</div></div></div>';
+      +   '</div></div>'
+      + '<div class="field s-extra-other-wrap" hidden style="grid-column:1/-1;"><label>¿Qué fue ese extra?</label>'
+      +   '<input type="text" class="s-extra-other" placeholder="Escríbalo aquí" autocomplete="off"></div>'
+      + '</div>';
   }
   function addExtraRow(card){
     const box = card && card.querySelector('.s-extra-more'); if(!box) return null;
@@ -3552,6 +3568,7 @@
       sel.innerHTML = sel.dataset.restOptions;
     }
     paintExtraOptions(sel, formKind() === 'mudanza');
+    syncExtraOther(row);
     return row;
   }
   shiftsContainer.addEventListener('click', (e) => {
@@ -3566,6 +3583,7 @@
     // A SU propia fila: antes, escoger el tipo en el Extra 2 le escribia el
     // precio en la casilla del Extra 1.
     const box = e.target.closest('.s-extra-row') || e.target.closest('.s-extra-first') || e.target.closest('.shift-card');
+    syncExtraOther(box);
     const amt = box.querySelector('.s-extra-amt');
     const price = EXTRA_PRICES[e.target.value];
     // Los $150/$200 son precios de restauracion: en una mudanza el monto del
@@ -4120,7 +4138,12 @@
                      // xs solo viaja cuando de verdad hay mas de uno.
                      e: xs.length ? (xs[0].e || '') : '',
                      x: xs.length ? String(xs[0].x == null ? '' : xs[0].x) : '' };
-        if(xs.length > 1) sh.xs = xs.map(it => ({ e: it.e || '', x: String(it.x == null ? '' : it.x) }));
+        // Lo que escribio en "Otro" viaja aparte (eo), nunca pisando el tipo:
+        // asi el select se vuelve a poner solo al reabrir el reporte.
+        if(xs.length && xs[0].e === 'Other' && xs[0].eo) sh.eo = xs[0].eo;
+        if(xs.length > 1) sh.xs = xs.map(it => Object.assign(
+          { e: it.e || '', x: String(it.x == null ? '' : it.x) },
+          (it.e === 'Other' && it.eo) ? { eo: it.eo } : {}));
         // Gasolina del turno: solo viaja cuando hay monto (sin gasolina el payload es identico al de siempre).
         const ga = parseFloat(($('.s-gas-amt',c)||{}).value);
         if(ga > 0){ const gsel = $('.s-gas-who',c); const gk = (gsel && gsel.value) || 'x';
@@ -4173,11 +4196,17 @@
       $('.s-from',c).value=sh.f||''; $('.s-to',c).value=sh.o||''; setNames(c, sh.n||'');
       $('.s-task',c).value=sh.k||'';  $('.s-address',c).value=sh.a||'';
       const xs = extraItemsOfShift(sh);
+      const b0 = c.querySelector('.s-extra-first');
       $('.s-extra',c).value = (xs[0] && xs[0].e) || '';
       $('.s-extra-amt',c).value = (xs[0] && xs[0].x != null) ? String(xs[0].x) : '';
+      const o0 = b0 && b0.querySelector('.s-extra-other');
+      if(o0) o0.value = (xs[0] && xs[0].eo) || '';
+      syncExtraOther(b0);
       xs.slice(1).forEach(it => { const row = addExtraRow(c);
         if(row){ row.querySelector('.s-extra').value = it.e || '';
-                 row.querySelector('.s-extra-amt').value = (it.x != null) ? String(it.x) : ''; } });
+                 row.querySelector('.s-extra-amt').value = (it.x != null) ? String(it.x) : '';
+                 const o = row.querySelector('.s-extra-other'); if(o) o.value = it.eo || '';
+                 syncExtraOther(row); } });
       const ga = $('.s-gas-amt',c), gw = $('.s-gas-who',c), go = $('.s-gas-other',c);
       if(ga) ga.value = sh.g || '';
       if(gw){ if(typeof paintWhoSelect === 'function') paintWhoSelect(gw, sh.gk || ''); else gw.value = sh.gk || ''; }
@@ -4215,7 +4244,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-BU';
+  const APP_BUILD = '2026-09-07-BV';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -4914,7 +4943,7 @@
     }
     (p.s || []).forEach(sh => extraItemsOfShift(sh).forEach(it => {
       const x = parseFloat(it.x);
-      if(Number.isFinite(x) && x !== 0) out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + (it.e || 'extra') + ' ' + date, q:1, u:x, a:x, src:String(log.id) });
+      if(Number.isFinite(x) && x !== 0) out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + extraLabel(it) + ' ' + date, q:1, u:x, a:x, src:String(log.id) });
     }));
     // Materiales que el lider anoto en el reporte, al precio por unidad del manager (Precio AMG -> Materiales).
     (p.mat || []).forEach(m => {
@@ -7316,7 +7345,7 @@
         <tr><td><b>${mg ? 'Work' : 'Task'}</b></td><td>${esc($('.s-task', card).value)}</td></tr>
         <tr><td><b>${mg ? 'From → To' : 'Address'}</b></td><td>${esc($('.s-address', card).value)}</td></tr>
         ${extraItemsOf(card).map((it, i, arr) => `<tr><td><b>Extra${arr.length > 1 ? ' ' + (i+1) : ''}</b></td><td>${
-            esc(it.e || 'Extra')} ($${(Number.isFinite(parseFloat(it.x)) ? parseFloat(it.x)
+            esc(extraLabel(it))} ($${(Number.isFinite(parseFloat(it.x)) ? parseFloat(it.x)
               : ((it.e && formKind() !== 'mudanza') ? EXTRA_FALLBACK : 0)).toFixed(2)})</td></tr>`).join('')}
         ${mgrView ? `<tr><td><b>Shift Total</b></td><td>${m.noPrice ? 'NO PRICE' : '$' + esc($('.s-total', card).value || '0.00')}</td></tr>` : ''}
         ${(mgrView && parseFloat(($('.s-gas-amt', card)||{}).value) > 0) ? `<tr><td><b>Crew expense</b></td><td>Gas $${esc((+$('.s-gas-amt', card).value).toFixed(2))} — paid by ${esc((function(){ const gs = $('.s-gas-who', card); return gs ? (gs.value === 'x' ? (($('.s-gas-other', card)||{}).value || '') : ((gs.options[gs.selectedIndex]||{}).textContent || '')) : ''; })())} (not billed, reimbursable)</td></tr>` : ''}
@@ -17304,7 +17333,7 @@
           <tr><td><b>${kind === 'mudanza' ? 'Work' : 'Task'}</b></td><td>${esc(sh.k||'')}</td></tr>
           <tr><td><b>${kind === 'mudanza' ? 'From → To' : 'Address'}</b></td><td>${esc(sh.a||'')}</td></tr>
           ${extraItemsOfShift(sh).map((it, i, arr) => `<tr><td><b>Extra${arr.length > 1 ? ' ' + (i+1) : ''}</b></td><td>${
-              esc(it.e || 'Extra')}${(it.x != null && String(it.x).trim() !== '') ? ' ($' + (parseFloat(it.x)||0).toFixed(2) + ')' : ''}</td></tr>`).join('')}
+              esc(extraLabel(it))}${(it.x != null && String(it.x).trim() !== '') ? ' ($' + (parseFloat(it.x)||0).toFixed(2) + ')' : ''}</td></tr>`).join('')}
         `;
       });
       const reportTotal = m.shifts.reduce((s,sh)=>
@@ -19404,9 +19433,13 @@
     // Los extras agregados NO cuentan para la posicion de los demas campos del
     // turno: si contaran, agregar un extra le cambiaria la llave a la gasolina
     // y lo escrito volveria a la casilla equivocada.
+    // .s-extra-other se agrego despues: se deja FUERA del conteo para que no le
+    // corra la llave a la gasolina ni al total de un borrador ya guardado. Como
+    // hay una sola por fila, su propia llave no necesita numero.
+    const late = x => x.classList && x.classList.contains('s-extra-other');
     const peers = row ? $$('input,select,textarea', row)
-      .filter(x => (x.closest('.s-extra-row') || null) === (el.closest('.s-extra-row') || null)) : [];
-    const nth   = peers.length ? peers.indexOf(el) : 0;
+      .filter(x => !late(x) && (x.closest('.s-extra-row') || null) === (el.closest('.s-extra-row') || null)) : [];
+    const nth   = late(el) ? 0 : (peers.length ? peers.indexOf(el) : 0);
     return tab + '|' + where + '|' + what + '|' + nth;
   }
 
@@ -19446,6 +19479,9 @@
     if(d.side && d.side !== sideKind()) return;
     // Los selects de "quien pago" nacen vacios: se pintan antes de poner los valores, o el valor guardado se perderia.
     $$('.l-ex-who, .s-gas-who').forEach(sel => { if(!sel.options.length) paintWhoSelect(sel, ''); });
+    // La casilla de "Otro" nace escondida: si no se abre, lo que el lider
+    // escribio vuelve pero nadie lo ve.
+    setTimeout(() => { $$('.s-extra-first, .s-extra-row').forEach(syncExtraOther); }, 0);
     setTimeout(() => {
       // La gasolina del turno tambien: si no se repinta, el pago se le anota a quien tiene el telefono
       // en la mano en vez de a quien la puso.
