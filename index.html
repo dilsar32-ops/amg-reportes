@@ -1049,8 +1049,6 @@
         <b id="laborTileTitle">Mano de Obra<span class="en"> / Labor</span></b><small id="laborTileHint">Reporte del día y enviarlo al manager</small></button>
       <button type="button" class="menubtn" data-go-tab="finanzas" data-side="mudanza">
         <b>&#128181; Finanzas</b><small>Gastos con recibo y pagos de clientes</small></button>
-      <button type="button" class="menubtn" data-go-tab="amgclientes" data-side="mudanza">
-        <b>&#128101; Clientes</b><small>Agregar un cliente nuevo o ver sus datos</small></button>
       <button type="button" class="menubtn amg" data-go-tab="amgmoving" data-side="manager">
         <b>&#128666; AMG Moving<span class="badge" id="menuAmgBadge" hidden></span></b><small id="menuAmgHint">Todo lo de mudanza: horas, tarifas y reportes de mudanza</small></button>
       <button type="button" class="menubtn" data-go-tab="equipment" data-side="restauracion manager">
@@ -2227,7 +2225,7 @@
   <section class="tab-panel" data-tab="amgclientes">
     <div class="amgbanner">
       <div class="amgbanner-t">&#128101; CLIENTES &middot; AMG MOVING</div>
-      <div class="amgbanner-s">Agregue aqu&iacute; al cliente nuevo con sus datos antes de hacer su reporte de mudanza, para escogerlo en la lista.</div>
+      <div class="amgbanner-s">Los datos del cliente. Al guardarlo vuelve al reporte de mudanza con este cliente ya escogido.</div>
     </div>
     <section class="card amgcard" id="acDoneCard" hidden style="text-align:center;">
       <div style="font-size:44px; line-height:1; margin:6px 0 4px;">&#9989;</div>
@@ -3063,17 +3061,21 @@
     }catch(e){ if(AMG_CLIENTS_STATE !== 'loaded') AMG_CLIENTS_STATE = 'error'; return false; }
   }
   // Los selects de cliente (reporte de mudanza, gasto, pago) se pintan desde la lista; el valor escogido se conserva.
-  function paintClientSelect(sel, firstLabel){
+  function paintClientSelect(sel, firstLabel, conNuevo){
     if(!sel) return;
     const cur = sel.value;
     let html = '<option value="">' + esc(firstLabel) + '</option>';
     amgClientNames().forEach(n => { html += '<option value="' + esc(n) + '">' + esc(n) + '</option>'; });
     html += '<option value="Otro">Otro</option>';
+    // Antes habia que salirse a la pantalla de Clientes, agregarlo, y volver a
+    // empezar el reporte. Ahora se agrega desde aqui y se regresa con el
+    // cliente ya escogido.
+    if(conNuevo) html += '<option value="__nuevo__">&#10133; Cliente nuevo (con sus datos)</option>';
     sel.innerHTML = html;
     if(cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
   }
   function paintClientOptions(){
-    paintClientSelect($('#l-client'), 'Escoja el cliente');
+    paintClientSelect($('#l-client'), 'Escoja el cliente', true);
     paintClientSelect($('#g-client'), '—');
     paintClientSelect($('#p-client'), 'Escoja el cliente');
     // OJO: esto corre tambien al arrancar, antes de que exista formKind (const mas abajo): se lee el campo directo.
@@ -3083,9 +3085,18 @@
   paintClientOptions();   // desde el arranque: con la lista guardada en el telefono o, si no hay, los nombres de respaldo
   // El cliente del reporte de mudanza que esta en pantalla (lo que se escogio en Move Info).
   function formClient(){ return (formKind() === 'mudanza' && $('#l-team')) ? String($('#l-team').value || '').trim() : ''; }
+  let acVolverAlReporte = false;      // se entro a Clientes desde el reporte de mudanza
   function clientToTeam(){
     const sel = $('#l-client'), other = $('#l-client-other'), of = $('#lClientOtherField'), team = $('#l-team');
     if(!sel || !team) return;
+    if(sel.value === '__nuevo__'){
+      sel.value = '';                 // que no se quede "__nuevo__" escrito como cliente
+      acVolverAlReporte = true;
+      if(typeof acFill === 'function') acFill(null);
+      showTab('amgclientes'); pushBack('labor');
+      const n = $('#acName'); if(n){ n.focus(); n.scrollIntoView({ block:'center' }); }
+      return;
+    }
     const otro = sel.value === 'Otro';
     if(of) of.hidden = !otro;
     team.value = otro ? ((other && other.value) || '').trim() : sel.value;
@@ -4415,7 +4426,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CM';
+  const APP_BUILD = '2026-09-07-CN';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -5452,7 +5463,23 @@
     acFill(null); const n = $('#acName'); if(n){ n.focus(); n.scrollIntoView({ block:'center' }); }
   });
   if($('#acDoneMore')) $('#acDoneMore').addEventListener('click', ()=>{ acHideDone(); acFill(null); const n = $('#acName'); if(n){ n.focus(); n.scrollIntoView({ block:'center' }); } });
-  if($('#acDoneBack')) $('#acDoneBack').addEventListener('click', ()=>{ acFill(null); if(AC_MGR){ acShowList(); } else { acHideDone(); goBack(); } });
+  if($('#acDoneBack')) $('#acDoneBack').addEventListener('click', ()=>{
+    const nuevo = ($('#acDoneName') && $('#acDoneName').textContent || '').trim();
+    acFill(null);
+    if(AC_MGR){ acShowList(); return; }
+    acHideDone(); goBack();
+    // Se vino del reporte: se regresa con ese cliente ya puesto, para no tener
+    // que buscarlo otra vez en la lista.
+    if(acVolverAlReporte){
+      acVolverAlReporte = false;
+      if(typeof paintClientOptions === 'function') paintClientOptions();
+      const sel = $('#l-client');
+      if(sel && nuevo && [...sel.options].some(o => o.value === nuevo)){
+        sel.value = nuevo;
+        clientToTeam();
+      }
+    }
+  });
   let acPricing = 'hora';
   function acSetPricing(mode){
     acPricing = mode === 'fijo' ? 'fijo' : 'hora';
