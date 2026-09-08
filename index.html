@@ -4498,7 +4498,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CY';
+  const APP_BUILD = '2026-09-07-CZ';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -11941,8 +11941,55 @@
       const bigGapSegs = (gapInfo.bridgeSegs||[]).filter(g => g.d > 6 && !fpAiSegmentCoveredByOtherWalls(data, idx, g, room.level || 1));
       if(bigGapSegs.length && !room._gapReviewed){
         const biggest = bigGapSegs.reduce((m, g) => g.d > m.d ? g : m);
-        issues.push({ kind: 'gap', room: idx, ack: '_gapReviewed', seg: biggest, text: `${esc(roomName)}: a ${fpFeetInches(biggest.d)} break in the room outline - a wall may be missing. Add the suggested wall, or rescan that side.` });
+        // Our own evidence, from the walked path - nobody walks through a
+        // wall. This never SILENCES the item (the honest direction is
+        // always to keep asking), it says what we independently know.
+        const walked = fpPathCrossesSegment(biggest, fpWalkedPath(data, room.level || 1), 4);
+        issues.push({ kind: 'gap', room: idx, ack: '_gapReviewed', seg: biggest,
+          text: `${esc(roomName)}: a ${fpFeetInches(biggest.d)} break in the room outline`
+            + (walked
+                ? ` - but you walked through it during the scan, so it is probably a doorway, not a missing wall.`
+                : ` - a wall may be missing. Add the suggested wall, or rescan that side.`) });
       }
+    });
+    // OUR OWN CHECK, not Apple's: two rooms cannot both own the same
+    // floor. When their outlines overlap, the building total adds that
+    // floor twice. Found 51.0 sq ft of it on the real house - a sheet
+    // printing 677.5 where the honest figure is about 626.5.
+    //
+    // The total is NOT quietly corrected here. That number gets billed
+    // from, and the overlap means the OUTLINES are wrong; silently
+    // subtracting would hide the defect and leave the drawing wrong
+    // forever. He is shown the error and the honest figure, and fixes
+    // the outline.
+    const multiLv = floorplanLevels(data).length > 1;
+    const lvNow = floorplanSelectedLevel;
+    const onLv = r => !multiLv || (r.level||1) === lvNow;
+    if(!data._overlapReviewed){
+      const ov = fpRoomsOverlapSqFt(data, onLv);
+      if(ov.pairs.length){
+        const worst = ov.pairs.slice().sort((a,b) => b.sqFt - a.sqFt)[0];
+        const shown = fpDisplayTotalAreaSqFt(data);
+        issues.push({ kind: 'overlap', room: -1, ack: '_overlapReviewed',
+          text: `${esc(worst.a)} and ${esc(worst.b)} both claim ${worst.sqFt} sq ft of the same floor`
+            + (ov.pairs.length > 1 ? ` (${ov.pairs.length} pairs overlap, ${ov.sqFt} sq ft in all)` : '')
+            + ` - the total counts it twice. It prints ${shown.toFixed(1)}; the honest figure is about ${(shown - ov.sqFt).toFixed(1)}. Fix the outline of one of them.` });
+      }
+    }
+    // Same idea: a wall running through another room's OPEN floor is a
+    // contradiction - a shared wall lies on the boundary of both, never
+    // inside one. (The boundary distance test matters: without it this
+    // accused 11 perfectly good shared walls on the real house.)
+    // Nuestra evidencia fisica contra la geometria: nadie atraviesa una
+    // pared. Si el camino la cruza lejos de una puerta, o la pared no
+    // esta donde dice, o el rastreo se corrio en ese tramo.
+    fpPathCrossesWalls(data, multiLv ? lvNow : null).slice(0, 3).forEach(h => {
+      issues.push({ kind: 'walked-through', room: -1,
+        text: `${esc(h.room)}: the walk-through path goes straight through a ${fpFeetInches(h.lengthFt)} wall with no door there - that wall is in the wrong place, or tracking drifted. Check it in person.` });
+    });
+    fpWallsInsideOtherRooms(data, onLv).slice(0, 3).forEach(h => {
+      issues.push({ kind: 'wallinside', room: -1,
+        text: `${esc(h.room)}: a wall runs through ${esc(h.inside)}'s open floor - one of those two outlines is wrong.` });
     });
     // Coverage downgrades from the walkthrough inspection: elements the
     // camera never got a good look at. Capped so a rushed scan doesn't
@@ -12112,9 +12159,12 @@
     }
     const ackBtn = e.target.closest('.fpAckIssue');
     if(ackBtn && floorplanData){
-      const room = (floorplanData.rooms||[])[Number(ackBtn.dataset.roomIdx)];
-      if(room){
-        room[ackBtn.dataset.ack] = true;
+      // room -1 means the finding is about the PLAN, not one room (two
+      // rooms claiming the same floor). Its ack belongs on the plan.
+      const idxAck = Number(ackBtn.dataset.roomIdx);
+      const target = idxAck < 0 ? floorplanData : (floorplanData.rooms||[])[idxAck];
+      if(target){
+        target[ackBtn.dataset.ack] = true;
         saveFloorplanDraft();
         renderFloorplanValidation(floorplanData);
       }
@@ -14787,6 +14837,162 @@
       if(g > 1){ rooms++; ft += g; }
     });
     return { rooms, ft };
+  }
+  // ============ NUESTRA PROPIA VERIFICACION ============
+  // Apple entrega geometria; esto la revisa por su cuenta y puede
+  // CONTRADECIRLA. Un plano que solo confia en lo que le dieron no tiene
+  // como saber que se equivoco. Estas pruebas no usan ninguna API de
+  // Apple: son hechos geometricos que se comprueban solos.
+  //
+  // Primera prueba, y la que ya encontro un error real en la casa de
+  // Amilcar: DOS CUARTOS NO PUEDEN SER DUENOS DEL MISMO PISO. El Living
+  // Room y el Hallway reclaman 51.0 sq ft en comun, y el total impreso
+  // los suma dos veces - 677.5 en una hoja donde lo honesto es 626.5.
+  // Se mide por muestreo de rejilla solo dentro del rectangulo donde las
+  // dos cajas se cruzan, asi que un par de cuartos que ni se tocan no
+  // cuesta nada.
+  // El camino que el tecnico ANDUVO, que es evidencia fisica nuestra y no
+  // de Apple. Viaja en inspection.path (ver ScanInspector.pathTrace).
+  function fpWalkedPath(data, level){
+    const raw = data && data.inspection && data.inspection.path;
+    if(!Array.isArray(raw)) return [];
+    return raw.filter(q => q && isFinite(q.x) && isFinite(q.y) &&
+                           (level == null || (q.l || 1) === level));
+  }
+  // ¿Dos segmentos se cruzan de verdad? (no se tocan de puntita)
+  function fpSegmentsCross(a1, a2, b1, b2){
+    const d = (a2.x-a1.x)*(b2.y-b1.y) - (a2.y-a1.y)*(b2.x-b1.x);
+    if(Math.abs(d) < 1e-9) return false;
+    const t = ((b1.x-a1.x)*(b2.y-b1.y) - (b1.y-a1.y)*(b2.x-b1.x)) / d;
+    const u = ((b1.x-a1.x)*(a2.y-a1.y) - (b1.y-a1.y)*(a2.x-a1.x)) / d;
+    return t > 0.02 && t < 0.98 && u > 0.02 && u < 0.98;
+  }
+  // ¿El tecnico paso caminando por este tramo? Nadie atraviesa una pared:
+  // si camino por ahi, es una puerta o un paso, no una pared que falta.
+  // Se pide que el camino lo cruce SIN SALTOS (dos muestras seguidas y
+  // cercanas), porque un salto grande es la camara perdiendo el rastro y
+  // no un paso real.
+  function fpPathCrossesSegment(seg, path, maxStepFt){
+    const step = maxStepFt || 4;
+    for(let i = 1; i < path.length; i++){
+      const p = path[i-1], q = path[i];
+      if(Math.hypot(q.x-p.x, q.y-p.y) > step) continue;   // salto: no es un paso
+      if(fpSegmentsCross(p, q, seg.a, seg.b)) return true;
+    }
+    return false;
+  }
+  // Contradiccion pura: el camino atraviesa una pared modelada. O la pared
+  // no existe, o el rastreo se corrio. Se exige que el cruce ocurra lejos
+  // de las puntas de la pared y en un paso corto, para no acusar por el
+  // ruido de siempre en las esquinas ni por una puerta.
+  function fpPathCrossesWalls(data, level){
+    const path = fpWalkedPath(data, level);
+    if(path.length < 2) return [];
+    const hits = [];
+    ((data && data.rooms) || []).forEach(r => {
+      if(r.deleted) return;
+      if(level != null && (r.level||1) !== level) return;
+      const gaps = [];
+      ['doors','windows','openings'].forEach(k => (r[k]||[]).forEach(o => {
+        if(o && o.position && !o._removed) gaps.push(o);
+      }));
+      (r.walls||[]).forEach((w, wi) => {
+        if(!w.start || !w.end) return;
+        const L = Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y);
+        if(L < 2) return;
+        // acorta la pared por las puntas: las esquinas siempre tienen ruido
+        const ux = (w.end.x-w.start.x)/L, uy = (w.end.y-w.start.y)/L;
+        const trim = Math.min(1.0, L*0.2);
+        const seg = { a:{x:w.start.x+ux*trim, y:w.start.y+uy*trim},
+                      b:{x:w.end.x-ux*trim,   y:w.end.y-uy*trim} };
+        if(!fpPathCrossesSegment(seg, path, 3)) return;
+        // ¿habia una puerta o un paso justo ahi? entonces no es contradiccion
+        const near = gaps.some(o => {
+          const dx = w.end.x-w.start.x, dy = w.end.y-w.start.y, L2 = dx*dx+dy*dy || 1;
+          let t = ((o.position.x-w.start.x)*dx + (o.position.y-w.start.y)*dy)/L2;
+          t = Math.max(0, Math.min(1, t));
+          return Math.hypot(o.position.x-(w.start.x+dx*t), o.position.y-(w.start.y+dy*t)) <= 1.5;
+        });
+        if(!near) hits.push({ room: r.roomName || 'Room', wall: wi, lengthFt: L });
+      });
+    });
+    return hits;
+  }
+  function fpRoomsOverlapSqFt(data, onLevel){
+    const rooms = ((data && data.rooms) || []).filter(r =>
+      !r.deleted && (r.walls||[]).length && (!onLevel || onLevel(r)));
+    if(rooms.length < 2) return { pairs: [], sqFt: 0 };
+    const polys = rooms.map(r => fpOrderedRoomPolygon(r));
+    const boxes = polys.map(p => {
+      if(!p || p.length < 3) return null;
+      const xs = p.map(q => q.x), ys = p.map(q => q.y);
+      return { x0:Math.min(...xs), x1:Math.max(...xs), y0:Math.min(...ys), y1:Math.max(...ys) };
+    });
+    const CELL = 0.5;
+    const pairs = [];
+    let total = 0;
+    for(let i=0; i<rooms.length; i++) for(let j=i+1; j<rooms.length; j++){
+      const A = polys[i], B = polys[j], ba = boxes[i], bb = boxes[j];
+      if(!A || !B || !ba || !bb) continue;
+      const x0 = Math.max(ba.x0, bb.x0), x1 = Math.min(ba.x1, bb.x1);
+      const y0 = Math.max(ba.y0, bb.y0), y1 = Math.min(ba.y1, bb.y1);
+      if(x1 - x0 < CELL || y1 - y0 < CELL) continue;      // ni se tocan
+      let n = 0;
+      for(let x = x0; x < x1; x += CELL) for(let y = y0; y < y1; y += CELL){
+        const pt = { x: x + CELL/2, y: y + CELL/2 };
+        if(fpPointInPolygon(pt, A) && fpPointInPolygon(pt, B)) n++;
+      }
+      const sq = n * CELL * CELL;
+      // Un pelo de traslape es el grosor de una pared compartida, no un
+      // error. 4 sq ft es mas o menos 2 ft de pared: por debajo de eso no
+      // vale la pena molestarlo.
+      if(sq >= 4){
+        pairs.push({ a: rooms[i].roomName || `Room ${i+1}`, b: rooms[j].roomName || `Room ${j+1}`, sqFt: Math.round(sq*10)/10 });
+        total += sq;
+      }
+    }
+    return { pairs, sqFt: Math.round(total*10)/10 };
+  }
+
+  // Segunda prueba: una pared que va por el PISO ABIERTO de otro cuarto.
+  // Una pared compartida vive en el borde de los dos y no cuenta - por eso
+  // se exige que el punto este a mas de 0.8 ft de la orilla del otro
+  // poligono. Sin ese detalle la prueba acusaba 11 paredes de la casa real
+  // que estaban perfectamente bien.
+  function fpWallsInsideOtherRooms(data, onLevel){
+    const rooms = ((data && data.rooms) || []).filter(r =>
+      !r.deleted && (r.walls||[]).length && (!onLevel || onLevel(r)));
+    const polys = rooms.map(r => fpOrderedRoomPolygon(r));
+    const edgeDist = (p, poly) => {
+      let m = Infinity;
+      for(let i=0;i<poly.length;i++){
+        const a = poly[i], b = poly[(i+1)%poly.length];
+        const dx = b.x-a.x, dy = b.y-a.y, L2 = dx*dx+dy*dy || 1e-9;
+        let t = ((p.x-a.x)*dx + (p.y-a.y)*dy)/L2; t = Math.max(0, Math.min(1, t));
+        m = Math.min(m, Math.hypot(p.x-(a.x+dx*t), p.y-(a.y+dy*t)));
+      }
+      return m;
+    };
+    const hits = [];
+    rooms.forEach((r, ri) => (r.walls||[]).forEach((w, wi) => {
+      if(!w.start || !w.end) return;
+      if(Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) < 1) return;
+      rooms.forEach((r2, ri2) => {
+        if(ri2 === ri) return;
+        const P = polys[ri2];
+        if(!P || P.length < 3) return;
+        let inside = 0, n = 0;
+        for(let t = 0.15; t <= 0.85; t += 0.1){
+          n++;
+          const p = { x: w.start.x + (w.end.x-w.start.x)*t, y: w.start.y + (w.end.y-w.start.y)*t };
+          if(fpPointInPolygon(p, P) && edgeDist(p, P) > 0.8) inside++;
+        }
+        if(n && inside/n > 0.8){
+          hits.push({ room: r.roomName || `Room ${ri+1}`, wall: wi, inside: r2.roomName || `Room ${ri2+1}` });
+        }
+      });
+    }));
+    return hits;
   }
   function fpRoomFloorFill(room, X, Y){
     if(!room || (room.walls||[]).length < 3) return '';
