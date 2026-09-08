@@ -4498,7 +4498,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-08-DA';
+  const APP_BUILD = '2026-09-08-DB';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -11984,6 +11984,11 @@
             + ` - the total counts it twice. It prints ${shown.toFixed(1)}; the honest figure is about ${(shown - ov.sqFt).toFixed(1)}. Fix the outline of one of them.` });
       }
     }
+    // La puerta que un cuarto dibujo y el vecino no.
+    fpMirroredPortCheck(data, multiLv ? lvNow : null).slice(0, 3).forEach(m => {
+      issues.push({ kind: 'mirrored-port', room: m.missingIdx, mirror: m,
+        text: `${esc(m.fromRoom)} has a ${fpFeetInches(m.widthFt)} ${m.kind === 'doors' ? 'door' : 'passage'} on the wall it shares with ${esc(m.missingIn)}, but ${esc(m.missingIn)} shows solid wall there. It is the same opening seen from one side only.` });
+    });
     // Same idea: a wall running through another room's OPEN floor is a
     // contradiction - a shared wall lies on the boundary of both, never
     // inside one. (The boundary distance test matters: without it this
@@ -12131,6 +12136,9 @@
       // An issue the tech checked on-site gets an end state instead of
       // nagging "Export anyway?" forever - the flag persists in the draft
       // and floorplanValidate consults it, same as op._reviewed.
+      const mirrorBtn = it.mirror
+        ? `<div style="margin-top:6px;"><button class="btn btn-outline fpMirrorPort" data-to-room="${it.mirror.missingIdx}" data-wall="${esc(String(it.mirror.wallId))}" data-kind="${it.mirror.kind}" data-w="${it.mirror.widthFt}" data-x="${it.mirror.x}" data-y="${it.mirror.y}" type="button" style="padding:6px 10px;">+ Add it to ${esc(it.mirror.missingIn)} too</button></div>`
+        : '';
       const ackBtn = it.ack
         ? `<div style="margin-top:6px;"><button class="btn btn-outline fpAckIssue" data-room-idx="${it.room}" data-ack="${esc(it.ack)}" type="button" style="padding:6px 10px;">✓ Verified in person</button></div>`
         : '';
@@ -12144,7 +12152,7 @@
               : '')
           + `<button class="btn btn-outline fpSuggestWall" data-room-idx="${it.room}" data-ax="${it.seg.a.x}" data-ay="${it.seg.a.y}" data-bx="${it.seg.b.x}" data-by="${it.seg.b.y}" type="button" style="padding:6px 10px;">+ Add a straight wall (${fpFeetInches(it.seg.d)})</button></div>`
         : '';
-      return `<div style="padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">⚠️ ${it.text}${classify}${photoBtn}${suggestBtn}${ackBtn}</div>`;
+      return `<div style="padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">⚠️ ${it.text}${classify}${photoBtn}${suggestBtn}${mirrorBtn}${ackBtn}</div>`;
     }).join('');
     el.innerHTML = `<div style="border:1px solid #b8860b55; border-radius:10px; padding:10px 12px;">
       <div style="font-weight:700; font-size:13px; color:#d9a021; margin-bottom:4px;">Plan review - ${issues.length} item${issues.length>1?'s':''} to check</div>${coverageHeader}${rows}</div>`;
@@ -12152,6 +12160,24 @@
   $('#floorplanValidation').addEventListener('click', (e) => {
     const photoBtn = e.target.closest('.fpViewKeyframe');
     if(photoBtn){ fpShowKeyframePhoto(photoBtn.dataset.kf); return; }
+    const mp = e.target.closest('.fpMirrorPort');
+    if(mp && floorplanData){
+      const ri = Number(mp.dataset.toRoom);
+      const room = (floorplanData.rooms||[])[ri];
+      if(room){
+        const kind = mp.dataset.kind === 'openings' ? 'openings' : 'doors';
+        // Same opening, now recorded on the neighbour's OWN copy of the
+        // shared wall. _added marks it as hand work, so every disclosure
+        // the sheet already carries applies to it.
+        const entry = { id: fpNewId(), wallId: mp.dataset.wall,
+          position: { x: +mp.dataset.x, y: +mp.dataset.y },
+          widthFt: +mp.dataset.w, heightFt: 6.8, _added: true, _reviewed: true };
+        fpPushUndo();
+        fpCommitEdit(() => { room[kind] = room[kind] || []; room[kind].push(entry); }, [ri]);
+        renderFloorplanValidation(floorplanData);
+      }
+      return;
+    }
     const sc = e.target.closest('.fpSuggestCorner');
     if(sc && floorplanData){
       const ri = Number(sc.dataset.roomIdx);
@@ -14906,6 +14932,69 @@
   // Y NUNCA se aplica solo: cambia pies cuadrados que se facturan, asi
   // que se dibuja punteado (estimado) y se OFRECE con un boton, igual que
   // la pared sugerida que ya existia.
+  // UNA PUERTA QUE UN CUARTO DIBUJO Y EL VECINO NO.
+  //
+  // Una puerta esta en UNA pared, y esa pared la comparten dos cuartos.
+  // Si un cuarto la modelo y el otro no, el plano entregado tiene la
+  // puerta de un lado y pared ciega del otro. Eso pasa en su casa: el
+  // Hallway modelo una puerta de 3.19 ft que cae a 0.0141 ft (0.17
+  // PULGADAS) de la pared de 7.71 ft del Living Room, en medio del
+  // segmento - la misma particion fisica. El Living Room no la dibujo.
+  //
+  // Esto no usa ninguna API de Apple: es la geometria contra si misma.
+  // Y no es un umbral delicado: el siguiente puerto suelto de su casa
+  // esta a 2.34 ft de la pared mas cercana - 166 veces mas lejos.
+  function fpMirroredPortCheck(data, level){
+    const rooms = ((data && data.rooms) || []).filter(r => !r.deleted);
+    const ports = [];
+    rooms.forEach((r, ri) => {
+      if(level != null && (r.level||1) !== level) return;
+      ['doors','openings'].forEach(kind => (r[kind]||[]).forEach((o, oi) => {
+        if(!o || !o.position || o._removed) return;
+        ports.push({ ri, roomName: r.roomName || `Room ${ri+1}`, kind, oi,
+                     id: o.id, w: +o.widthFt || 0, p: o.position, lvl: r.level||1 });
+      }));
+    });
+    // El MISMO objeto visto desde los dos lados. 1.0 ft es lo mas
+    // estrecho que sigue emparejando los 3 pares reales de su casa.
+    const paired = new Set();
+    for(let i=0; i<ports.length; i++) for(let j=i+1; j<ports.length; j++){
+      if(ports[i].ri === ports[j].ri || ports[i].lvl !== ports[j].lvl) continue;
+      if(Math.hypot(ports[i].p.x-ports[j].p.x, ports[i].p.y-ports[j].p.y) <= 1.0){
+        paired.add(i); paired.add(j);
+      }
+    }
+    const out = [];
+    ports.forEach((pt, i) => {
+      if(paired.has(i)) return;
+      // Un "paso" de media pulgada es ruido de RoomPlan, no una puerta.
+      // Sin esta reja, el escaneo anterior daba 2 falsos positivos, los
+      // dos de un opening de 0.04 ft. Con ella: 1 acierto, 0 falsos, en
+      // los dos escaneos guardados.
+      if(pt.w < 1.5) return;
+      let best = null;
+      rooms.forEach((r2, rj) => {
+        if(rj === pt.ri || (r2.level||1) !== pt.lvl) return;
+        (r2.walls||[]).forEach(w => {
+          if(!w.start || !w.end) return;
+          const dx = w.end.x-w.start.x, dy = w.end.y-w.start.y, L2 = dx*dx+dy*dy;
+          if(L2 < 1e-6) return;
+          const t = ((pt.p.x-w.start.x)*dx + (pt.p.y-w.start.y)*dy)/L2;
+          // Dentro del segmento, no en la punta: una punta es una esquina,
+          // y toda esquina tiene paredes de otros cuartos cerca.
+          if(t < 0.05 || t > 0.95) return;
+          const d = Math.hypot(pt.p.x-(w.start.x+dx*t), pt.p.y-(w.start.y+dy*t));
+          if(d > 0.5) return;
+          if(!best || d < best.d) best = { d, rj, roomName: r2.roomName || `Room ${rj+1}`, wallId: w.id };
+        });
+      });
+      if(best) out.push({ fromRoom: pt.roomName, fromIdx: pt.ri, kind: pt.kind, oi: pt.oi,
+                          widthFt: pt.w, x: pt.p.x, y: pt.p.y,
+                          missingIn: best.roomName, missingIdx: best.rj,
+                          wallId: best.wallId, distFt: Math.round(best.d*10000)/10000 });
+    });
+    return out;
+  }
   function fpInferCorner(room, seg){
     if(!room || !seg || !seg.a || !seg.b) return null;
     const D = (p, q) => Math.hypot(p.x-q.x, p.y-q.y);
