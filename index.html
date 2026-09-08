@@ -1142,7 +1142,8 @@
           <select id="l-client">
             <option value="">Escoja el cliente</option>
             <option value="Otro">Otro</option>
-          </select></div>
+          </select>
+          <button type="button" class="btn btn-outline btn-block" id="lAddClient" style="margin-top:8px;">&#10133; Agregar cliente</button></div>
       </div>
       <div class="field" id="lClientOtherField" hidden><label>¿Qué cliente?</label><input type="text" id="l-client-other" placeholder="Nombre del cliente" autocomplete="off"></div>
       <div class="field"><label>Líder de Cuadrilla<span class="en"> / Crew Leader</span></label><input type="text" id="l-leader" placeholder="Name / Nombre"></div>
@@ -2614,8 +2615,8 @@
     put('#casualJoinCode', teal ? 'Código de AMG Moving' : 'Código de trabajadores', 'placeholder');
     put('#authCasualHint', (teal ? 'Código de AMG Moving' : 'Código de trabajadores') + ', su nombre y su PIN de 4 dígitos.');
     put('#teSideName', teal ? ' de mudanza (AMG)' : '');
-    put('#laborTileTitle', teal ? 'Reporte de mudanza' : 'Mano de Obra<span class="en"> / Labor</span>', 'innerHTML');
-    put('#laborTileHint', teal ? 'Reporte de la mudanza del día · queda en Recibidos AMG' : 'Reporte del día y enviarlo al manager');
+    put('#laborTileTitle', teal ? 'Clientes' : 'Mano de Obra<span class="en"> / Labor</span>', 'innerHTML');
+    put('#laborTileHint', teal ? 'Escoja el cliente o agregue uno nuevo, y haga su reporte de mudanza' : 'Reporte del día y enviarlo al manager');
     const crewBtn = document.querySelector('#authRole [data-go="authCrew"]'); if(crewBtn) crewBtn.textContent = teal ? 'Crew de mudanza (código del equipo)' : 'Líder de grupo';
     put('#casualCompany', teal ? 'AMG MOVING' : 'RESTORATION DOCTOR');
     put('#casualMyTitle', teal ? 'Sus horas de AMG' : 'Sus horas');
@@ -2895,7 +2896,7 @@
     const iw = $('#inboxWrap'); if(iw) iw.hidden = mg && laborFormOpen;   // en el wizard AMG no se ve ninguna lista debajo del banner
     // Extras: en AMG las opciones son de mudanza y nunca traen '($150)'.
     $$('.s-extra', panel).forEach(sel => paintExtraOptions(sel, mg));
-    const st = $('#secTitle'); if(st && panel.classList.contains('active') && !document.body.classList.contains('menu')) st.innerHTML = mg ? 'Reporte de mudanza' : sectionTitleHtml('labor');
+    const st = $('#secTitle'); if(st && panel.classList.contains('active') && !document.body.classList.contains('menu')) st.innerHTML = mg ? 'Clientes' : sectionTitleHtml('labor');
     paintCompanyHeader();
   }
   // ---- Cliente de la mudanza: el select escribe en #l-team (el campo de siempre) ----
@@ -3061,21 +3062,17 @@
     }catch(e){ if(AMG_CLIENTS_STATE !== 'loaded') AMG_CLIENTS_STATE = 'error'; return false; }
   }
   // Los selects de cliente (reporte de mudanza, gasto, pago) se pintan desde la lista; el valor escogido se conserva.
-  function paintClientSelect(sel, firstLabel, conNuevo){
+  function paintClientSelect(sel, firstLabel){
     if(!sel) return;
     const cur = sel.value;
     let html = '<option value="">' + esc(firstLabel) + '</option>';
     amgClientNames().forEach(n => { html += '<option value="' + esc(n) + '">' + esc(n) + '</option>'; });
     html += '<option value="Otro">Otro</option>';
-    // Antes habia que salirse a la pantalla de Clientes, agregarlo, y volver a
-    // empezar el reporte. Ahora se agrega desde aqui y se regresa con el
-    // cliente ya escogido.
-    if(conNuevo) html += '<option value="__nuevo__">&#10133; Cliente nuevo (con sus datos)</option>';
     sel.innerHTML = html;
     if(cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
   }
   function paintClientOptions(){
-    paintClientSelect($('#l-client'), 'Escoja el cliente', true);
+    paintClientSelect($('#l-client'), 'Escoja el cliente');
     paintClientSelect($('#g-client'), '—');
     paintClientSelect($('#p-client'), 'Escoja el cliente');
     // OJO: esto corre tambien al arrancar, antes de que exista formKind (const mas abajo): se lee el campo directo.
@@ -3086,17 +3083,18 @@
   // El cliente del reporte de mudanza que esta en pantalla (lo que se escogio en Move Info).
   function formClient(){ return (formKind() === 'mudanza' && $('#l-team')) ? String($('#l-team').value || '').trim() : ''; }
   let acVolverAlReporte = false;      // se entro a Clientes desde el reporte de mudanza
+  // Antes habia que salirse al cuadro de Clientes, agregarlo y volver a empezar
+  // el reporte. Ahora se agrega desde aqui y se regresa con el cliente puesto.
+  function abrirClienteNuevo(){
+    acVolverAlReporte = true;
+    if(typeof acFill === 'function') acFill(null);
+    showTab('amgclientes'); pushBack('labor');
+    const n = $('#acName'); if(n){ n.focus(); n.scrollIntoView({ block:'center' }); }
+  }
+  if($('#lAddClient')) $('#lAddClient').addEventListener('click', abrirClienteNuevo);
   function clientToTeam(){
     const sel = $('#l-client'), other = $('#l-client-other'), of = $('#lClientOtherField'), team = $('#l-team');
     if(!sel || !team) return;
-    if(sel.value === '__nuevo__'){
-      sel.value = '';                 // que no se quede "__nuevo__" escrito como cliente
-      acVolverAlReporte = true;
-      if(typeof acFill === 'function') acFill(null);
-      showTab('amgclientes'); pushBack('labor');
-      const n = $('#acName'); if(n){ n.focus(); n.scrollIntoView({ block:'center' }); }
-      return;
-    }
     const otro = sel.value === 'Otro';
     if(of) of.hidden = !otro;
     team.value = otro ? ((other && other.value) || '').trim() : sel.value;
@@ -3412,7 +3410,11 @@
   function updateNavButtons(){
     const top = navStack.length ? navStack[navStack.length - 1] : null;
     const b = $('#backMenu');
-    if(b) b.innerHTML = top ? '&#9664; ' + (SECTION_NAMES[top] || 'Atrás') : '&#9664; Menú';
+    // En la puerta de AMG esa pantalla se llama "Clientes", no "Mano de Obra":
+    // el Atras tiene que decir el mismo nombre que el titulo.
+    const nombreTop = (top === 'labor' && typeof laborMode !== 'undefined' && laborMode === 'mudanza')
+      ? 'Clientes' : (SECTION_NAMES[top] || 'Atrás');
+    if(b) b.innerHTML = top ? '&#9664; ' + nombreTop : '&#9664; Menú';
     const cur = document.querySelector('.tab-panel.active');
     // El modo revision salta las preguntas de los formularios; la navegacion
     // no la toca. Con el && !skipSteps aparecia un Atras que no llevaba a nada.
@@ -4426,7 +4428,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CN';
+  const APP_BUILD = '2026-09-07-CO';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
