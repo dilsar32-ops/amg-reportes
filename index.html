@@ -4498,7 +4498,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CX';
+  const APP_BUILD = '2026-09-07-CY';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -14767,6 +14767,27 @@
   // fpRoomDisplayAreaSqFt already uses for the printed area - has none of
   // it. The stale comment that used to sit here claimed the fill and the
   // area calc shared vertices; they stopped sharing them long ago.
+  // How much of a room's boundary the app closed BY ITSELF, in feet. A
+  // doorway-sized bridge is ordinary; a 10 ft one is the app drawing a
+  // straight line across a side the scan never captured. The plan used to
+  // print "677.5 sq ft" with no note at all while three of five rooms had
+  // a stretch like that. On a document an adjuster reads, the number has
+  // to say which part was measured and which part was closed for it.
+  function fpGuessedBoundaryFt(room){
+    const gi = {};
+    fpOrderedRoomPolygon(room, gi);
+    return (gi.bridgeSegs || []).reduce((t, b) => t + (b && b.d > 1 ? b.d : 0), 0);
+  }
+  function fpPlanHasGuessedBoundary(data, onLevel){
+    let rooms = 0, ft = 0;
+    ((data && data.rooms) || []).forEach(r => {
+      if(r.deleted || !(r.walls||[]).length) return;
+      if(onLevel && !onLevel(r)) return;
+      const g = fpGuessedBoundaryFt(r);
+      if(g > 1){ rooms++; ft += g; }
+    });
+    return { rooms, ft };
+  }
   function fpRoomFloorFill(room, X, Y){
     if(!room || (room.walls||[]).length < 3) return '';
     const gap = {};
@@ -15097,8 +15118,17 @@
       s += `<text x="${svgW - 18}" y="${y0+102}" font-size="11" font-weight="600" fill="#b8860b" text-anchor="end">* = adjusted by hand${n ? ` (${n} edit${n>1?'s':''})` : ''}</text>`;
     }
     const rx = svgW - 18;
-    s += `<text x="${rx}" y="${y0+28}" font-size="11" font-weight="700" letter-spacing="0.08em" fill="#8a95a3" text-anchor="end">TOTAL AREA</text>`;
+    const multiLvl = floorplanLevels(data).length > 1;
+    const guessed = fpPlanHasGuessedBoundary(data, r => !multiLvl || (r.level||1) === floorplanSelectedLevel);
+    s += `<text x="${rx}" y="${y0+28}" font-size="11" font-weight="700" letter-spacing="0.08em" fill="#8a95a3" text-anchor="end">TOTAL AREA${guessed.rooms ? ' (APPROX.)' : ''}</text>`;
     s += `<text x="${rx}" y="${y0+60}" font-size="21" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#1C2530" text-anchor="end">${fpDisplayTotalAreaSqFt(data).toFixed(1)} sq ft</text>`;
+    // Says WHICH part is estimated, on the sheet itself - the exported PDF
+    // skips the on-screen legend, so this is the only place an adjuster
+    // reading the paper would ever learn it.
+    if(guessed.rooms){
+      s += `<text x="${rx}" y="${y0+78}" font-size="11" font-weight="600" fill="#8a95a3" text-anchor="end">`
+        + `${guessed.rooms} room${guessed.rooms>1?'s':''}: ${Math.round(guessed.ft)} ft of boundary closed by the app (shown dashed)</text>`;
+    }
     const roomsTxt = `${roomCount} room${roomCount===1?'':'s'}${levels.length>1 ? ' · ' + levels.length + ' levels' : ''}`;
     s += `<text x="${rx}" y="${y0+84}" font-size="12" font-weight="500" fill="#5a6472" text-anchor="end">${esc(roomsTxt)}</text>`;
     s += `</g>`;
@@ -15184,7 +15214,11 @@
       const labelOff = room._labelOffsetPx || {dx:0, dy:0};
       const labelX = X(c.x) + labelOff.dx, labelY = Y(c.y) + labelOff.dy;
       const label = esc((room.roomName || `Room ${idx+1}`).toUpperCase());
-      const areaTxt = fpRoomDisplayAreaSqFt(room).toFixed(1);
+      // "approx." after the unit, not inside the number - a room whose
+      // boundary the app had to close for itself must not print a bare
+      // figure on a document someone bills from.
+      const areaTxt = fpRoomDisplayAreaSqFt(room).toFixed(1) + ' sq ft'
+        + (fpGuessedBoundaryFt(room) > 1 ? ' approx.' : '');
       // Overall room dimensions (width x depth), not just area - the
       // bounding box of its own walls, which is exactly the room's real
       // width/depth for a rectangular room now that the whole plan is
@@ -15238,7 +15272,7 @@
       const labelLines = fpMeasurePrefs.roomArea
         ? `<text x="${labelX}" y="${labelY-48*k}" font-size="${f(30)}" font-weight="700" letter-spacing="0.5" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${label}</text>`
           + `<text x="${labelX}" y="${labelY-14*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${dimTxt}</text>`
-          + `<text x="${labelX}" y="${labelY+18*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${areaTxt} sq ft</text>`
+          + `<text x="${labelX}" y="${labelY+18*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${areaTxt}</text>`
         : `<text x="${labelX}" y="${labelY}" font-size="${f(30)}" font-weight="700" letter-spacing="0.5" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${label}</text>`;
       overlays.push(`<g class="fp-roomlabel" data-room-idx="${idx}" style="cursor:grab;">${labelLines}</g>`);
       // Auto-detected sub-areas (closet/laundry alcoves): name + own
