@@ -89,8 +89,13 @@
     padding:calc(10px + env(safe-area-inset-top)) 12px 10px;
     background:var(--card); border-bottom:1px solid var(--line);
   }
-  .fpv-topbar-title{flex:1; min-width:0; display:flex; flex-direction:column; gap:6px;}
-  .fpv-topbar-title>span{font-size:15px; font-weight:600; color:var(--blue);}
+  .fpv-topbar-title{flex:1 1 auto; min-width:56px; overflow:hidden; display:flex; flex-direction:column; gap:6px;}
+  /* Clip, never spill: with min-width:0 the box collapsed to zero and the
+     title text painted OUTSIDE it, underneath the action buttons. */
+  .fpv-topbar-title>span{
+    font-size:15px; font-weight:600; color:var(--blue);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
   .fpv-topbar-actions{display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;}
   .fpv-topbar-actions .btn{width:auto; padding:8px 12px; font-size:12px;}
   .fpv-icon-btn{
@@ -260,7 +265,9 @@
   .fpv-drawer-content .clockhint{font-size:11px; margin:6px 0 0;}
   /* While a detail panel is open, the legend and idle hint make way. */
   .fpv-drawer-content:has([id$="Detail"]:not([hidden])) > .clockhint,
+  .fpv-drawer-content:has([id$="Detail"]:not([hidden])) > .fpv-drawer-extra,
   .fpv-drawer-content:has([id$="Detail"]:not([hidden])) > .hint{display:none;}
+  .fpv-drawer-extra{margin-top:8px;}
   /* AI Fix modal: explicit display so the hidden attribute wins cleanly. */
   #fpAiFixModal{
     position:fixed; inset:0; z-index:80; background:rgba(8,12,20,0.6);
@@ -1658,8 +1665,7 @@
         <button type="button" class="btn btn-outline" id="floorplanUndoBtn" style="color:var(--danger);" hidden>Undo</button>
         <button type="button" class="btn btn-outline" id="fpAiFixBtn">&#10024; AI Fix</button>
         <button type="button" class="btn btn-ink" id="floorplanEditToggle">Edit Plan</button>
-        <button type="button" class="btn btn-accent" id="fpvView3d">View in 3D</button>
-        <button type="button" class="btn btn-outline" id="fpvExport3d">Export 3D</button>
+        <button type="button" class="btn btn-accent" id="fpvView3d" title="View in 3D">3D</button>
       </div>
     </header>
     <div class="fpv-body">
@@ -1738,6 +1744,13 @@
         <div class="fpv-drawer-content">
           <p class="clockhint" style="margin-top:6px;"><span style="color:#3ddc84;">&#9679;</span> Door &nbsp; <span style="color:#5b9bd9;">&#9679;</span> Window &nbsp; <span style="color:#999;">┄┄</span> Low-confidence wall</p>
           <p class="hint" id="fpvIdleHint">Tap anything on the plan - a wall, door, window, furniture, or a room's open floor - and its options appear here.</p>
+          <!-- Export 3D lives here, not in the top bar: with it up there the
+               action row needed 338px of a 375px screen, wrapped to two rows,
+               and squeezed the title to zero width so "Floor Plan" spilled out
+               underneath the buttons. Measured: top bar 117px -> 65px. -->
+          <div class="fpv-drawer-extra">
+            <button type="button" class="btn btn-outline" id="fpvExport3d" style="width:100%;">Export 3D Model</button>
+          </div>
 
           <div id="floorplanRoomDetail" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--line);" hidden>
             <div style="display:flex; align-items:center; gap:8px;">
@@ -4485,7 +4498,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CW';
+  const APP_BUILD = '2026-09-07-CX';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8839,6 +8852,8 @@
     fpResetUndoStack();
     floorplanAlignRooms(floorplanData);
     if(!floorplanData._handEdited){ floorplanRectifyWalls(floorplanData); floorplanRefineGeometry(floorplanData); }
+    const goneNames = fpCleanPhantomSpaceLabels(floorplanData);
+    if(goneNames && goneNames.length){ floorplanData._phantomLabelsRemoved = goneNames; saveFloorplanDraft(); }
     renderFloorplan(floorplanData);
     $('#floorplanResultCard').hidden = false;
     // Se puede llegar desde la lista de escaneos: hay que volver a la ventana
@@ -9168,7 +9183,15 @@
             const into = Math.abs(rx*abux + ry*abuy);
             return along <= width/2 + 0.5 && into <= depth/2 + 0.5;
           });
-          if(hasDoor) continue;
+          // The door veto exists to kill entry vestibules (you walk THROUGH
+          // a doorway; it is not a closet). But a real closet with its own
+          // door looks identical to it, and after a hand edit put a door at
+          // the mouth of a real Master Bedroom closet this veto silently
+          // deleted the pocket - and with it the name the tech had typed.
+          // A pocket a human already named is not a guess to be overruled.
+          const namedBefore = (room._subAreas||[]).some(q => q._renamed &&
+            Math.hypot(q.cx - cx, q.cy - cy) <= Math.max(1.5, Math.max(width, depth)/2));
+          if(hasDoor && !namedBefore) continue;
           // Honest guess: Laundry if a washer/dryer sits in the pocket.
           let name = 'Closet';
           (room.objects||[]).forEach(o => {
@@ -9195,10 +9218,20 @@
         if(!dedup.some(isDupOf)) dedup.push(p);
       });
       const prev = room._subAreas || [];
-      room._subAreas = dedup.map(p => {
+      const carried = dedup.map(p => {
         const old = prev.find(q => q._renamed && Math.hypot(q.cx-p.cx, q.cy-p.cy) <= 1.5);
         return old ? Object.assign(p, { name: old.name, _renamed: true, _suggested: false }) : p;
       });
+      // This assignment used to be unconditional, and it runs on EVERY
+      // render - so the moment detection came back empty (a hand edit
+      // changing the outline is enough), a name the tech had typed was
+      // gone for good, with no warning and no undo entry, because this
+      // is a render path and not fpCommitEdit. A named pocket now
+      // survives its own detection failing.
+      prev.filter(q => q._renamed).forEach(q => {
+        if(!carried.some(p => Math.hypot(p.cx-q.cx, p.cy-q.cy) <= 1.5)) carried.push(q);
+      });
+      room._subAreas = carried;
     });
   }
 
@@ -9267,6 +9300,8 @@
         floorplanRectifyWalls(floorplanData);
         floorplanRefineGeometry(floorplanData);
       }
+      const gone = fpCleanPhantomSpaceLabels(floorplanData);
+      if(gone && gone.length){ floorplanData._phantomLabelsRemoved = gone; saveFloorplanDraft(); }
       renderFloorplan(floorplanData);
     }
     paintFpSaved();
@@ -11995,6 +12030,13 @@
         : `<div style="font-size:12px; color:#d9a021; margin-bottom:6px;">The walkthrough coverage check did not run this scan (${esc(why)}) - camera coverage of walls/doors/windows was NOT verified.</div>`;
     }
     // Auto-straightening disclosure - never silent about touched geometry.
+    if(data._phantomLabelsRemoved && data._phantomLabelsRemoved.length){
+      const n = data._phantomLabelsRemoved.length;
+      coverageHeader += `<div style="font-size:12px; color:var(--ink-soft); margin-bottom:6px;">`
+        + `Removed ${n} space name${n>1?'s':''} the old detector invented on a broken outline `
+        + `(${esc(data._phantomLabelsRemoved.join(', '))}). They were not real spaces - `
+        + `they sat on floor a room already owns. Names you placed by hand were not touched.</div>`;
+    }
     if(data._rectified){
       coverageHeader += `<div style="font-size:12px; color:var(--ink-soft); margin-bottom:6px;">${data._rectified} wall${data._rectified>1?'s':''} auto-straightened to square (small measurement skew) - check those corners look right.</div>`;
     }
@@ -13032,6 +13074,66 @@
   // covered by neither a room polygon nor a wall, flood-filled; a pocket
   // that never reaches the outside and is at least 12 sq ft is a real
   // space that deserves a name. The app ASKS - it never guesses one.
+  // fpAiFragileOutline only catches an EXACTLY repeated vertex. A
+  // reconstructed outline can also double back on itself without ever
+  // repeating a point - the closing bridge runs back along the way it
+  // came, carving a notch out of the room's own floor. The real Bathroom
+  // does this: its outline closes from (4.4,-3.9) to (-4.3,-4.3) and
+  // straight back out to (11.7,-4.3), and the notch it cuts came back as
+  // an 8'-11" x 2'-5" "unclaimed space" sitting on the bathroom floor.
+  // Same treatment as a figure-eight: the polygon cannot be trusted to
+  // say what floor the room owns, so fall back to its bounding box.
+  function fpOutlineDoublesBack(room){
+    const poly = fpOrderedRoomPolygon(room);
+    if(!poly || poly.length < 4) return false;
+    const n = poly.length;
+    for(let i=0;i<n;i++){
+      const a = poly[(i-1+n)%n], b = poly[i], c = poly[(i+1)%n];
+      const ux = b.x-a.x, uy = b.y-a.y, vx = c.x-b.x, vy = c.y-b.y;
+      const lu = Math.hypot(ux,uy), lv = Math.hypot(vx,vy);
+      if(lu < 0.3 || lv < 0.3) continue;
+      if((ux*vx + uy*vy)/(lu*lv) <= -0.98) return true;   // turns back on itself
+    }
+    return false;
+  }
+  // One-time cleanup of space names the OLD, broken detector invented.
+  // Before the outline fixes, a room whose reconstructed outline doubled
+  // back had a diagonal wedge of its own floor read as "unclaimed", and
+  // the app asked the tech to name it. That is how a 13'-5" x 12'-11"
+  // "laundry room" ended up printed on top of a real 16'-2" x 13'-5"
+  // MASTER BEDROOM. Those labels are permanent - nothing in the app ever
+  // re-checked or deleted one, and the old dedupe made them self-hiding,
+  // so pressing AI Fix again could never heal the plan.
+  //
+  // The test is not a heuristic about size or position: re-run the FIXED
+  // detector with the stored labels out of the way, and a label that no
+  // longer sits on any space the detector still finds was, by definition,
+  // an artifact of the broken outline. A label the tech placed himself
+  // (_byHand, from fpPlaceName) is never touched, and on a multi-level
+  // plan only the level actually examined is judged.
+  function fpCleanPhantomSpaceLabels(data){
+    const labels = data && data._spaceLabels;
+    if(!Array.isArray(labels) || !labels.length) return null;
+    let voids = [];
+    try {
+      const probe = JSON.parse(JSON.stringify(data));
+      delete probe._spaceLabels;
+      voids = fpAiFindVoids(probe) || [];
+    } catch(_){ return null; }
+    const multi = floorplanLevels(data).length > 1;
+    const lvl = floorplanSelectedLevel;
+    const kept = [], dropped = [];
+    labels.forEach(l => {
+      const lLvl = l.level || 1;
+      if(l._byHand || (multi && lLvl !== lvl)){ kept.push(l); return; }
+      const near = Math.max(3, Math.min(+l.w||0, +l.d||0) * 0.6);
+      const still = voids.some(v => (v.level||1) === lLvl && Math.hypot(v.cx - l.x, v.cy - l.y) <= near);
+      (still ? kept : dropped).push(l);
+    });
+    if(!dropped.length) return null;
+    data._spaceLabels = kept;
+    return dropped.map(l => (l.name||'').trim()).filter(Boolean);
+  }
   function fpAiFindVoids(work){
     if(work.merged === false) return [];
     const multi = floorplanLevels(work).length > 1;
@@ -13053,13 +13155,39 @@
     minX-=PAD; minY-=PAD; maxX+=PAD; maxY+=PAD;
     const nx = Math.ceil((maxX-minX)/CELL), ny = Math.ceil((maxY-minY)/CELL);
     if(nx*ny > 40000) return []; // absurdly large plan - skip rather than stall
-    const polys = rooms.map(r => fpOrderedRoomPolygon(r)).filter(p => p && p.length >= 3);
+    // A room whose outline doubles back on itself cannot say which floor
+    // it owns: fpPointInPolygon is an even-odd ray cast, so the crossed
+    // lobe reads as OUTSIDE and a diagonal wedge of the room's OWN floor
+    // comes back "unclaimed". That is exactly how a 13'-5" x 12'-11"
+    // phantom space landed on top of a real 16'-2" x 13'-5" Master
+    // Bedroom and the tech was asked to name his own bedroom. AI Fix's
+    // gap-closing step already refuses to trust these outlines
+    // (fpAiFragileOutline, used ~60 lines above) - this step did not.
+    // Their BOUNDING BOX is still a hard fact, so it still claims space;
+    // only the fine-grained polygon answer is thrown away.
+    const polys = [];
+    const fragileBoxes = [];
+    rooms.forEach(r => {
+      if(fpAiFragileOutline(r) || fpOutlineDoublesBack(r)){
+        // Only a real room falls back to its box. A 2-wall fragment has
+        // no outline at all, and letting its box claim floor swallowed a
+        // genuine enclosed pocket lying between two rooms.
+        if((r.walls||[]).length >= 3){
+          const b = floorplanRoomBounds(r);
+          if(b && isFinite(b.minX)) fragileBoxes.push(b);
+        }
+        return;
+      }
+      const p = fpOrderedRoomPolygon(r);
+      if(p && p.length >= 3) polys.push(p);
+    });
     // 0 free / 1 wall or room / 2 outside
     const grid = new Uint8Array(nx*ny);
     for(let gy=0; gy<ny; gy++) for(let gx=0; gx<nx; gx++){
       const px = minX + (gx+0.5)*CELL, py = minY + (gy+0.5)*CELL;
       const pt = {x:px, y:py};
       let covered = polys.some(p => fpPointInPolygon(pt, p));
+      if(!covered) covered = fragileBoxes.some(b => px >= b.minX && px <= b.maxX && py >= b.minY && py <= b.maxY);
       if(!covered){
         // 0.45ft = wall half-thickness + a little slack. Bigger radii
         // swallowed a real 2.4ft-wide closet strip whole.
@@ -13112,6 +13240,14 @@
         bx0=Math.min(bx0,cx2); bx1=Math.max(bx1,cx2);
         by0=Math.min(by0,cy2); by1=Math.max(by1,cy2);
       });
+      // A real nameless space is a compact pocket. A component that does
+      // not fill its own bounding box is a thin band snaking between
+      // walls - the signature of a broken outline. The phantom "laundry
+      // room" measured 12.4 x 12.4 ft of bbox holding 38.8 sq ft of real
+      // cells: 25% full. Without this the printed w x d is a straight
+      // lie, because w/d come from the bbox while area is the cell count.
+      const bboxArea = (bx1-bx0+1) * (by1-by0+1) * CELL * CELL;
+      if(bboxArea > 0 && areaSqFt / bboxArea < 0.55) continue;
       // The wall-coverage radius shaved ~0.45ft off each side - put it
       // back so the reported size matches the real clear space.
       const sp = {
@@ -13124,7 +13260,25 @@
       // Already labeled on a previous pass? Then it is done. Same FLOOR
       // only - an upstairs label at the same plan x/y is a different
       // physical space.
-      const already = (work._spaceLabels||[]).some(q => (q.level||1) === (sp.level||1) && Math.hypot(q.x-sp.cx, q.y-sp.cy) <= 3);
+      // The old test was a fixed 3ft radius against existing space labels
+      // ONLY - meaningless against a 12ft void, blind to room names and to
+      // the CLOSET pockets floorplanDetectSubAreas draws, and one-way, so
+      // a phantom label suppressed its own corrected replacement and the
+      // plan could never heal by pressing AI Fix again. Now the radius
+      // scales with the space being proposed, and every family of label
+      // that is already on the drawing counts.
+      const near = Math.max(3, Math.min(sp.w, sp.d) * 0.6);
+      const sameLevel = q => (q.level||1) === (sp.level||1);
+      const already = (work._spaceLabels||[]).some(q => sameLevel(q) && Math.hypot(q.x-sp.cx, q.y-sp.cy) <= near)
+        || rooms.some(r => {
+             // Only rooms that actually draw a name count. A 2-wall
+             // fragment has no meaningful anchor, and letting it vote
+             // here silently swallowed a genuine enclosed pocket.
+             if((r.walls||[]).length < 3) return false;
+             const a = floorplanLabelAnchor(r);
+             return a && Math.hypot(a.x-sp.cx, a.y-sp.cy) <= near;
+           })
+        || rooms.some(r => (r._subAreas||[]).some(sa => Math.hypot(sa.cx-sp.cx, sa.cy-sp.cy) <= near));
       if(!already) voids.push(sp);
     }
     return voids;
@@ -13957,6 +14111,22 @@
     const poly = kept[0].map(p => ({x:p.x,y:p.y}));
     const rest = kept.slice(1);
     while(rest.length){
+      // THE root cause of the "grey shadows" and of the app asking the
+      // tech to name his own bedroom. If what has been chained so far
+      // ALREADY closes, it is the room's outline - full stop. Whatever
+      // chain is left over is an INTERIOR wall of that room, not a piece
+      // of its boundary, and bridging back out to it draws a figure
+      // eight across the room's own floor. On the real Master Bedroom the
+      // ring closed cleanly at 8 walls and the loop then bridged 15.5 ft
+      // back to the closet's mouth wall and 19.2 ft home again, which
+      // made an even-odd point test answer "outside" for most of the
+      // bedroom. A leftover is NOT a gap - it is reported separately so
+      // AI Fix never proposes a wall to close something that is closed.
+      if(poly.length >= 3 &&
+         Math.hypot(poly[0].x-poly[poly.length-1].x, poly[0].y-poly[poly.length-1].y) <= tol){
+        if(gapInfo) gapInfo.leftovers = rest.map(c => c.map(pt => ({x:pt.x, y:pt.y})));
+        break;
+      }
       const tail = poly[poly.length-1];
       let bi=-1, bflip=false, bd=Infinity;
       rest.forEach((c,i) => {
@@ -14584,7 +14754,49 @@
   // rooms' object arrays (a real scan had the same refrigerator in both
   // the Kitchen's and the Laundry's lists - drawn twice, the stacked
   // boxes read as a mystery gray blob).
-  function buildFloorplanRoomContent(room, roomIdx, X, Y, scale, allRooms, buildingCentroid, overlays, drawnObjectKeys){
+  // The room floor tint used to be drawn from room.walls in RAW ARRAY
+  // ORDER. RoomPlan does not hand walls back as a connected loop, so on a
+  // real house that ring crosses itself, and under SVG's default nonzero
+  // fill rule the crossed lobes come out UNPAINTED - straight-edged
+  // diagonal wedges of bare sheet. That is what the field reported as
+  // "grey shadows... maybe places the scanner could not scan": a drawing
+  // artifact, not a coverage statement. Measured on the real 5-room scan:
+  // 4 of 5 rooms self-intersected, and the Master Bedroom's fill covered
+  // 10% of its own bounding box while its raw-order shoelace area read
+  // 8.2 sq ft for a 155.5 sq ft room. The reconstructed outline - the one
+  // fpRoomDisplayAreaSqFt already uses for the printed area - has none of
+  // it. The stale comment that used to sit here claimed the fill and the
+  // area calc shared vertices; they stopped sharing them long ago.
+  function fpRoomFloorFill(room, X, Y){
+    if(!room || (room.walls||[]).length < 3) return '';
+    const gap = {};
+    const poly = fpOrderedRoomPolygon(room, gap);
+    if(!poly || poly.length < 3) return '';
+    const pts = poly.map(p => ({ x: X(p.x), y: Y(p.y) }));
+    // A repeated vertex means the outline doubles back on itself - the
+    // shape is a traversal artifact, not a room boundary. Tint it, but
+    // never let it read as a measured floor on an insurance document.
+    // Tinting a doubled-back outline anyway does NOT remove the wedges:
+    // under nonzero winding the crossed lobes stay bare, just in another
+    // shade, and the traversal never encloses the missing floor in the
+    // first place. An untinted room reads as "the app is not claiming
+    // this floor", which is the truth, and floorplanValidate's "break in
+    // the outline" item already carries the message with a one-tap fix.
+    if(fpAiFragileOutline(room)) return '';
+    let out = `<polygon points="${fpPts(pts)}" fill="${FLOORPLAN_FLOOR_FILL}"/>`;
+    // Where the outline had to be BRIDGED, that run of the boundary is a
+    // guess. Put the doubt on the segment that is actually doubtful
+    // instead of over the whole room: measured on the real plan, only the
+    // Master Bedroom is a true figure-eight (35% of its perimeter
+    // bridged) - the others just bridge doorways, 0-22%, which is normal.
+    (gap.bridgeSegs||[]).forEach(b => {
+      if(!b || !b.a || !b.b || !(b.d > 4)) return;
+      out += `<line x1="${X(b.a.x)}" y1="${Y(b.a.y)}" x2="${X(b.b.x)}" y2="${Y(b.b.y)}"`
+        + ` stroke="#b9c2cf" stroke-width="3" stroke-dasharray="14,10" fill="none"/>`;
+    });
+    return out;
+  }
+  function buildFloorplanRoomContent(room, roomIdx, X, Y, scale, allRooms, buildingCentroid, overlays, drawnObjectKeys, skipFloorFill){
     const centroid = floorplanRoomCentroid(room);
     const dimCentroid = buildingCentroid || centroid;
     const wallsById = {};
@@ -14592,12 +14804,11 @@
     let s = '';
     const dims = [];
 
-    // Room floor fill - the wall start-point loop, same vertices the area
-    // calc uses. Plain, like a real CAD export - no per-room color coding.
-    if((room.walls||[]).length >= 3){
-      const pts = room.walls.map(w => ({ x: X(w.start.x), y: Y(w.start.y) }));
-      s += `<polygon points="${fpPts(pts)}" fill="${FLOORPLAN_FLOOR_FILL}"/>`;
-    }
+    // Floor tint. In the merged view every room's fill is painted FIRST,
+    // in one pass, by the caller - rooms are emitted sequentially, so a
+    // fill drawn here buried the previous room's walls, doors and
+    // furniture (measured: 27 of 77 Hallway wall samples were overpainted).
+    if(!skipFloorFill) s += fpRoomFloorFill(room, X, Y);
 
     // Walls as filled, properly-thick, hatched rectangles (the real
     // difference between a wireframe and an architectural drawing) -
@@ -14678,11 +14889,22 @@
       // 2ft are skipped as unmeasurable noise, and low-confidence walls
       // are separately flagged by the validation panel.
       const dimTxt = `${fpFeetInches(effLen)}${(wall._lengthOverrideFt != null || wall._squared || wall._movedByHand || wall._geomEdited || wall._added) ? '*' : ''}`;
-      if(floorplanIsExteriorWall(wall, room, allRooms)){
-        dims.push(fpDimensionLine(wall, dimCentroid, X, Y, dimTxt));
-      } else if(effLen >= 2 && fpMeasurePrefs.interior){
-        const midX = (wall.start.x+wall.end.x)/2, midY = (wall.start.y+wall.end.y)/2;
-        if(!seenNear('idim', midX, midY)){
+      // ONE dimension per physical wall, whichever branch draws it. The
+      // dedupe used to guard only the interior branch, so a wall that
+      // floorplanIsExteriorWall called exterior in BOTH of the rooms that
+      // share it printed the same measurement twice at the same point -
+      // reproduced on the real plan: Living Room wall 6 and Hallway wall 2
+      // are the same 2'-4" wall, 0.00 ft apart, and "2'-4"*" was stamped
+      // on itself. Sharing one key across the two branches also stops a
+      // wall called exterior in one room and interior in the other from
+      // getting two differently-styled measurements.
+      const midX = (wall.start.x+wall.end.x)/2, midY = (wall.start.y+wall.end.y)/2;
+      // A genuinely zero-length wall exists in the real scan (Hallway
+      // wall 4, start === end) and printed "0'-0"" on the plan.
+      if(effLen >= 0.25 && !seenNear('dim', midX, midY)){
+        if(floorplanIsExteriorWall(wall, room, allRooms)){
+          dims.push(fpDimensionLine(wall, dimCentroid, X, Y, dimTxt));
+        } else if(effLen >= 2 && fpMeasurePrefs.interior){
           dims.push(fpInteriorDimension(wall, X, Y, dimTxt));
         }
       }
@@ -14712,7 +14934,14 @@
       if(fpMeasurePrefs.openings){
         const dw = floorplanOpeningEffectiveWidth(d);
         if(dw >= 1){
-          const dl = fpOpeningLabelPos(wallsById[d.wallId], centroid, d.position, X, Y);
+          // dimCentroid, not centroid: fpDimensionLine offsets its text
+          // AWAY from the building centre while this offsets INTO the
+          // room. With two different reference points the two 'opposite
+          // lanes' can resolve to the SAME side - measured on the real
+          // plan, a 3'-0" door width landed 0.51 ft from a 4'-9" wall
+          // dimension because one used the building centre and the other
+          // the room centre.
+          const dl = fpOpeningLabelPos(wallsById[d.wallId], dimCentroid, d.position, X, Y);
           s += `<text x="${dl.x}" y="${dl.y}" font-size="17" font-weight="700" fill="#7a6248" text-anchor="middle" dominant-baseline="middle" paint-order="stroke" stroke="#fff" stroke-width="5">${fpFeetInches(dw)}${d._added ? '*' : ''}</text>`;
         }
       }
@@ -14726,7 +14955,7 @@
       const ww = floorplanOpeningEffectiveWidth(win), wh = floorplanOpeningEffectiveHeight(win);
       s += fpOpeningHitTarget('fp-window', roomIdx, winId, win, wallsById[win.wallId], X, Y);
       if(fpMeasurePrefs.openings){
-        const winLabel = fpOpeningLabelPos(wallsById[win.wallId], centroid, win.position, X, Y);
+        const winLabel = fpOpeningLabelPos(wallsById[win.wallId], dimCentroid, win.position, X, Y);
         s += `<text x="${winLabel.x}" y="${winLabel.y}" font-size="19" font-weight="700" fill="#39699e" text-anchor="middle" dominant-baseline="middle" paint-order="stroke" stroke="#fff" stroke-width="5">${fpFeetInches(ww)} x ${fpFeetInches(wh)}${win._added ? '*' : ''}</text>`;
       }
     });
@@ -14931,9 +15160,18 @@
     // room labels can never be covered by another room's furniture.
     const overlays = [];
     const drawnObjectKeys = new Set();
+    // Every room's floor tint goes down FIRST, in its own pass. Rooms are
+    // emitted one after another, so a room that painted its own floor at
+    // the top of its block buried the PREVIOUS room's walls, doors and
+    // furniture (measured on the real plan: 27 of 77 Hallway wall samples
+    // were overpainted by a later room's fill).
+    (data.rooms||[]).forEach(room => {
+      if(!(room.walls||[]).length || !onLevel(room) || room.deleted) return;
+      s += fpRoomFloorFill(room, X, Y);
+    });
     (data.rooms||[]).forEach((room, idx) => {
       if(!(room.walls||[]).length || !onLevel(room) || room.deleted) return;
-      s += buildFloorplanRoomContent(room, idx, X, Y, scale, rooms, buildingCentroid, overlays, drawnObjectKeys);
+      s += buildFloorplanRoomContent(room, idx, X, Y, scale, rooms, buildingCentroid, overlays, drawnObjectKeys, true);
       // A manually-positioned label anchors at the PLAIN geometric
       // center plus its own saved offset - the learned bias only steers
       // rooms with no manual override (applying it under an override
@@ -15082,7 +15320,12 @@
       // "FLOOR N" tag bottom-left, the way professional plans sign each
       // sheet's level.
       const floorNum = floorNumForWater;
-      s += `<text x="16" y="${svgH-36}" font-size="24" font-weight="700" letter-spacing="1" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530">FLOOR ${floorNum}</text>`;
+      // Clear of the scale bar. Both were hardcoded to the bottom-left with
+      // baselines 10px apart under a 24px glyph, so "FLOOR 1" and the scale
+      // bar's "5 ft" printed on top of each other at every zoom level.
+      // The scale bar's text baseline is svgH-26; this sits above its
+      // ascender with room to spare.
+      s += `<text x="16" y="${svgH-64}" font-size="24" font-weight="700" letter-spacing="1" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530">FLOOR ${floorNum}</text>`;
       s += fpTitleBlock(svgW, svgH, data);
     }
     s += fpCompassAndScale(svgW, svgH, scale);
