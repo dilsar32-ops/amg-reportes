@@ -4431,7 +4431,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CQ';
+  const APP_BUILD = '2026-09-07-CR';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -9668,14 +9668,12 @@
                       const n = P(o.x, o.y); o.x = n.x; o.y = n.y; };
     (data.rooms || []).forEach(r => {
       (r.walls || []).forEach(w => { mv(w.start); mv(w.end); });
-      ['doors','windows','openings'].forEach(k => (r[k] || []).forEach(o => {
-        mv(o.position);
-        // La bisagra y el barrido son LADOS: en un espejo se voltean, al girar no.
-        if(flip){
-          if('_swingAcross' in o) o._swingAcross = !o._swingAcross;
-          if('_hingeFlip'   in o) o._hingeFlip   = !o._hingeFlip;
-        }
-      }));
+      // _swingAcross y _hingeFlip NO se tocan. Son banderas RELATIVAS: el
+      // dibujante saca "u" de la pared ya transformada y reorienta "n" contra el
+      // centro del cuarto (fpDoorSwingMarkup 14174-14182), asi que el lado se
+      // refleja solo. Voltear ademas la bandera lo voltearia dos veces y la
+      // puerta abriria al cuarto equivocado.
+      ['doors','windows','openings'].forEach(k => (r[k] || []).forEach(o => mv(o.position)));
       (r.objects || []).forEach(o => {
         mv(o.center);
         // El dibujante ya aplica rotationDeg (rotate(...) en el <g>), asi que el
@@ -9689,10 +9687,23 @@
       if(off && typeof off.dx === 'number' && typeof off.dy === 'number'){
         const n = P(off.dx, off.dy); off.dx = n.x; off.dy = n.y;
       }
-      delete r._subAreas;        // los huecos se vuelven a detectar en cada dibujado
+      // Los huecos se vuelven a detectar en cada dibujado, PERO el nombre escrito
+      // a mano se reencuentra por cercania (_renamed, 9145). Borrarlos aqui
+      // perdia ese nombre; se transforman como todo lo demas.
+      (r._subAreas || []).forEach(sa => {
+        if(typeof sa.cx === 'number' && typeof sa.cy === 'number'){
+          const n = P(sa.cx, sa.cy); sa.cx = n.x; sa.cy = n.y;
+        }
+        if(!flip){ const w = sa.w; sa.w = sa.d; sa.d = w; }
+      });
     });
     (data._waterMarks    || []).forEach(m => (m.points  || []).forEach(mv));
-    (data._moistureMarks || []).forEach(m => (m.corners || []).forEach(mv));
+    // Una marca de humedad puede ser un relleno (corners) O un trazo de brocha
+    // (points). Solo se transformaban los rellenos.
+    (data._moistureMarks || []).forEach(m => {
+      (m.corners || []).forEach(mv);
+      (m.points  || []).forEach(mv);
+    });
     (data._spaceLabels   || []).forEach(l => {
       mv(l);
       // El largo y el ancho del hueco se cruzan al girar; en un espejo no.
