@@ -278,9 +278,54 @@
   #fpAiFixModal.fpai-side{align-items:flex-end; background:transparent; pointer-events:none; padding:0;}
   #fpAiFixModal.fpai-side .fpai-card{
     pointer-events:auto; max-width:none; border-radius:14px 14px 0 0;
-    max-height:44vh; background:rgba(13,20,33,0.92);
+    max-height:62vh; background:rgba(13,20,33,0.92);
     -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
     box-shadow:0 -8px 30px rgba(0,0,0,0.5);
+    display:flex; flex-direction:column; overflow:hidden;
+    padding:0 18px calc(14px + env(safe-area-inset-bottom));
+  }
+  /* The preview sheet is DRAGGABLE. It used to be a fixed slab over the
+     bottom 44% of the screen - exactly where a proposed wall usually
+     lands - so the tech could not see what he was approving. The grab
+     handle pulls it down to uncover the plan and back up to press Apply;
+     the plan underneath stays pannable and pinchable the whole time. */
+  .fpai-head{display:flex; align-items:center; gap:8px; margin-bottom:10px;}
+  .fpai-head > span{flex:1;}
+  .fpai-grip{display:none;}
+  #fpAiFrameBtn{display:none;}
+  #fpAiFixModal.fpai-side .fpai-grip{
+    display:block; flex:0 0 auto; padding:10px 0 8px; touch-action:none; cursor:grab;
+  }
+  #fpAiFixModal.fpai-side .fpai-grip > span{
+    display:block; width:46px; height:5px; border-radius:3px; margin:0 auto;
+    background:rgba(180,200,230,0.55);
+  }
+  #fpAiFixModal.fpai-side .fpai-head{flex:0 0 auto; margin-bottom:8px;}
+  #fpAiFixModal.fpai-side #fpAiFrameBtn{display:inline-flex;}
+  #fpAiFixModal.fpai-side #fpAiFixSummary{flex:1 1 auto; min-height:0; overflow-y:auto;}
+  #fpAiFixModal.fpai-side #fpAiFixActions{flex:0 0 auto; margin-top:10px;}
+  /* While the preview is up the viewer's own chrome steps aside: the plan
+     gets those rows back, and the zoom buttons ride on top of the sheet
+     at whatever height it has been dragged to. */
+  body.fpai-open .fpv-topbar-actions .btn{display:none;}
+  body.fpai-open #fpToolRail{display:none;}
+  body.fpai-open .fpv-drawer{display:none;}
+  body.fpai-open .fpv-zoomcontrols{bottom:calc(var(--fpai-h, 300px) + 14px);}
+  /* Landscape: a bottom sheet would eat two thirds of a 375pt-tall
+     screen, so it docks to the SIDE instead - same 320px column the
+     details drawer already uses there, and the plan keeps its full
+     height. No grab handle in that shape: nothing is covering the plan. */
+  @media (orientation:landscape){
+    #fpAiFixModal.fpai-side{align-items:stretch; justify-content:flex-end;}
+    #fpAiFixModal.fpai-side .fpai-card{
+      width:320px; max-width:320px; height:auto; max-height:none;
+      border-radius:0; border-left:1px solid rgba(130,160,205,0.35);
+      padding:14px 16px calc(14px + env(safe-area-inset-bottom));
+    }
+    #fpAiFixModal.fpai-side .fpai-grip{display:none;}
+    body.fpai-open .fpv-zoomcontrols{
+      bottom:calc(12px + env(safe-area-inset-bottom)); right:344px;
+    }
   }
   .fpv-drawer-handle{
     display:block; width:100%; background:none; border:none; color:var(--ink-soft);
@@ -1807,7 +1852,11 @@
     <!-- AI Fix summary modal: ONE card, counts + at most three actions. -->
     <div id="fpAiFixModal" hidden>
       <div class="fpai-card">
-        <div style="font-weight:700; font-size:17px; margin-bottom:10px;">&#10024; AI Fix</div>
+        <div class="fpai-grip" id="fpAiGrip"><span></span></div>
+        <div class="fpai-head">
+          <span style="font-weight:700; font-size:17px;">&#10024; AI Fix</span>
+          <button type="button" class="fpv-icon-btn" id="fpAiFrameBtn" title="Zoom to the changes" aria-label="Zoom to the changes" style="width:34px; height:34px; min-height:34px; flex:0 0 auto;">&#10530;</button>
+        </div>
         <div id="fpAiFixSummary" style="font-size:14px; line-height:1.55;"></div>
         <div id="fpAiFixActions" style="display:flex; flex-direction:column; gap:8px; margin-top:14px;"></div>
       </div>
@@ -4436,7 +4485,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CV';
+  const APP_BUILD = '2026-09-07-CW';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -13433,6 +13482,189 @@
     g.innerHTML = out;
     svgEl.appendChild(g);
   }
+  // ---- The preview sheet: draggable, and it frames what will change ----
+  // Field report: "all of the items are covering the entire screen... I
+  // need to be able to zoom in and zoom out so I can see what is going to
+  // be fixed." The plan was always pannable under the sheet (the backdrop
+  // is click-through), but nothing ever moved the view TO the change, and
+  // the sheet could not be moved out of the way. Both are fixed here.
+  var fpAiSheetSnaps = [];
+  var fpAiSheetDrag = null;
+  var fpAiSheetWired = false;
+  function fpAiCardEl(){ return document.querySelector('#fpAiFixModal .fpai-card'); }
+  function fpAiSheetHeight(){
+    var c = fpAiCardEl();
+    return c ? c.getBoundingClientRect().height : 0;
+  }
+  // Landscape docks the sheet to the side, where it covers nothing - the
+  // drag handle and the height maths belong to the portrait sheet only.
+  function fpAiBottomSheet(){
+    return !(window.matchMedia && window.matchMedia('(orientation:landscape)').matches);
+  }
+  function fpAiSetSheetH(h){
+    var card = fpAiCardEl();
+    if(!card || !fpAiSheetSnaps.length || !fpAiBottomSheet()) return;
+    var lo = fpAiSheetSnaps[0], hi = fpAiSheetSnaps[fpAiSheetSnaps.length-1];
+    var v = Math.round(Math.min(hi, Math.max(lo, h)));
+    card.style.height = v + 'px';
+    // Read the height BACK: a css max-height can clamp what was asked
+    // for, and a --fpai-h that lies puts the zoom buttons in mid-air.
+    var real = Math.round(card.getBoundingClientRect().height) || v;
+    document.body.style.setProperty('--fpai-h', real + 'px');
+  }
+  // Measured with the height released, so the snap points come from the
+  // sheet's REAL content (a two-line summary must not open as tall as a
+  // ten-line one). Smallest = handle + title only; middle = the action
+  // buttons still reachable; largest = everything, capped at 62vh.
+  function fpAiMeasureSnaps(){
+    var card = fpAiCardEl();
+    if(!card) return;
+    card.style.height = '';
+    if(!fpAiBottomSheet()){ fpAiSheetSnaps = []; document.body.style.removeProperty('--fpai-h'); return; }
+    var vh = window.innerHeight || 640;
+    var grip = card.querySelector('.fpai-grip');
+    var head = card.querySelector('.fpai-head');
+    var acts = $('#fpAiFixActions');
+    var pad = 24;
+    var tiny = Math.round((grip ? grip.offsetHeight : 26) + (head ? head.offsetHeight : 28) + pad);
+    var mid  = Math.round(tiny + (acts ? acts.offsetHeight + 10 : 0));
+    var full = Math.round(Math.min(card.scrollHeight + pad, vh * 0.62));
+    var snaps = [tiny];
+    if(mid > tiny + 24) snaps.push(mid);
+    if(full > snaps[snaps.length-1] + 24) snaps.push(full);
+    fpAiSheetSnaps = snaps;
+  }
+  function fpAiSnapTo(h){
+    if(!fpAiSheetSnaps.length) return;
+    var best = fpAiSheetSnaps[0];
+    fpAiSheetSnaps.forEach(function(sn){ if(Math.abs(sn-h) < Math.abs(best-h)) best = sn; });
+    fpAiSetSheetH(best);
+  }
+  function fpAiWireSheet(){
+    if(fpAiSheetWired) return;
+    var grip = $('#fpAiGrip');
+    if(!grip) return;
+    fpAiSheetWired = true;
+    grip.addEventListener('pointerdown', function(e){
+      var card = fpAiCardEl();
+      if(!card) return;
+      fpAiSheetDrag = { id:e.pointerId, y:e.clientY, h:card.getBoundingClientRect().height, moved:false };
+      try{ grip.setPointerCapture(e.pointerId); }catch(_){}
+      e.preventDefault();
+    });
+    grip.addEventListener('pointermove', function(e){
+      if(!fpAiSheetDrag || e.pointerId !== fpAiSheetDrag.id) return;
+      var dy = e.clientY - fpAiSheetDrag.y;
+      if(Math.abs(dy) > 3) fpAiSheetDrag.moved = true;
+      fpAiSetSheetH(fpAiSheetDrag.h - dy);
+    });
+    var end = function(e){
+      if(!fpAiSheetDrag || e.pointerId !== fpAiSheetDrag.id) return;
+      var moved = fpAiSheetDrag.moved;
+      fpAiSheetDrag = null;
+      var h = fpAiSheetHeight();
+      if(!moved){
+        // A tap on the handle alone flips between smallest and largest,
+        // so the plan can be uncovered and covered with one finger.
+        var lo = fpAiSheetSnaps[0], hi = fpAiSheetSnaps[fpAiSheetSnaps.length-1];
+        fpAiSetSheetH(h > lo + 8 ? lo : hi);
+      } else fpAiSnapTo(h);
+    };
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
+    var fb = $('#fpAiFrameBtn');
+    if(fb) fb.onclick = function(){ fpAiFrameChanges(); };
+    // The zoom buttons ride on --fpai-h, so it has to be the sheet's REAL
+    // height at all times - a css max-height clamp, a rotation, or a
+    // longer summary would otherwise leave them floating in mid-plan.
+    // Same ResizeObserver the details drawer already uses for its own.
+    var card = fpAiCardEl();
+    if(card && window.ResizeObserver){
+      new ResizeObserver(function(){
+        if(!document.body.classList.contains('fpai-open')) return;
+        var h = Math.round(card.getBoundingClientRect().height);
+        if(h) document.body.style.setProperty('--fpai-h', h + 'px');
+      }).observe(card);
+    }
+  }
+  // Pan and zoom the plan so the coloured preview sits in the strip that
+  // is still visible ABOVE the sheet. Screen rects throughout, so it is
+  // correct whatever the plan's own coordinate system is, and it never
+  // pushes past the view's own zoom limits.
+  function fpAiFrameChanges(){
+    var g = document.querySelector('#floorplanSvgWrap svg .fp-ai-preview');
+    var stageEl = $('#fpStage');
+    if(!g || !stageEl) return;
+    var b;
+    try { b = g.getBoundingClientRect(); } catch(_){ return; }
+    if(!b || !b.width || !b.height) return;
+    var st = stageEl.getBoundingClientRect();
+    if(!st.width || !st.height) return;
+    var modal = $('#fpAiFixModal'), card = fpAiCardEl();
+    // Subtract whichever edge the sheet actually sits on - bottom in
+    // portrait, right-hand column in landscape.
+    var top = st.top + 10, bottom = st.bottom - 10;
+    var left = st.left + 12, right = st.right - 12;
+    if(card && modal && !modal.hidden){
+      var sr = card.getBoundingClientRect();
+      if(sr.width && sr.height){
+        if(sr.bottom >= st.bottom - 2 && sr.top > st.top + 40) bottom = Math.min(bottom, sr.top - 10);
+        else if(sr.right >= st.right - 2 && sr.left > st.left + 40) right = Math.min(right, sr.left - 12);
+      }
+    }
+    bottom = Math.max(top + 90, bottom);
+    right = Math.max(left + 90, right);
+    var availW = right - left, availH = bottom - top;
+    // Fill about three quarters of that strip, never more than 2.5x in or
+    // 40% out in one jump - a change zoomed until it touches the edges
+    // loses every landmark around it, and then he cannot tell WHERE the
+    // wall is being added, only that one is.
+    var want = Math.min(availW / b.width, availH / b.height) * 0.75;
+    var ns = fpView.scale * Math.min(2.5, Math.max(0.6, want));
+    ns = Math.min(fpView.maxScale, Math.max(fpView.minScale, ns));
+    var cx = b.left + b.width/2, cy = b.top + b.height/2;
+    var contentX = (cx - st.left - fpView.tx) / fpView.scale;
+    var contentY = (cy - st.top  - fpView.ty) / fpView.scale;
+    fpView.scale = ns;
+    fpView.tx = ((left + right)/2 - st.left) - contentX*ns;
+    fpView.ty = ((top + bottom)/2 - st.top) - contentY*ns;
+    fpApplyTransform();
+    if(typeof fpRenderEditHandles === 'function') fpRenderEditHandles();
+  }
+  function fpAiResizeSheet(){
+    if(!document.body.classList.contains('fpai-open')) return;
+    fpAiMeasureSnaps();
+    if(fpAiSheetSnaps.length) fpAiSetSheetH(fpAiSheetSnaps[fpAiSheetSnaps.length-1]);
+    fpAiFrameChanges();
+  }
+  function fpAiOpenSheet(){
+    document.body.classList.add('fpai-open');
+    var dw = $('#fpvDrawer');
+    if(dw) dw.classList.add('collapsed');
+    fpAiWireSheet();
+    // Sized and framed SYNCHRONOUSLY - the modal is laid out by the time
+    // this runs, and a setup that only lives inside requestAnimationFrame
+    // silently never happens on a page the system is not painting, which
+    // leaves the sheet unsized and the zoom buttons stranded over it.
+    // The second pass a frame later is idempotent (framing an already
+    // framed change computes a factor of 1) and only catches late layout.
+    fpAiResizeSheet();
+    requestAnimationFrame(fpAiFrameChanges);
+  }
+  window.addEventListener('resize', fpAiResizeSheet);
+  window.addEventListener('orientationchange', function(){ setTimeout(fpAiResizeSheet, 250); });
+  function fpAiCloseSheet(){
+    document.body.classList.remove('fpai-open');
+    document.body.style.removeProperty('--fpai-h');
+    var card = fpAiCardEl();
+    if(card) card.style.height = '';
+    fpAiSheetDrag = null;
+    // The chrome coming back shrinks the stage - re-seat the plan inside
+    // it rather than leaving part of the drawing off the top.
+    requestAnimationFrame(function(){
+      if(typeof fpClampPan === 'function' && $('#fpStage')){ fpClampPan(); fpApplyTransform(); }
+    });
+  }
   function fpRunAiFix(){
     const orig = floorplanData;
     if(!orig || !(orig.rooms||[]).some(r => !r.deleted && (r.walls||[]).length)) return;
@@ -13452,7 +13684,7 @@
         + (remaining ? `<div style="margin-top:6px; color:#d9a021;">${remaining} item${remaining>1?'s':''} in Plan review still ask for your eyes.</div>` : '');
       a.innerHTML = `<button type="button" class="btn btn-accent" id="fpAiContinue" style="width:100%;">Continue</button>`;
       $('#fpAiFixModal').hidden = false;
-      $('#fpAiContinue').onclick = () => { $('#fpAiFixModal').hidden = true; };
+      $('#fpAiContinue').onclick = () => { $('#fpAiFixModal').hidden = true; fpAiCloseSheet(); };
       return;
     }
     fpAiRenderPreview(orig, work, plan.spaces);
@@ -13469,6 +13701,7 @@
     const modal = $('#fpAiFixModal');
     modal.classList.add('fpai-side');
     modal.hidden = false;
+    fpAiOpenSheet();
     $('#fpAiApplyBtn').onclick = fpAiApply;
     $('#fpAiCancelBtn').onclick = fpAiCancel;
     const pr = $('#fpAiPrevReview');
@@ -13480,11 +13713,13 @@
     const m = $('#fpAiFixModal');
     m.hidden = true;
     m.classList.remove('fpai-side');
+    fpAiCloseSheet();
   }
   function fpAiApply(){
     const work = fpAiWork, plan = fpAiPlan;
     if(!work || !plan){ fpAiCancel(); return; }
     $('#fpAiFixModal').classList.remove('fpai-side');
+    fpAiCloseSheet();
     // Names it could not guess - asked now, never left blank.
     let asked = 0;
     plan.askRooms.forEach(ri => {
