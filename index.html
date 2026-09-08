@@ -4431,7 +4431,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CR';
+  const APP_BUILD = '2026-09-07-CS';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -15990,11 +15990,26 @@
   // "He fixed his hours" - shown to the worker on their own row, and to the
   // manager on theirs (see renderPerson), so a correction is never silent.
   function myCorrectionLineFor(e){
-    if(!e || !e.corrected_at) return '';
+    if(!e) return '';
     const from = (e.original_clock_in || e.original_clock_out)
       ? `${fmtTime12(e.original_clock_in||'')} - ${fmtTime12(e.original_clock_out||'')}` : '';
-    return `<br><span class="matchstatus partial" style="cursor:default; color:var(--ink-soft);">`
-      + `Corregido${from ? ' (antes: ' + esc(from) + ')' : ''}</span>`;
+    // SON DOS CASOS, y antes solo se pintaba el primero:
+    //  - el trabajador se corrigio solo: correct_my_hours escribe corrected_at.
+    //  - el MANAGER le cambio las horas: saveEntryEdit deja el rastro en
+    //    original_clock_* y borra confirmed, pero NUNCA escribe corrected_at
+    //    (para que "el corrigio sus horas" siga siendo verdad del otro lado).
+    // Sin la segunda rama, al trabajador le cambiaban las horas y en su
+    // telefono no aparecia absolutamente nada.
+    if(e.corrected_at){
+      return `<br><span class="matchstatus partial" style="cursor:default; color:var(--ink-soft);">`
+        + `Corregido${from ? ' (antes: ' + esc(from) + ')' : ''}</span>`;
+    }
+    if(!from) return '';
+    return `<br><span class="matchstatus mismatch" style="cursor:default;">`
+      + `&#9998; Su manager cambió estas horas${from ? ' (antes: ' + esc(from) + ')' : ''}`
+      + `</span>`
+      + (e.confirmed ? '' : `<br><span class="clockhint" style="margin:2px 0 0;">`
+          + `Revíselas y toque <b>Confirmar</b> otra vez. Si no está de acuerdo, toque Corregir o hable con su manager.</span>`);
   }
 
   // Returns true only if it actually re-read the server. Callers that are
