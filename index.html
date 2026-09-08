@@ -4428,7 +4428,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CO';
+  const APP_BUILD = '2026-09-07-CP';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8584,7 +8584,12 @@
       const roomSel = $('.meas-room', card);
       const room = !roomSel ? 'Kitchen' : (roomSel.value === 'Other' ? ($('.meas-room-other', card).value || 'Other') : roomSel.value);
 
-      let cutRows = '', cardSqft = 0, cardLinear = 0;
+      // Los renglones se AGRUPAN por material y cada grupo lleva su propia suma.
+      // Antes salian en el orden en que se midieron (drywall, trim, drywall,
+      // insulation, drywall...) y para hacer un estimado habia que sumarlos a
+      // mano en el papel.
+      const grupos = new Map();      // material -> {rows, sqft, linear}
+      let cardSqft = 0, cardLinear = 0;
       $$('.meas-cut', card).forEach(cut => {
         const matVal = $('.meas-material', cut).value;
         const material = matVal === 'Other' ? $('.meas-material-other', cut).value : matVal;
@@ -8602,12 +8607,34 @@
           dimText = a + ' ft'; resultText = a + ' linear ft';
           cardLinear += a;
         }
-        cutRows += `<tr>
+        const g = grupos.get(material) || { rows:'', sqft:0, linear:0, n:0 };
+        if(aOk && bOk) g.sqft += Math.round(a*b*100)/100; else g.linear += a;
+        g.n++;
+        g.rows += `<tr>
           <td style="padding:5px 8px; border-bottom:1px solid #EEF1EE;">${esc(material)}</td>
           <td style="padding:5px 8px; border-bottom:1px solid #EEF1EE; text-align:center;">${esc(dimText)}</td>
           <td style="padding:5px 8px; border-bottom:1px solid #EEF1EE; text-align:center; font-weight:700;">${esc(resultText)}</td>
         </tr>`;
+        grupos.set(material, g);
       });
+      let cutRows = '';
+      [...grupos.keys()].sort((x, y) => String(x).localeCompare(String(y), 'es', {sensitivity:'base'}))
+        .forEach(mat => {
+          const g = grupos.get(mat);
+          cutRows += g.rows;
+          // La suma del material. Solo se pone si hay mas de un renglon: con uno
+          // solo, el subtotal repetiria el mismo numero de arriba.
+          if(g.n > 1){
+            const bits = [];
+            if(g.sqft > 0)   bits.push((Math.round(g.sqft*100)/100) + ' sq ft');
+            if(g.linear > 0) bits.push((Math.round(g.linear*100)/100) + ' linear ft');
+            cutRows += `<tr>
+              <td style="padding:4px 8px; border-bottom:1px solid #EEF1EE; font-weight:700; color:#2E5C74;">${esc(mat)} — total</td>
+              <td style="padding:4px 8px; border-bottom:1px solid #EEF1EE;"></td>
+              <td style="padding:4px 8px; border-bottom:1px solid #EEF1EE; text-align:center; font-weight:700; color:#2E5C74;">${esc(bits.join(' + '))}</td>
+            </tr>`;
+          }
+        });
       if(!cutRows) return;
       totalSqft += cardSqft; totalLinear += cardLinear;
       cardsHtml += `
