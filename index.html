@@ -443,6 +443,11 @@
   .whychip.soft > summary{
     background:var(--surface-2); color:var(--ink-soft); border-color:var(--line);
   }
+  /* Cuando SI cuadra: palomita verde. El trabajador tiene que poder ver que se
+     reviso y que salio bien, no solo enterarse cuando algo esta mal. */
+  .whychip.ok > summary{
+    background:rgba(46,158,91,.14); color:var(--green, #2e9e5b); border-color:rgba(46,158,91,.34);
+  }
   .whytext{
     font-size:13px; line-height:1.5; color:var(--text); margin-top:8px;
     padding:10px 12px; background:var(--surface-2); border:1px solid var(--line);
@@ -4431,7 +4436,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CS';
+  const APP_BUILD = '2026-09-07-CT';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -15937,7 +15942,29 @@
   // exactly where they are worth reading: on a day that disagrees.
   function myLeaderLineFor(day, kind){
     const v = myDayVerdict(day, kind);
-    if(!v || v.kind === 'ok') return '';
+    if(!v) return '';
+    // Antes un dia que CUADRABA no decia nada, y no habia forma de saber si la
+    // revision siquiera habia corrido. Ahora tambien se ve cuando coincide.
+    if(v.kind === 'ok'){
+      const mg0 = v.co === 'mudanza';
+      const quien = v.leader ? (mg0 ? ' &middot; lo mandó: ' + esc(v.leader) : ' &middot; líder: ' + esc(v.leader)) : '';
+      const fuente = mg0 ? 'en el reporte de mudanza' : 'el líder';
+      const detalle = `Usted puso <b>${hhmm(v.mine)}</b> y ${fuente} reportó <b>${hhmm(v.theirs)}</b>`
+        + (v.times ? ' (' + esc(v.times) + ')' : '') + quien + '.';
+      // 'ok' junta DOS cosas: que sea igual, y que el haya puesto de MENOS (por
+      // decision suya eso no se avisa). Pintar las dos con "dicen lo mismo"
+      // seria mentira: en un dia de menos NO dicen lo mismo.
+      const igual = Math.abs(v.mine - v.theirs) <= 1;      // 1 minuto de tolerancia
+      if(igual){
+        return `<br><details class="whychip ok"><summary>&#10003; Coincide${mg0 ? ' · AMG' : ''}</summary>`
+          + `<div class="whytext">${detalle}`
+          + `<span class="muted">Sus horas y el reporte dicen lo mismo. No hay nada que arreglar.</span></div></details>`;
+      }
+      return `<br><details class="whychip soft"><summary>&#10003; Revisado${mg0 ? ' · AMG' : ''}</summary>`
+        + `<div class="whytext">${detalle}`
+        + `<span class="muted">${fuente === 'el líder' ? 'El líder' : 'El reporte'} puso <b>${hhmm(v.theirs - v.mine)}</b> más que usted. `
+        + `Sus horas quedan como usted las puso. Si trabajó esas horas, hable con su líder antes del pago.</span></div></details>`;
+    }
     const mg = v.co === 'mudanza';
     // En AMG no hay "lider": el labor log lo mando el manager.
     const leader = v.leader ? (mg ? ` &middot; lo mandó: ${esc(v.leader)}` : ` &middot; líder: ${esc(v.leader)}`) : '';
@@ -16434,7 +16461,21 @@
       }
       problems.push({ date: d, cos: [k], ...v });
     }));
-    if(!problems.length){ hideHourAlerts(); return; }
+    if(!problems.length){
+      hideHourAlerts();
+      // Que se vea que la revision corrio y salio limpia. Solo se cuentan los
+      // dias que de verdad se pudieron comparar: decir "todo bien" sobre dias
+      // sin labor log seria mentir.
+      const revisados = days.reduce((n, d) => n + (['restauracion','mudanza']
+        .some(k => { const v = myDayVerdict(d, k); return v && v.kind === 'ok'; }) ? 1 : 0), 0);
+      if(revisados && box){
+        box.hidden = false;
+        box.innerHTML = '<div class="matchstatus ok" style="display:block; margin:0;">&#10003; '
+          + 'Sus horas coinciden con el labor log'
+          + (revisados === 1 ? ' (1 día revisado)' : ' (' + revisados + ' días revisados)') + '</div>';
+      }
+      return;
+    }
     const paint = (el, list, amgOnly) => {
       if(!el) return;
       if(!list.length){ el.hidden = true; el.innerHTML = ''; return; }
