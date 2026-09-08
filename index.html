@@ -4436,7 +4436,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CT';
+  const APP_BUILD = '2026-09-07-CU';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -16466,13 +16466,29 @@
       // Que se vea que la revision corrio y salio limpia. Solo se cuentan los
       // dias que de verdad se pudieron comparar: decir "todo bien" sobre dias
       // sin labor log seria mentir.
-      const revisados = days.reduce((n, d) => n + (['restauracion','mudanza']
-        .some(k => { const v = myDayVerdict(d, k); return v && v.kind === 'ok'; }) ? 1 : 0), 0);
-      if(revisados && box){
+      // Y 'ok' junta dos cosas distintas: que sea IGUAL, y que el haya puesto de
+      // MENOS. Meter las dos en "sus horas coinciden" seria decirle que cuadra
+      // un dia que no cuadra.
+      let iguales = 0, deMenos = 0;
+      days.forEach(d => {
+        let vio = null;
+        ['restauracion','mudanza'].forEach(k => {
+          const v = myDayVerdict(d, k);
+          if(v && v.kind === 'ok') vio = (Math.abs(v.mine - v.theirs) <= 1) ? (vio || 'igual') : 'menos';
+        });
+        if(vio === 'igual') iguales++; else if(vio === 'menos') deMenos++;
+      });
+      if((iguales || deMenos) && box){
         box.hidden = false;
-        box.innerHTML = '<div class="matchstatus ok" style="display:block; margin:0;">&#10003; '
-          + 'Sus horas coinciden con el labor log'
-          + (revisados === 1 ? ' (1 día revisado)' : ' (' + revisados + ' días revisados)') + '</div>';
+        const dia = n => n === 1 ? '1 día' : n + ' días';
+        box.innerHTML = deMenos
+          ? '<div class="matchstatus partial" style="display:block; margin:0;">&#10003; '
+            + 'Revisado con el labor log'
+            + (iguales ? ' &middot; ' + dia(iguales) + ' coinciden' : '')
+            + ' &middot; en ' + dia(deMenos) + ' el líder reportó más horas que usted</div>'
+          : '<div class="matchstatus ok" style="display:block; margin:0;">&#10003; '
+            + 'Sus horas coinciden con el labor log (' + dia(iguales) + ' revisado'
+            + (iguales === 1 ? '' : 's') + ')</div>';
       }
       return;
     }
