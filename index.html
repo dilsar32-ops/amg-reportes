@@ -11924,8 +11924,20 @@
       if(room._coverageReviewed) return;
       const roomName = room.roomName || `Room ${el.roomIndex+1}`;
       const typeLabel = {wall:'wall', door:'door', window:'window', opening:'passage'}[el.type] || el.type;
+      // Say WHY, with the number that actually drove the verdict. The
+      // tier comes from how much of the element the camera covered, not
+      // from how many camera positions it turned up in - so the old
+      // wording ("not well observed... seen in 12 views") read as a
+      // contradiction on a document an adjuster sees, and taught the
+      // tech to distrust the whole review list.
+      const cov = (typeof el.coverage === 'number') ? Math.round(el.coverage * 100) : null;
+      const views = +el.views || 0;
+      let why;
+      if(views <= 1) why = `the camera only caught this ${typeLabel} from one spot`;
+      else if(cov != null) why = `the camera covered only about ${cov}% of this ${typeLabel}, even though it shows up in ${views} views`;
+      else why = `the camera never got a good look at this ${typeLabel}`;
       coverageIssues.push({ kind: 'coverage', room: el.roomIndex, kfId: el.bestKeyframe || null, ack: '_coverageReviewed',
-        text: `${esc(roomName)}: a ${typeLabel} was not well observed by the camera during the walkthrough (seen in ${el.views} view${el.views===1?'':'s'}) - check it in person.` });
+        text: `${esc(roomName)}: ${why} - check it in person.` });
     });
     coverageIssues.slice(0, 6).forEach(it => issues.push(it));
     if(coverageIssues.length > 6) issues.push({ kind: 'coverage-more', room: -1, text: `${coverageIssues.length - 6} more elements had poor camera coverage - a slower walkthrough with the camera pointed at the walls covers them.` });
