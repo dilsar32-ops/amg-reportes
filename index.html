@@ -1637,6 +1637,10 @@
         <summary><span id="fpRoomsSummaryLabel">Rooms</span></summary>
         <div id="floorplanRoomList" style="margin-top:6px;"></div>
       </details>
+      <details class="fp-collapse" id="fpMeasureCollapse">
+        <summary><span id="fpMeasureSummaryLabel">Measurements &mdash; for the estimate</span></summary>
+        <div id="floorplanMeasureTable" style="margin-top:8px;"></div>
+      </details>
       <details class="fp-collapse" id="floorplanFurnitureWrap" hidden>
         <summary><span id="fpFurnitureSummaryLabel">Furniture &amp; Objects</span></summary>
         <div id="floorplanFurnitureList"></div>
@@ -4498,7 +4502,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-08-DB';
+  const APP_BUILD = '2026-09-08-DD';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -11773,6 +11777,12 @@
     // length overrides, door edits, deletes) instead of only the classify
     // buttons, so it can never disagree with the export gate's own check.
     renderFloorplanValidation(data);
+    // Las medidas salen de estas MISMAS paredes y aberturas. Colgarlas
+    // solo de renderFloorplanRoomList las dejaba viejas en los caminos
+    // que redibujan el plano sin repintar la lista (corregir el ancho de
+    // una puerta era uno), y entonces la pantalla y el PDF imprimian
+    // numeros distintos del mismo trabajo.
+    renderFloorplanMeasurements(data);
     // A fresh render wipes injected handles - re-inject (no-op outside
     // the Move tool).
     fpRenderEditHandles();
@@ -11824,6 +11834,25 @@
             <button class="btn btn-outline fpRoomNameSave" type="button" data-room-idx="${idx}" style="width:100%;">Save</button></div>
         </div>`;
     }).join('');
+    renderFloorplanMeasurements(data);
+  }
+  // Enganchado DENTRO de renderFloorplanRoomList y no en sus once sitios
+  // de llamada: asi la tabla no puede quedarse vieja frente a la lista.
+  function renderFloorplanMeasurements(data){
+    const box = $('#floorplanMeasureTable');
+    if(!box) return;
+    const multi = floorplanLevels(data).length > 1;
+    const onLevel = multi ? (r => (r.level||1) === floorplanSelectedLevel) : null;
+    const t = fpPlanMeasurements(data, onLevel);
+    box.innerHTML = fpMeasurementTable(data, onLevel, false)
+      || '<div class="hint">Scan a room to see its measurements.</div>';
+    const lbl = $('#fpMeasureSummaryLabel');
+    // La pastilla tampoco puede anunciar un total al que le faltan
+    // cuartos como si estuviera completo.
+    const gap = t.noHeight.length ? ` &middot; <span style="color:var(--accent);">${t.noHeight.length} without wall height</span>` : '';
+    if(lbl) lbl.innerHTML = t.rooms
+      ? `Measurements &mdash; ${t.netWallSqFt.toFixed(0)} sq ft of wall, ${t.perimeterFt.toFixed(0)} ft of perimeter${gap}`
+      : 'Measurements &mdash; for the estimate';
   }
   function renderFloorplanSummary(data){
     const b = data.buildingSummary || {};
@@ -14266,7 +14295,37 @@
       (gapInfo.bridgeSegs = gapInfo.bridgeSegs||[]).push({ a:{x:poly[poly.length-1].x,y:poly[poly.length-1].y}, b:{x:poly[0].x,y:poly[0].y}, d:closeDist });
     }
     if(poly.length>3 && closeDist <= tol) poly.pop();
-    return poly.length>=3 ? poly : walls.map(w=>w.start);
+    if(poly.length>=3) return fpPruneOutlineSpikes(poly);
+    return walls.map(w=>w.start);
+  }
+  // ESPINAS DEL CONTORNO. El encadenado consume paredes ENTERAS y no
+  // puede partir una, asi que cuando una pared se extiende mas alla del
+  // cuarto (la del Bathroom real mide 16.07 pies y solo 7.37 bordean el
+  // cuarto) el contorno sale hasta la punta y se devuelve por encima de
+  // si mismo. Esa excursion encierra casi nada -- 1.8 pies cuadrados --
+  // y por eso la validacion por AREA nunca pudo verla, pero aporta 17.4
+  // de los 42.2 pies de perimetro: el 41%.
+  //
+  // Se nota en que los dos lados que se juntan en la punta son casi
+  // antiparalelos (el contorno da media vuelta). fpOutlineDoublesBack ya
+  // detectaba exactamente esto y nadie lo usaba para corregir.
+  //
+  // Importa ahora porque el perimetro se volvio un numero que se cobra:
+  // en el Bathroom la pared salia 334.8 pies cuadrados en vez de ~195.
+  function fpPruneOutlineSpikes(poly){
+    if(!poly || poly.length < 4) return poly;
+    let pts = poly.slice(), changed = true, guard = 0;
+    while(changed && pts.length >= 4 && guard++ < 64){
+      changed = false;
+      for(let i = 0; i < pts.length; i++){
+        const a = pts[(i-1+pts.length)%pts.length], b = pts[i], c = pts[(i+1)%pts.length];
+        const ax = b.x-a.x, ay = b.y-a.y, cx = c.x-b.x, cy = c.y-b.y;
+        const la = Math.hypot(ax, ay), lc = Math.hypot(cx, cy);
+        if(la < 1e-6 || lc < 1e-6) continue;
+        if((ax*cx + ay*cy) / (la*lc) <= -0.98){ pts.splice(i, 1); changed = true; break; }
+      }
+    }
+    return pts.length >= 3 ? pts : poly;
   }
   function fpPolygonAreaSqFt(poly){
     if(!poly || poly.length < 3) return 0;
@@ -14293,6 +14352,226 @@
   // areas, inheriting their garbage cases.
   function fpDisplayTotalAreaSqFt(data){
     return Math.round(((data && data.rooms) || []).reduce((sum, r) => r.deleted ? sum : sum + fpRoomDisplayAreaSqFt(r), 0)*10)/10;
+  }
+  // ============ MEDIDAS PARA EL SEGURO ============
+  // La hoja imprimia UN solo numero: pies cuadrados de piso. Un ajustador
+  // cotiza con cuatro mas -- pared, techo, perimetro y rodapie -- y los
+  // cuatro ya estaban en el escaneo sin que nadie los ensenara: RoomPlan
+  // entrega la altura de cada pared y el ancho y alto de cada puerta y
+  // ventana. Esto no mide nada nuevo; saca a la luz lo que ya se tenia.
+  //
+  // EL PERIMETRO SALE DEL CONTORNO, no de sumar wall.lengthFt. Medido en
+  // la casa real: el Master Bedroom tiene 7.0 pies de pared en su lista
+  // que NO estan en el borde (trazos del closet y copias duplicadas de
+  // una particion compartida), asi que la suma cruda inflaba ese cuarto
+  // 12%. El contorno ES el borde, y el borde es lo que se pinta y lo que
+  // lleva rodapie. Como applyFloorplanWallLength mueve wall.end de
+  // verdad, una medida corregida a mano entra sola en este numero.
+  //
+  // LA ALTURA ES LA MODA PONDERADA POR LARGO, ni el maximo ni el
+  // promedio. En su Master Bedroom hay una pared de 5.4 pies de alto y
+  // 2.3 de largo entre nueve de 8.25: el promedio habria bajado el
+  // cuarto entero por un pedazo, el maximo habria subido un cuarto de
+  // techo bajo de verdad. La moda toma la altura del cuarto y el pedazo
+  // raro se REPORTA aparte -- nunca desaparece dentro de un promedio.
+  function fpDistToPolygon(pt, poly){
+    let best = Infinity;
+    for(let i = 0, j = poly.length - 1; i < poly.length; j = i++){
+      const a = poly[j], b = poly[i];
+      const dx = b.x - a.x, dy = b.y - a.y, L = dx*dx + dy*dy;
+      let t = L ? ((pt.x-a.x)*dx + (pt.y-a.y)*dy) / L : 0;
+      t = Math.max(0, Math.min(1, t));
+      best = Math.min(best, Math.hypot(pt.x - (a.x + t*dx), pt.y - (a.y + t*dy)));
+    }
+    return best;
+  }
+  function fpRoomMeasurements(room){
+    const gi = {};
+    const poly = fpOrderedRoomPolygon(room, gi);
+    // Con menos de 3 vertices no hay contorno: el lazo de abajo recorreria
+    // los mismos 2 puntos de ida y vuelta y publicaria el DOBLE de una
+    // pared como si fuera el perimetro del cuarto.
+    const outlineOk = poly.length >= 3;
+    let perimeterFt = 0;
+    for(let i = 0, j = poly.length - 1; i < poly.length; j = i++)
+      perimeterFt += Math.hypot(poly[i].x - poly[j].x, poly[i].y - poly[j].y);
+    const bins = {};
+    (room.walls||[]).forEach(w => {
+      const h = Math.round((w.heightFt||0) * 20) / 20;
+      if(h > 0) bins[h] = (bins[h]||0) + floorplanWallEffectiveLength(w);
+    });
+    const ranked = Object.entries(bins).sort((a, b) => b[1] - a[1]);
+    const wallHeightFt = ranked.length ? parseFloat(ranked[0][0]) : 0;
+    // Media pulgada de diferencia es ruido de escaneo; medio pie es otra
+    // pared. Solo lo segundo se reporta.
+    const oddHeights = ranked.slice(1)
+      .filter(e => Math.abs(parseFloat(e[0]) - wallHeightFt) > 0.5)
+      .map(e => ({ heightFt: parseFloat(e[0]), lengthFt: e[1] }));
+    // Puertas y ventanas se restan de la pared bruta. Las puertas y los
+    // pasos ADEMAS cortan el rodapie; una ventana no.
+    let openingSqFt = 0, doorWidthFt = 0, insideOpenings = 0;
+    [['doors', true], ['windows', false], ['openings', true]].forEach(([k, cutsBase]) => {
+      (room[k]||[]).forEach(o => {
+        if(o._removed) return;
+        // Una abertura reclasificada a mano cuenta como lo que el tecnico
+        // dijo que es, no como la lista donde quedo guardada.
+        const kind = o._kindOverride || (k === 'windows' ? 'window' : k === 'doors' ? 'door' : 'opening');
+        const w = o._widthOverrideFt != null ? o._widthOverrideFt : (o.widthFt || 0);
+        const h = o._heightOverrideFt != null ? o._heightOverrideFt : (o.heightFt || 0);
+        if(o.position && poly.length >= 3 && fpDistToPolygon(o.position, poly) > 0.5){
+          insideOpenings++;   // en una particion interior: el perimetro no la incluye
+          return;
+        }
+        openingSqFt += w * h;
+        if(kind !== 'window') doorWidthFt += w;
+      });
+    });
+    const grossWallSqFt = perimeterFt * wallHeightFt;
+    const floorSqFt = fpRoomDisplayAreaSqFt(room);
+    return {
+      floorSqFt, outlineOk,
+      // Un techo PLANO a una sola altura. El escaneo no entrega geometria
+      // de techo, asi que un techo inclinado o abovedado no se detecta -
+      // por eso la hoja lo dice en letra, en vez de dejarlo suponer.
+      ceilingSqFt: floorSqFt,
+      perimeterFt,
+      baseboardFt: Math.max(0, perimeterFt - doorWidthFt),
+      wallHeightFt, oddHeights,
+      // Sin altura no hay pared que calcular. Se DECLARA, porque 0.0 en
+      // una columna de medidas se lee como "este cuarto no tiene pared",
+      // que es una mentira distinta de "no lo sabemos".
+      heightKnown: wallHeightFt > 0,
+      // Aberturas en paredes interiores (un divisor de closet): ni su area
+      // ni su ancho tocan estas cifras, porque el perimetro tampoco
+      // incluye esa pared. Se cuentan para poder decirlo.
+      insideOpenings,
+      grossWallSqFt, openingSqFt,
+      netWallSqFt: Math.max(0, grossWallSqFt - openingSqFt),
+      // Pies del borde que la app cerro sola. Todo lo que se calcula
+      // sobre ese tramo -- perimetro, pared, rodapie -- hereda la duda,
+      // asi que viaja con el resultado en vez de perderse.
+      guessedFt: (gi.bridgeSegs||[]).reduce((t, b) => t + (b && b.d > 1 ? b.d : 0), 0)
+    };
+  }
+  function fpPlanMeasurements(data, onLevel){
+    const t = { rooms: 0, floorSqFt: 0, ceilingSqFt: 0, perimeterFt: 0, baseboardFt: 0,
+                grossWallSqFt: 0, openingSqFt: 0, netWallSqFt: 0, guessedFt: 0, guessedRooms: 0,
+                odd: [], noHeight: [], noOutline: [], insideOpenings: 0 };
+    ((data && data.rooms) || []).forEach((r, i) => {
+      if(r.deleted || !(r.walls||[]).length) return;
+      if(onLevel && !onLevel(r)) return;
+      const m = fpRoomMeasurements(r);
+      t.rooms++;
+      // Un cuarto sin contorno no aporta perimetro ni pared: sumar su
+      // numero inventado contaminaria el TOTAL de toda la casa.
+      const keys = m.outlineOk
+        ? ['floorSqFt','ceilingSqFt','perimeterFt','baseboardFt','grossWallSqFt','openingSqFt','netWallSqFt','guessedFt']
+        : ['floorSqFt','ceilingSqFt'];
+      keys.forEach(k => { t[k] += m[k]; });
+      if(m.guessedFt > 1) t.guessedRooms++;
+      if(m.oddHeights.length) t.odd.push({ idx: i, room: r, m });
+      // Un cuarto sin altura no aporta pared, y el TOTAL lo estaria
+      // soltando en silencio: se guarda para decirlo.
+      if(!m.heightKnown) t.noHeight.push({ idx: i, room: r });
+      if(!m.outlineOk) t.noOutline.push({ idx: i, room: r });
+      if(m.insideOpenings) t.insideOpenings += m.insideOpenings;
+    });
+    return t;
+  }
+  // Una sola tabla para la pantalla y para la hoja exportada. Si fueran
+  // dos constructores, tarde o temprano el papel diria un numero y el
+  // telefono otro -- y el que se manda al seguro es el papel.
+  //
+  // Perimetro y rodapie van en pies decimales (LF): es la unidad con la
+  // que se cotiza, la que se multiplica por un precio. La altura va en
+  // pies y pulgadas, que es como se ve un techo.
+  // opts.only limita las FILAS a un trozo de cuartos (paginacion de la
+  // hoja); el TOTAL sigue siendo el del nivel entero, nunca el del trozo.
+  // Sin opts se comporta igual que siempre: es el caso de la pantalla.
+  function fpMeasurementTable(data, onLevel, sheet, opts){
+    const ink = sheet ? '#1C2530' : 'var(--ink)';
+    const soft = sheet ? '#5a6472' : 'var(--ink-soft)';
+    const body = sheet ? '#3A4552' : 'var(--ink)';
+    const line = sheet ? '#c8d0da' : 'var(--line)';
+    const fs = sheet ? 15 : 12;
+    const all = ((data && data.rooms) || []).map((r, i) => ({ r, i }))
+      .filter(x => !x.r.deleted && (x.r.walls||[]).length && (!onLevel || onLevel(x.r)));
+    if(!all.length) return '';
+    const o = opts || {};
+    const rooms = o.only ? all.slice(o.only[0], o.only[1]) : all;
+    const withTotal = o.only ? !!o.withTotal : true;
+    const withNotes = o.only ? !!o.withNotes : true;
+    if(!rooms.length) return '';
+    const t = fpPlanMeasurements(data, onLevel);
+    const th = `padding:6px 8px; text-align:right; font-size:${fs-2}px; letter-spacing:0.06em; text-transform:uppercase; color:${soft}; border-bottom:2px solid ${ink}; white-space:nowrap;`;
+    const td = `padding:6px 8px; text-align:right; font-size:${fs}px; color:${body}; font-variant-numeric:tabular-nums; white-space:nowrap;`;
+    const n1 = v => v.toFixed(1);
+    let html = `<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse;">`
+      + `<thead><tr><th style="${th} text-align:left;">Room</th>`
+      + `<th style="${th}">Floor SF</th><th style="${th}">Wall SF</th><th style="${th}">Ceiling SF</th>`
+      + `<th style="${th}">Perimeter LF</th><th style="${th}">Baseboard LF</th><th style="${th}">Ceiling ht</th></tr></thead><tbody>`;
+    rooms.forEach(({ r, i }) => {
+      const m = fpRoomMeasurements(r);
+      // El asterisco es el MISMO que ya lleva una cota ajustada a mano en
+      // el dibujo: aqui marca un cuarto cuyo borde la app cerro sola, asi
+      // que su perimetro, su pared y su rodapie traen un tramo adivinado.
+      const mark = m.guessedFt > 1 ? '<span style="color:#8a6d1a;">&dagger;</span>' : '';
+      const dash = '&mdash;';
+      // Sin contorno no hay perimetro, y sin perimetro no hay pared ni
+      // rodapie. Se pone raya: publicar el numero que sale del lazo seria
+      // la MISMA pared contada dos veces.
+      const wallCell = (m.outlineOk && m.heightKnown) ? n1(m.netWallSqFt) : dash;
+      const htCell = m.heightKnown ? fpFeetInches(m.wallHeightFt) : dash;
+      const perCell = m.outlineOk ? n1(m.perimeterFt) : dash;
+      const baseCell = m.outlineOk ? n1(m.baseboardFt) : dash;
+      html += `<tr><td style="${td} text-align:left;">${esc(r.roomName || `Room ${i+1}`)}${mark}</td>`
+        + `<td style="${td}">${n1(m.floorSqFt)}</td><td style="${td}">${wallCell}</td>`
+        + `<td style="${td}">${n1(m.ceilingSqFt)}</td><td style="${td}">${perCell}</td>`
+        + `<td style="${td}">${baseCell}</td><td style="${td}">${htCell}</td></tr>`;
+    });
+    const tt = `${td} font-weight:700; color:${ink}; border-top:2px solid ${ink};`;
+    if(withTotal) html += `<tr><td style="${tt} text-align:left;">TOTAL</td>`
+      + `<td style="${tt}">${n1(t.floorSqFt)}</td><td style="${tt}">${n1(t.netWallSqFt)}${t.noHeight.length ? '<span style="color:#8a6d1a;">&dagger;</span>' : ''}</td>`
+      + `<td style="${tt}">${n1(t.ceilingSqFt)}</td><td style="${tt}">${n1(t.perimeterFt)}</td>`
+      + `<td style="${tt}">${n1(t.baseboardFt)}</td><td style="${tt}">&nbsp;</td></tr>`;
+    html += `</tbody></table></div>`;
+    if(!withNotes) return html;
+    // Cada nota existe porque sin ella un numero de arriba se leeria como
+    // algo que no es. Ninguna es relleno legal.
+    const notes = [];
+    notes.push(`Wall SF is each room's perimeter times its ceiling height, with every door, window and passage deducted (${n1(t.openingSqFt)} sq ft removed from ${n1(t.grossWallSqFt)} sq ft gross).`);
+    notes.push(`Ceiling SF assumes one flat ceiling at the height shown. The scan does not measure ceiling shape, so a vaulted, sloped or dropped ceiling is not detected here.`);
+    notes.push(`Baseboard LF is the perimeter less the width of every door and passage. Windows are not deducted.`);
+    // Lo mas peligroso de todo esto: un total de pared al que le faltan
+    // cuartos se ve igual de creible que uno completo.
+    if(t.noOutline.length) notes.push(`<span style="color:#8a6d1a;">${t.noOutline.length} room${t.noOutline.length>1?'s':''} (${t.noOutline.slice(0,4).map(x => esc(x.room.roomName || `Room ${x.idx+1}`)).join(', ')}) could not be outlined - not enough connected walls - so no perimeter, wall or baseboard figure is given for ${t.noOutline.length>1?'them':'it'} and ${t.noOutline.length>1?'they are':'it is'} left out of those totals. The floor area still stands.</span>`);
+    if(t.insideOpenings) notes.push(`Wall SF and Baseboard LF cover the room's outer boundary. ${t.insideOpenings} door or opening sits on an interior partition inside a room (a closet divider, for example); that partition is not part of the perimeter, so it is not measured here.`);
+    if(t.noHeight.length) notes.push(`<span style="color:#8a6d1a;">No wall height was recorded for ${t.noHeight.length} room${t.noHeight.length>1?'s':''} (${t.noHeight.slice(0,4).map(x => esc(x.room.roomName || `Room ${x.idx+1}`)).join(', ')}${t.noHeight.length>4?`, +${t.noHeight.length-4} more`:''}), so no wall area could be calculated for ${t.noHeight.length>1?'them':'it'} and the Wall SF total above does NOT include ${t.noHeight.length>1?'those rooms':'that room'}. Measure ${t.noHeight.length>1?'those walls':'that wall'} on site.</span>`);
+    if(t.guessedRooms) notes.push(`<span style="color:#8a6d1a;">&dagger; ${n1(t.guessedFt)} ft of boundary in ${t.guessedRooms} room${t.guessedRooms>1?'s':''} was closed by the app, not measured. Those rooms' perimeter, wall and baseboard figures include that stretch.</span>`);
+    // Tope de 6, como el resto del archivo: una nota por cuarto empujaba
+    // las demas advertencias fuera de la hoja sin avisar. Lo que no cabe
+    // se DICE, no se pierde.
+    t.odd.slice(0, 6).forEach(o => {
+      const list = o.m.oddHeights.map(h => `${n1(h.lengthFt)} ft at ${fpFeetInches(h.heightFt)}`).join(', ');
+      const many = o.m.oddHeights.length > 1;
+      notes.push(`<span style="color:#8a6d1a;">${esc(o.room.roomName || `Room ${o.idx+1}`)}: ${list} instead of ${fpFeetInches(o.m.wallHeightFt)}. The figures above use ${fpFeetInches(o.m.wallHeightFt)} for the whole room - check ${many ? 'those walls' : 'that wall'}.</span>`);
+    });
+    if(t.odd.length > 6) notes.push(`<span style="color:#8a6d1a;">+ ${t.odd.length - 6} more rooms have a wall measured at a different height. Open Measurements in the app to see them all.</span>`);
+    // Dos cuartos no pueden ser duenos del mismo piso. Nuestra propia
+    // verificacion ya encontro 49 sq ft repetidos en la casa real, y el
+    // TOTAL de piso y de techo de arriba los suma dos veces. NO se
+    // corrige en silencio -- de ese numero se factura y el defecto real
+    // esta en el contorno -- pero la hoja tiene que decirlo.
+    //
+    // La PARED no sufre esto: una particion compartida tiene dos caras y
+    // las dos se pintan, asi que sumarlas es correcto.
+    try{
+      const ov = fpRoomsOverlapSqFt(data, onLevel);
+      if(ov && ov.sqFt >= 4) notes.push(`<span style="color:#8a6d1a;">Two or more rooms claim the same ${ov.sqFt.toFixed(1)} sq ft of floor, so the floor and ceiling totals above count it twice. Open Plan review in the app to fix the room outlines. Wall SF is unaffected - a shared partition has two faces and both get finished.</span>`);
+    }catch(e){}
+    notes.push(`Figures are taken from the LiDAR scan for estimating. They are not a certified survey.`);
+    return html + `<div style="font-size:${fs-3}px; line-height:1.6; color:${soft}; padding-top:10px;">`
+      + notes.map(n => `<div style="margin-top:3px;">${n}</div>`).join('') + `</div>`;
   }
   // Clearance from a point to the nearest piece of furniture, measured
   // to each object's actual RECTANGULAR footprint (axis-aligned - plans
@@ -15947,8 +16226,57 @@
         </div>
         <div style="font-size:15px; color:#c8d0da;">${new Date().toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'})}</div>
       </div>
-      <div style="flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; padding:18px 24px;">${fitSvg}</div>
-      <div style="flex:0 0 auto; max-height:430px; overflow:hidden; padding:0 40px 8px; border-top:2px solid #1C2530;">${infoHtml}</div>
+      <div data-fp-planbox style="flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; padding:18px 24px;">${fitSvg}</div>
+      <div data-fp-info style="flex:0 0 auto; overflow:hidden; padding:0 40px 8px; border-top:2px solid #1C2530;">${infoHtml}</div>
+      <div style="flex:0 0 auto; padding:8px 40px 16px; font-size:12px; color:#5a6472;">${footHtml}</div>
+    `;
+    return wrap;
+  }
+
+  // La hoja de medidas va en su PROPIA pagina, despues del dibujo. La
+  // banda de informacion del plano tiene max-height:430px con
+  // overflow:hidden, asi que una tabla ahi habria empujado la lista de
+  // cuartos fuera de la pagina SIN AVISAR -- y en un documento de seguro
+  // un renglon que se pierde en silencio es peor que no ponerlo.
+  // SEGUNDO PASE. fpMakeSheet reparte la pagina a ciegas (reserva un alto
+  // fijo para la banda de informacion), y ahora la banda lleva la cedula
+  // de medidas, cuyo alto depende de cuantos cuartos hay. El svg trae
+  // ancho y alto en pixeles fijos -- html2canvas no es de fiar con
+  // porcentajes -- asi que si la banda crece, el dibujo se saldria de su
+  // caja y el overflow:hidden de la hoja lo cortaria en silencio.
+  //
+  // Con la hoja ya en el documento se puede MEDIR: se lee el alto real
+  // que quedo para el dibujo y se vuelve a encajar dentro de el.
+  function fpRefitSheetPlans(stack){
+    [...stack.children].forEach(sheet => {
+      const box = sheet.querySelector('[data-fp-planbox]');
+      const svg = box && box.querySelector('svg');
+      if(!box || !svg) return;
+      const vb = (svg.getAttribute('viewBox')||'').split(/\s+/).map(Number);
+      const vbW = vb[2], vbH = vb[3];
+      if(!(vbW > 0 && vbH > 0)) return;
+      const cs = getComputedStyle(box);
+      const availW = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const availH = box.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      if(!(availW > 0 && availH > 0)) return;
+      const fit = Math.min(availW / vbW, availH / vbH);
+      svg.setAttribute('width', String(Math.floor(vbW * fit)));
+      svg.setAttribute('height', String(Math.floor(vbH * fit)));
+    });
+  }
+  function fpMakeTableSheet({ title, subtitle, bodyHtml, footHtml }){
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'width:1190px; height:1683px; display:flex; flex-direction:column; background:#fff; overflow:hidden;';
+    wrap.innerHTML = `
+      <div style="flex:0 0 auto; background:#1C2530; color:#fff; padding:26px 40px; display:flex; align-items:baseline; justify-content:space-between;">
+        <div>
+          <div style="font-family:'Oswald',sans-serif; color:#D2601A; font-size:15px; letter-spacing:0.18em; text-transform:uppercase;">Daily Field Report</div>
+          <div style="font-family:'Oswald',sans-serif; font-size:34px; text-transform:uppercase; margin-top:4px;">${title}</div>
+        </div>
+        <div style="font-size:15px; color:#c8d0da;">${new Date().toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'})}</div>
+      </div>
+      ${subtitle ? `<div style="flex:0 0 auto; padding:14px 40px 0; font-size:16px; font-weight:700; color:#1C2530;">${subtitle}</div>` : ''}
+      <div style="flex:1 1 auto; min-height:0; overflow:hidden; padding:16px 40px 8px;">${bodyHtml}</div>
       <div style="flex:0 0 auto; padding:8px 40px 16px; font-size:12px; color:#5a6472;">${footHtml}</div>
     `;
     return wrap;
@@ -15981,9 +16309,13 @@
       const sev = moisture ? (data._moistureMarks||[]).filter(m => m.type === 'fill' && m.roomIdx === i).map(m => fmKindDef(m.kind).legend.toLowerCase()).join(', ') : '';
       return `<b>${name}</b>: ${dims} &middot; ${area} sq ft${subs ? ` (incl. ${subs})` : ''}${sev ? ` &middot; <i>${sev}</i>` : ''}${!moisture && eq ? ` (${eq})` : ''}`;
     };
+    // Decia lo mismo dos veces ("* ajustado a mano..." y despues, dentro
+    // del resumen, "Dimensions marked * were set by hand..."). Se queda
+    // UNA vez: la nota no se puede quitar porque explica los asteriscos
+    // que van sobre el dibujo.
     const handEditNote = (!moisture && data._handEdited) ? (() => {
       const manual = fpManualEditSummary(data);
-      return `* dimension adjusted by hand after the scan; all other dimensions as measured by LiDAR.${manual ? ' ' + manual.text : ''}`;
+      return manual ? manual.text : '* dimension adjusted by hand after the scan; all other dimensions as measured by LiDAR.';
     })() : '';
     const drawnNote = moisture ? "Water / mold / smoke / damage areas drawn by hand from the technician's on-site observations and readings. The floor plan geometry is as measured by LiDAR." : '';
     // The quality badge prints only when the final validator passes -
@@ -15992,6 +16324,37 @@
       ? `<span style="color:#1e7a44; font-weight:700; letter-spacing:0.5px;">&#10003; ${FP_QUALITY_BADGE_TEXT}</span> &middot; walls consistent, openings classified, all spaces labeled &middot; `
       : '';
     const foot = `${qualityBadge}${handEditNote ? `<span style="color:#8a6d1a;">${handEditNote}</span> ` : ''}Generated ${new Date().toLocaleString()}`;
+    // El ajustador recibe hojas sueltas: la de medidas tiene que decir
+    // de quien es sin depender de la que trae el dibujo.
+    const job = (data && data.job) || fpJobInfo();
+    const jobLine = [job.client, job.address].filter(Boolean).map(esc).join(' &middot; ') || 'No client on this plan';
+    // 26 cuartos por hoja. Medido: a los 40 las NOTAS se salian de la
+    // hoja (overflow:hidden) y desaparecian sin avisar - y son justo las
+    // advertencias. 26 deja aire para una lista larga de notas.
+    const FP_MEAS_ROWS_PER_SHEET = 26;
+    // Cuantos cuartos caben en la banda del plano sin empujar el dibujo
+    // fuera ni comerse las notas. Medido en la hoja real, no supuesto.
+    const FP_MEAS_ROWS_ON_PLAN_SHEET = 9;
+    const pushMeasurementSheets = (onLevel, extra) => {
+      if(moisture) return;
+      const n = ((data && data.rooms) || [])
+        .filter(r => !r.deleted && (r.walls||[]).length && (!onLevel || onLevel(r))).length;
+      if(!n) return;
+      const parts = Math.max(1, Math.ceil(n / FP_MEAS_ROWS_PER_SHEET));
+      // El pie de la cedula NO lleva la medalla de calidad: se contradecia
+      // con sus propias notas de borde adivinado y piso contado dos veces.
+      // La medalla pertenece a la hoja del plano.
+      const measFoot = foot.replace(/^<span style="color:#1e7a44[\s\S]*?&middot;\s/, '');
+      for(let k = 0; k < parts; k++){
+        const last = k === parts - 1;
+        const body = fpMeasurementTable(data, onLevel, true,
+          { only: [k*FP_MEAS_ROWS_PER_SHEET, (k+1)*FP_MEAS_ROWS_PER_SHEET], withTotal: last, withNotes: last });
+        if(!body) continue;
+        sheetOpts.push({ table: true, title: `${company} — Measurements`,
+          subtitle: `${jobLine}${extra || ''}${parts > 1 ? ` &middot; sheet ${k+1} of ${parts}` : ''}`,
+          bodyHtml: body, footHtml: measFoot });
+      }
+    };
     const infoFor = (headLeft, headRight, lines) =>
       `<div style="display:flex; align-items:baseline; justify-content:space-between; padding:14px 0 10px;"><span style="font-size:20px; font-weight:700; color:#1C2530;">${headLeft}</span><span style="font-size:14px; font-weight:700; letter-spacing:1px; color:#1C2530;">${headRight}</span></div>`
       + (legendChips ? `<div style="padding-bottom:8px;">${legendChips}</div>` : '')
@@ -16013,9 +16376,24 @@
           : `<b>Total Area:</b> ${fpDisplayTotalAreaSqFt(data).toFixed(1)} sq ft &nbsp; <b>Rooms:</b> ${lvlRooms.length}`;
         const spaceLines = (data._spaceLabels||[]).filter(sp => (sp.level||1) === lvl)
           .map(sp => `<b>${esc(sp.name)}</b>: ${fpFeetInches(sp.w)} x ${fpFeetInches(sp.d)} &middot; labeled space (named on site, not a scanned room)`);
+        // La banda del plano ES la cedula de medidas. Los renglones por
+        // cuarto que estaban aqui ya van rotulados sobre el propio
+        // dibujo (nombre, medidas y pies cuadrados), asi que repetirlos
+        // abajo ocupaba media pagina diciendo lo mismo dos veces.
+        const onLvl = multi ? (r => (r.level||1) === lvl) : null;
+        const measTable = moisture ? '' : fpMeasurementTable(data, onLvl, true);
+        const fitsOnPlanSheet = !!measTable && lvlRooms.length <= FP_MEAS_ROWS_ON_PLAN_SHEET;
+        const extra = spaceLines.length
+          ? `<div style="font-size:13px; line-height:1.6; color:#3A4552; padding-top:8px;">${spaceLines.join('<br>')}</div>` : '';
         sheetOpts.push({ title: titleBase, svgHtml: svg,
-          infoHtml: infoFor(headLeft, `FLOOR ${lvl}`, lvlRooms.map(x => roomLine(x.r, x.i)).concat(spaceLines).join('<br>')),
+          infoHtml: fitsOnPlanSheet
+            ? infoFor(headLeft, `FLOOR ${lvl}`, '') + measTable + extra
+            : infoFor(headLeft, `FLOOR ${lvl}`, lvlRooms.map(x => roomLine(x.r, x.i)).concat(spaceLines).join('<br>')),
           footHtml: foot });
+        // Hoja aparte SOLO cuando no cabe: con muchos cuartos la tabla
+        // desbordaria la banda y overflow:hidden se comeria las notas sin
+        // avisar, que es peor que una segunda pagina.
+        if(!fitsOnPlanSheet) pushMeasurementSheets(onLvl, multi ? ` &middot; Level ${lvl}` : '');
       });
     }else{
       // Rooms shown separately (merge unavailable): one honest sheet each.
@@ -16034,12 +16412,27 @@
           infoHtml: infoFor(`<b>${esc(r.roomName || `Room ${ri+1}`)}</b>`, `FLOOR ${r.level||1}`, roomLine(r, ri)) + note,
           footHtml: foot });
       });
+      // El merge fallo, pero la geometria de cada cuarto por separado no
+      // se toca: sus medidas siguen siendo validas y se imprimen juntas.
+      // Una cedula POR NIVEL tambien aqui: la pantalla ensena un nivel a
+      // la vez, y una hoja que sumara los dos no cuadraria con lo que el
+      // tecnico acaba de revisar en el telefono.
+      if(multi) levels.forEach(lvl => pushMeasurementSheets(r => (r.level||1) === lvl, ` &middot; Level ${lvl}`));
+      else pushMeasurementSheets(null, '');
     }
     const stack = document.createElement('div');
     stack.className = 'printout';
     stack.style.cssText = 'margin:0; padding:0; background:#fff; width:1190px;';
-    sheetOpts.forEach(o => stack.appendChild(fpMakeSheet(o)));
+    // La pila DECLARA cuantas hojas trae. El PDF lo leia de merged/niveles
+    // y con eso adivinaba - y adivinaba mal en cuanto se agrego la hoja de
+    // medidas: un plano de un solo nivel seguia pidiendo "todo en una
+    // pagina" y aplastaba las DOS hojas dentro de una sola A4, ilegibles.
+    stack.dataset.sheets = String(sheetOpts.length);
+    sheetOpts.forEach(o => stack.appendChild(o.table ? fpMakeTableSheet(o) : fpMakeSheet(o)));
     document.body.appendChild(stack);
+    // Ya en el documento: medir y re-encajar el dibujo con el alto REAL
+    // que le dejo la cedula.
+    fpRefitSheetPlans(stack);
     return stack;
   }
 
@@ -19541,9 +19934,13 @@
         // multi-level printout is a stack of separate sections - forcing
         // that stack onto one page shrank every room to illegibility, so
         // those paginate at full width like a text report instead.
+        // UNA hoja cabe en una pagina; dos o mas se paginan a ancho
+        // completo (una hoja por pagina, que es como se armo la pila).
+        // Se cuenta la pila real en vez de deducirla de merged/niveles:
+        // el plano de un solo nivel ahora lleva ademas la hoja de medidas.
+        const sheetCount = Number(node.dataset.sheets || 0);
         const onePagePlan = (tab === 'floorplan' || tab === 'moisture')
-          && floorplanData && floorplanData.merged !== false
-          && floorplanLevels(floorplanData).length <= 1;
+          && floorplanData && sheetCount === 1;
         // A wide building on a portrait sheet was a stretched strip with
         // huge empty margins - the PAPER now turns to match the plan.
         const orient = onePagePlan && canvas.width > canvas.height ? 'l' : 'p';
