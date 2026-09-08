@@ -1620,6 +1620,9 @@
         <button type="button" class="fpv-tool" id="fpFurnitureBtn">&#128715;<span>Furniture</span></button>
         <button type="button" class="fpv-tool" data-tool="water">&#128167;<span>Water</span></button>
         <button type="button" class="fpv-tool" id="fpMeasureBtn">&#128207;<span>Measure</span></button>
+        <button type="button" class="fpv-tool" data-tool="name">&#127991;<span>Name</span></button>
+        <button type="button" class="fpv-tool" id="fpRotateBtn">&#8635;<span>Rotate</span></button>
+        <button type="button" class="fpv-tool" id="fpFlipBtn">&#8646;<span>Flip</span></button>
         <span class="fpv-rail-gap"></span>
         <button type="button" class="fpv-tool" id="fpRailUndoBtn" style="opacity:0.45;">&#8630;<span>Undo</span></button>
         <button type="button" class="fpv-tool" id="fpRailRedoBtn" style="opacity:0.45;">&#8631;<span>Redo</span></button>
@@ -4428,7 +4431,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CP';
+  const APP_BUILD = '2026-09-07-CQ';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -9531,6 +9534,8 @@
       fpSetTool('opening');
       return;
     }
+    if(e.target.closest('#fpRotateBtn')){ fpRotatePlan(); return; }
+    if(e.target.closest('#fpFlipBtn')){   fpFlipPlan();   return; }
     if(e.target.closest('#fpFurnitureBtn')){
       fpSetTool(fpActiveTool === 'furniture' ? 'select' : 'furniture');
       return;
@@ -9647,6 +9652,78 @@
 
   // Single commit choke point - EVERY editor mutation routes through it,
   // so the honesty flag, draft save, and re-render can never be skipped.
+  // ---- Girar y voltear el plano entero -------------------------------------
+  // TODO lo que lleva coordenadas se transforma junto. La lista sale del censo
+  // de un plano REAL bajado del telefono, no de lo que "deberia" traer: si un
+  // solo campo se queda sin girar, el plano se corrompe en silencio - una pared
+  // en su sitio y su puerta a tres metros - y es un papel que va al seguro.
+  //   girar 90 grados  (x,y) -> (-y, x)
+  //   espejo           (x,y) -> (-x, y)
+  function fpTransformPlan(data, kind){
+    if(!data) return;
+    const flip = kind === 'flip';
+    const P = flip ? (x, y) => ({ x: -x, y:  y })
+                   : (x, y) => ({ x: -y, y:  x });
+    const mv = o => { if(!o || typeof o.x !== 'number' || typeof o.y !== 'number') return;
+                      const n = P(o.x, o.y); o.x = n.x; o.y = n.y; };
+    (data.rooms || []).forEach(r => {
+      (r.walls || []).forEach(w => { mv(w.start); mv(w.end); });
+      ['doors','windows','openings'].forEach(k => (r[k] || []).forEach(o => {
+        mv(o.position);
+        // La bisagra y el barrido son LADOS: en un espejo se voltean, al girar no.
+        if(flip){
+          if('_swingAcross' in o) o._swingAcross = !o._swingAcross;
+          if('_hingeFlip'   in o) o._hingeFlip   = !o._hingeFlip;
+        }
+      }));
+      (r.objects || []).forEach(o => {
+        mv(o.center);
+        // El dibujante ya aplica rotationDeg (rotate(...) en el <g>), asi que el
+        // ancho y el fondo NO se intercambian: basta con girar el angulo.
+        const a = +o.rotationDeg || 0;
+        o.rotationDeg = (((flip ? -a : a + 90) % 360) + 360) % 360;
+      });
+      // El corrimiento de la etiqueta va en PIXELES del plano, pero sus ejes son
+      // los mismos del plano, asi que gira igual.
+      const off = r._labelOffsetPx;
+      if(off && typeof off.dx === 'number' && typeof off.dy === 'number'){
+        const n = P(off.dx, off.dy); off.dx = n.x; off.dy = n.y;
+      }
+      delete r._subAreas;        // los huecos se vuelven a detectar en cada dibujado
+    });
+    (data._waterMarks    || []).forEach(m => (m.points  || []).forEach(mv));
+    (data._moistureMarks || []).forEach(m => (m.corners || []).forEach(mv));
+    (data._spaceLabels   || []).forEach(l => {
+      mv(l);
+      // El largo y el ancho del hueco se cruzan al girar; en un espejo no.
+      if(!flip){ const w = l.w; l.w = l.d; l.d = w; }
+    });
+    // Girar es una edicion a mano: sin esto, el alineador que corre al cargar el
+    // borrador la desharia.
+    data._handEdited = true;
+  }
+
+  function fpHint(txt){
+    const h = $('#fpToolHint'); if(!h) return;
+    h.hidden = false; h.textContent = txt;
+  }
+  function fpRotatePlan(){
+    if(!floorplanData) return;
+    fpPushUndo();
+    fpCommitEdit(() => fpTransformPlan(floorplanData, 'rot90'), []);
+    renderFloorplan(floorplanData);
+    fpFitToScreen();
+    fpHint('Turned a quarter turn. Tap again for another.');
+  }
+  function fpFlipPlan(){
+    if(!floorplanData) return;
+    fpPushUndo();
+    fpCommitEdit(() => fpTransformPlan(floorplanData, 'flip'), []);
+    renderFloorplan(floorplanData);
+    fpFitToScreen();
+    fpHint('Mirrored. Tap again to put it back.');
+  }
+
   function fpCommitEdit(mutate, affectedRoomIdxs){
     if(!floorplanData) return;
     mutate();
@@ -9815,6 +9892,28 @@
     });
     if(roomIdx == null && allowNear && bestDist <= 3) roomIdx = bestIdx;
     return roomIdx;
+  }
+
+  // Un nombre puesto a mano donde el tecnico quiera. Se guarda como los rotulos
+  // de espacio que ya existen (_spaceLabels), asi que se dibuja, se renombra y
+  // sale en el PDF sin codigo nuevo.
+  function fpPlaceName(svgEl, clientX, clientY){
+    const pt = fpClientToFeet(svgEl, clientX, clientY);
+    if(!pt) return false;
+    const txt = (prompt('Name for this spot / Nombre de este lugar:', '') || '').trim();
+    if(!txt) return false;
+    fpPushUndo();
+    fpCommitEdit(() => {
+      floorplanData._spaceLabels = floorplanData._spaceLabels || [];
+      floorplanData._spaceLabels.push({
+        x: Math.round(pt.x*100)/100, y: Math.round(pt.y*100)/100,
+        w: 0, d: 0, level: floorplanSelectedLevel || 1, name: txt, _byHand: true
+      });
+    }, []);
+    renderFloorplan(floorplanData);
+    fpSetTool('select');
+    fpHint('Name added. Tap it to rename.');
+    return true;
   }
 
   function fpPlaceFurniture(svgEl, clientX, clientY){
@@ -12360,6 +12459,10 @@
         fpPlaceFurniture(svgEl, e.clientX, e.clientY);
         return;
       }
+      if(svgEl && fpActiveTool === 'name'){
+        fpPlaceName(svgEl, e.clientX, e.clientY);
+        return;
+      }
       if(svgEl && fpActiveTool === 'wall'){
         fpPlaceWallTap(svgEl, e.clientX, e.clientY);
         return;
@@ -14656,7 +14759,11 @@
       const sx = X(sp.x), sy = Y(sp.y);
       overlays.push(`<g class="fp-spacelabel" data-space-idx="${si}" style="cursor:pointer;">`
         + `<text x="${sx}" y="${sy-9}" font-size="17" font-weight="700" letter-spacing="0.4" font-family="'IBM Plex Sans',sans-serif" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${esc(sp.name).toUpperCase()}</text>`
-        + `<text x="${sx}" y="${sy+11}" font-size="15" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#5a6472" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpFeetInches(sp.w)} x ${fpFeetInches(sp.d)}</text>`
+        // Un nombre puesto a mano no tiene medidas: sin esto imprimia 0" x 0"
+        // debajo del texto.
+        + ((sp.w > 0 && sp.d > 0)
+            ? `<text x="${sx}" y="${sy+11}" font-size="15" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#5a6472" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpFeetInches(sp.w)} x ${fpFeetInches(sp.d)}</text>`
+            : '')
         + `</g>`);
     });
     // Paint layer: on the FLOOR PLAN this is the damage-brush strokes;
