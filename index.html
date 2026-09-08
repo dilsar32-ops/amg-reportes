@@ -4436,7 +4436,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CU';
+  const APP_BUILD = '2026-09-07-CV';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -15954,16 +15954,13 @@
       // 'ok' junta DOS cosas: que sea igual, y que el haya puesto de MENOS (por
       // decision suya eso no se avisa). Pintar las dos con "dicen lo mismo"
       // seria mentira: en un dia de menos NO dicen lo mismo.
-      const igual = Math.abs(v.mine - v.theirs) <= 1;      // 1 minuto de tolerancia
-      if(igual){
-        return `<br><details class="whychip ok"><summary>&#10003; Coincide${mg0 ? ' · AMG' : ''}</summary>`
-          + `<div class="whytext">${detalle}`
-          + `<span class="muted">Sus horas y el reporte dicen lo mismo. No hay nada que arreglar.</span></div></details>`;
-      }
-      return `<br><details class="whychip soft"><summary>&#10003; Revisado${mg0 ? ' · AMG' : ''}</summary>`
+      // Solo se avisa cuando pone de MAS (regla suya). Si puso de MENOS no sale
+      // nada: ni aviso, ni palomita. Callar es honesto; poner "coincide" sobre
+      // un dia que no coincide, no.
+      if(Math.abs(v.mine - v.theirs) > 1) return '';
+      return `<br><details class="whychip ok"><summary>&#10003; Coincide${mg0 ? ' · AMG' : ''}</summary>`
         + `<div class="whytext">${detalle}`
-        + `<span class="muted">${fuente === 'el líder' ? 'El líder' : 'El reporte'} puso <b>${hhmm(v.theirs - v.mine)}</b> más que usted. `
-        + `Sus horas quedan como usted las puso. Si trabajó esas horas, hable con su líder antes del pago.</span></div></details>`;
+        + `<span class="muted">Sus horas y el reporte dicen lo mismo. No hay nada que arreglar.</span></div></details>`;
     }
     const mg = v.co === 'mudanza';
     // En AMG no hay "lider": el labor log lo mando el manager.
@@ -16466,29 +16463,18 @@
       // Que se vea que la revision corrio y salio limpia. Solo se cuentan los
       // dias que de verdad se pudieron comparar: decir "todo bien" sobre dias
       // sin labor log seria mentir.
-      // Y 'ok' junta dos cosas distintas: que sea IGUAL, y que el haya puesto de
-      // MENOS. Meter las dos en "sus horas coinciden" seria decirle que cuadra
-      // un dia que no cuadra.
-      let iguales = 0, deMenos = 0;
-      days.forEach(d => {
-        let vio = null;
-        ['restauracion','mudanza'].forEach(k => {
-          const v = myDayVerdict(d, k);
-          if(v && v.kind === 'ok') vio = (Math.abs(v.mine - v.theirs) <= 1) ? (vio || 'igual') : 'menos';
-        });
-        if(vio === 'igual') iguales++; else if(vio === 'menos') deMenos++;
-      });
-      if((iguales || deMenos) && box){
+      // Solo se cuentan los dias que de verdad son IGUALES. Un dia donde el puso
+      // de menos no se avisa (regla suya) y tampoco se cuenta como coincidencia:
+      // no aparece en ningun lado.
+      const iguales = days.reduce((n, d) => n + (['restauracion','mudanza'].some(k => {
+        const v = myDayVerdict(d, k);
+        return v && v.kind === 'ok' && Math.abs(v.mine - v.theirs) <= 1;
+      }) ? 1 : 0), 0);
+      if(iguales && box){
         box.hidden = false;
-        const dia = n => n === 1 ? '1 día' : n + ' días';
-        box.innerHTML = deMenos
-          ? '<div class="matchstatus partial" style="display:block; margin:0;">&#10003; '
-            + 'Revisado con el labor log'
-            + (iguales ? ' &middot; ' + dia(iguales) + ' coinciden' : '')
-            + ' &middot; en ' + dia(deMenos) + ' el líder reportó más horas que usted</div>'
-          : '<div class="matchstatus ok" style="display:block; margin:0;">&#10003; '
-            + 'Sus horas coinciden con el labor log (' + dia(iguales) + ' revisado'
-            + (iguales === 1 ? '' : 's') + ')</div>';
+        box.innerHTML = '<div class="matchstatus ok" style="display:block; margin:0;">&#10003; '
+          + 'Sus horas coinciden con el labor log ('
+          + (iguales === 1 ? '1 día revisado' : iguales + ' días revisados') + ')</div>';
       }
       return;
     }
