@@ -4498,7 +4498,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-07-CZ';
+  const APP_BUILD = '2026-09-08-DA';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -11945,11 +11945,19 @@
         // wall. This never SILENCES the item (the honest direction is
         // always to keep asking), it says what we independently know.
         const walked = fpPathCrossesSegment(biggest, fpWalkedPath(data, room.level || 1), 4);
-        issues.push({ kind: 'gap', room: idx, ack: '_gapReviewed', seg: biggest,
+        // The corner the tech could not reach: if the two walls that reach
+        // this break would meet at a square corner, offer THAT instead of
+        // a single straight wall across the opening.
+        const corner = walked ? null : fpInferCorner(room, biggest);
+        issues.push({ kind: 'gap', room: idx, ack: '_gapReviewed', seg: biggest, corner: corner,
           text: `${esc(roomName)}: a ${fpFeetInches(biggest.d)} break in the room outline`
             + (walked
                 ? ` - but you walked through it during the scan, so it is probably a doorway, not a missing wall.`
-                : ` - a wall may be missing. Add the suggested wall, or rescan that side.`) });
+                : corner
+                  ? (corner.kind === 'vertice'
+                      ? ` - the two walls that reach it would meet at a ${corner.angle}&deg; corner, so the scan just missed the last stretch into it. Add the corner, or rescan that side.`
+                      : ` - squaring off the two walls that reach it closes the room cleanly. That is what a corner blocked by furniture looks like. Add it, or rescan that side.`)
+                  : ` - a wall may be missing. Add the suggested wall, or rescan that side.`) });
       }
     });
     // OUR OWN CHECK, not Apple's: two rooms cannot both own the same
@@ -12130,7 +12138,11 @@
       // proposes the exact wall that would close it (marked "drawn by
       // hand" like any added wall - suggesting is not measuring).
       const suggestBtn = (it.kind === 'gap' && it.seg)
-        ? `<div style="margin-top:6px;"><button class="btn btn-outline fpSuggestWall" data-room-idx="${it.room}" data-ax="${it.seg.a.x}" data-ay="${it.seg.a.y}" data-bx="${it.seg.b.x}" data-by="${it.seg.b.y}" type="button" style="padding:6px 10px;">+ Add the suggested wall (${fpFeetInches(it.seg.d)})</button></div>`
+        ? `<div style="margin-top:6px;">`
+          + (it.corner
+              ? `<button class="btn btn-outline fpSuggestCorner" data-room-idx="${it.room}" data-ax="${it.seg.a.x}" data-ay="${it.seg.a.y}" data-bx="${it.seg.b.x}" data-by="${it.seg.b.y}" data-cx="${it.corner.x}" data-cy="${it.corner.y}" type="button" style="padding:6px 10px;">+ Add the corner (${fpFeetInches(it.corner.legA)} + ${fpFeetInches(it.corner.legB)})</button> `
+              : '')
+          + `<button class="btn btn-outline fpSuggestWall" data-room-idx="${it.room}" data-ax="${it.seg.a.x}" data-ay="${it.seg.a.y}" data-bx="${it.seg.b.x}" data-by="${it.seg.b.y}" type="button" style="padding:6px 10px;">+ Add a straight wall (${fpFeetInches(it.seg.d)})</button></div>`
         : '';
       return `<div style="padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">⚠️ ${it.text}${classify}${photoBtn}${suggestBtn}${ackBtn}</div>`;
     }).join('');
@@ -12140,6 +12152,30 @@
   $('#floorplanValidation').addEventListener('click', (e) => {
     const photoBtn = e.target.closest('.fpViewKeyframe');
     if(photoBtn){ fpShowKeyframePhoto(photoBtn.dataset.kf); return; }
+    const sc = e.target.closest('.fpSuggestCorner');
+    if(sc && floorplanData){
+      const ri = Number(sc.dataset.roomIdx);
+      const room = (floorplanData.rooms||[])[ri];
+      if(room){
+        const a = { x:+sc.dataset.ax, y:+sc.dataset.ay };
+        const b = { x:+sc.dataset.bx, y:+sc.dataset.by };
+        const c = { x:+sc.dataset.cx, y:+sc.dataset.cy };
+        // Two walls meeting at the inferred corner. _added marks them as
+        // drawn by hand, so every disclosure the app already has for hand
+        // work (the asterisk on the dimension, the "adjusted by hand"
+        // stamp on the sheet) covers them too.
+        const mk = (p, q) => ({ id: fpNewId(), start:{x:p.x,y:p.y}, end:{x:q.x,y:q.y},
+          lengthFt: Math.round(Math.hypot(q.x-p.x, q.y-p.y)*100)/100, heightFt: 8, _added: true });
+        fpPushUndo();
+        fpCommitEdit(() => {
+          room.walls = room.walls || [];
+          if(Math.hypot(c.x-a.x, c.y-a.y) > 0.3) room.walls.push(mk(a, c));
+          if(Math.hypot(b.x-c.x, b.y-c.y) > 0.3) room.walls.push(mk(c, b));
+        }, [ri]);
+        renderFloorplanValidation(floorplanData);
+      }
+      return;
+    }
     const sw = e.target.closest('.fpSuggestWall');
     if(sw && floorplanData){
       const ri = Number(sw.dataset.roomIdx);
@@ -14853,6 +14889,94 @@
   // cuesta nada.
   // El camino que el tecnico ANDUVO, que es evidencia fisica nuestra y no
   // de Apple. Viaja en inspection.path (ver ScanInspector.pathTrace).
+  // LA ESQUINA QUE NO SE PUDO ALCANZAR.
+  //
+  // El caso que Amilcar describio: habia muebles enfrente y no se pudo
+  // llegar a la esquina, asi que RoomPlan nunca la vio y el contorno queda
+  // abierto ahi. Hoy la app cierra ese hueco con una diagonal recta, que
+  // NO es la forma del cuarto - en su casa esa diagonal se comia 45 pies
+  // cuadrados de mas.
+  //
+  // Pero las dos paredes que llegan al hueco SI se midieron. Prolongarlas
+  // hasta donde se cruzan da la esquina real. En su casa las tres se
+  // cruzan a 90 grados exactos - que es lo que uno espera de un edificio
+  // de verdad, y por eso es una inferencia y no una adivinanza.
+  //
+  // Esto NO es geometria de Apple: sale de dos rectas y un cruce.
+  // Y NUNCA se aplica solo: cambia pies cuadrados que se facturan, asi
+  // que se dibuja punteado (estimado) y se OFRECE con un boton, igual que
+  // la pared sugerida que ya existia.
+  function fpInferCorner(room, seg){
+    if(!room || !seg || !seg.a || !seg.b) return null;
+    const D = (p, q) => Math.hypot(p.x-q.x, p.y-q.y);
+    let wa = null, wb = null;
+    (room.walls||[]).forEach(w => {
+      if(!w.start || !w.end) return;
+      if(D(w.end, seg.a) < 0.35)   wa = { from: w.start, to: w.end };
+      if(D(w.start, seg.a) < 0.35) wa = { from: w.end,   to: w.start };
+      if(D(w.start, seg.b) < 0.35) wb = { from: w.end,   to: w.start };
+      if(D(w.end, seg.b) < 0.35)   wb = { from: w.start, to: w.end };
+    });
+    if(!wa || !wb) return null;
+    const u = (a, b) => { const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy);
+      return L < 0.5 ? null : { x:dx/L, y:dy/L }; };
+    const u1 = u(wa.from, wa.to), u2 = u(wb.from, wb.to);
+    if(!u1 || !u2) return null;
+    const meet = (p1, d1, p2, d2) => {
+      const den = d1.x*d2.y - d1.y*d2.x;
+      if(Math.abs(den) < 1e-6) return null;
+      const t = ((p2.x-p1.x)*d2.y - (p2.y-p1.y)*d2.x) / den;
+      const c = { x: p1.x + d1.x*t, y: p1.y + d1.y*t };
+      return (isFinite(c.x) && isFinite(c.y)) ? c : null;
+    };
+    // El codo no puede caer encima de una pared que ya existe: eso seria
+    // que el contorno se devuelve sobre si mismo, no una esquina.
+    const onAWall = c => (room.walls||[]).some(w => {
+      if(!w.start || !w.end) return false;
+      const dx=w.end.x-w.start.x, dy=w.end.y-w.start.y, L2=dx*dx+dy*dy||1;
+      let t = ((c.x-w.start.x)*dx + (c.y-w.start.y)*dy)/L2;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(c.x-(w.start.x+dx*t), c.y-(w.start.y+dy*t)) < 0.4;
+    });
+    const cap = Math.max(14, seg.d * 2.2);
+    const ok = c => {
+      if(!c || onAWall(c)) return null;
+      const legA = D(seg.a, c), legB = D(seg.b, c);
+      if(legA > cap || legB > cap) return null;
+      if(legA < 0.2 && legB < 0.2) return null;
+      return { x: Math.round(c.x*100)/100, y: Math.round(c.y*100)/100,
+               legA: Math.round(legA*100)/100, legB: Math.round(legB*100)/100 };
+    };
+
+    // FORMA 1 - las dos paredes son los dos lados de UNA esquina, y solo
+    // les falto el pedacito hasta el vertice. Solo vale si el vertice
+    // queda HACIA ADELANTE de las dos: un cruce "hacia atras" obligaria al
+    // contorno a devolverse encima de una pared existente. En la casa real
+    // de Amilcar las tres roturas fallan justo aqui - parecian esquinas de
+    // 90 grados pero exigian retroceder, asi que no lo son.
+    const cornerAngle = Math.abs(Math.atan2(u1.x*u2.y - u1.y*u2.x, u1.x*u2.x + u1.y*u2.y) * 180/Math.PI);
+    if(cornerAngle >= 55 && cornerAngle <= 125){
+      const c1 = meet(wa.to, u1, wb.to, u2);
+      if(c1){
+        const fwdA = (c1.x-wa.to.x)*u1.x + (c1.y-wa.to.y)*u1.y;
+        const fwdB = (c1.x-wb.to.x)*u2.x + (c1.y-wb.to.y)*u2.y;
+        if(fwdA > -0.5 && fwdB > -0.5){
+          const r1 = ok(c1);
+          if(r1) return Object.assign(r1, { angle: Math.round(cornerAngle), kind: 'vertice' });
+        }
+      }
+    }
+    // FORMA 2 - "escuadrar el hueco": doblar 90 grados en cada punta y
+    // encontrarse. Es la que corresponde cuando falta un PEDAZO del
+    // contorno, no solo el vertice, y es la que aplica en su casa: los
+    // tres codos caen en lugar limpio (Living Room 2'-11" + 10'-6",
+    // Hallway 8'-10" + 6'-4", Bathroom 8'-8" + 0'-5").
+    const n1 = { x:-u1.y, y:u1.x }, n2 = { x:-u2.y, y:u2.x };
+    const c2 = meet(seg.a, n1, seg.b, n2);
+    const r2 = ok(c2);
+    if(r2) return Object.assign(r2, { angle: 90, kind: 'escuadra' });
+    return null;
+  }
   function fpWalkedPath(data, level){
     const raw = data && data.inspection && data.inspection.path;
     if(!Array.isArray(raw)) return [];
@@ -15018,8 +15142,17 @@
     // bridged) - the others just bridge doorways, 0-22%, which is normal.
     (gap.bridgeSegs||[]).forEach(b => {
       if(!b || !b.a || !b.b || !(b.d > 4)) return;
-      out += `<line x1="${X(b.a.x)}" y1="${Y(b.a.y)}" x2="${X(b.b.x)}" y2="${Y(b.b.y)}"`
-        + ` stroke="#b9c2cf" stroke-width="3" stroke-dasharray="14,10" fill="none"/>`;
+      // If the two walls that reach this gap would meet at a real corner,
+      // draw THAT instead of a straight diagonal. The diagonal is not the
+      // shape of the room - on the real house it overstated the plan by 45
+      // sq ft. Dashed either way: this side was never measured.
+      const c = fpInferCorner(room, b);
+      const dash = ` stroke="#b9c2cf" stroke-width="3" stroke-dasharray="14,10" fill="none"`;
+      if(c){
+        out += `<polyline points="${X(b.a.x)},${Y(b.a.y)} ${X(c.x)},${Y(c.y)} ${X(b.b.x)},${Y(b.b.y)}"${dash}/>`;
+      } else {
+        out += `<line x1="${X(b.a.x)}" y1="${Y(b.a.y)}" x2="${X(b.b.x)}" y2="${Y(b.b.y)}"${dash}/>`;
+      }
     });
     return out;
   }
