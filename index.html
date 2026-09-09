@@ -4502,7 +4502,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-08-DD';
+  const APP_BUILD = '2026-09-08-DE';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -14374,6 +14374,17 @@
   // cuarto entero por un pedazo, el maximo habria subido un cuarto de
   // techo bajo de verdad. La moda toma la altura del cuarto y el pedazo
   // raro se REPORTA aparte -- nunca desaparece dentro de un promedio.
+  // Cuantas advertencias se dejaron de imprimir en la hoja compacta. No
+  // se callan: se cuentan, y la hoja manda a verlas a la app.
+  function fpQuietFlagCount(data, onLevel, t){
+    let n = t.odd.length;
+    try{
+      const ov = fpRoomsOverlapSqFt(data, onLevel);
+      if(ov && ov.sqFt >= 4) n++;
+    }catch(e){}
+    if(t.insideOpenings) n++;
+    return n;
+  }
   function fpDistToPolygon(pt, poly){
     let best = Infinity;
     for(let i = 0, j = poly.length - 1; i < poly.length; j = i++){
@@ -14488,6 +14499,17 @@
   // opts.only limita las FILAS a un trozo de cuartos (paginacion de la
   // hoja); el TOTAL sigue siendo el del nivel entero, nunca el del trozo.
   // Sin opts se comporta igual que siempre: es el caso de la pantalla.
+  // opts.compact: la HOJA que se entrega lleva la tabla y una sola linea
+  // al pie. Amilcar marco el bloque de notas para quitarlo, y tiene razon
+  // en que un documento para el seguro no se lee con diez renglones de
+  // metodologia debajo.
+  //
+  // Lo unico que NO se puede quitar es lo que explica un SIMBOLO que si
+  // esta impreso en la pagina: la daga junto a un nombre de cuarto y el
+  // asterisco sobre las cotas del dibujo. Un simbolo sin leyenda no es
+  // una hoja mas limpia, es una hoja que no se puede leer. Todo lo demas
+  // -- metodologia, avisos y advertencias -- vive completo en la pantalla
+  // de la app, que es donde el puede hacer algo al respecto.
   function fpMeasurementTable(data, onLevel, sheet, opts){
     const ink = sheet ? '#1C2530' : 'var(--ink)';
     const soft = sheet ? '#5a6472' : 'var(--ink-soft)';
@@ -14539,6 +14561,16 @@
     // Cada nota existe porque sin ella un numero de arriba se leeria como
     // algo que no es. Ninguna es relleno legal.
     const notes = [];
+    if(o.compact){
+      const bits = [];
+      if(t.guessedRooms) bits.push(`&dagger; part of the boundary was closed by the app, not measured (${n1(t.guessedFt)} ft in ${t.guessedRooms} room${t.guessedRooms>1?'s':''})`);
+      if(t.noHeight.length) bits.push(`&dagger; ${t.noHeight.length} room${t.noHeight.length>1?'s have':' has'} no wall height, so ${t.noHeight.length>1?'they are':'it is'} left out of the Wall SF total`);
+      if(t.noOutline.length) bits.push(`${t.noOutline.length} room${t.noOutline.length>1?'s':''} could not be outlined`);
+      const flags = fpQuietFlagCount(data, onLevel, t);
+      if(flags) bits.push(`${flags} item${flags>1?'s':''} to check in Plan review`);
+      bits.push('from the LiDAR scan, for estimating - not a certified survey');
+      return html + `<div style="font-size:${fs-3}px; line-height:1.5; color:${soft}; padding-top:8px;">${bits.join(' &middot; ')}</div>`;
+    }
     notes.push(`Wall SF is each room's perimeter times its ceiling height, with every door, window and passage deducted (${n1(t.openingSqFt)} sq ft removed from ${n1(t.grossWallSqFt)} sq ft gross).`);
     notes.push(`Ceiling SF assumes one flat ceiling at the height shown. The scan does not measure ceiling shape, so a vaulted, sloped or dropped ceiling is not detected here.`);
     notes.push(`Baseboard LF is the perimeter less the width of every door and passage. Windows are not deducted.`);
@@ -16313,10 +16345,10 @@
     // del resumen, "Dimensions marked * were set by hand..."). Se queda
     // UNA vez: la nota no se puede quitar porque explica los asteriscos
     // que van sobre el dibujo.
-    const handEditNote = (!moisture && data._handEdited) ? (() => {
-      const manual = fpManualEditSummary(data);
-      return manual ? manual.text : '* dimension adjusted by hand after the scan; all other dimensions as measured by LiDAR.';
-    })() : '';
+    // El asterisco SI aparece sobre las cotas del dibujo, asi que la
+    // leyenda se queda -- en una linea, no en un parrafo.
+    const handEditNote = (!moisture && data._handEdited)
+      ? '* set by hand after the scan, not measured by LiDAR.' : '';
     const drawnNote = moisture ? "Water / mold / smoke / damage areas drawn by hand from the technician's on-site observations and readings. The floor plan geometry is as measured by LiDAR." : '';
     // The quality badge prints only when the final validator passes -
     // an honest statement that the app's own checks found nothing open.
@@ -16381,10 +16413,11 @@
         // dibujo (nombre, medidas y pies cuadrados), asi que repetirlos
         // abajo ocupaba media pagina diciendo lo mismo dos veces.
         const onLvl = multi ? (r => (r.level||1) === lvl) : null;
-        const measTable = moisture ? '' : fpMeasurementTable(data, onLvl, true);
+        const measTable = moisture ? '' : fpMeasurementTable(data, onLvl, true, { compact: true });
         const fitsOnPlanSheet = !!measTable && lvlRooms.length <= FP_MEAS_ROWS_ON_PLAN_SHEET;
-        const extra = spaceLines.length
-          ? `<div style="font-size:13px; line-height:1.6; color:#3A4552; padding-top:8px;">${spaceLines.join('<br>')}</div>` : '';
+        // Los espacios rotulados ya van escritos sobre el propio dibujo;
+        // repetirlos abajo era el mismo dato dos veces en una pagina.
+        const extra = '';
         sheetOpts.push({ title: titleBase, svgHtml: svg,
           infoHtml: fitsOnPlanSheet
             ? infoFor(headLeft, `FLOOR ${lvl}`, '') + measTable + extra
