@@ -4502,7 +4502,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-08-DE';
+  const APP_BUILD = '2026-09-08-DF';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -14374,17 +14374,6 @@
   // cuarto entero por un pedazo, el maximo habria subido un cuarto de
   // techo bajo de verdad. La moda toma la altura del cuarto y el pedazo
   // raro se REPORTA aparte -- nunca desaparece dentro de un promedio.
-  // Cuantas advertencias se dejaron de imprimir en la hoja compacta. No
-  // se callan: se cuentan, y la hoja manda a verlas a la app.
-  function fpQuietFlagCount(data, onLevel, t){
-    let n = t.odd.length;
-    try{
-      const ov = fpRoomsOverlapSqFt(data, onLevel);
-      if(ov && ov.sqFt >= 4) n++;
-    }catch(e){}
-    if(t.insideOpenings) n++;
-    return n;
-  }
   function fpDistToPolygon(pt, poly){
     let best = Infinity;
     for(let i = 0, j = poly.length - 1; i < poly.length; j = i++){
@@ -14566,9 +14555,9 @@
       if(t.guessedRooms) bits.push(`&dagger; part of the boundary was closed by the app, not measured (${n1(t.guessedFt)} ft in ${t.guessedRooms} room${t.guessedRooms>1?'s':''})`);
       if(t.noHeight.length) bits.push(`&dagger; ${t.noHeight.length} room${t.noHeight.length>1?'s have':' has'} no wall height, so ${t.noHeight.length>1?'they are':'it is'} left out of the Wall SF total`);
       if(t.noOutline.length) bits.push(`${t.noOutline.length} room${t.noOutline.length>1?'s':''} could not be outlined`);
-      const flags = fpQuietFlagCount(data, onLevel, t);
-      if(flags) bits.push(`${flags} item${flags>1?'s':''} to check in Plan review`);
-      bits.push('from the LiDAR scan, for estimating - not a certified survey');
+      // Se quedo SOLO lo que explica un simbolo impreso. El puntero a los
+      // avisos y la linea de "no es un levantamiento certificado" salieron
+      // por decision suya; los avisos siguen completos en la app.
       return html + `<div style="font-size:${fs-3}px; line-height:1.5; color:${soft}; padding-top:8px;">${bits.join(' &middot; ')}</div>`;
     }
     notes.push(`Wall SF is each room's perimeter times its ceiling height, with every door, window and passage deducted (${n1(t.openingSqFt)} sq ft removed from ${n1(t.grossWallSqFt)} sq ft gross).`);
@@ -15648,7 +15637,8 @@
       // both adjoining rooms carry their own copy). Stub segments under
       // 2ft are skipped as unmeasurable noise, and low-confidence walls
       // are separately flagged by the validation panel.
-      const dimTxt = `${fpFeetInches(effLen)}${(wall._lengthOverrideFt != null || wall._squared || wall._movedByHand || wall._geomEdited || wall._added) ? '*' : ''}`;
+      const handMark = (!fpSheetExport && (wall._lengthOverrideFt != null || wall._squared || wall._movedByHand || wall._geomEdited || wall._added)) ? '*' : '';
+      const dimTxt = `${fpFeetInches(effLen)}${handMark}`;
       // ONE dimension per physical wall, whichever branch draws it. The
       // dedupe used to guard only the interior branch, so a wall that
       // floorplanIsExteriorWall called exterior in BOTH of the rooms that
@@ -15702,7 +15692,7 @@
           // dimension because one used the building centre and the other
           // the room centre.
           const dl = fpOpeningLabelPos(wallsById[d.wallId], dimCentroid, d.position, X, Y);
-          s += `<text x="${dl.x}" y="${dl.y}" font-size="17" font-weight="700" fill="#7a6248" text-anchor="middle" dominant-baseline="middle" paint-order="stroke" stroke="#fff" stroke-width="5">${fpFeetInches(dw)}${d._added ? '*' : ''}</text>`;
+          s += `<text x="${dl.x}" y="${dl.y}" font-size="17" font-weight="700" fill="#7a6248" text-anchor="middle" dominant-baseline="middle" paint-order="stroke" stroke="#fff" stroke-width="5">${fpFeetInches(dw)}${(!fpSheetExport && d._added) ? '*' : ''}</text>`;
         }
       }
     });
@@ -15716,7 +15706,7 @@
       s += fpOpeningHitTarget('fp-window', roomIdx, winId, win, wallsById[win.wallId], X, Y);
       if(fpMeasurePrefs.openings){
         const winLabel = fpOpeningLabelPos(wallsById[win.wallId], dimCentroid, win.position, X, Y);
-        s += `<text x="${winLabel.x}" y="${winLabel.y}" font-size="19" font-weight="700" fill="#39699e" text-anchor="middle" dominant-baseline="middle" paint-order="stroke" stroke="#fff" stroke-width="5">${fpFeetInches(ww)} x ${fpFeetInches(wh)}${win._added ? '*' : ''}</text>`;
+        s += `<text x="${winLabel.x}" y="${winLabel.y}" font-size="19" font-weight="700" fill="#39699e" text-anchor="middle" dominant-baseline="middle" paint-order="stroke" stroke="#fff" stroke-width="5">${fpFeetInches(ww)} x ${fpFeetInches(wh)}${(!fpSheetExport && win._added) ? '*' : ''}</text>`;
       }
     });
     // A doorless passage: the wall gap is already cut (allOpenings above);
@@ -16345,10 +16335,10 @@
     // del resumen, "Dimensions marked * were set by hand..."). Se queda
     // UNA vez: la nota no se puede quitar porque explica los asteriscos
     // que van sobre el dibujo.
-    // El asterisco SI aparece sobre las cotas del dibujo, asi que la
-    // leyenda se queda -- en una linea, no en un parrafo.
-    const handEditNote = (!moisture && data._handEdited)
-      ? '* set by hand after the scan, not measured by LiDAR.' : '';
+    // Ya no se imprimen asteriscos en la hoja, asi que no hay leyenda que
+    // poner. La marca de mano sigue viva en la app (el editor la ensena
+    // sobre cada cota tocada) y en fpManualEditSummary del panel.
+    const handEditNote = '';
     const drawnNote = moisture ? "Water / mold / smoke / damage areas drawn by hand from the technician's on-site observations and readings. The floor plan geometry is as measured by LiDAR." : '';
     // The quality badge prints only when the final validator passes -
     // an honest statement that the app's own checks found nothing open.
