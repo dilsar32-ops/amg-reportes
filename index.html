@@ -1756,6 +1756,28 @@
             <button type="button" class="btn btn-outline" id="fpvExport3d" style="width:100%;">Export 3D Model</button>
           </div>
 
+          <div id="fpSpaceDetail" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--line);" hidden>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div class="line" style="flex:1;"><span id="fpSpaceKindLabel">Space</span><span id="fpSpaceStats"></span></div>
+              <button type="button" class="fpv-icon-btn" id="fpSpaceClose" aria-label="Close" style="width:34px; height:34px; min-height:34px; flex:0 0 auto;">&#10005;</button>
+            </div>
+            <div style="display:flex; gap:8px; margin-top:6px; align-items:center;">
+              <span style="font-size:12px; font-weight:600; color:var(--ink-soft); flex:0 0 auto;">Label</span>
+              <button class="btn btn-outline" type="button" id="fpSpaceSmaller" style="flex:1;">A&minus;</button>
+              <button class="btn btn-outline" type="button" id="fpSpaceBigger" style="flex:1;">A+</button>
+              <button class="btn btn-outline" type="button" id="fpSpaceReset" style="flex:1.3;">Reset</button>
+            </div>
+            <div class="row2" style="margin-top:6px;">
+              <div class="field"><label>Name</label>
+                <input type="text" id="fpSpaceName" placeholder="Closet, Pantry, Storage"></div>
+              <div class="field"><label>&nbsp;</label>
+                <button class="btn btn-outline" type="button" id="fpSpaceSave" style="width:100%;">Save Name</button></div>
+            </div>
+            <div style="margin-top:6px;">
+              <button class="btn btn-outline" type="button" id="fpSpaceRemove" style="width:100%; color:var(--danger);">Remove this label</button>
+            </div>
+            <p class="clockhint">Drag the name on the plan to move it. A&minus;/A+ change its size.</p>
+          </div>
           <div id="floorplanRoomDetail" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--line);" hidden>
             <div style="display:flex; align-items:center; gap:8px;">
               <div class="line" style="flex:1;"><span>Room</span><span id="fpRoomDetailStats"></span></div>
@@ -4502,7 +4524,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-08-DG';
+  const APP_BUILD = '2026-09-08-DH';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -9224,7 +9246,11 @@
       const prev = room._subAreas || [];
       const carried = dedup.map(p => {
         const old = prev.find(q => q._renamed && Math.hypot(q.cx-p.cx, q.cy-p.cy) <= 1.5);
-        return old ? Object.assign(p, { name: old.name, _renamed: true, _suggested: false }) : p;
+        // La posicion y el tamano que le dio la mano viajan con el nombre.
+        // Sin esto, mover el rotulo de un CLOSET duraba hasta el siguiente
+        // dibujo: la deteccion lo reemplaza en cada render.
+        return old ? Object.assign(p, { name: old.name, _renamed: true, _suggested: false,
+          _offFt: old._offFt, _labelScale: old._labelScale }) : p;
       });
       // This assignment used to be unconditional, and it runs on EVERY
       // render - so the moment detection came back empty (a hand edit
@@ -11416,11 +11442,34 @@
     // pan/pinch is already in progress, a finger landing on a label is
     // part of THAT gesture, not a new drag.
     if(fpPointers.size > 0 || fpLabelDrag) return false;
+    if(!floorplanData) return false;
+    // Los rotulos de ANOTACION (la sub-area detectada y el espacio que AI
+    // Fix pide nombrar) se arrastran por esta MISMA maquina. Antes solo el
+    // nombre de cuarto se podia mover: uno escribia el nombre que le pedia
+    // AI Fix y quedaba clavado donde cayera.
+    const spaceEl = labelEl.classList.contains('fp-spacelabel') ? labelEl : null;
+    const subEl = labelEl.classList.contains('fp-subarea') ? labelEl : null;
+    if(spaceEl || subEl){
+      const meta = spaceEl
+        ? (floorplanData._spaceLabels||[])[Number(spaceEl.dataset.spaceIdx)]
+        : (((floorplanData.rooms||[])[Number(subEl.dataset.roomIdx)]||{})._subAreas||[])[Number(subEl.dataset.subIdx)];
+      if(!meta) return false;
+      // Se guarda en PIES pero se arrastra en unidades del svg, para poder
+      // reusar tal cual fpUpdateLabelDrag.
+      const o = meta._offFt || {dx:0, dy:0};
+      fpLabelDrag = { kind: spaceEl ? 'space' : 'sub', meta,
+        sel: spaceEl ? `.fp-spacelabel[data-space-idx="${spaceEl.dataset.spaceIdx}"]`
+                     : `.fp-subarea[data-room-idx="${subEl.dataset.roomIdx}"][data-sub-idx="${subEl.dataset.subIdx}"]`,
+        pointerId: e.pointerId, startClientX: e.clientX, startClientY: e.clientY,
+        baseDx: (o.dx||0)*FLOORPLAN_SVG_SCALE, baseDy: (o.dy||0)*FLOORPLAN_SVG_SCALE, moved: false,
+        liveDx: (o.dx||0)*FLOORPLAN_SVG_SCALE, liveDy: (o.dy||0)*FLOORPLAN_SVG_SCALE };
+      return true;
+    }
     const idx = Number(labelEl.dataset.roomIdx);
-    const room = floorplanData && (floorplanData.rooms||[])[idx];
+    const room = (floorplanData.rooms||[])[idx];
     if(!room) return false;
     const off = room._labelOffsetPx || {dx:0, dy:0};
-    fpLabelDrag = { roomIdx: idx, pointerId: e.pointerId, startClientX: e.clientX, startClientY: e.clientY, baseDx: off.dx, baseDy: off.dy, moved: false, liveDx: off.dx, liveDy: off.dy, hadOverride: !!room._labelOffsetPx };
+    fpLabelDrag = { kind: 'room', roomIdx: idx, sel: `.fp-roomlabel[data-room-idx="${idx}"]`, pointerId: e.pointerId, startClientX: e.clientX, startClientY: e.clientY, baseDx: off.dx, baseDy: off.dy, moved: false, liveDx: off.dx, liveDy: off.dy, hadOverride: !!room._labelOffsetPx };
     return true;
   }
   function fpUpdateLabelDrag(e){
@@ -11438,14 +11487,22 @@
     // renders the same label markup earlier in the DOM, and an unscoped
     // query used to grab THAT copy, so the drag showed zero live
     // feedback on the label actually under the finger.
-    const g = document.querySelector(`#floorplanSvgWrap .fp-roomlabel[data-room-idx="${fpLabelDrag.roomIdx}"]`);
+    const g = document.querySelector(`#floorplanSvgWrap ${fpLabelDrag.sel}`);
     if(g) g.setAttribute('transform', `translate(${dx - fpLabelDrag.baseDx}, ${dy - fpLabelDrag.baseDy})`);
   }
   function fpEndLabelDrag(){
     if(!fpLabelDrag) return;
-    const { roomIdx, moved, liveDx, liveDy, hadOverride } = fpLabelDrag;
+    const { kind, meta, roomIdx, moved, liveDx, liveDy, hadOverride } = fpLabelDrag;
     fpLabelDrag = null;
     if(!moved || !floorplanData) return;
+    if(kind === 'space' || kind === 'sub'){
+      fpPushUndo();
+      meta._offFt = { dx: liveDx/FLOORPLAN_SVG_SCALE, dy: liveDy/FLOORPLAN_SVG_SCALE };
+      floorplanData._handEdited = true;
+      saveFloorplanDraft();
+      renderFloorplanSvg(floorplanData);
+      return;
+    }
     const room = (floorplanData.rooms||[])[roomIdx];
     if(!room) return;
     fpPushUndo();
@@ -11564,12 +11621,17 @@
     if(fpLabelDrag && e.pointerId === fpLabelDrag.pointerId){
       const wasMoved = fpLabelDrag.moved;
       const labelRoomIdx = fpLabelDrag.roomIdx;
+      const labelKind = fpLabelDrag.kind, labelMeta = fpLabelDrag.meta;
       fpEndLabelDrag();
       fpSuppressNextClick = true;
       // Tap (no drag) on a room label = open that room's panel (rename,
       // label size, expand/shrink, remove); hold-and-drag still moves it.
       if(!wasMoved && floorplanData){
-        if(fpEditMode){ openFloorplanRoomDetail(labelRoomIdx); fpEnsureAboveSheet(e.clientY); }
+        if(labelKind === 'space' || labelKind === 'sub'){
+          if(fpEditMode){ openFpSpaceDetail(labelKind, labelMeta); fpEnsureAboveSheet(e.clientY); }
+          else fpFlashHint(`${labelMeta.name} - open Edit Plan to rename it, move it or change its size.`);
+        }
+        else if(fpEditMode){ openFloorplanRoomDetail(labelRoomIdx); fpEnsureAboveSheet(e.clientY); }
         else fpFlashHint('Open Edit Plan to rename this room or resize its label.');
       }
       return;
@@ -11643,7 +11705,11 @@
     // Touching the plan closes any open popout menu - a menu must never
     // sit over the plan while the tech is working on it.
     fpHideMenus();
-    fpStageEl.setPointerCapture(e.pointerId);
+    // Protegido como el de la linea del grip: si la captura falla, la
+    // excepcion mataba TODO este manejador -- se perdian el pan, el
+    // arrastre del rotulo y las herramientas de edicion a la vez. La
+    // captura es una comodidad; perder el gesto entero no lo es.
+    try{ fpStageEl.setPointerCapture(e.pointerId); }catch(_){}
     // While a label is mid-drag, extra fingers are ignored entirely -
     // letting one join fpPointers would start a phantom pan underneath
     // the drag.
@@ -11651,7 +11717,7 @@
     // A room-name label starts its OWN drag, never the stage's pan/pinch -
     // fpPointers/fpBeginGesture are deliberately left untouched so the two
     // gestures can never mix.
-    const labelEl = e.target.closest('.fp-roomlabel');
+    const labelEl = e.target.closest('.fp-roomlabel, .fp-spacelabel, .fp-subarea');
     if(labelEl && fpBeginLabelDrag(e, labelEl)) return;
     // Move-tool drags: same contract as labels - own the pointer, never
     // enter fpPointers. Extra fingers during a tool drag are ignored.
@@ -12486,6 +12552,66 @@
   // edit mode) is a first-class selection - name it, resize its label,
   // expand/shrink the whole room, or remove it from the plan. ----
   let fpSelectedRoomPanelIdx = null;
+  // El panel de un rotulo de anotacion: el nombre que AI Fix pidio, o la
+  // sub-area que la app detecto. Se guarda la REFERENCIA al objeto, no un
+  // indice: las sub-areas se vuelven a detectar en cada dibujo y un indice
+  // habria apuntado a otra cosa despues de la primera edicion.
+  let fpSpacePanel = null;
+  function openFpSpaceDetail(kind, meta){
+    if(!meta) return;
+    fpSpacePanel = { kind, meta };
+    $('#fpSpaceKindLabel').textContent = kind === 'sub' ? 'Space inside a room' : 'Named space';
+    $('#fpSpaceStats').textContent = (meta.w > 0 && meta.d > 0)
+      ? `${fpFeetInches(meta.w)} x ${fpFeetInches(meta.d)}` : 'no measurement';
+    $('#fpSpaceName').value = meta.name || '';
+    // Una sub-area la dibuja el detector en cada render: borrar el rotulo
+    // no la borraria, volveria sola. Se ofrece solo donde de verdad se
+    // puede cumplir.
+    $('#fpSpaceRemove').hidden = kind !== 'space';
+    closeFloorplanObjDetail();
+    closeFloorplanWallDetail();
+    closeFloorplanOpeningDetail();
+    closeFloorplanRoomDetail();
+    $('#fpSpaceDetail').hidden = false;
+    fpExpandDrawer();
+    $('#fpSpaceDetail').scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+  function closeFpSpaceDetail(){ fpSpacePanel = null; $('#fpSpaceDetail').hidden = true; }
+  function fpSpaceApply(mutate){
+    if(!fpSpacePanel || !floorplanData) return;
+    fpPushUndo();
+    mutate(fpSpacePanel.meta);
+    floorplanData._handEdited = true;
+    saveFloorplanDraft();
+    renderFloorplanSvg(floorplanData);
+  }
+  $('#fpSpaceClose').addEventListener('click', closeFpSpaceDetail);
+  $('#fpSpaceBigger').addEventListener('click', () => fpSpaceApply(m => {
+    m._labelScale = Math.min(2.4, Math.round(((m._labelScale||1) + 0.15)*100)/100); }));
+  $('#fpSpaceSmaller').addEventListener('click', () => fpSpaceApply(m => {
+    m._labelScale = Math.max(0.6, Math.round(((m._labelScale||1) - 0.15)*100)/100); }));
+  $('#fpSpaceReset').addEventListener('click', () => fpSpaceApply(m => {
+    delete m._offFt; delete m._labelScale; }));
+  $('#fpSpaceSave').addEventListener('click', () => {
+    const name = String($('#fpSpaceName').value || '').trim();
+    if(!name) return alert('Type a name for this space.');
+    const kind = fpSpacePanel && fpSpacePanel.kind;
+    fpSpaceApply(m => { m.name = name; if(kind === 'sub'){ m._renamed = true; m._suggested = false; } });
+    fpFlashHint('Saved.');
+  });
+  $('#fpSpaceRemove').addEventListener('click', () => {
+    if(!fpSpacePanel || fpSpacePanel.kind !== 'space' || !floorplanData) return;
+    const meta = fpSpacePanel.meta;
+    if(!confirm(`Remove the "${meta.name}" label from the plan?`)) return;
+    fpPushUndo();
+    const list = floorplanData._spaceLabels || [];
+    const i = list.indexOf(meta);
+    if(i >= 0) list.splice(i, 1);
+    floorplanData._handEdited = true;
+    closeFpSpaceDetail();
+    saveFloorplanDraft();
+    renderFloorplanSvg(floorplanData);
+  });
   function openFloorplanRoomDetail(roomIdx){
     const room = floorplanData && (floorplanData.rooms||[])[roomIdx];
     if(!room) return;
@@ -12497,6 +12623,7 @@
     closeFloorplanObjDetail();
     closeFloorplanWallDetail();
     closeFloorplanOpeningDetail();
+    closeFpSpaceDetail();
     $('#floorplanRoomDetail').hidden = false;
     fpExpandDrawer();
     $('#floorplanRoomDetail').scrollIntoView({behavior:'smooth', block:'nearest'});
@@ -14842,6 +14969,27 @@
   // pixel offset always converts back to the same real-world distance,
   // regardless of where either piece of code reads it from.
   const FLOORPLAN_SVG_SCALE = 55;
+  // Un rotulo de ANOTACION: la sub-area detectada (CLOSET) y el espacio
+  // que AI Fix pide nombrar. Los dos se veian igual pero se dibujaban por
+  // separado, y ninguno se podia mover ni agrandar -- solo el nombre del
+  // CUARTO. Ahora salen de la MISMA funcion: si fueran dos, la proxima
+  // vez que se toque una la otra se quedaria sin arrastre otra vez.
+  //
+  // _offFt: cuanto lo corrio la mano, EN PIES. No se toca cx/cy porque
+  // esa es la posicion del espacio (la usa el dedupe de huecos); mover el
+  // rotulo no mueve el lugar.
+  // _labelScale: 0.6 a 2.4, como el nombre de cuarto.
+  function fpAnnotationLabelSvg(X, Y, cls, attrs, meta, cx, cy, name, w, d){
+    const off = meta._offFt || {dx:0, dy:0};
+    const k = Math.max(0.6, Math.min(2.4, meta._labelScale || 1));
+    const sx = X(cx + (off.dx||0)), sy = Y(cy + (off.dy||0));
+    const dim = (w > 0 && d > 0)
+      ? `<text x="${sx}" y="${sy + 11*k}" font-size="${(15*k).toFixed(1)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#5a6472" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpFeetInches(w)} x ${fpFeetInches(d)}</text>`
+      : '';
+    return `<g class="${cls}" ${attrs} style="cursor:grab;">`
+      + `<text x="${sx}" y="${sy - 9*k}" font-size="${(17*k).toFixed(1)}" font-weight="700" letter-spacing="0.4" font-family="'IBM Plex Sans',sans-serif" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${esc(name).toUpperCase()}</text>`
+      + dim + `</g>`;
+  }
   const FLOORPLAN_WALL_THICKNESS_FT = 0.65;
   const FLOORPLAN_FLOOR_FILL = '#fbfbfa'; // plain, like a real CAD export - not a colored tint per room
   function fpPerp(dx, dy){ const len = Math.sqrt(dx*dx+dy*dy) || 1; return { x: -dy/len, y: dx/len }; }
@@ -16044,11 +16192,8 @@
       // dimensions, the way a pro plan annotates them. Tappable to
       // rename in Edit Plan.
       (room._subAreas||[]).forEach((sa, si) => {
-        const sx = X(sa.cx), sy = Y(sa.cy);
-        overlays.push(`<g class="fp-subarea" data-room-idx="${idx}" data-sub-idx="${si}" style="cursor:pointer;">`
-          + `<text x="${sx}" y="${sy-9}" font-size="17" font-weight="700" letter-spacing="0.4" font-family="'IBM Plex Sans',sans-serif" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${esc(sa.name).toUpperCase()}</text>`
-          + `<text x="${sx}" y="${sy+11}" font-size="15" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#5a6472" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpFeetInches(sa.w)} x ${fpFeetInches(sa.d)}</text>`
-          + `</g>`);
+        overlays.push(fpAnnotationLabelSvg(X, Y, 'fp-subarea',
+          `data-room-idx="${idx}" data-sub-idx="${si}"`, sa, sa.cx, sa.cy, sa.name, sa.w, sa.d));
       });
     });
     // Hand-named open spaces (AI Fix asks, the human answers): a label
@@ -16056,15 +16201,8 @@
     // only, honest that no geometry was invented there.
     (data._spaceLabels||[]).forEach((sp, si) => {
       if(level != null && (sp.level||1) !== level) return;
-      const sx = X(sp.x), sy = Y(sp.y);
-      overlays.push(`<g class="fp-spacelabel" data-space-idx="${si}" style="cursor:pointer;">`
-        + `<text x="${sx}" y="${sy-9}" font-size="17" font-weight="700" letter-spacing="0.4" font-family="'IBM Plex Sans',sans-serif" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${esc(sp.name).toUpperCase()}</text>`
-        // Un nombre puesto a mano no tiene medidas: sin esto imprimia 0" x 0"
-        // debajo del texto.
-        + ((sp.w > 0 && sp.d > 0)
-            ? `<text x="${sx}" y="${sy+11}" font-size="15" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#5a6472" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpFeetInches(sp.w)} x ${fpFeetInches(sp.d)}</text>`
-            : '')
-        + `</g>`);
+      overlays.push(fpAnnotationLabelSvg(X, Y, 'fp-spacelabel',
+        `data-space-idx="${si}"`, sp, sp.x, sp.y, sp.name, sp.w, sp.d));
     });
     // Paint layer: on the FLOOR PLAN this is the damage-brush strokes;
     // in MOISTURE MAP mode it is the moisture fills + strokes instead -
