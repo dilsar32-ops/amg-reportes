@@ -465,6 +465,24 @@
   #casualPayAlert{background:var(--danger); color:#fff; font-weight:700; font-size:14px;
     padding:12px 14px; border-radius:12px; margin:0 0 12px; line-height:1.35;}
   #casualPayAlert[hidden]{display:none !important;}
+  /* Su propia pantalla con Atras, no un acordeon dentro de la tarjeta: una
+     ayuda que empuja el formulario hacia abajo se lee peor y se cierra sola
+     sin querer. Reglas en su propia linea - NUNCA dentro de la lista larga
+     de [hidden] de mas abajo (meter una regla ahi ya abrio una pantalla
+     vacia encima del menu en un telefono, build AI). */
+  #medHelpViewer{position:fixed; inset:0; z-index:600; background:var(--paper);
+    color:var(--text); overflow-y:auto; padding:0 0 40px;}
+  #medHelpViewer[hidden]{display:none !important;}
+  #medHelpViewer .mhbar{position:sticky; top:0; background:var(--card);
+    border-bottom:1px solid var(--line); padding:12px 14px; display:flex;
+    align-items:center; gap:10px;}
+  #medHelpViewer .mhbody{padding:14px;}
+  #medHelpViewer .mhstep{display:flex; gap:12px; align-items:flex-start; margin-bottom:16px;}
+  #medHelpViewer .mhnum{flex:0 0 26px; height:26px; border-radius:13px; background:var(--accent);
+    color:var(--on-accent); font-weight:800; font-size:13px; display:flex;
+    align-items:center; justify-content:center;}
+  #medHelpViewer .mhtxt{font-size:14.5px; line-height:1.45;}
+  #medHelpViewer .mhtxt b{color:var(--accent);}
   .entryrow{
     display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline; gap:10px;
     padding:9px 0; border-bottom:1px solid var(--line); font-size:14px;
@@ -1506,6 +1524,9 @@
 
   <!-- ===================== TAB 6: MEASUREMENTS ===================== -->
   <section class="tab-panel" data-tab="measurements">
+    <button type="button" class="btn btn-outline" id="medHelpBtn" style="width:100%; margin-bottom:12px;">
+      &#10067; ¿Cómo se usa esta pantalla?
+    </button>
     <section class="card" data-step="job">
       <h2><span class="num">1</span>Información del Trabajo<span class="en"> / Job Info</span></h2>
       <div class="row2">
@@ -1936,6 +1957,25 @@
   </section>
 
   <!-- ===================== TAB: RELOJ ===================== -->
+  <div id="medHelpViewer" hidden>
+    <div class="mhbar">
+      <button type="button" class="btn btn-ink" id="medHelpBack" style="padding:6px 12px;">&larr; Atrás</button>
+      <b style="font-size:15px;">Cómo llenar Medidas</b>
+    </div>
+    <div class="mhbody">
+      <p class="hint" style="margin-top:0;">Esta pantalla es para lo que <b>ya se quitó</b> de la casa: piso, pared, techo, cocina. Una tarjeta por cuarto.</p>
+      <div class="mhstep"><div class="mhnum">1</div><div class="mhtxt">Arriba llene el <b>trabajo</b>: cliente, fecha, dirección y quién es el líder.</div></div>
+      <div class="mhstep"><div class="mhnum">2</div><div class="mhtxt">Baje a <b>Piso</b>, <b>Pared</b>, <b>Techo</b> o <b>Cocina</b> — la que corresponda a lo que quitó.</div></div>
+      <div class="mhstep"><div class="mhnum">3</div><div class="mhtxt">Toque <b>+ Agregar Cuarto</b> y escriba de qué cuarto es (cocina, baño, recámara…).</div></div>
+      <div class="mhstep"><div class="mhnum">4</div><div class="mhtxt">Escoja el <b>material</b> que quitó. Si quitó dos cosas distintas en el mismo cuarto, agregue otro corte dentro de la misma tarjeta.</div></div>
+      <div class="mhstep"><div class="mhnum">5</div><div class="mhtxt">Ponga el <b>tamaño</b>. Puede escribirlo a mano, o tocar el botón de <b>cámara</b> y que el teléfono lo mida por usted.</div></div>
+      <div class="mhstep"><div class="mhnum">6</div><div class="mhtxt">Con la cámara: párese en una esquina, apunte, toque <b>+</b>. Camine a la siguiente esquina y toque <b>+</b> otra vez. La medida sale sola. <b>La cámara le habla</b> y le va diciendo qué hacer y qué está viendo.</div></div>
+      <div class="mhstep"><div class="mhnum">7</div><div class="mhtxt">Tome <b>fotos</b> de lo que quitó y escriba notas si hace falta.</div></div>
+      <div class="mhstep"><div class="mhnum">8</div><div class="mhtxt">Al final, <b>PDF</b> para mandarlo a la oficina.</div></div>
+      <p class="hint" style="margin-top:18px;"><b>Si algo no le queda claro:</b> abra la cámara de medir y toque el signo de interrogación. Ahí le explica paso por paso, y se lo dice en voz alta.</p>
+      <button type="button" class="btn btn-accent" id="medHelpDone" style="width:100%; margin-top:14px;">Entendido</button>
+    </div>
+  </div>
   <p id="skipStepsBanner" hidden>MODO REVISIÓN — el app no le está pidiendo los datos obligatorios. No mande un reporte así. <b>Toque aquí para apagarlo.</b></p>
   <section class="tab-panel active" data-tab="reloj">
     <!-- A manager doesn't clock in for pay - this stays out of the way
@@ -2800,6 +2840,10 @@
     if(typeof finCardsHome === 'function') finCardsHome();        // ningun formulario prestado se queda fuera de su pantalla
 
     if(name !== 'labor') laborFormOpen = false;
+    // Salir de Medidas cierra su ayuda: si no, se queda tapando la pantalla
+    // siguiente y parece que la app se trabo.
+    if(name !== 'measurements') medHelpClose();
+    else medHelpMaybeAutoOpen();   // la primera vez, sola
     $$('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
     $$('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === name));
     document.body.classList.remove('menu');
@@ -4524,7 +4568,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-10-DK';
+  const APP_BUILD = '2026-09-10-DL';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -9546,6 +9590,42 @@
       room.openings = quedan;
     });
   }
+
+  // LA AYUDA DE MEDIDAS.
+  //
+  // Su reporte: "las personas que estan usando la aplicacion no saben como
+  // usarla... en medidas no saben como medir". La primera vez que alguien
+  // abre Medidas, la ayuda se abre SOLA - una tarjeta de ayuda que hay que
+  // ir a buscar no la encuentra justamente quien mas la necesita. Despues
+  // de esa vez, queda en el boton de arriba.
+  //
+  // `function`, no const arrow: esto se llama desde el cambio de pestaña,
+  // que corre al cargar la app si quedo guardada en Medidas. Un const de
+  // aqui abajo habria matado la app entera al abrirla (builds T y AG).
+  function medHelpOpen(){
+    const v = document.getElementById('medHelpViewer');
+    if(!v) return;
+    v.hidden = false;
+    v.scrollTop = 0;
+    try{ localStorage.setItem('medHelpSeen1','1'); }catch(e){}
+  }
+  function medHelpClose(){
+    const v = document.getElementById('medHelpViewer');
+    if(v) v.hidden = true;
+  }
+  function medHelpMaybeAutoOpen(){
+    let visto = false;
+    try{ visto = !!localStorage.getItem('medHelpSeen1'); }catch(e){ visto = true; }
+    if(!visto) medHelpOpen();
+  }
+  (function wireMedHelp(){
+    const b = document.getElementById('medHelpBtn');
+    if(b) b.addEventListener('click', medHelpOpen);
+    const back = document.getElementById('medHelpBack');
+    if(back) back.addEventListener('click', medHelpClose);
+    const done = document.getElementById('medHelpDone');
+    if(done) done.addEventListener('click', medHelpClose);
+  })();
 
   // Distinct levels present, sorted (1-based; a room without a `level`
   // field - old drafts saved before this feature - defaults to level 1).
