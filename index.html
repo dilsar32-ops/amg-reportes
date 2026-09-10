@@ -2015,6 +2015,20 @@
         <div class="mhrow"><div class="mhwhat"><b>💬 naranja</b> &nbsp;Tóquelo cuando esté perdido: le dice <b>dónde va</b> — qué está midiendo, qué material escogió, cuántas esquinas lleva y <b>qué sigue</b>.</div><div class="mhhow">asistente</div></div>
         <div class="mhrow"><div class="mhwhat"><b>🔊</b> &nbsp;Apaga o prende la voz automática. Aunque la apague, el botón naranja le sigue contestando, y los avisos importantes se oyen igual.</div><div class="mhhow">voz</div></div>
       </div>
+      <div class="mhunit">
+        <h4>Puede hablarle en vez de tocar</h4>
+        <p style="margin:0 0 10px; font-size:14px; line-height:1.45;">Con las dos manos sosteniendo el teléfono, soltar una para tocar un botón es justo cuando se mueve. Ya no hace falta:</p>
+        <div class="mhrow"><div class="mhwhat">Pone una esquina, igual que el botón <b>+</b></div><div class="mhhow" style="flex:0 0 130px;">"marca" · "aquí"</div></div>
+        <div class="mhrow"><div class="mhwhat">Cierra el recorrido del largo</div><div class="mhhow" style="flex:0 0 130px;">"terminar recorrido"</div></div>
+        <div class="mhrow"><div class="mhwhat">Pasa a medir el ancho</div><div class="mhhow" style="flex:0 0 130px;">"ancho"</div></div>
+        <div class="mhrow"><div class="mhwhat">Guarda y sigue con la próxima</div><div class="mhhow" style="flex:0 0 130px;">"guardar"</div></div>
+        <div class="mhrow"><div class="mhwhat">Le lee lo que va a mandar (dígalo otra vez para mandarlo)</div><div class="mhhow" style="flex:0 0 130px;">"terminar"</div></div>
+        <div class="mhrow"><div class="mhwhat">Quita lo último</div><div class="mhhow" style="flex:0 0 130px;">"deshacer"</div></div>
+        <div class="mhrow"><div class="mhwhat">Le dice dónde va y qué sigue</div><div class="mhhow" style="flex:0 0 130px;">"¿cómo voy?"</div></div>
+        <div class="mhrow"><div class="mhwhat">Abre la ayuda / apaga la voz</div><div class="mhhow" style="flex:0 0 130px;">"ayuda" · "silencio"</div></div>
+      </div>
+      <p class="hint" style="margin:0 0 14px;"><b>Solo esas órdenes.</b> La cámara no escucha nada más — la plática de la casa no la puede mover. Y si alguien dice "marca" sin querer, se quita con "deshacer".</p>
+
       <p class="hint" style="margin:0 0 14px;"><b>¿No le gusta la voz?</b> Toque el <b>?</b> en la cámara y baje hasta <b>"La voz del asistente"</b>. Ahí están las voces que tiene su teléfono — toque una para oírla y esa se queda, también en el escáner de planos.</p>
       <div class="mhwarn"><b>Si todas suenan a robot:</b> es que su teléfono solo tiene las voces <b>Básicas</b>, que vienen de fábrica y son de baja calidad. Las buenas son una <b>descarga gratis</b>: <b>Ajustes → Accesibilidad → Contenido hablado → Voces → Español</b>, y baje una que diga <b>Mejorada</b> o <b>Premium</b>. Se nota muchísimo. La app se lo avisa también en esa misma pantalla.</div>
       <p class="hint" style="margin-top:18px;">El asistente habla <b>poco y en los momentos que importan</b>: cuando escoge el material, cuando ya tiene el largo, y cuando algo va a salir mal. Si necesita más, toque el botón naranja — para eso está.</p>
@@ -4613,7 +4627,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-10-DP';
+  const APP_BUILD = '2026-09-10-DQ';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8660,7 +8674,20 @@
       const materials = MEASURE_SECTIONS[section].options
         .filter(o => o.value !== 'Other')
         .map(o => ({ value: o.value, label: o.label, companion: MATERIAL_COMPANION[o.value] || null }));
-      const result = await ARMeasure.measure({ section, materials });
+      // LO QUE LA WEB YA SABE Y LA CAMARA NO SABIA.
+      //
+      // 1. Quien lo trae en la mano, para que el asistente le hable por su
+      //    nombre en vez de hablarle a nadie.
+      // 2. De que cuarto es esta tarjeta.
+      // 3. CUANTO MIDE ESE CUARTO EN EL PLANO ESCANEADO. Con eso la camara
+      //    puede atrapar un error de dedo en la casa, en vez de que llegue a
+      //    la oficina: no se puede demoler mas piso del que el cuarto tiene.
+      const crewName = fpFirstName((SES && SES.full_name) || '');
+      const roomName = fpCardRoomName(card);
+      const result = await ARMeasure.measure({
+        section, materials, crewName, roomName,
+        roomAreaSqFt: fpAreaOfScannedRoom(roomName)
+      });
       if(result.cancelled){
         if(result.error) alert(result.error);
         return;
@@ -9671,6 +9698,47 @@
     const done = document.getElementById('medHelpDone');
     if(done) done.addEventListener('click', medHelpClose);
   })();
+
+  // Solo el nombre de pila: "Listo, Samuel" suena a persona; "Listo, Samuel
+  // Alexander Gonzalez Perez" suena a lista de asistencia.
+  function fpFirstName(full){
+    const n = String(full || '').trim().split(/\s+/)[0] || '';
+    return n.length >= 2 ? n : '';
+  }
+
+  // El cuarto que dice la tarjeta, contando el campo "Other".
+  function fpCardRoomName(card){
+    const sel = card && card.querySelector('.meas-room');
+    if(!sel) return '';
+    if(sel.value === 'Other'){
+      const otro = card.querySelector('.meas-room-other');
+      return String((otro && otro.value) || '').trim();
+    }
+    return String(sel.value || '').trim();
+  }
+
+  // Cuanto mide ese cuarto SEGUN EL PLANO YA ESCANEADO, si es que existe.
+  // Devuelve 0 cuando no hay plano o no hay un cuarto que se le parezca - y
+  // 0 significa "no compares", nunca "mide cero".
+  function fpAreaOfScannedRoom(roomName){
+    const clave = String(roomName || '').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    if(!clave || !floorplanData || !Array.isArray(floorplanData.rooms)) return 0;
+    let mejor = 0;
+    floorplanData.rooms.forEach(r => {
+      if(r.deleted) return;
+      const n = String(r.roomName || '').toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      if(!n) return;
+      // Se acepta que uno contenga al otro: el plano dice "Recámara" y la
+      // tarjeta "Recamara principal", o al reves.
+      if(n === clave || n.includes(clave) || clave.includes(n)){
+        const a = fpRoomDisplayAreaSqFt(r);
+        if(a > mejor) mejor = a;
+      }
+    });
+    return Math.round(mejor * 10) / 10;
+  }
 
   // Distinct levels present, sorted (1-based; a room without a `level`
   // field - old drafts saved before this feature - defaults to level 1).
