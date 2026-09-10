@@ -4524,7 +4524,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-08-DH';
+  const APP_BUILD = '2026-09-10-DI';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -9406,7 +9406,18 @@
       const matches = rule.cats.filter(c => cats.includes(c)).length;
       if(matches > 0 && (!best || matches > best.matches)) best = { name: rule.name, matches };
     });
+    // SUS palabras antes que las nuestras. Si el ya bautizo DOS veces un
+    // cuarto con estos mismos muebles, esa es mejor evidencia que nuestra
+    // tabla generica: el escribio "londry room", no "Laundry Room" - esa
+    // es su palabra. Solo cambia lo que la app SUGIERE; jamas una medida,
+    // jamas un aviso, y siempre se puede escribir encima.
+    const learned = fpMemSuggestRoom(room, objects);
+    if(learned && learned.via === 'sig')
+      return { name: learned.name, confidence: learned.count >= 3 ? 'High' : 'Medium', learned: true };
     if(best) return { name: best.name, confidence: best.matches >= 2 ? 'High' : 'Medium' };
+    // Sin muebles que digan nada, un cuarto que mide parecido a otros que
+    // el ya nombro es evidencia debil - pero es mejor que dejarlo en blanco.
+    if(learned) return { name: learned.name, confidence: 'Low', learned: true };
     // No fixture evidence: a very small enclosed space is almost always
     // a closet (per the field request: "small areas like closets... the
     // app should know"). Suggested, never certain - the name stays fully
@@ -9478,6 +9489,9 @@
       // Stamp who this plan belongs to onto the plan itself, so it travels
       // with the saved draft and prints even if the fields are edited later.
       result.job = fpJobInfo();
+      // Un sello por escaneo: sirve unicamente para contar cuantos lleva.
+      result._scanId = 'scan-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
+      fpMemRememberScan(result);
       floorplanAlignRooms(result);
       floorplanRectifyWalls(result);
       floorplanRefineGeometry(result);
@@ -11941,13 +11955,27 @@
     const groupLine = Object.keys(FLOORPLAN_GROUP_ES).map(k => `${FLOORPLAN_GROUP_ES[k]}: ${groupCounts[k]||0}`).join(' &middot; ');
     const levels = floorplanLevels(data);
     const levelsRow = levels.length > 1 ? `<div class="line"><span>Levels</span><span>${levels.length}</span></div>` : '';
+    // Lo que la app aprendio de escaneos ANTERIORES. Aparece solo cuando
+    // ya hay algo aprendido, para no llenar la tarjeta de ruido. El boton
+    // Olvidar borra unicamente los nombres aprendidos: ni un plano
+    // guardado ni una sola medida se tocan.
+    const mem = fpMemStats();
+    const memRow = mem.names ? `<div class="line"><span>Lo que la app aprendi\u00f3</span><span style="text-align:right; font-size:12px;">${mem.names} nombre${mem.names===1?'':'s'} suyo${mem.names===1?'':'s'} &middot; ${mem.scans} escaneo${mem.scans===1?'':'s'} <button type="button" id="fpMemForgetBtn" class="btn btn-ink" style="padding:2px 8px; font-size:11px; margin-left:6px;">Olvidar</button></span></div>` : '';
     $('#floorplanSummary').innerHTML = `
       <div class="line"><span>Total Area</span><span>${fpDisplayTotalAreaSqFt(data).toFixed(1)} sq ft</span></div>
       <div class="line"><span>Rooms</span><span>${b.roomCount||rooms.filter(r => !r.deleted).length}</span></div>
       ${levelsRow}
       <div class="line"><span>Walls / Doors / Windows</span><span>${wallCount} / ${doorCount} / ${windowCount}</span></div>
       <div class="line"><span>Objects</span><span style="text-align:right; font-size:12px;">${groupLine}</span></div>
+      ${memRow}
     `;
+    const fmb = $('#fpMemForgetBtn');
+    if(fmb) fmb.onclick = () => {
+      if(!confirm('\u00bfBorrar lo que la app aprendi\u00f3 de sus nombres?\n\nLos planos guardados y todas las medidas NO se tocan. La app solo deja de proponer sus palabras.')) return;
+      fpMemForget();
+      renderFloorplanSummary(data);
+      fpFlashHint('Listo - la app olvid\u00f3 los nombres.');
+    };
   }
 
   // Automated quality check over the finished plan - finds what a clean
@@ -12363,6 +12391,7 @@
     room.roomName = ((input && input.value) || '').trim() || null;
     room._suggestedConfidence = null;
     room._namedByVoice = false;
+    fpMemRememberRoom(room.roomName, room);
     saveFloorplanDraft();
     renderFloorplanSvg(floorplanData);
     renderFloorplanRoomList(floorplanData);
@@ -12596,7 +12625,9 @@
     const name = String($('#fpSpaceName').value || '').trim();
     if(!name) return alert('Type a name for this space.');
     const kind = fpSpacePanel && fpSpacePanel.kind;
+    const meta0 = fpSpacePanel && fpSpacePanel.meta;
     fpSpaceApply(m => { m.name = name; if(kind === 'sub'){ m._renamed = true; m._suggested = false; } });
+    fpMemRememberSpace(name, meta0 && meta0.w, meta0 && meta0.d);
     fpFlashHint('Saved.');
   });
   $('#fpSpaceRemove').addEventListener('click', () => {
@@ -12643,6 +12674,7 @@
     room.roomName = val;
     room._suggestedConfidence = null;
     room._namedByVoice = false;
+    fpMemRememberRoom(room.roomName, room);
     saveFloorplanDraft();
     renderFloorplanSvg(floorplanData);
     renderFloorplanRoomList(floorplanData);
@@ -14151,7 +14183,7 @@
     modal.hidden = false;
     fpAiOpenSheet();
     $('#fpAiApplyBtn').onclick = fpAiApply;
-    $('#fpAiCancelBtn').onclick = fpAiCancel;
+    $('#fpAiCancelBtn').onclick = () => { fpMemCountAiFix('cancelled'); fpAiCancel(); };
     const pr = $('#fpAiPrevReview');
     if(pr) pr.onclick = () => { fpAiCancel(); fpAiGoReview(); };
   }
@@ -14166,6 +14198,7 @@
   function fpAiApply(){
     const work = fpAiWork, plan = fpAiPlan;
     if(!work || !plan){ fpAiCancel(); return; }
+    fpMemCountAiFix('applied');
     $('#fpAiFixModal').classList.remove('fpai-side');
     fpAiCloseSheet();
     // Names it could not guess - asked now, never left blank.
@@ -14174,16 +14207,22 @@
       const room = (work.rooms||[])[ri];
       if(!room) return;
       const area = fpRoomDisplayAreaSqFt(room);
-      const typed = prompt(`A ${area.toFixed(0)} sq ft space has no name - what is it? (Closet, Bathroom, Office...)`);
-      if(typed && typed.trim()){ room.roomName = typed.trim(); room._suggestedConfidence = null; asked++; }
+      // Su palabra viene YA ESCRITA en la caja; el la acepta o escribe
+      // encima. La app propone, nunca decide sola.
+      const guess = fpMemSuggestRoom(room);
+      const typed = prompt(`A ${area.toFixed(0)} sq ft space has no name - what is it? (Closet, Bathroom, Office...)`, (guess && guess.name) || '');
+      if(typed && typed.trim()){ room.roomName = typed.trim(); room._suggestedConfidence = null; asked++; fpMemRememberRoom(room.roomName, room); }
       else { room.roomName = area <= 30 ? 'Closet' : `Room ${ri+1}`; room._suggestedConfidence = 'Low'; }
     });
     plan.spaces.forEach(sp => {
-      const typed = prompt(`There is a ${fpFeetInches(sp.w)} x ${fpFeetInches(sp.d)} open space no room claims - what is it? (Closet, Pantry, Storage...)`);
+      const sGuess = fpMemSuggestSpace(sp.w, sp.d);
+      const typed = prompt(`There is a ${fpFeetInches(sp.w)} x ${fpFeetInches(sp.d)} open space no room claims - what is it? (Closet, Pantry, Storage...)`, (sGuess && sGuess.name) || '');
       work._spaceLabels = work._spaceLabels || [];
+      const spName = (typed && typed.trim()) ? typed.trim() : 'Open Space';
       work._spaceLabels.push({ x: Math.round(sp.cx*100)/100, y: Math.round(sp.cy*100)/100,
         w: sp.w, d: sp.d, level: sp.level || 1,
-        name: (typed && typed.trim()) ? typed.trim() : 'Open Space' });
+        name: spName });
+      fpMemRememberSpace(spName, sp.w, sp.d);
       asked++;
     });
     if(plan.applied.length || asked) work._handEdited = true;
@@ -14832,6 +14871,125 @@
   function fpLoadLabelLearning(){
     try{ return JSON.parse(localStorage.getItem(FLOORPLAN_LABEL_LEARNING_KEY)) || []; }catch(e){ return []; }
   }
+  // ============ LO QUE LA APP APRENDE DE CADA ESCANEO ============
+  // EL LIMITE, dicho una vez y en serio: aqui no hay modelo ni nube.
+  // RoomPlan es de Apple y es una caja cerrada, asi que el ESCANER no
+  // puede aprender a medir mejor por mas escaneos que haga. Prometer eso
+  // seria mentira.
+  //
+  // Lo que si se puede recordar, y sirve, es lo que USTED escoge: como
+  // llama a los espacios y a los cuartos. La app deja de preguntar a
+  // ciegas y empieza a proponer SUS palabras (el escribio "londry room",
+  // no "Laundry Room" -- esa es su palabra, no la nuestra).
+  //
+  // REGLA QUE NO SE ROMPE: nada de lo aprendido cambia una medida ni
+  // calla un aviso. Solo cambia lo que la app SUGIERE, y usted siempre
+  // puede escribir otra cosa encima.
+  // Declaradas como FUNCIONES, no como const: el resumen del plano usa
+  // esta memoria y ese resumen se dibuja al CARGAR la app. Un const
+  // definido mas abajo habria matado la app entera al abrirla - ya paso
+  // dos veces (builds T y AG). Una funcion se puede llamar desde arriba.
+  function fpMemKey(){ return 'fpMemory:v1'; }
+  function fpMemMax(){ return 80; }
+  function fpMemLoad(){
+    try{
+      const m = JSON.parse(localStorage.getItem(fpMemKey()) || '{}');
+      return { spaces: m.spaces||[], rooms: m.rooms||[], scans: m.scans||[], aiFix: m.aiFix||{applied:0, cancelled:0} };
+    }catch(e){ return { spaces:[], rooms:[], scans:[], aiFix:{applied:0, cancelled:0} }; }
+  }
+  function fpMemSave(m){
+    try{
+      m.spaces = m.spaces.slice(-fpMemMax());
+      m.rooms = m.rooms.slice(-fpMemMax());
+      m.scans = m.scans.slice(-fpMemMax());
+      localStorage.setItem(fpMemKey(), JSON.stringify(m));
+    }catch(e){}
+  }
+  // La firma de muebles del cuarto: es la evidencia mas fuerte de que dos
+  // cuartos de escaneos distintos son la misma clase de cuarto.
+  function fpMemFixtureSig(room){
+    return [...new Set((room.objects||[]).filter(o => !o._hidden).map(o => o.category))].sort().join('|');
+  }
+  // Un nombre generico no ensena nada: "Room 3" o "Open Space" son lo que
+  // la app pone cuando NO sabe, asi que recordarlos seria aprender su
+  // propia ignorancia.
+  function fpMemWorthLearning(name){
+    const n = String(name||'').trim();
+    return !!n && !/^room\s*\d+$/i.test(n) && !/^open space$/i.test(n) && !/^space\s*\d*$/i.test(n);
+  }
+  function fpMemRememberSpace(name, w, d){
+    if(!fpMemWorthLearning(name)) return;
+    const m = fpMemLoad();
+    m.spaces.push({ n: String(name).trim(), a: Math.round((w||0)*(d||0)*10)/10 });
+    fpMemSave(m);
+  }
+  function fpMemRememberRoom(name, room){
+    if(!fpMemWorthLearning(name) || !room) return;
+    const m = fpMemLoad();
+    m.rooms.push({ n: String(name).trim(), sig: fpMemFixtureSig(room), a: Math.round(fpRoomDisplayAreaSqFt(room)) });
+    fpMemSave(m);
+  }
+  function fpMemRememberScan(data){
+    const id = (data && data._scanId) || null;
+    if(!id) return;
+    const m = fpMemLoad();
+    if(!m.scans.includes(id)){ m.scans.push(id); fpMemSave(m); }
+  }
+  // DOS veces, no una. Una vez es una casualidad; el mismo nombre para lo
+  // mismo dos veces ya es una costumbre suya.
+  function fpMemTop(list){
+    const c = {};
+    list.forEach(s => { c[s.n] = (c[s.n]||0) + 1; });
+    let best = null;
+    Object.keys(c).forEach(k => { if(!best || c[k] > best.count) best = { name: k, count: c[k] }; });
+    return (best && best.count >= 2) ? best : null;
+  }
+  function fpMemSimilarArea(list, area){
+    return list.filter(s => {
+      const big = Math.max(area||0, s.a||0) || 1;
+      return Math.abs((s.a||0) - (area||0)) / big <= 0.45;
+    });
+  }
+  function fpMemSuggestSpace(w, d){
+    const m = fpMemLoad();
+    return m.spaces.length < 2 ? null : fpMemTop(fpMemSimilarArea(m.spaces, (w||0)*(d||0)));
+  }
+  function fpMemSuggestRoom(room, objects){
+    const m = fpMemLoad();
+    if(m.rooms.length < 2) return null;
+    // Cada casa se escanea UNA sola vez (asi es water damage), asi que
+    // aqui NO se recuerda "esta casa" - eso no serviria de nada. Se
+    // recuerda que muebles tenia el cuarto y que nombre le puso el. Eso
+    // es lo unico que se repite de una casa a la siguiente.
+    //
+    // Primero por muebles: un cuarto con lavadora es un cuarto de lavado
+    // aunque mida distinto en otra casa. Solo si eso no alcanza se cae al
+    // tamano, que es evidencia mas debil - por eso se devuelve `via`, para
+    // que quien pregunta sepa cuanto puede confiar.
+    const sig = fpMemFixtureSig(room || { objects: objects || [] });
+    if(sig){
+      const bySig = fpMemTop(m.rooms.filter(r => r.sig === sig));
+      if(bySig) return { name: bySig.name, count: bySig.count, via: 'sig' };
+    }
+    // El tamano solo se puede comparar si este cuarto TIENE paredes; en el
+    // paso de AI Fix que mira nada mas los muebles todavia no las hay.
+    if(!room || !(room.walls||[]).length) return null;
+    const byArea = fpMemTop(fpMemSimilarArea(m.rooms, fpRoomDisplayAreaSqFt(room)));
+    return byArea ? { name: byArea.name, count: byArea.count, via: 'area' } : null;
+  }
+  function fpMemStats(){
+    const m = fpMemLoad();
+    const names = new Set([...m.rooms.map(r => r.n), ...m.spaces.map(s => s.n)]);
+    return { scans: m.scans.length, names: names.size, rooms: m.rooms.length, spaces: m.spaces.length,
+             applied: m.aiFix.applied||0, cancelled: m.aiFix.cancelled||0 };
+  }
+  function fpMemCountAiFix(kind){
+    const m = fpMemLoad();
+    m.aiFix[kind] = (m.aiFix[kind]||0) + 1;
+    fpMemSave(m);
+  }
+  function fpMemForget(){ try{ localStorage.removeItem(fpMemKey()); }catch(e){} }
+
   function fpRecordLabelCorrection(room, dxFeet, dyFeet){
     const b = floorplanRoomBounds(room);
     const w = Math.max(0.1, b.maxX-b.minX), h = Math.max(0.1, b.maxY-b.minY);
