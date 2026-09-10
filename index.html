@@ -4524,7 +4524,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-10-DJ';
+  const APP_BUILD = '2026-09-10-DK';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -9492,6 +9492,7 @@
       // Un sello por escaneo: sirve unicamente para contar cuantos lleva.
       result._scanId = 'scan-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
       fpMemRememberScan(result);
+      fpApplyVoiceSurfaceAnswers(result);
       floorplanAlignRooms(result);
       floorplanRectifyWalls(result);
       floorplanRefineGeometry(result);
@@ -9518,6 +9519,33 @@
   $('#floorplanClear').addEventListener('click', () => {
     if(confirm('Delete this floor plan?')) clearFloorplanDraft();
   });
+
+  // LO QUE EL TECNICO CONTESTO PARADO EN EL CUARTO.
+  //
+  // RoomPlan deja como "abertura" todo hueco de pared que no supo llamar
+  // puerta ni ventana. En un plano de seguro eso NO es lo mismo: un vano de
+  // puerta se cuenta y se dibuja distinto. El escaner lo ve desde afuera; el
+  // tecnico esta parado adentro y lo ve de un vistazo, asi que su respuesta
+  // gana - el escaner ya dijo que no sabia.
+  //
+  // Solo cambia la ETIQUETA. Ni una medida, ni una posicion, ni una pared se
+  // tocan: es el mismo hueco, del mismo ancho, en el mismo lugar. Y se deja
+  // la marca _voiceSaid para que el plano pueda decir de donde salio.
+  function fpApplyVoiceSurfaceAnswers(data){
+    (data && data.rooms || []).forEach(room => {
+      const quedan = [];
+      (room.openings || []).forEach(op => {
+        if(op && op.voiceIs === 'door'){
+          op._voiceSaid = 'door';
+          room.doors = room.doors || [];
+          room.doors.push(op);
+        }else{
+          quedan.push(op);
+        }
+      });
+      room.openings = quedan;
+    });
+  }
 
   // Distinct levels present, sorted (1-based; a room without a `level`
   // field - old drafts saved before this feature - defaults to level 1).
