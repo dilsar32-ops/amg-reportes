@@ -1535,6 +1535,10 @@
 
   <!-- ===================== TAB 6: MEASUREMENTS ===================== -->
   <section class="tab-panel" data-tab="measurements">
+    <button type="button" class="btn btn-accent" id="medRecorridoBtn" style="width:100%; margin-bottom:8px;">
+      &#128247; Medir un recorrido<span class="en"> / Measure a walkthrough</span>
+    </button>
+    <p class="hint" style="margin:0 0 12px;">Abre la cámara <b>una sola vez</b> y le pregunta el nivel, el cuarto y la sección hablando. Va cuarto por cuarto sin que usted salga, y al terminar llena las tarjetas solo.</p>
     <button type="button" class="btn btn-outline" id="medHelpBtn" style="width:100%; margin-bottom:12px;">
       &#10067; ¿Cómo se usa esta pantalla?
     </button>
@@ -4657,7 +4661,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-11-DY';
+  const APP_BUILD = '2026-09-11-DZ';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8686,6 +8690,105 @@
   // A camera session can hand back several measurements at once - a crew
   // member cutting a one-foot flood line here, a six-foot removal there,
   // all on the same room's card. Every one of them becomes its own cut
+  // ============ EL RECORRIDO: UNA CASA SIN SALIR DE LA CAMARA ============
+  //
+  // Su reporte despues de un dia midiendo: "es muy complicado que cada vez en
+  // cada cuarto nos vuelva a pedir otra vez en que nivel estoy".
+  //
+  // measureWithCamera (abajo) sigue igual y se queda: mide UNA seccion de UNA
+  // tarjeta. Esto es el camino nuevo y aparte - la camara se abre una vez y
+  // devuelve medidas ETIQUETADAS con nivel, cuarto y seccion, y aqui se arman
+  // las tarjetas solas.
+  const CONTENEDOR_DE = {};   // se llena mas abajo, junto a los contenedores
+
+  async function medirRecorrido(){
+    const ARMeasure = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ARMeasure;
+    if(!isNative() || !ARMeasure){
+      alert('Medir con cámara solo funciona en la app del teléfono.');
+      return;
+    }
+    // Los catalogos COMPLETOS: las cuatro secciones con sus materiales, los
+    // cuartos, los niveles, y cuanto mide cada cuarto en el plano escaneado.
+    // Sin esto la camara no puede cambiar de seccion sola.
+    const secciones = {};
+    Object.keys(MEASURE_SECTIONS).forEach(k => {
+      secciones[k] = MEASURE_SECTIONS[k].options
+        .filter(o => o.value !== 'Other')
+        .map(o => ({ value: o.value, label: o.label, companion: MATERIAL_COMPANION[o.value] || null }));
+    });
+    const cuartos = ROOM_OPTIONS.filter(o => o.value !== 'Other').map(o => o.value);
+    const niveles = LEVEL_OPTIONS.filter(o => o.value !== 'Other').map(o => o.value);
+    const areasPorCuarto = {};
+    cuartos.forEach(c => { const a = fpAreaOfScannedRoom(c); if(a > 0) areasPorCuarto[c] = a; });
+
+    try{
+      const result = await ARMeasure.measure({
+        modo: 'recorrido',
+        section: 'floor', materials: secciones.floor || [],   // punto de partida
+        secciones, cuartos, niveles, areasPorCuarto,
+        crewName: fpFirstName((SES && SES.full_name) || ''),
+        roomName: '', roomAreaSqFt: 0
+      });
+      if(result.cancelled){
+        if(result.error) alert(result.error);
+        return;
+      }
+      const medidas = Array.isArray(result.measurements) ? result.measurements : [];
+      if(!medidas.length) return;
+      volcarRecorrido(medidas);
+      showTab('measurements');
+      alert(medidas.length + (medidas.length === 1 ? ' medida agregada.' : ' medidas agregadas.'));
+    }catch(e){
+      console.error(e);
+      alert('No se pudo abrir la cámara de medir.');
+    }
+  }
+
+  // Reparte las medidas etiquetadas en tarjetas.
+  //
+  // TRES REGLAS QUE NO SE PUEDEN ROMPER, verificadas en el codigo de guardado
+  // y de impresion:
+  //   1. Las tarjetas SOLO se agregan al final. El borrador guarda cada valor
+  //      por POSICION (ver fieldKey), asi que meter una tarjeta en medio deja
+  //      ilegibles todos los valores de las que vienen despues.
+  //   2. addMeasureRow ya crea UN corte vacio. Hay que reusarlo o queda basura
+  //      en la tarjeta.
+  //   3. Las tarjetas de cocina NO tienen selector de cuarto.
+  function volcarRecorrido(medidas){
+    // Una tarjeta por (seccion + nivel + cuarto). Si dos medidas caen en el
+    // mismo trio, van a la MISMA tarjeta: el PDF no junta tarjetas repetidas y
+    // saldrian dos bloques del mismo cuarto.
+    const tarjetas = new Map();
+    medidas.forEach(m => {
+      const seccion = m.seccion || 'floor';
+      const nivel = m.nivel || '';
+      const cuarto = m.cuarto || '';
+      const clave = seccion + '|' + nivel + '|' + cuarto;
+      let entrada = tarjetas.get(clave);
+      if(!entrada){
+        const contenedor = CONTENEDOR_DE[seccion];
+        if(!contenedor) return;
+        const card = addMeasureRow(seccion, contenedor);      // siempre al FINAL
+        if(nivel) setFieldValue($('.meas-level', card), nivel);
+        const selCuarto = $('.meas-room', card);              // null en cocina
+        if(selCuarto && cuarto) setFieldValue(selCuarto, cuarto);
+        // setFieldValue dispara 'input', y el "Other" escucha 'change': hay que
+        // llamarlo a mano o el campo libre se queda escondido.
+        refreshLevelRoomOther(card);
+        entrada = { card, usados: 0 };
+        tarjetas.set(clave, entrada);
+      }
+      const cutsBox = $('.meas-cuts', entrada.card);
+      // El primer corte ya existe (lo creo addMeasureRow): se reusa.
+      const cut = entrada.usados === 0 ? $$('.meas-cut', cutsBox)[0] : addCutRow(cutsBox);
+      entrada.usados++;
+      fillCutDims(cut, m);
+      refreshMaterialOther(cut);
+      if(m.companion) addCompanionCut(cut, m.companion);
+      updateCardTotal(entrada.card);
+    });
+  }
+
   // inside THIS card - the camera never creates a new room/card by itself.
   async function measureWithCamera(card){
     const ARMeasure = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ARMeasure;
@@ -8773,6 +8876,12 @@
   const wallContainer = $('#wallContainer');
   const ceilingContainer = $('#ceilingContainer');
   const kitchenContainer = $('#kitchenContainer');
+  // El recorrido necesita llegar al contenedor de CUALQUIER seccion, no solo
+  // a la de la tarjeta que toco.
+  CONTENEDOR_DE.floor = floorContainer;
+  CONTENEDOR_DE.wall = wallContainer;
+  CONTENEDOR_DE.ceiling = ceilingContainer;
+  CONTENEDOR_DE.kitchen = kitchenContainer;
   wireMeasureContainer('floor', floorContainer);
   wireMeasureContainer('wall', wallContainer);
   wireMeasureContainer('ceiling', ceilingContainer);
@@ -9723,6 +9832,8 @@
   (function wireMedHelp(){
     const b = document.getElementById('medHelpBtn');
     if(b) b.addEventListener('click', medHelpOpen);
+    const rec = document.getElementById('medRecorridoBtn');
+    if(rec) rec.addEventListener('click', medirRecorrido);
     const back = document.getElementById('medHelpBack');
     if(back) back.addEventListener('click', medHelpClose);
     const done = document.getElementById('medHelpDone');
