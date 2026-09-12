@@ -4721,7 +4721,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-11-EK';
+  const APP_BUILD = '2026-09-11-EL';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8529,6 +8529,15 @@
     {value:'Attic', label:'Ático / Attic'},
     {value:'Office', label:'Oficina / Office'},
     {value:'Closet', label:'Clóset / Closet'},
+    // Los de sótano, que faltaban: "ya se sabe que puede haber TV room o baños".
+    {value:'TV Room', label:'Cuarto de TV / TV Room'},
+    {value:'Storage Room', label:'Bodega / Storage Room'},
+    {value:'Utility Room', label:'Cuarto de Máquinas / Utility Room'},
+    {value:'Stairs', label:'Escaleras / Stairs'},
+    {value:'Kids Bedroom', label:'Cuarto de los Niños / Kids Bedroom'},
+    {value:'Guest Bedroom', label:'Cuarto de Visitas / Guest Bedroom'},
+    {value:'Guest Bathroom', label:'Baño de Visitas / Guest Bathroom'},
+    {value:'Half Bathroom', label:'Medio Baño / Half Bathroom'},
     {value:'Other', label:'Otro / Other'}
   ];
   const LEVEL_OPTIONS = [
@@ -8801,15 +8810,121 @@
   }
   function medRevisarTarjetas(){}   // lo gobierna el motor de pasos
 
+  // ============ LOS CUARTOS QUE LA APP YA CONOCE ============
+  //
+  // Su pedido: "la app ya debe saber qué cuartos hay, que cuando ellos
+  // seleccionan el nivel la app ya sabe y sugiere los nombres automáticamente".
+  //
+  // Y SI LOS SABE: si esta casa ya se escaneó en la pestaña Plano, ahí están
+  // los cuartos de verdad, con los nombres que él mismo les puso. Ofrecerle una
+  // lista genérica de dieciséis cuando la app tiene los ocho reales de ESTA
+  // casa es hacerle escoger a mano algo que ya está contestado.
+  //
+  // El nivel del plano es un número (1, 2, 3) y el de las medidas es un texto
+  // ("1st Floor"). Aquí se casan.
+  const MED_NIVEL_A_PLANO = { '1st Floor':1, '2nd Floor':2, '3rd Floor':3 };
+
+  // Los nombres del plano salen como él los dijo - "Recámara", "londry room" -
+  // y al seguro tienen que ir en INGLÉS. Aquí se traducen a la lista oficial
+  // cuando se puede; lo que no casa se respeta tal cual (es su nombre, y el
+  // campo libre ya lo acepta).
+  const MED_CUARTO_ES_EN = {
+    'recamara principal':'Master Bedroom', 'cuarto principal':'Master Bedroom',
+    'recamara':'Bedroom', 'dormitorio':'Bedroom', 'habitacion':'Bedroom', 'alcoba':'Bedroom',
+    'bano principal':'Master Bathroom', 'bano':'Bathroom', 'sanitario':'Bathroom',
+    'medio bano':'Half Bathroom', 'cocina':'Kitchen', 'sala':'Living Room',
+    'sala familiar':'Family Room', 'cuarto familiar':'Family Room', 'comedor':'Dining Room',
+    'pasillo':'Hallway', 'corredor':'Hallway', 'sotano':'Basement', 'atico':'Attic',
+    'closet':'Closet', 'ropero':'Closet', 'armario':'Closet',
+    'lavanderia':'Laundry Room', 'cuarto de lavado':'Laundry Room',
+    'garaje':'Garage', 'cochera':'Garage', 'oficina':'Office', 'estudio':'Office',
+    'cuarto de los ninos':'Kids Bedroom', 'cuarto de ninos':'Kids Bedroom',
+    'cuarto de visitas':'Guest Bedroom', 'cuarto de huespedes':'Guest Bedroom'
+  };
+  function medAInglesElCuarto(nombre){
+    const crudo = String(nombre || '').trim();
+    if(!crudo) return '';
+    const pelado = crudo.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    // ¿Ya es uno de los nuestros? (comparando sin acentos ni mayúsculas)
+    const oficial = ROOM_OPTIONS.find(o => o.value.toLowerCase() === pelado);
+    if(oficial) return oficial.value;
+    // ¿Trae un número al final? "Recámara 2" -> "Bedroom 2".
+    const m = pelado.match(/^(.*?)\s*(\d+)$/);
+    const base = m ? m[1].trim() : pelado;
+    const num  = m ? (' ' + m[2]) : '';
+    if(MED_CUARTO_ES_EN[base]) return MED_CUARTO_ES_EN[base] + num;
+    const oficialBase = ROOM_OPTIONS.find(o => o.value.toLowerCase() === base);
+    if(oficialBase) return oficialBase.value + num;
+    // No se pudo traducir: se respeta lo que él escribió. El campo libre lo
+    // acepta, y es preferible su nombre a perder el cuarto.
+    return crudo;
+  }
+
+  // Los cuartos ESCANEADOS de ese nivel, ya en inglés y sin repetidos.
+  function medCuartosDelPlano(nivel){
+    if(!floorplanData || !Array.isArray(floorplanData.rooms)) return [];
+    const nivelPlano = MED_NIVEL_A_PLANO[nivel];
+    const vistos = new Set();
+    const salida = [];
+    floorplanData.rooms.forEach(r => {
+      if(r.deleted) return;
+      // Sin mapeo conocido (Sótano, Ático, Otro) se ofrecen TODOS: mejor de más
+      // que dejarlo sin ninguno.
+      if(nivelPlano && (r.level || 1) !== nivelPlano) return;
+      const en = medAInglesElCuarto(r.roomName);
+      if(!en) return;
+      const k = en.toLowerCase();
+      if(vistos.has(k)) return;
+      vistos.add(k);
+      salida.push(en);
+    });
+    return salida;
+  }
+
+  // ============ LO QUE HAY EN CADA NIVEL ============
+  //
+  // Su pedido: "como el sótano ya se sabe que puede haber TV room o baños; casi
+  // en todos los niveles hay baños".
+  //
+  // Una casa no es una lista alfabética: en el sótano hay cuarto de TV,
+  // lavandería y bodega; en el segundo piso hay recámaras y clósets; la cocina
+  // está abajo. Si al escoger "sótano" le ofrecemos "Cocina" y "Recámara
+  // Principal", tiene que scrollear entre cosas que no existen ahí.
+  //
+  // BAÑOS EN TODOS, sin excepción: es lo que él dijo y es verdad de cualquier
+  // casa. El que sobra no estorba; el que falta cuesta escribirlo a mano.
+  const MED_BAÑOS = ['Bathroom', 'Bathroom 2', 'Half Bathroom'];
+  const MED_CUARTOS_POR_NIVEL = {
+    'Basement':  ['TV Room','Family Room','Bedroom','Office','Laundry Room',
+                  'Storage Room','Utility Room','Closet','Hallway','Stairs'],
+    '1st Floor': ['Living Room','Kitchen','Dining Room','Family Room','Office',
+                  'Bedroom','Laundry Room','Garage','Closet','Hallway','Stairs'],
+    '2nd Floor': ['Master Bedroom','Bedroom','Bedroom 2','Bedroom 3','Kids Bedroom',
+                  'Guest Bedroom','Master Bathroom','Closet','Closet 2','Hallway',
+                  'Laundry Room','Office','Stairs'],
+    '3rd Floor': ['Master Bedroom','Bedroom','Bedroom 2','Kids Bedroom','Master Bathroom',
+                  'Closet','Hallway','Storage Room','Stairs'],
+    'Attic':     ['Storage Room','Bedroom','Closet','Utility Room','Stairs']
+  };
+  function medCuartosDelNivel(nivel){
+    const base = MED_CUARTOS_POR_NIVEL[nivel] || [];
+    // Los baños primero de los que faltan: son los que nunca sobran.
+    const conBaños = base.concat(MED_BAÑOS.filter(b => base.indexOf(b) < 0));
+    return conBaños;
+  }
+
   // LAS ZONAS. Los valores van en INGLES porque son los que acaban en la
   // factura del seguro; las etiquetas son las que él lee.
   const MED_ZONAS = [
     { clave:'dormir',  etiqueta:'Recámaras y baños',
-      cuartos:['Master Bedroom','Bedroom','Master Bathroom','Bathroom','Closet','Hallway'] },
+      cuartos:['Master Bedroom','Bedroom','Kids Bedroom','Guest Bedroom','Master Bathroom',
+               'Bathroom','Guest Bathroom','Half Bathroom','Closet','Hallway'] },
     { clave:'comun',   etiqueta:'Sala, cocina y comedor',
-      cuartos:['Living Room','Family Room','Kitchen','Dining Room','Hallway','Bathroom','Office'] },
+      cuartos:['Living Room','Family Room','TV Room','Kitchen','Dining Room','Hallway',
+               'Bathroom','Half Bathroom','Office','Stairs'] },
     { clave:'servicio',etiqueta:'Sótano, lavandería, garaje',
-      cuartos:['Basement','Laundry Room','Garage','Attic','Closet','Hallway'] },
+      cuartos:['Basement','TV Room','Laundry Room','Garage','Attic','Storage Room',
+               'Utility Room','Closet','Hallway','Stairs','Bathroom'] },
     { clave:'todo',    etiqueta:'Todo el nivel',
       cuartos:null }   // null = la lista completa
   ];
@@ -8826,11 +8941,42 @@
   // esos. Con dieciséis nombres en la lista, los cuatro que va a usar de verdad
   // quedan enterrados.
   function medPedirZona(nivel, alcance){
-    medBotonesDe('medZonaOpciones', MED_ZONAS.map(z => ({ value:z.clave, label:z.etiqueta })), clave => {
-      const zona = MED_ZONAS.find(z => z.clave === clave);
+    const delPlano = medCuartosDelPlano(nivel);
+    const delNivel = medCuartosDelNivel(nivel);
+    let opciones = MED_ZONAS.map(z => ({ value:z.clave, label:z.etiqueta }));
+    // Lo que normalmente hay en ESE nivel, que es la respuesta correcta la
+    // mayoría de las veces.
+    if(delNivel.length){
+      opciones = [{ value:'nivel',
+                    label:'Lo normal de ' + nivel + ' (' + delNivel.length + ')' }].concat(opciones);
+    }
+    // Y si esta casa ya se escaneó, ESA es la mejor respuesta de todas: son los
+    // cuartos que de verdad tiene, con los nombres que él mismo les puso.
+    if(delPlano.length){
+      opciones = [{ value:'plano',
+                    label:'📐 Los cuartos de esta casa (' + delPlano.length + ')' }].concat(opciones);
+    }
+    medBotonesDe('medZonaOpciones', opciones, clave => {
       medMostrar('medMenuRecorrido');
       medMostrarTarjetas(true);
-      medirRecorrido({ nivel: nivel, alcance: alcance, cuartos: zona && zona.cuartos });
+      if(clave === 'plano'){
+        // Los del plano primero, y detrás lo normal del nivel: el escáner pudo
+        // no ver un clóset, y quedarse sin él sería peor que ofrecer uno de más.
+        medirRecorrido({ nivel: nivel, alcance: alcance,
+                         cuartos: delPlano.concat(delNivel.filter(c => delPlano.indexOf(c) < 0)) });
+        return;
+      }
+      if(clave === 'nivel'){
+        medirRecorrido({ nivel: nivel, alcance: alcance, cuartos: delNivel });
+        return;
+      }
+      const zona = MED_ZONAS.find(z => z.clave === clave);
+      // Los del plano se suman SIEMPRE, aunque escoja otra zona: son los
+      // cuartos que de verdad tiene esta casa y nunca estorban.
+      const lista = (zona && zona.cuartos)
+        ? delPlano.concat(zona.cuartos.filter(c => delPlano.indexOf(c) < 0))
+        : null;
+      medirRecorrido({ nivel: nivel, alcance: alcance, cuartos: lista });
     });
     medMostrar('medEscogerZona');
   }
