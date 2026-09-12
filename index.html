@@ -4735,7 +4735,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-12-EQ';
+  const APP_BUILD = '2026-09-12-ES';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -21053,6 +21053,77 @@
     if(!issues.length) return true;
     return confirm(`Plan review has ${issues.length} open item${issues.length>1?'s':''} (possible missing walls, unclassified openings, or low-confidence measurements - see the Plan review panel). Export anyway?`);
   }
+  // ============ EL PDF NO PARTE FILAS A LA MITAD ============
+  //
+  // Su foto del 12 de septiembre: en el salto de página, la fila "Insulation
+  // 28.4 x 6.44 ft — 182.9 sq ft" salía cortada por la mitad, media arriba y
+  // media abajo, pegada al borde del papel.
+  //
+  // La causa: la página se armaba rebanando la imagen en pedazos de ALTURA
+  // FIJA (exactamente el alto de una hoja A4), sin mirar qué había ahí. Si una
+  // fila caía sobre la línea, se partía. Y sin margen, las mitades quedaban
+  // contra el filo de la hoja.
+  //
+  // Esto no es cosmético: ese PDF va al ajustador del seguro. Una cifra
+  // partida en dos es una cifra que se puede leer mal - o que le devuelven.
+  //
+  // Dónde SÍ se puede cortar: el borde de abajo de cada fila, cada título y
+  // cada bloque. Se miden en el DOM, que es lo único que sabe dónde empieza y
+  // acaba una fila; la imagen ya no lo sabe.
+  function cortesSegurosDelNodo(node){
+    const arriba = node.getBoundingClientRect().top;
+    const set = new Set();
+    node.querySelectorAll('tr, th, td, h1, h2, h3, h4, p, li, section, div').forEach(el => {
+      if(!el.offsetHeight) return;
+      const r = el.getBoundingClientRect();
+      // Redondeado: dos elementos que acaban en el mismo sitio son un corte.
+      set.add(Math.round(r.bottom - arriba));
+    });
+    return Array.from(set).sort((a, b) => a - b);
+  }
+
+  function paginarSinPartirFilas(pdf, canvas, pageWidth, pageHeight, cortesDom, anchoDom){
+    const escala = pageWidth / canvas.width;          // px de imagen -> puntos
+    const domACanvas = canvas.width / anchoDom;       // px del DOM -> px de imagen
+    const cortes = cortesDom.map(y => y * domACanvas);
+    // Margen arriba y abajo: sin él las filas quedan contra el filo del papel,
+    // que es la otra mitad de lo que se veía mal en su foto.
+    const margen = 18;
+    const utilPx = (pageHeight - margen * 2) / escala;
+    const tmp = document.createElement('canvas');
+    tmp.width = canvas.width;
+    const ctx = tmp.getContext('2d');
+    let desde = 0, primera = true;
+    while(desde < canvas.height - 1){
+      let hasta = Math.min(canvas.height, desde + utilPx);
+      if(hasta < canvas.height){
+        // El último corte seguro que quepa. El piso del 35% evita una hoja
+        // casi vacía cuando el único corte disponible está pegado al inicio -
+        // un bloque muy alto se parte, pero se parte en un sitio razonable.
+        const limite = desde + utilPx;
+        const piso = desde + utilPx * 0.35;
+        let mejor = 0;
+        for(let i = 0; i < cortes.length; i++){
+          const c = cortes[i];
+          if(c > piso && c <= limite && c > mejor) mejor = c;
+        }
+        if(mejor) hasta = mejor;
+      }
+      const alto = Math.max(1, Math.round(hasta - desde));
+      tmp.height = alto;
+      // JPEG no tiene transparencia: sin este relleno, lo que no se dibuje
+      // sale negro.
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, tmp.width, alto);
+      ctx.drawImage(canvas, 0, -desde);
+      if(!primera) pdf.addPage();
+      primera = false;
+      pdf.addImage(tmp.toDataURL('image/jpeg', 0.92), 'JPEG',
+                   0, margen, pageWidth, alto * escala);
+      desde = hasta;
+    }
+  }
+
   $$('[data-pdf]').forEach(btn => btn.addEventListener('click', () => {
     const tab = btn.dataset.pdf;
     if(tab === 'labor' && formKind() === 'mudanza' && !recalcGrandTotal()) return alert('Falta el precio de AMG. Póngalo en AMG Moving → Precio AMG antes de bajar el PDF.');
@@ -21060,6 +21131,10 @@
     showOverlay('Generando PDF… / Generating PDF…');
     setTimeout(() => {
       const node = buildFor(tab);
+      // LOS CORTES SEGUROS, medidos AHORA que el nodo todavia esta en la
+      // pagina. Despues de html2canvas se borra, y ya no hay de donde leerlos.
+      const cortesDom = cortesSegurosDelNodo(node);
+      const anchoDom = node.offsetWidth || 1;
       html2canvas(node, { scale: 2, useCORS: true }).then(canvas => {
         document.body.removeChild(node);
         const { jsPDF } = window.jspdf;
@@ -21092,17 +21167,7 @@
           const x = (pageWidth - imgWidth) / 2, y = (pageHeight - imgHeight) / 2;
           pdf.addImage(imgData, 'JPEG', x, y, imgWidth, imgHeight);
         } else {
-          const imgWidth = pageWidth;
-          const imgHeight = canvas.height * imgWidth / canvas.width;
-          let heightLeft = imgHeight, position = 0;
-          pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-          heightLeft -= pageHeight;
-          while (heightLeft > 0) {
-            position = heightLeft - imgHeight;
-            pdf.addPage();
-            pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-            heightLeft -= pageHeight;
-          }
+          paginarSinPartirFilas(pdf, canvas, pageWidth, pageHeight, cortesDom, anchoDom);
         }
         const filename = filenameBase(tab) + '.pdf';
         if(isNative()){
