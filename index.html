@@ -1589,6 +1589,16 @@
       <div id="medNivelOpciones" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;"></div>
       <button type="button" class="btn btn-outline" id="medNivelCancelar" style="width:100%;">Cancelar</button>
     </div>
+    <!-- TERCERA CAPA. Su pedido: "qué va a medir, puros cuartos, con oficina, o
+         va a medir sala, cocinas y cuartos... para que vayamos por capas, para
+         que sea más ordenado". En un nivel de recámaras, ofrecerle "Cocina" y
+         "Garaje" es ruido: tiene que scrollear entre dieciséis nombres para
+         llegar a los cuatro que de verdad va a usar. -->
+    <div id="medEscogerZona" hidden style="margin-bottom:12px;">
+      <div class="hint" style="margin:0 0 6px;"><b>¿Qué hay en este nivel?</b><span class="en"> / What is on this level?</span></div>
+      <div id="medZonaOpciones" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;"></div>
+      <button type="button" class="btn btn-outline" id="medZonaCancelar" style="width:100%;">Cancelar</button>
+    </div>
     <div id="medEscogerCuarto" hidden style="margin-bottom:12px;">
       <div class="hint" style="margin:0 0 6px;"><b>¿Qué cuarto?</b><span class="en"> / Which room?</span></div>
       <div id="medCuartoOpciones" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;"></div>
@@ -4711,7 +4721,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-11-EI';
+  const APP_BUILD = '2026-09-11-EJ';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8763,7 +8773,7 @@
   // escoge en un toque - y peor, si no le entendia esa primera respuesta, se
   // quedaba atorado antes de empezar.
   function medMostrar(cual){
-    ['medMenuRecorrido','medEscogerNivel','medEscogerCuarto'].forEach(id => {
+    ['medMenuRecorrido','medEscogerNivel','medEscogerZona','medEscogerCuarto'].forEach(id => {
       const el = document.getElementById(id);
       if(el) el.hidden = (id !== cual);
     });
@@ -8791,16 +8801,43 @@
   }
   function medRevisarTarjetas(){}   // lo gobierna el motor de pasos
 
+  // LAS ZONAS. Los valores van en INGLES porque son los que acaban en la
+  // factura del seguro; las etiquetas son las que él lee.
+  const MED_ZONAS = [
+    { clave:'dormir',  etiqueta:'Recámaras y baños',
+      cuartos:['Master Bedroom','Bedroom','Master Bathroom','Bathroom','Closet','Hallway'] },
+    { clave:'comun',   etiqueta:'Sala, cocina y comedor',
+      cuartos:['Living Room','Family Room','Kitchen','Dining Room','Hallway','Bathroom','Office'] },
+    { clave:'servicio',etiqueta:'Sótano, lavandería, garaje',
+      cuartos:['Basement','Laundry Room','Garage','Attic','Closet','Hallway'] },
+    { clave:'todo',    etiqueta:'Todo el nivel',
+      cuartos:null }   // null = la lista completa
+  ];
+
   function medPedirNivel(alcance){
     medBotonesDe('medNivelOpciones', LEVEL_OPTIONS.filter(o => o.value !== 'Other'), nivel => {
-      medMostrarTarjetas(true);
-      if(alcance === 'nivel'){ medMostrar('medMenuRecorrido'); medirRecorrido({ nivel: nivel, alcance: 'nivel' }); }
-      else { medPedirCuarto(nivel); }
+      if(alcance === 'cuarto'){ medPedirCuarto(nivel, null); return; }
+      medPedirZona(nivel, alcance);
     });
     medMostrar('medEscogerNivel');
   }
-  function medPedirCuarto(nivel){
-    medBotonesDe('medCuartoOpciones', ROOM_OPTIONS.filter(o => o.value !== 'Other'), cuarto => {
+
+  // Tercera capa: qué tipo de cuartos hay, para que la cámara solo ofrezca
+  // esos. Con dieciséis nombres en la lista, los cuatro que va a usar de verdad
+  // quedan enterrados.
+  function medPedirZona(nivel, alcance){
+    medBotonesDe('medZonaOpciones', MED_ZONAS.map(z => ({ value:z.clave, label:z.etiqueta })), clave => {
+      const zona = MED_ZONAS.find(z => z.clave === clave);
+      medMostrar('medMenuRecorrido');
+      medMostrarTarjetas(true);
+      medirRecorrido({ nivel: nivel, alcance: alcance, cuartos: zona && zona.cuartos });
+    });
+    medMostrar('medEscogerZona');
+  }
+  function medPedirCuarto(nivel, soloEstos){
+    const lista = ROOM_OPTIONS.filter(o => o.value !== 'Other'
+      && (!soloEstos || soloEstos.indexOf(o.value) >= 0));
+    medBotonesDe('medCuartoOpciones', lista, cuarto => {
       medMostrar('medMenuRecorrido');
       medMostrarTarjetas(true);
       medirRecorrido({ nivel: nivel, cuarto: cuarto, alcance: 'cuarto' });
@@ -8824,7 +8861,10 @@
         .filter(o => o.value !== 'Other')
         .map(o => ({ value: o.value, label: o.label, companion: MATERIAL_COMPANION[o.value] || null }));
     });
-    const cuartos = ROOM_OPTIONS.filter(o => o.value !== 'Other').map(o => o.value);
+    // Solo los cuartos de la zona que escogio. Los valores van en INGLES: de
+    // aqui salen tal cual a la factura del seguro.
+    const todosLosCuartos = ROOM_OPTIONS.filter(o => o.value !== 'Other').map(o => o.value);
+    const cuartos = (op.cuartos && op.cuartos.length) ? op.cuartos : todosLosCuartos;
     const niveles = LEVEL_OPTIONS.filter(o => o.value !== 'Other').map(o => o.value);
     const areasPorCuarto = {};
     cuartos.forEach(c => { const a = fpAreaOfScannedRoom(c); if(a > 0) areasPorCuarto[c] = a; });
@@ -8885,7 +8925,22 @@
         const card = addMeasureRow(seccion, contenedor);      // siempre al FINAL
         if(nivel) setFieldValue($('.meas-level', card), nivel);
         const selCuarto = $('.meas-room', card);              // null en cocina
-        if(selCuarto && cuarto) setFieldValue(selCuarto, cuarto);
+        // UN CUARTO QUE NO ESTA EN LA LISTA cae en "Other" con su nombre
+        // escrito. Pasa todo el tiempo ahora que la camara numera los
+        // repetidos ("Bedroom 2", "Closet 3") y deja escribir nombres libres
+        // ("Kids Room"). Sin esto, `setFieldValue` no encontraba la opcion, el
+        // selector se quedaba en blanco, y esa medida salia en el reporte SIN
+        // CUARTO - sin manera de saber despues de donde era.
+        if(selCuarto && cuarto){
+          const existe = Array.from(selCuarto.options).some(o => o.value === cuarto);
+          if(existe){
+            setFieldValue(selCuarto, cuarto);
+          } else {
+            setFieldValue(selCuarto, 'Other');
+            const libre = $('.meas-room-other', card);
+            if(libre) setFieldValue(libre, cuarto);
+          }
+        }
         // setFieldValue dispara 'input', y el "Other" escucha 'change': hay que
         // llamarlo a mano o el campo libre se queda escondido.
         refreshLevelRoomOther(card);
@@ -9961,6 +10016,8 @@
     if(cn) cn.addEventListener('click', () => medMostrar('medMenuRecorrido'));
     const cc = document.getElementById('medCuartoCancelar');
     if(cc) cc.addEventListener('click', () => medMostrar('medMenuRecorrido'));
+    const cz = document.getElementById('medZonaCancelar');
+    if(cz) cz.addEventListener('click', () => medMostrar('medMenuRecorrido'));
     const back = document.getElementById('medHelpBack');
     if(back) back.addEventListener('click', medHelpClose);
     const done = document.getElementById('medHelpDone');
