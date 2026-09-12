@@ -1566,6 +1566,20 @@
   </section>
 
   <!-- ===================== TAB 6: MEASUREMENTS ===================== -->
+  <!-- ===================== TAB: MEDIDAS GUARDADAS ===================== -->
+  <section class="tab-panel" data-tab="medguardadas">
+    <section class="card">
+      <h2>Medidas Guardadas<span class="en"> / Saved Measurements</span></h2>
+      <!-- EL BUSCADOR ARRIBA, y eso lo pidio asi: con veinte trabajos, bajar la
+           lista buscando una direccion es peor que no tener la lista. -->
+      <div class="field" style="margin-bottom:6px;">
+        <input type="text" id="medBuscador" placeholder="Buscar por nombre o dirección…" autocomplete="off">
+      </div>
+      <p class="hint" id="medGuardadasCuenta" style="margin:0 0 10px;"></p>
+      <div id="medGuardadasRows"></div>
+    </section>
+  </section>
+
   <!-- ===================== TAB: PLANO Y MEDIDAS (la division) ===================== -->
   <section class="tab-panel" data-tab="planomed">
     <section class="card">
@@ -1575,9 +1589,16 @@
         &#128207; Medidas<span class="en"> / Measurements</span>
         <span style="display:block; font-weight:400; font-size:12px; opacity:.85; margin-top:2px;">Piso, pared, techo y cocina — a mano o con la cámara</span>
       </button>
-      <button type="button" class="btn btn-pick" id="irAlPlano" style="width:100%;">
+      <button type="button" class="btn btn-pick" id="irAlPlano" style="width:100%; margin-bottom:14px;">
         &#128208; Plano<span class="en"> / Floor Plan</span>
         <span style="display:block; font-weight:400; font-size:12px; opacity:.85; margin-top:2px;">Escanear el cuarto con LiDAR</span>
+      </button>
+      <div class="hint" style="margin:0 0 6px;"><b>Buscar un trabajo de antes</b><span class="en"> / Find an earlier job</span></div>
+      <button type="button" class="btn btn-outline" id="irAMedGuardadas" style="width:100%; margin-bottom:6px;">
+        &#128194; Medidas guardadas<span class="en"> / Saved measurements</span>
+      </button>
+      <button type="button" class="btn btn-outline" id="irAPlanosGuardados" style="width:100%;">
+        &#128194; Planos guardados<span class="en"> / Saved plans</span>
       </button>
     </section>
   </section>
@@ -1737,8 +1758,11 @@
        para abajo. Se entra con la pastilla "Escaneos" y se sale con Atras. -->
   <section class="tab-panel" data-tab="fpscans">
     <section class="card">
-      <h2>Escaneos Guardados<span class="en"> / Saved Scans</span></h2>
-      <p class="hint" style="margin-top:0;">Toque un escaneo para abrirlo y seguir editando. Un plano que no abra en 3 días se borra solo, y solo se guardan los últimos 3.</p>
+      <h2>Planos Guardados<span class="en"> / Saved Plans</span></h2>
+      <div class="field" style="margin-bottom:6px;">
+        <input type="text" id="fpBuscador" placeholder="Buscar por nombre o dirección…" autocomplete="off">
+      </div>
+      <p class="hint" style="margin:0 0 10px;">Toque un plano para abrirlo y seguir editando. Un plano que no abra en 3 días se borra solo, y solo se guardan los últimos 3.</p>
       <div id="fpScansRows"></div>
     </section>
   </section>
@@ -2999,9 +3023,10 @@
     comms:'Comunicación / Comms', drying:'Secado / Drying',
     materials:'Materiales / Materials', measurements:'Medidas / Measurements',
     floorplan:'Plano / Floor Plan', planomed:'Plano y Medidas',
+    medguardadas:'Medidas Guardadas',
     manual:'Manual', manager:'Manager',
     mgrmore:'Precios, pagos y equipo', finanzas:'Finanzas', amgclientes:'Clientes de AMG',
-    fpscans:'Escaneos / Saved Scans', mgrcodes:'Códigos',
+    fpscans:'Planos Guardados', mgrcodes:'Códigos',
     'floorplan-view':'Floor Plan', 'floorplan-moisture':'Moisture Map'
   };
 
@@ -4795,7 +4820,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-12-EY';
+  const APP_BUILD = '2026-09-12-EZ';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -9169,6 +9194,9 @@
       if(!medidas.length) return;
       volcarRecorrido(medidas);
       showTab('measurements');
+      // SE GUARDA SOLO. Su pedido: "cada vez que hacen alguna medida y le dan
+      // terminar, que se guarde automáticamente y aparezca en esa sección".
+      medGuardarActual();
       // DIRECTO A REVISARLAS. Su pedido: "después de la cámara, al pulsar
       // terminar debe llevarme directamente a ver las medidas para revisarlas e
       // ir a descargar el PDF".
@@ -9988,7 +10016,16 @@
       ? (list.length === 1 ? '1 plano guardado' : list.length + ' planos guardados')
       : '';
     if(!rows) return;
-    rows.innerHTML = list.map(e => {
+    // El buscador, por nombre Y por direccion: unas veces se acuerda de una y
+    // otras de la otra.
+    const q = (($('#fpBuscador')||{}).value || '')
+      .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    const vistos = q ? list.filter(e => {
+      const j = e.job || {};
+      return ((j.client||'') + ' ' + (j.address||'')).toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'').includes(q);
+    }) : list;
+    rows.innerHTML = vistos.map(e => {
       const j = e.job || {}, n = (e.data.rooms || []).filter(r => !r.deleted).length;
       const dias = fpDaysLeft(e);
       return `<div class="entryrow" data-fpid="${esc(e.id)}" style="cursor:pointer;">
@@ -9997,7 +10034,9 @@
           <span class="when" style="color:var(--ink-soft);">deletes itself in ${dias} day${dias===1?'':'s'} if not opened</span></span>
         <button type="button" class="icon-btn fpDelSaved" data-fpid="${esc(e.id)}">Delete</button>
       </div>`;
-    }).join('') || '<p class="clockhint">Nothing saved yet.</p>';
+    }).join('') || (list.length
+        ? '<p class="clockhint">Nada con esa búsqueda.</p>'
+        : '<p class="clockhint">Todavía no hay planos guardados.</p>');
   }
   if($('#fpOpenSaved')) $('#fpOpenSaved').addEventListener('click', ()=>{
     // SIEMPRE abre su ventana, haya uno o tres. El atajo de "con uno solo entra
@@ -10304,6 +10343,40 @@
     // del showTab (asi lo usa el resto del codigo: la pila dice "de donde
     // vino" una vez que ya cambio la pantalla). De paso el boton se llama solo
     // "◀ Plano y Medidas", que es el nombre de la pantalla a la que vuelve.
+    const img = document.getElementById('irAMedGuardadas');
+    if(img) img.addEventListener('click', () => {
+      medPintarGuardadas();
+      showTab('medguardadas'); pushBack('planomed');
+    });
+    const ipg = document.getElementById('irAPlanosGuardados');
+    if(ipg) ipg.addEventListener('click', () => {
+      paintFpSaved();
+      showTab('fpscans'); pushBack('planomed');
+    });
+    const bus = document.getElementById('medBuscador');
+    if(bus) bus.addEventListener('input', medPintarGuardadas);
+    const busfp = document.getElementById('fpBuscador');
+    if(busfp) busfp.addEventListener('input', paintFpSaved);
+    const filas = document.getElementById('medGuardadasRows');
+    if(filas) filas.addEventListener('click', (e) => {
+      const del = e.target.closest('.medDelSaved');
+      if(del){
+        if(confirm('¿Borrar ese trabajo guardado?\n\nNo se puede deshacer.')){
+          medBorrarGuardada(del.dataset.medid);
+          medPintarGuardadas();
+        }
+        return;
+      }
+      const fila = e.target.closest('[data-medid]');
+      if(!fila) return;
+      if(medAbrirGuardada(fila.dataset.medid)){
+        medModo = 'manual';          // ya trae tarjetas: no hay que preguntarle como medir
+        showTab('measurements');
+        medIrAlPaso('medidas');
+        pushBack('medguardadas');
+      }
+    });
+
     const im = document.getElementById('irAMedidas');
     if(im) im.addEventListener('click', () => { showTab('measurements'); pushBack('planomed'); });
     const ip = document.getElementById('irAlPlano');
@@ -21219,6 +21292,10 @@
 
   $$('[data-pdf]').forEach(btn => btn.addEventListener('click', () => {
     const tab = btn.dataset.pdf;
+    // Bajar el PDF es "ya terminé" para quien llena a mano. Se guarda aquí
+    // tambien, no solo al cerrar la camara: el que escribe las medidas a dedo
+    // nunca pasa por la camara y se quedaba sin nada guardado.
+    if(tab === 'measurements' && typeof medGuardarActual === 'function') medGuardarActual();
     if(tab === 'labor' && formKind() === 'mudanza' && !recalcGrandTotal()) return alert('Falta el precio de AMG. Póngalo en AMG Moving → Precio AMG antes de bajar el PDF.');
     if(!floorplanExportGate(tab)) return;
     showOverlay('Generando PDF… / Generating PDF…');
@@ -23056,6 +23133,153 @@
   // network - it is purely local until they press Enviar.
   // Un borrador por empresa: 'draft1' sigue siendo el de restauracion/manager
   // (nadie pierde un borrador al actualizar); el de AMG es aparte.
+  // ============ MEDIDAS GUARDADAS, CON BUSCADOR ============
+  //
+  // Su pedido: "necesitamos medidas guardadas y planos guardados; ellos entran
+  // ahí, aparece primero un buscador, luego abajo todos los trabajos, y cada
+  // medida lleva su dirección... cada vez que hacen alguna medida y le dan
+  // terminar, que se guarde automáticamente, por si quieren buscar otra vez esa
+  // casa".
+  //
+  // Se REUSA la maquinaria del borrador, que ya sabe serializar y reconstruir
+  // estas tarjetas exactas (`rowCounts` / `fieldKey`). Escribir un segundo
+  // guardado en paralelo seria tener dos formatos del mismo dato, y el dia que
+  // se agregue un campo uno de los dos se queda atras.
+  //
+  // La llave es CLIENTE + DIRECCION: guardar la misma casa dos veces la
+  // actualiza en vez de duplicarla. Un trabajo no se mide dos veces; se
+  // corrige.
+  const MED_GUARDADAS_KEY = 'medidasGuardadas:v1';
+  const MED_GUARDADAS_MAX = 60;
+
+  function medLeerGuardadas(){
+    try{
+      const l = JSON.parse(localStorage.getItem(MED_GUARDADAS_KEY) || '[]');
+      return Array.isArray(l) ? l : [];
+    }catch(e){ return []; }
+  }
+  function medEscribirGuardadas(lista){
+    try{ localStorage.setItem(MED_GUARDADAS_KEY, JSON.stringify(lista.slice(0, MED_GUARDADAS_MAX))); }
+    catch(e){ /* almacenamiento lleno: no se puede hacer nada */ }
+  }
+  const medLlaveDeCasa = (cliente, dir) =>
+    (String(cliente||'') + '|' + String(dir||'')).toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+
+  function medHayTarjetas(){
+    return ['floorContainer','wallContainer','ceilingContainer','kitchenContainer']
+      .some(id => { const c = document.getElementById(id); return c && c.children.length > 0; });
+  }
+
+  // Guardar lo que hay en pantalla. Devuelve el trabajo guardado, o null.
+  function medGuardarActual(){
+    if(!medHayTarjetas()) return null;
+    const panel = document.querySelector('.tab-panel[data-tab="measurements"]');
+    if(!panel) return null;
+    const cliente = (($('#x-client')||{}).value || '').trim();
+    const dir = (($('#x-address')||{}).value || '').trim();
+    // Sin nombre NI dirección no hay cómo buscarlo después, y un trabajo que no
+    // se puede encontrar es lo mismo que no haberlo guardado. Se guarda igual,
+    // pero se dice.
+    const vals = {};
+    draftFields().filter(el => panel.contains(el)).forEach(el => {
+      vals[fieldKey(el)] = (el.type === 'checkbox' || el.type === 'radio')
+        ? (el.checked ? 1 : 0) : el.value;
+    });
+    const trabajo = {
+      id: 'm' + Date.now().toString(36),
+      at: Date.now(),
+      cliente: cliente, dir: dir,
+      fecha: (($('#x-date')||{}).value || ''),
+      cuartos: ['floorContainer','wallContainer','ceilingContainer','kitchenContainer']
+                 .reduce((t,id) => t + ((document.getElementById(id)||{children:[]}).children.length), 0),
+      rows: rowCounts(), vals: vals
+    };
+    const lista = medLeerGuardadas();
+    const llave = medLlaveDeCasa(cliente, dir);
+    const i = llave ? lista.findIndex(t => medLlaveDeCasa(t.cliente, t.dir) === llave) : -1;
+    if(i >= 0){ trabajo.id = lista[i].id; lista[i] = trabajo; }
+    else lista.unshift(trabajo);
+    lista.sort((a,b) => (b.at||0) - (a.at||0));
+    medEscribirGuardadas(lista);
+    return trabajo;
+  }
+
+  // Abrir un trabajo guardado: se reconstruyen las tarjetas y se reparten los
+  // valores, igual que hace el borrador al arrancar la app.
+  function medAbrirGuardada(id){
+    const t = medLeerGuardadas().find(x => x.id === id);
+    if(!t) return false;
+    const r = t.rows || {};
+    [['floorContainer', r.floor, addFloorRow], ['wallContainer', r.wall, addWallRow],
+     ['ceilingContainer', r.ceiling, addCeilingRow], ['kitchenContainer', r.kitchen, addKitchenRow]]
+      .forEach(([id2, cuantas, agregar]) => {
+        const c = document.getElementById(id2);
+        if(!c) return;
+        // Se vacia primero: mezclar lo guardado con lo que estaba en pantalla
+        // seria inventar un trabajo que nunca existio.
+        c.innerHTML = '';
+        for(let k = 0; k < (cuantas || 0); k++) agregar();
+      });
+    [['floorContainer', r.floorCuts], ['wallContainer', r.wallCuts],
+     ['ceilingContainer', r.ceilingCuts], ['kitchenContainer', r.kitchenCuts]]
+      .forEach(([id2, cuantos]) => {
+        const c = document.getElementById(id2);
+        if(!c || !cuantos) return;
+        $$('.measure-card', c).forEach((card, i) => {
+          const box = $('.meas-cuts', card);
+          while(box && $$('.meas-cut', box).length < (cuantos[i] || 0)) addCutRow(box);
+        });
+      });
+    const panel = document.querySelector('.tab-panel[data-tab="measurements"]');
+    draftFields().filter(el => panel && panel.contains(el)).forEach(el => {
+      const v = (t.vals || {})[fieldKey(el)];
+      if(v === undefined) return;
+      if(el.type === 'checkbox' || el.type === 'radio') el.checked = !!v;
+      else el.value = v;
+    });
+    // Los campos "Otro" nacen escondidos: sin esto, un cuarto escrito a mano
+    // vuelve pero nadie lo ve.
+    $$('.measure-card', panel).forEach(refreshLevelRoomOther);
+    $$('.meas-cut', panel).forEach(refreshMaterialOther);
+    $$('.measure-card', panel).forEach(updateCardTotal);
+    if(typeof saveDraft === 'function') saveDraft();
+    return true;
+  }
+
+  function medBorrarGuardada(id){
+    medEscribirGuardadas(medLeerGuardadas().filter(t => t.id !== id));
+  }
+
+  // La lista, filtrada por lo que escriba en el buscador. Busca por NOMBRE y
+  // por DIRECCION a la vez: unas veces se acuerda de una y otras de la otra.
+  function medPintarGuardadas(){
+    const caja = document.getElementById('medGuardadasRows');
+    if(!caja) return;
+    const q = ((document.getElementById('medBuscador')||{}).value || '')
+      .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    const todas = medLeerGuardadas();
+    const lista = !q ? todas : todas.filter(t =>
+      medLlaveDeCasa(t.cliente, t.dir).includes(q));
+    const cuenta = document.getElementById('medGuardadasCuenta');
+    if(cuenta) cuenta.textContent = todas.length
+      ? (q ? lista.length + ' de ' + todas.length : todas.length + (todas.length === 1 ? ' trabajo guardado' : ' trabajos guardados'))
+      : '';
+    caja.innerHTML = lista.map(t => {
+      const f = new Date(t.at || Date.now());
+      const cuando = t.fecha || (f.getFullYear() + '-' + String(f.getMonth()+1).padStart(2,'0') + '-' + String(f.getDate()).padStart(2,'0'));
+      return '<div class="entryrow" data-medid="' + esc(t.id) + '" style="cursor:pointer;">'
+        + '<span><span class="who">' + esc(t.cliente || 'Sin nombre') + '</span><br>'
+        + '<span class="when">' + esc(t.dir || 'Sin dirección') + '</span><br>'
+        + '<span class="when" style="color:var(--ink-soft);">' + esc(cuando)
+        + ' &middot; ' + (t.cuartos || 0) + (t.cuartos === 1 ? ' tarjeta' : ' tarjetas') + '</span></span>'
+        + '<button type="button" class="icon-btn medDelSaved" data-medid="' + esc(t.id) + '">Borrar</button>'
+        + '</div>';
+    }).join('') || (todas.length
+        ? '<p class="clockhint">Nada con esa búsqueda.</p>'
+        : '<p class="clockhint">Todavía no hay medidas guardadas. Se guardan solas al terminar un trabajo.</p>');
+  }
+
   const draftKey = () => isAmgSide() ? 'draft1amg' : 'draft1';
   let draftReady = false;
 
@@ -23110,6 +23334,26 @@
                  : row.classList.contains('s-extra-row') ? row.closest('.shift-card') : null;
       if(card && card.parentElement){
         where = '#' + Array.prototype.indexOf.call(card.parentElement.children, card) + '.' + where;
+      }
+      // ============ Y LA SECCION, QUE FALTABA ============
+      //
+      // Encontrado el 12 de septiembre, y era CORRUPCION SILENCIOSA del
+      // borrador, no un detalle.
+      //
+      // Cada seccion (piso, pared, techo, cocina) tiene su PROPIO contenedor,
+      // asi que la primera tarjeta de piso y la primera de pared eran las dos
+      // "#0", y su primer corte "#0.#0". Misma llave, dos casillas distintas.
+      // `saveDraft` recorre en orden del DOM y escribe encima: ganaba la
+      // ULTIMA seccion. O sea que con piso Y pared llenos - el caso normal de
+      // un trabajo de agua - el borrador guardaba las medidas de la pared en
+      // las dos, y al restaurar el piso salia con los numeros de la pared o
+      // vacio. Nadie lo veia: las tarjetas si volvian, los numeros no.
+      //
+      // Con la seccion adentro, "floor#0.#0" y "wall#0.#0" ya no chocan.
+      const tarjeta = row.classList.contains('measure-card') ? row
+                    : row.closest('.measure-card');
+      if(tarjeta && tarjeta.dataset && tarjeta.dataset.section){
+        where = tarjeta.dataset.section + where;
       }
     }
     const what = el.id || (el.className || '').split(/\s+/).filter(Boolean).join('.') || el.tagName;
