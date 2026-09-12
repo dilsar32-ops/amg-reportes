@@ -37,6 +37,13 @@
     color-scheme: dark;
     --ink:#08101c; --ink-soft:#8fa3c2; --paper:#0c1524; --card:#152238; --line:#2a3d5c;
     --accent:#ff7a1a; --accent-dark:#e0650a; --blue:#5b9bd9; --green:#3ddc84; --danger:#ff5c5c;
+    /* EL COLOR DE ESCOGER. Su reporte del 12 de septiembre: "el anaranjado se
+       ve muy mal, el morado en serio se ve muy mal; ponle otro color que
+       contraste con el azul".
+       Un teal de acero: contrasta con el --blue claro sin pelearse con él, se
+       lee sobre el fondo oscuro, y no compite con el naranja de la marca -
+       que se queda para las ACCIONES (Continuar, PDF), no para las opciones. */
+    --pick:#17a3a3; --pick-dark:#128787; --pick-on:#04201f;
     --text:#ffffff; --on-accent:#2b1200; --surface-2:#101c2e; --surface-hover:#1c2f4a; --danger-soft:#3a1a12;
     --radius:4px;
   }
@@ -421,6 +428,11 @@
   .btn-outline:hover{background:var(--surface-hover);}
   .btn-accent{background:var(--accent); color:var(--on-accent);}
   .btn-accent:hover{background:var(--accent-dark);}
+  /* Los botones de ESCOGER (cómo va a medir, qué va a medir). Antes eran
+     naranjas como los de acción, y eso los hacía verse como el botón que
+     manda - cuando en realidad son una pregunta. */
+  .btn-pick{background:var(--pick); color:#fff; width:100%; text-align:center; display:block; padding:13px 16px;}
+  .btn-pick:hover{background:var(--pick-dark);}
   .btn-ink{background:var(--ink); color:#fff;}
   .btn-ghost{background:transparent; color:var(--ink-soft); border:1px solid var(--line);}
   .btn-danger{background:var(--danger); color:#fff;}
@@ -1569,17 +1581,32 @@
          preguntar el nombre de los cuartos". Tenía razón: preguntarlo por voz
          adentro de la cámara era un paso hablado de más para un dato que no
          cambia en todo el recorrido, y que con el dedo se escoge en un toque. -->
+    <section class="card" data-step="como">
+      <h2><span class="num">2</span>¿Cómo va a medir?<span class="en"> / How are you measuring?</span></h2>
+      <p class="hint" style="margin-top:0;">Las dos formas llenan el mismo reporte. Puede empezar con una y seguir con la otra.<span class="en"> / Both fill the same report.</span></p>
+      <button type="button" class="btn btn-pick" id="medModoCamara" style="width:100%; margin-bottom:6px;">
+        &#128247; Medir con la cámara<span class="en"> / Measure with the camera</span>
+      </button>
+      <button type="button" class="btn btn-pick" id="medModoManual" style="width:100%;">
+        &#9997;&#65039; Medir a mano<span class="en"> / Fill it in by hand</span>
+        <span style="display:block; font-weight:400; font-size:12px; opacity:.85; margin-top:2px;">Cada tarjeta trae su botón de cámara</span>
+      </button>
+    </section>
+
     <section class="card" data-step="alcance" id="medAlcanceCard">
       <h2><span class="num">2</span>¿Qué va a medir?<span class="en"> / What are you measuring?</span></h2>
     <div id="medMenuRecorrido" style="margin-bottom:12px;">
-      <button type="button" class="btn btn-accent" id="medNivelBtn" style="width:100%; margin-bottom:6px;">
-        &#128247; Medir un nivel completo<span class="en"> / Measure a whole level</span>
-      </button>
-      <button type="button" class="btn btn-accent" id="medCuartoBtn" style="width:100%; margin-bottom:6px;">
+      <!-- EN ESTE ORDEN, y lo pidio asi: de lo mas chico a lo mas grande. Lo
+           que se hace todos los dias va arriba; lo que se hace de vez en cuando,
+           abajo. Antes estaba al revés. -->
+      <button type="button" class="btn btn-pick" id="medCuartoBtn" style="width:100%; margin-bottom:6px;">
         &#128247; Medir un cuarto<span class="en"> / Measure one room</span>
       </button>
-      <button type="button" class="btn btn-accent" id="medVariosBtn" style="width:100%; margin-bottom:8px;">
-        &#128247; Medir diferentes niveles<span class="en"> / Measure several levels</span>
+      <button type="button" class="btn btn-pick" id="medNivelBtn" style="width:100%; margin-bottom:6px;">
+        &#128247; Medir un nivel completo<span class="en"> / Measure a whole level</span>
+      </button>
+      <button type="button" class="btn btn-pick" id="medVariosBtn" style="width:100%; margin-bottom:8px;">
+        &#128247; Medir varios niveles<span class="en"> / Measure several levels</span>
       </button>
       <p class="hint" style="margin:0;">Escoja el nivel <b>una sola vez</b>. La cámara abre con <b>los cuartos de ese nivel ya propuestos</b> — y si esta casa ya se escaneó en Plano, con los suyos de verdad. Adentro ya no se le vuelve a preguntar el nivel.</p>
     </div>
@@ -3056,6 +3083,10 @@
                     // Materiales. Metido como un <div> suelto se veia ENCIMA
                     // del paso 1 - el motor de pasos solo esconde tarjetas con
                     // data-step, asi que lo que no lo trae sale en todos.
+                    // Su pedido: "siguiente pantalla seria, ¿quiere medir a
+                    // mano o con la cámara?". Va antes de todo lo demas porque
+                    // decide QUE pantallas siguen.
+                    {k:'como',     t:'¿Cómo va a medir?'},
                     {k:'alcance',  t:'¿Qué va a medir?'},
                     {k:'medidas',  t:'Medidas'},
                     {k:'photos',   t:'Fotos'},
@@ -3084,10 +3115,17 @@
   // persisted: a Back out of the signature screen after a reload would
   // otherwise walk a path that no longer exists.
   let flowChoice = 'both';
+  // Cómo va a llenar las medidas: con la cámara, o a mano (con el botón de
+  // cámara de cada tarjeta, como estaba al principio). Se escoge en su propia
+  // pantalla y decide qué pasos siguen.
+  let medModo = null;
 
   function stepsFor(tab){
     const all = FLOWS[tab] || [];
     if(tab === 'labor') return (typeof formKind === 'function' && formKind() === 'mudanza') ? all : all.filter(s => s.k !== 'mat');   // materiales y gastos: solo en el reporte de mudanza
+    // MEDIDAS: si va a llenar a mano, la pantalla de "¿qué va a medir?" no
+    // aplica - esa existe solo para decirle a la cámara por dónde empezar.
+    if(tab === 'measurements') return all.filter(s => s.k !== 'alcance' || medModo === 'camara');
     if(tab !== 'materials') return all;
     return all.filter(s =>
       (s.k !== 'mat' || flowChoice === 'mat' || flowChoice === 'both') &&
@@ -4735,7 +4773,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-12-ET';
+  const APP_BUILD = '2026-09-12-EU';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8107,6 +8145,7 @@
     // Clearing the form takes them back to the first screen too - the
     // alternative is an empty form opened on step 4 of 5.
     if(typeof flowChoice !== 'undefined') flowChoice = 'both';
+    if(typeof medModo !== 'undefined') medModo = null;
     laborFormOpen = false;
     setTimeout(() => goStep('labor', 0), 0);
     $('#l-date').value = todayStr();
@@ -8291,6 +8330,7 @@
     // Clearing the form takes them back to the first screen too - the
     // alternative is an empty form opened on step 4 of 5.
     if(typeof flowChoice !== 'undefined') flowChoice = 'both';
+    if(typeof medModo !== 'undefined') medModo = null;
     setTimeout(() => goStep('equipment', 0), 0);
     $('#e-date').value = todayStr();
     $('#e-tech').value=''; $('#e-crew').value=''; $('#e-address').value=''; $('#e-cause').value='';
@@ -8508,6 +8548,7 @@
     // Clearing the form takes them back to the first screen too - the
     // alternative is an empty form opened on step 4 of 5.
     if(typeof flowChoice !== 'undefined') flowChoice = 'both';
+    if(typeof medModo !== 'undefined') medModo = null;
     setTimeout(() => goStep('materials', 0), 0);
     $('#m-client').value=''; $('#m-date').value = todayStr(); $('#m-address').value=''; $('#m-leader').value='';
     materialsBody.innerHTML = '';
@@ -9461,6 +9502,7 @@
     // Clearing the form takes them back to the first screen too - the
     // alternative is an empty form opened on step 4 of 5.
     if(typeof flowChoice !== 'undefined') flowChoice = 'both';
+    if(typeof medModo !== 'undefined') medModo = null;
     setTimeout(() => goStep('measurements', 0), 0);
     $('#x-client').value=''; $('#x-date').value = todayStr(); $('#x-address').value=''; $('#x-leader').value='';
     floorContainer.innerHTML = ''; addFloorRow();
@@ -10227,6 +10269,15 @@
   (function wireMedHelp(){
     const b = document.getElementById('medHelpBtn');
     if(b) b.addEventListener('click', medHelpOpen);
+    const mc = document.getElementById('medModoCamara');
+    if(mc) mc.addEventListener('click', () => { medModo = 'camara'; medIrAlPaso('alcance'); });
+    const mm = document.getElementById('medModoManual');
+    if(mm) mm.addEventListener('click', () => {
+      // A mano: derecho a las tarjetas, como estaba al principio. Cada una trae
+      // su botón de cámara, así que no pierde nada.
+      medModo = 'manual';
+      medIrAlPaso('medidas');
+    });
     const bn = document.getElementById('medNivelBtn');
     if(bn) bn.addEventListener('click', () => medPedirNivel('nivel'));
     const bc = document.getElementById('medCuartoBtn');
@@ -17729,6 +17780,7 @@
     // Clearing the form takes them back to the first screen too - the
     // alternative is an empty form opened on step 4 of 5.
     if(typeof flowChoice !== 'undefined') flowChoice = 'both';
+    if(typeof medModo !== 'undefined') medModo = null;
     setTimeout(() => goStep('comms', 0), 0);
     // El cliente NO se limpiaba: el nombre del trabajo anterior se quedaba en el
     // reporte siguiente.
@@ -17937,6 +17989,7 @@
     // Clearing the form takes them back to the first screen too - the
     // alternative is an empty form opened on step 4 of 5.
     if(typeof flowChoice !== 'undefined') flowChoice = 'both';
+    if(typeof medModo !== 'undefined') medModo = null;
     setTimeout(() => goStep('drying', 0), 0);
     $('#d-address').value=''; $('#d-room').value='';
     surfaceSelect.value = 'Floor'; populateMaterialOptions();
