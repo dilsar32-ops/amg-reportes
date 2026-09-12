@@ -1581,7 +1581,7 @@
       <button type="button" class="btn btn-accent" id="medVariosBtn" style="width:100%; margin-bottom:8px;">
         &#128247; Medir diferentes niveles<span class="en"> / Measure several levels</span>
       </button>
-      <p class="hint" style="margin:0;">Escoja el nivel aquí <b>una sola vez</b> y adentro la cámara ya no se lo vuelve a preguntar: solo le pide el nombre de cada cuarto. Si la casa tiene más de un piso, escoja <b>diferentes niveles</b> y ahí sí le pregunta cuando cambie.</p>
+      <p class="hint" style="margin:0;">Escoja el nivel <b>una sola vez</b>. La cámara abre con <b>los cuartos de ese nivel ya propuestos</b> — y si esta casa ya se escaneó en Plano, con los suyos de verdad. Adentro ya no se le vuelve a preguntar el nivel.</p>
     </div>
     <!-- Los dos selectores salen aqui, en pantalla, antes de abrir la camara. -->
     <div id="medEscogerNivel" hidden style="margin-bottom:12px;">
@@ -1594,6 +1594,9 @@
          que sea más ordenado". En un nivel de recámaras, ofrecerle "Cocina" y
          "Garaje" es ruido: tiene que scrollear entre dieciséis nombres para
          llegar a los cuatro que de verdad va a usar. -->
+    <!-- FUERA DEL FLUJO desde EM: tocar el nivel ya propone los cuartos. Se deja
+         el cascarón porque `medPedirZona` sigue existiendo y sirve si algún día
+         hace falta acotar a mano. -->
     <div id="medEscogerZona" hidden style="margin-bottom:12px;">
       <div class="hint" style="margin:0 0 6px;"><b>¿Qué hay en este nivel?</b><span class="en"> / What is on this level?</span></div>
       <div id="medZonaOpciones" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;"></div>
@@ -4721,7 +4724,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-11-EL';
+  const APP_BUILD = '2026-09-11-EM';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8929,10 +8932,41 @@
       cuartos:null }   // null = la lista completa
   ];
 
+  // TOCA EL NIVEL Y YA. Su pedido: "si presiono un nivel automáticamente se
+  // proponen los cuartos en la lista".
+  //
+  // La pregunta de en medio ("¿qué hay en este nivel?") sobra desde que la app
+  // sabe leer el plano y sabe qué trae cada nivel: era pedirle que contestara
+  // algo que ya estaba contestado. Se arma UNA lista, ordenada por qué tan
+  // probable es cada cuarto, y la cámara abre de una vez.
+  //
+  // El orden ES la función: la lista se desliza, y lo que queda abajo es como
+  // si no estuviera.
+  //   1. Los del plano de ESTA casa - los únicos que son seguros.
+  //   2. Lo normal de ESE nivel, más los baños.
+  //   3. Todo lo demás, por si la casa es rara.
+  function medCuartosSugeridos(nivel){
+    const vistos = new Set();
+    const salida = [];
+    function meter(c){
+      if(!c) return;
+      const k = c.toLowerCase();
+      if(vistos.has(k)) return;
+      vistos.add(k); salida.push(c);
+    }
+    medCuartosDelPlano(nivel).forEach(meter);
+    medCuartosDelNivel(nivel).forEach(meter);
+    ROOM_OPTIONS.filter(o => o.value !== 'Other').forEach(o => meter(o.value));
+    return salida;
+  }
+
   function medPedirNivel(alcance){
     medBotonesDe('medNivelOpciones', LEVEL_OPTIONS.filter(o => o.value !== 'Other'), nivel => {
-      if(alcance === 'cuarto'){ medPedirCuarto(nivel, null); return; }
-      medPedirZona(nivel, alcance);
+      if(alcance === 'cuarto'){ medPedirCuarto(nivel, medCuartosSugeridos(nivel)); return; }
+      // Sin pantalla de en medio: los cuartos ya vienen propuestos.
+      medMostrar('medMenuRecorrido');
+      medMostrarTarjetas(true);
+      medirRecorrido({ nivel: nivel, alcance: alcance, cuartos: medCuartosSugeridos(nivel) });
     });
     medMostrar('medEscogerNivel');
   }
