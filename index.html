@@ -1535,10 +1535,34 @@
 
   <!-- ===================== TAB 6: MEASUREMENTS ===================== -->
   <section class="tab-panel" data-tab="measurements">
-    <button type="button" class="btn btn-accent" id="medRecorridoBtn" style="width:100%; margin-bottom:8px;">
-      &#128247; Medir un recorrido<span class="en"> / Measure a walkthrough</span>
-    </button>
-    <p class="hint" style="margin:0 0 12px;">Abre la cámara <b>una sola vez</b> y le pregunta el nivel, el cuarto y la sección hablando. Va cuarto por cuarto sin que usted salga, y al terminar llena las tarjetas solo.</p>
+    <!-- EL NIVEL SE ESCOGE AQUI, NO ADENTRO DE LA CAMARA.
+         Su reporte: "cuando vamos a medir un nivel, la aplicación ya tiene que
+         entender si le ponemos nivel uno, ya sabe que en todos tiene que
+         anotar que estamos en nivel uno, entonces ya solo nos tiene que
+         preguntar el nombre de los cuartos". Tenía razón: preguntarlo por voz
+         adentro de la cámara era un paso hablado de más para un dato que no
+         cambia en todo el recorrido, y que con el dedo se escoge en un toque. -->
+    <div id="medMenuRecorrido" style="margin-bottom:12px;">
+      <div class="hint" style="margin:0 0 6px;"><b>Medir con la cámara</b><span class="en"> / Measure with the camera</span></div>
+      <button type="button" class="btn btn-accent" id="medNivelBtn" style="width:100%; margin-bottom:6px;">
+        &#128247; Medir un nivel completo<span class="en"> / Measure a whole level</span>
+      </button>
+      <button type="button" class="btn btn-accent" id="medCuartoBtn" style="width:100%; margin-bottom:8px;">
+        &#128247; Medir un cuarto<span class="en"> / Measure one room</span>
+      </button>
+      <p class="hint" style="margin:0;">Escoja el nivel aquí <b>una sola vez</b>. Adentro la cámara ya no se lo vuelve a preguntar: solo le pide el nombre de cada cuarto, y todas las tarjetas salen con ese nivel puesto.</p>
+    </div>
+    <!-- Los dos selectores salen aqui, en pantalla, antes de abrir la camara. -->
+    <div id="medEscogerNivel" hidden style="margin-bottom:12px;">
+      <div class="hint" style="margin:0 0 6px;"><b>¿En qué nivel estamos?</b><span class="en"> / Which level?</span></div>
+      <div id="medNivelOpciones" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;"></div>
+      <button type="button" class="btn btn-outline" id="medNivelCancelar" style="width:100%;">Cancelar</button>
+    </div>
+    <div id="medEscogerCuarto" hidden style="margin-bottom:12px;">
+      <div class="hint" style="margin:0 0 6px;"><b>¿Qué cuarto?</b><span class="en"> / Which room?</span></div>
+      <div id="medCuartoOpciones" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;"></div>
+      <button type="button" class="btn btn-outline" id="medCuartoCancelar" style="width:100%;">Cancelar</button>
+    </div>
     <button type="button" class="btn btn-outline" id="medHelpBtn" style="width:100%; margin-bottom:12px;">
       &#10067; ¿Cómo se usa esta pantalla?
     </button>
@@ -4661,7 +4685,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-11-ED';
+  const APP_BUILD = '2026-09-11-EE';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8701,7 +8725,54 @@
   // las tarjetas solas.
   const CONTENEDOR_DE = {};   // se llena mas abajo, junto a los contenedores
 
-  async function medirRecorrido(){
+  // ============ ESCOGER EL NIVEL ANTES DE ENTRAR ============
+  //
+  // Su reporte: "al principio, donde yo entro en medidas, ahi en medidas me
+  // tiene que salir el menu... ya sabe que en todos tiene que anotar que
+  // estamos en nivel uno, entonces ya solo nos tiene que preguntar el nombre
+  // de los cuartos".
+  //
+  // Antes la camara preguntaba el nivel HABLANDO, al abrir. Era un paso de mas
+  // para un dato que no cambia en todo el recorrido y que con el dedo se
+  // escoge en un toque - y peor, si no le entendia esa primera respuesta, se
+  // quedaba atorado antes de empezar.
+  function medMostrar(cual){
+    ['medMenuRecorrido','medEscogerNivel','medEscogerCuarto'].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.hidden = (id !== cual);
+    });
+  }
+  function medBotonesDe(contenedorId, opciones, alEscoger){
+    const box = document.getElementById(contenedorId);
+    if(!box) return;
+    box.innerHTML = '';
+    opciones.forEach(o => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn btn-outline';
+      b.style.cssText = 'flex:1 1 46%; min-width:130px;';
+      b.textContent = o.label;
+      b.addEventListener('click', () => alEscoger(o.value));
+      box.appendChild(b);
+    });
+  }
+  function medPedirNivel(alcance){
+    medBotonesDe('medNivelOpciones', LEVEL_OPTIONS.filter(o => o.value !== 'Other'), nivel => {
+      if(alcance === 'nivel'){ medMostrar('medMenuRecorrido'); medirRecorrido({ nivel: nivel, alcance: 'nivel' }); }
+      else { medPedirCuarto(nivel); }
+    });
+    medMostrar('medEscogerNivel');
+  }
+  function medPedirCuarto(nivel){
+    medBotonesDe('medCuartoOpciones', ROOM_OPTIONS.filter(o => o.value !== 'Other'), cuarto => {
+      medMostrar('medMenuRecorrido');
+      medirRecorrido({ nivel: nivel, cuarto: cuarto, alcance: 'cuarto' });
+    });
+    medMostrar('medEscogerCuarto');
+  }
+
+  async function medirRecorrido(opciones){
+    const op = opciones || {};
     const ARMeasure = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ARMeasure;
     if(!isNative() || !ARMeasure){
       alert('Medir con cámara solo funciona en la app del teléfono.');
@@ -8724,10 +8795,15 @@
     try{
       const result = await ARMeasure.measure({
         modo: 'recorrido',
+        // El nivel YA viene resuelto desde la pantalla: la camara no lo vuelve
+        // a preguntar y lo estampa en cada medida del recorrido.
+        alcance: op.alcance || 'nivel',
+        nivel: op.nivel || '',
         section: 'floor', materials: secciones.floor || [],   // punto de partida
         secciones, cuartos, niveles, areasPorCuarto,
         crewName: fpFirstName((SES && SES.full_name) || ''),
-        roomName: '', roomAreaSqFt: 0
+        roomName: op.cuarto || '',
+        roomAreaSqFt: op.cuarto ? (areasPorCuarto[op.cuarto] || 0) : 0
       });
       if(result.cancelled){
         if(result.error) alert(result.error);
@@ -9832,8 +9908,14 @@
   (function wireMedHelp(){
     const b = document.getElementById('medHelpBtn');
     if(b) b.addEventListener('click', medHelpOpen);
-    const rec = document.getElementById('medRecorridoBtn');
-    if(rec) rec.addEventListener('click', medirRecorrido);
+    const bn = document.getElementById('medNivelBtn');
+    if(bn) bn.addEventListener('click', () => medPedirNivel('nivel'));
+    const bc = document.getElementById('medCuartoBtn');
+    if(bc) bc.addEventListener('click', () => medPedirNivel('cuarto'));
+    const cn = document.getElementById('medNivelCancelar');
+    if(cn) cn.addEventListener('click', () => medMostrar('medMenuRecorrido'));
+    const cc = document.getElementById('medCuartoCancelar');
+    if(cc) cc.addEventListener('click', () => medMostrar('medMenuRecorrido'));
     const back = document.getElementById('medHelpBack');
     if(back) back.addEventListener('click', medHelpClose);
     const done = document.getElementById('medHelpDone');
