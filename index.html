@@ -1638,6 +1638,17 @@
       <button class="btn btn-outline" id="addKitchenBtn">+ Agregar Sección<span class="en"> / Add Section</span></button>
     </section>
 
+    <!-- El atajo al PDF, aquí mismo. Su pedido: revisar las medidas "e ir a
+         descargar el PDF o imagen". Los botones de exportar viven en el último
+         paso; desde aquí se llega de un toque en vez de tres "Continuar". -->
+    <section class="card" data-step="medidas">
+      <h2><span class="num">6</span>¿Ya quedó?<span class="en"> / All set?</span></h2>
+      <p class="hint" style="margin-top:0;">Revise las medidas de arriba. Cuando estén bien, vaya por el PDF o la imagen para la oficina.<span class="en"> / Check the measurements above, then get the PDF.</span></p>
+      <button class="btn btn-accent" type="button" id="medIrAlPdf" style="width:100%;">
+        &#128196; Ver PDF o imagen<span class="en"> / Get the PDF</span>
+      </button>
+    </section>
+
     <section class="card" data-step="photos">
       <h2><span class="num">6</span>Fotos<span class="en"> / Photos</span></h2>
       <input type="file" id="x-photoInput" accept="image/*" capture="environment" multiple style="display:none;">
@@ -4724,7 +4735,7 @@
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-11-EN';
+  const APP_BUILD = '2026-09-11-EO';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8809,7 +8820,32 @@
   // motor de pasos de la app ya lo hace, y pelearse con el fue justo lo que
   // dejo el menu flotando encima del paso 1.
   function medMostrarTarjetas(_){
-    goStep('measurements', (stepIdx.measurements || 0) + 1);
+    medIrAlPaso('medidas');
+  }
+  // Por NOMBRE, no por "uno más": si mañana se agrega o se quita un paso, un
+  // índice a mano cae en la pantalla equivocada y nadie relaciona las dos cosas.
+  function medIrAlPaso(clave){
+    const pasos = stepsFor('measurements');
+    const i = pasos.findIndex(s => s.k === clave);
+    if(i >= 0) goStep('measurements', i);
+  }
+  // Un aviso que NO hay que tocar para seguir.
+  function medAvisoEnPantalla(texto){
+    const panel = document.querySelector('.tab-panel[data-tab="measurements"]');
+    if(!panel) return;
+    let caja = document.getElementById('medAviso');
+    if(!caja){
+      caja = document.createElement('div');
+      caja.id = 'medAviso';
+      caja.className = 'hint';
+      caja.style.cssText = 'background:var(--ok,#0a7f5a); color:#fff; padding:10px 12px;'
+        + 'border-radius:10px; margin:0 0 12px; font-weight:600;';
+      panel.insertBefore(caja, panel.firstChild);
+    }
+    caja.textContent = texto;
+    caja.hidden = false;
+    clearTimeout(medAvisoEnPantalla._t);
+    medAvisoEnPantalla._t = setTimeout(() => { caja.hidden = true; }, 6000);
   }
   function medRevisarTarjetas(){}   // lo gobierna el motor de pasos
 
@@ -9069,9 +9105,19 @@
       const medidas = Array.isArray(result.measurements) ? result.measurements : [];
       if(!medidas.length) return;
       volcarRecorrido(medidas);
-      medMostrarTarjetas(true);
       showTab('measurements');
-      alert(medidas.length + (medidas.length === 1 ? ' medida agregada.' : ' medidas agregadas.'));
+      // DIRECTO A REVISARLAS. Su pedido: "después de la cámara, al pulsar
+      // terminar debe llevarme directamente a ver las medidas para revisarlas e
+      // ir a descargar el PDF".
+      //
+      // Antes avanzaba UN paso desde donde estuviera, que casi siempre daba en
+      // el lugar correcto - pero "casi siempre" no sirve cuando acaba de medir
+      // una casa entera y lo que necesita es verla. Ahora se va al paso de las
+      // medidas por su nombre.
+      medIrAlPaso('medidas');
+      // Y sin ventana que tocar para seguir: un alert lo obliga a un toque de
+      // más justo cuando quiere mirar lo que acaba de capturar.
+      medAvisoEnPantalla(medidas.length + (medidas.length === 1 ? ' medida agregada.' : ' medidas agregadas.') + ' Revíselas abajo.');
     }catch(e){
       console.error(e);
       alert('No se pudo abrir la cámara de medir.');
@@ -10196,6 +10242,12 @@
     if(cn) cn.addEventListener('click', () => medMostrar('medMenuRecorrido'));
     const cc = document.getElementById('medCuartoCancelar');
     if(cc) cc.addEventListener('click', () => medMostrar('medMenuRecorrido'));
+    const pdf = document.getElementById('medIrAlPdf');
+    if(pdf) pdf.addEventListener('click', () => {
+      // Al ULTIMO paso, que es donde viven los botones de exportar.
+      const pasos = stepsFor('measurements');
+      goStep('measurements', pasos.length - 1);
+    });
     const cz = document.getElementById('medZonaCancelar');
     if(cz) cz.addEventListener('click', () => medMostrar('medMenuRecorrido'));
     const back = document.getElementById('medHelpBack');
