@@ -828,6 +828,22 @@
   .cal-res.pasado{opacity:.6;}
   .cal-res .e{color:var(--amg); font-weight:700; font-size:14px;}
   .cal-dos{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  /* ¿VA O NO VA? (24 sep 2026) - quienes van, y los botones grandes para contestar */
+  .cal-van{font-size:14px; line-height:1.4;}
+  .cal-van-m{font-size:13px;}
+  .cal-asis{grid-column:1 / -1; margin-top:4px; padding:10px; border-radius:12px; background:rgba(25,179,154,.08); border:1px solid var(--line);}
+  .cal-yo{display:flex; align-items:center; justify-content:space-between; gap:8px; font-weight:700; font-size:15px; margin-bottom:8px;}
+  .cal-yo:last-child{margin-bottom:0;}
+  .cal-yo.si{color:var(--green);} .cal-yo.no{color:var(--danger);}
+  .cal-si, .cal-no, .cal-desp{width:100%; min-height:52px; border-radius:12px; font:inherit; font-size:17px; font-weight:700;}
+  .cal-si{background:#1f9d55; color:#fff; border:0;}
+  .cal-no{background:rgba(255,107,107,.12); color:var(--danger); border:1px solid rgba(255,107,107,.45);}
+  .cal-desp{background:#ffcc00; color:#1c1c1e; border:0; margin-top:8px;}
+  .cal-si:disabled, .cal-no:disabled, .cal-desp:disabled{opacity:.5;}
+  .cal-cambiar{flex:0 0 auto; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:999px; padding:7px 14px; font:inherit; font-size:13px; font-weight:600;}
+  .cal-sinalarma{margin-top:8px; font-size:13px; color:#ff9f0a; font-weight:600;}
+  .cal-desp-ok{margin-top:8px; font-size:13px; color:var(--ink-soft);}
+  .cal-quien small{display:block; font-size:11px; font-weight:500; opacity:.85;}
   .cal-pills{display:flex; flex-wrap:wrap; gap:8px;}
   .cal-pill{border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:999px; padding:10px 14px; font:inherit; font-size:14px;}
   .cal-pill.on{background:var(--amg); border-color:var(--amg); color:#fff; font-weight:700;}
@@ -4414,6 +4430,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   <div id="calHayCampos">
     <div class="field"><label>Personas</label>
       <div class="cal-stepper"><button type="button" id="calMenos" aria-label="Una persona menos">&minus;</button><span id="calPers">4</span><button type="button" id="calMas" aria-label="Una persona más">+</button></div></div>
+    <!-- QUIENES VAN (24 sep 2026): a cada uno le llega "¿Va a la mudanza?" hasta que conteste -->
+    <div class="field"><label>Quiénes van</label>
+      <div class="cal-pills" id="calQuienes"></div>
+      <p class="clockhint" style="margin:8px 0 0;">Al guardar, a cada uno le llega la pregunta en su teléfono (a los temporales no: la ven al abrir la app).</p></div>
     <div class="field"><label>Camiones</label>
       <div class="cal-pills" id="calCamiones"></div>
       <input type="text" id="calCamionOtro" maxlength="60" placeholder="Escriba cuáles camiones" hidden style="margin-top:8px;"></div>
@@ -6756,7 +6776,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-23-KX';
+  const APP_BUILD = '2026-09-24-KY';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8211,10 +8231,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     a.hora = String(a.hora || CAL_DEF.hora).slice(0, 5);
     return a;
   }
-  function calArmar(desde, hasta, ajustes, semanas, dias){
-    const o = { desde: String(desde).slice(0, 10), hasta: String(hasta).slice(0, 10), ajustes: ajustes || null, dias: {}, semanas: {} };
+  // asignados (24 sep 2026): quienes van cada dia, { 'YYYY-MM-DD': [filas] }.
+  // Es opcional: sin el SQL nuevo (o del temporal con el RPC viejo) queda {}.
+  function calArmar(desde, hasta, ajustes, semanas, dias, asignados){
+    const o = { desde: String(desde).slice(0, 10), hasta: String(hasta).slice(0, 10), ajustes: ajustes || null, dias: {}, semanas: {}, asignados: {} };
     (dias || []).forEach(r => { if(r && r.fecha) o.dias[String(r.fecha).slice(0, 10)] = r; });
     (semanas || []).forEach(x => { if(x && x.semana) o.semanas[String(x.semana).slice(0, 10)] = x.notas; });
+    (asignados || []).forEach(a => { if(a && a.fecha){ const f = String(a.fecha).slice(0, 10); (o.asignados[f] = o.asignados[f] || []).push(a); } });
     return o;
   }
   // Lo que se dice de un dia con trabajo, en una sola linea (lista del manager,
@@ -8233,18 +8256,182 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     return [r.personas || '', r.camiones || '', r.lugar || '', r.por_confirmar ? 'pc' : String(r.hora || '').slice(0, 5), r.nota || ''].join('|');
   }
 
+  // ================= ¿VA O NO VA? y LA ALARMA (24 sep 2026) =================
+  //
+  //   "¿Podremos enviarle notificaciones y que suene el teléfono de los
+  //    trabajadores varias veces hasta que confirme si sí van a participar ese
+  //    día? También avisarles una hora antes si confirma que sí van a ir.
+  //    También que suene su teléfono ... porque suelen dormirse"
+  //
+  // El manager (o la asistente) escoge en la hoja del dia QUIENES VAN
+  // (amg_cal_asignados). La nube les pregunta cada 30 min hasta que contesten;
+  // aqui estan los botones "Sí voy / No puedo". Al que dijo SÍ, su iPhone le
+  // pone la alarma (plugin Alarma, AlarmKit, iOS 26) 1 h 30 antes y otra vez
+  // cada 5 min hasta que toque "Ya me levanté", y un recordatorio 1 hora antes.
+  // Las fechas: siempre la hora del telefono, nunca toISOString.
+  //
+  // Todo esto son funciones puras (se prueban en tests/asistencia_app_test.js).
+  const CAL_ALARMA_MIN = [90, 85, 80, 75];      // minutos antes de la hora de inicio
+  function calMarca(estado){ return estado === 'si' ? '✓' : (estado === 'no' ? '✗' : '⏳'); }
+  function calVanTexto(lista){ return (lista || []).map(a => calMarca(a.estado) + ' ' + String(a.nombre || '').trim()).join(' · '); }
+  function calMiFila(lista, yo){
+    if(!yo || !yo.persona) return null;
+    return (lista || []).find(a => a && a.tipo === yo.tipo && String(a.persona) === String(yo.persona)) || null;
+  }
+  // La hora de inicio de ESE dia, en la hora del telefono. Sin hora o "por
+  // confirmar" no hay inicio (y no hay alarma: no se sabe a que hora).
+  function calInicio(f, r){
+    if(!r || r.por_confirmar || !r.hora) return null;
+    const p = String(r.hora).slice(0, 5).split(':').map(Number);
+    if(!(p[0] >= 0 && p[0] < 24) || !(p[1] >= 0 && p[1] < 60)) return null;
+    const d = calFecha(f); d.setHours(p[0], p[1], 0, 0);
+    return d;
+  }
+  function calHHMM(d){ const p = n => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()); }
+  function calFechaHora(d){ return calStr(d) + 'T' + calHHMM(d); }
+  function calHoraDe(d){ return fmtTime12(calHHMM(d)); }
+  // Lo que el plugin tiene que programar: la lista COMPLETA (el plugin borra lo
+  // que no venga). excluir = dias en que ya toco "Ya me levanté" y la nube
+  // todavia no lo sabe (si no, se volvian a poner las alarmas que el boton quito).
+  function calAlarmasDe(datos, yo, ahora, excluir){
+    const out = { alarmas: [], recordatorios: [] };
+    if(!datos || !datos.asignados || !yo) return out;
+    const aj = calAjDe(datos), fuera = new Set(excluir || []), t0 = (ahora || new Date()).getTime();
+    Object.keys(datos.asignados).sort().forEach(f => {
+      const mia = calMiFila(datos.asignados[f], yo), r = datos.dias && datos.dias[f];
+      if(!mia || mia.estado !== 'si' || !r) return;
+      const ini = calInicio(f, r); if(!ini) return;
+      const hora = calHora(r.hora);
+      if(!mia.despierto_at && !fuera.has(f)){
+        CAL_ALARMA_MIN.forEach((m, k) => {
+          const t = new Date(ini.getTime() - m * 60000);
+          if(t.getTime() > t0) out.alarmas.push({ clave: f + '#' + k, fecha: calFechaHora(t), titulo: 'Mudanza hoy ' + hora + ' · AMG Moving', dia: f });
+        });
+      }
+      const t = new Date(ini.getTime() - 60 * 60000);
+      if(t.getTime() > t0) out.recordatorios.push({ clave: f + '#1h', fecha: calFechaHora(t), titulo: 'En 1 hora: mudanza', cuerpo: hora + ' en ' + (r.lugar || aj.lugar) + '. No llegue tarde.' });
+    });
+    return out;
+  }
+  function calNotaSinAlarma(ini){ return 'Su teléfono no pone la alarma: póngase una para las ' + calHoraDe(new Date(ini.getTime() - CAL_ALARMA_MIN[0] * 60000)) + '.'; }
+  function calPendientesMios(datos, yo, hoy){
+    if(!datos || !datos.asignados || !yo) return 0;
+    return Object.keys(datos.asignados).filter(f => f >= hoy && (!datos.dias || datos.dias[f]) && (calMiFila(datos.asignados[f], yo) || {}).estado === 'pendiente').length;
+  }
+  function calPendientesTexto(n){ return n ? '⚠️ Tiene ' + n + (n === 1 ? ' mudanza' : ' mudanzas') + ' sin contestar' : ''; }
+  // Lo que contesto la nube (o lo que se sabe) se pone en MI fila de ese dia.
+  function calPonerFila(datos, yo, f, cambios){
+    if(!datos || !datos.asignados || !yo) return false;
+    const mia = calMiFila(datos.asignados[f], yo); if(!mia) return false;
+    Object.keys(cambios || {}).forEach(k => { if(cambios[k] !== undefined) mia[k] = cambios[k]; });
+    return true;
+  }
+  // Lo que se ve debajo de un dia: quienes van y, si yo voy, mis botones.
+  // asis = { tipo, persona, sinAlarma, abiertos:Set, ahora:Date } (o nada).
+  function calHtmlAsistencia(datos, f, hoy, asis){
+    const lista = (datos.asignados && datos.asignados[f]) || [];
+    if(!lista.length) return '';
+    let h = '<span class="ic">&#128075;</span><span class="cal-van">Van: ' + esc(calVanTexto(lista)) + '</span>';
+    const mia = asis ? calMiFila(lista, asis) : null;
+    if(!mia) return h;
+    const ini = calInicio(f, datos.dias && datos.dias[f]), ahora = (asis.ahora || new Date()).getTime();
+    const abierto = !!(asis.abiertos && asis.abiertos.has(f));
+    const botones = '<div class="cal-yo">¿Va a esta mudanza?</div><div class="cal-dos">'
+      + '<button type="button" class="cal-si" data-cal-resp="si" data-cal-f="' + f + '">✓ Sí voy</button>'
+      + '<button type="button" class="cal-no" data-cal-resp="no" data-cal-f="' + f + '">✗ No puedo</button></div>';
+    const cambiar = '<button type="button" class="cal-cambiar" data-cal-cambiar="' + f + '">Cambiar</button>';
+    h += '<div class="cal-asis">';
+    if(f < hoy){
+      h += '<div class="cal-yo">' + (mia.estado === 'si' ? 'Usted dijo que SÍ iba' : (mia.estado === 'no' ? 'Usted dijo que NO iba' : 'No contestó')) + '</div>';
+    } else if((mia.estado !== 'si' && mia.estado !== 'no') || abierto){
+      h += botones;
+    } else if(mia.estado === 'si'){
+      h += '<div class="cal-yo si"><span>Usted dijo que SÍ va</span>' + cambiar + '</div>';
+      // "Ya me levanté": ese dia, desde 3 horas antes (tocarlo a medianoche
+      // callaba la alarma y el aviso a la asistente) hasta la hora de inicio.
+      if(f === hoy && !mia.despierto_at && !(ini && (ahora >= ini.getTime() || ahora < ini.getTime() - 3 * 3600000)))
+        h += '<button type="button" class="cal-desp" data-cal-desp="' + f + '">☀️ Ya me levanté</button>';
+      else if(f === hoy && mia.despierto_at) h += '<div class="cal-desp-ok">☀️ Ya avisó que se levantó.</div>';
+      if(asis.sinAlarma && ini && !mia.despierto_at && ini.getTime() - CAL_ALARMA_MIN[0] * 60000 > ahora)
+        h += '<div class="cal-sinalarma">' + esc(calNotaSinAlarma(ini)) + '</div>';
+    } else {
+      h += '<div class="cal-yo no"><span>Usted dijo que NO va</span>' + cambiar + '</div>';
+    }
+    return h + '</div>';
+  }
+  // "Los que van a mudanza" (como loadMgHours): de planta con tarifa de AMG y
+  // temporales activos con tarifa de AMG. sinPuerta: no ha entrado por la
+  // puerta de AMG, asi que no ve el calendario (ni le llega la pregunta a la app).
+  // Igual que la nube (amg_cal_mandar_pregunta pide amg_unlocked_at, sin
+  // excepcion para el manager): un manager sin puerta de AMG tampoco la recibe.
+  function calGenteDe(perfiles, temporales, tarifasCrew, tarifasTemp){
+    const tc = new Set((tarifasCrew || []).map(x => String(x.user_id)));
+    const tt = new Set((tarifasTemp || []).map(x => String(x.casual_worker_id)));
+    const out = [];
+    (perfiles || []).forEach(p => {
+      if(!p || !tc.has(String(p.id)) || (p.status || 'active') !== 'active') return;
+      out.push({ tipo: 'crew', persona: String(p.id), nombre: String(p.full_name || 'Sin nombre').trim().slice(0, 80), sinPuerta: !p.amg_unlocked_at });
+    });
+    (temporales || []).forEach(w => {
+      if(!w || !tt.has(String(w.id)) || (w.status || 'active') !== 'active') return;
+      out.push({ tipo: 'temporal', persona: String(w.id), nombre: String(w.name || 'Trabajador').trim().slice(0, 80), sinPuerta: false });
+    });
+    return out.sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }
+  // Las pastillas de la hoja: la gente, mas quien ya estaba escogido aunque ya
+  // no tenga tarifa (para poder quitarlo).
+  function calGenteHoja(gente, asignados){
+    const out = (gente || []).slice(), ya = new Set(out.map(p => p.tipo + ':' + p.persona));
+    (asignados || []).forEach(a => {
+      const k = a.tipo + ':' + a.persona;
+      if(!ya.has(k)){ ya.add(k); out.push({ tipo: a.tipo, persona: String(a.persona), nombre: String(a.nombre || ''), sinPuerta: false }); }
+    });
+    return out.sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }
+  // Que se agrega y que se quita al guardar. sel: Map 'tipo:persona' -> persona.
+  function calPlanQuienes(antes, sel, f, companyId){
+    const ya = new Set((antes || []).map(a => a.tipo + ':' + a.persona));
+    const quitar = (antes || []).filter(a => !sel.has(a.tipo + ':' + a.persona)).map(a => a.id).filter(Boolean);
+    const nuevos = [];
+    sel.forEach((p, k) => { if(!ya.has(k)) nuevos.push({ company_id: companyId, fecha: f, tipo: p.tipo, persona: p.persona, nombre: String(p.nombre || '').trim().slice(0, 80) || 'Sin nombre' }); });
+    return { nuevos, quitar };
+  }
+  // A cuantos de los nuevos les llega la pregunta: solo a la cuadrilla con
+  // puerta de AMG (la nube no le pregunta a nadie mas).
+  function calCuantosPreguntados(nuevos, gente){
+    return (nuevos || []).filter(x => x.tipo === 'crew'
+      && !((gente || []).find(p => p.tipo === 'crew' && p.persona === String(x.persona)) || {}).sinPuerta).length;
+  }
+  // De noche (9 PM a 7 AM) la nube guarda la pregunta para las 7 AM, salvo que
+  // la mudanza empiece en menos de 12 horas (sin hora: las 8 AM de ese dia).
+  function calPreguntaDeNoche(f, r, ahora){
+    const h = ahora.getHours(); if(h >= 7 && h < 21) return false;
+    let ini = calInicio(f, r); if(!ini){ ini = calFecha(f); ini.setHours(8, 0, 0, 0); }
+    return ini.getTime() - ahora.getTime() >= 12 * 3600000;
+  }
+  // Quitar a alguien, borrar el dia o cambiar la hora: el aviso a esa persona
+  // lo manda la nube (disparadores de supabase-amg-calendario-2.sql), no la app.
+
   // ---- leer (manager y cuadrilla con cuenta: la RLS decide que le toca) ----
   async function calLeer(desde, hasta){
     const q = (t, f) => authFetch('/rest/v1/' + t + f, { headers: cloudHeaders() });
-    const [rD, rS, rA] = await Promise.all([
+    const [rD, rS, rA, rG] = await Promise.all([
       q('amg_cal_dias', '?select=*&fecha=gte.' + desde + '&fecha=lte.' + hasta + '&order=fecha.asc'),
       q('amg_cal_semanas', '?select=semana,notas,updated_at&semana=gte.' + desde + '&semana=lte.' + hasta),
-      q('amg_cal_ajustes', '?select=*&limit=1')
+      q('amg_cal_ajustes', '?select=*&limit=1'),
+      q('amg_cal_asignados', '?select=*&fecha=gte.' + desde + '&fecha=lte.' + hasta + '&order=fecha,nombre').catch(() => null)
     ]);
     if(rD.status === 404 || rS.status === 404 || rA.status === 404) throw new Error(CAL_FALTA_SQL);
     if(!rD.ok || !rS.ok || !rA.ok) throw new Error('No se pudo leer el calendario (' + [rD.status, rS.status, rA.status].join('/') + ').');
     const [dias, sem, aj] = await Promise.all([rD.json(), rS.json(), rA.json()]);
-    return calArmar(desde, hasta, (aj && aj[0]) || null, sem, dias);
+    // Quienes van: si esa lectura falla (o falta el SQL nuevo) el calendario se
+    // ve igual, pero asignadosOk=false: no se tocan las alarmas (una lista vacia
+    // las borraria todas) ni se deja cambiar quienes van.
+    let asig = null;
+    if(rG && rG.ok){ try{ asig = await rG.json(); }catch(e){ asig = null; } }
+    const o = calArmar(desde, hasta, (aj && aj[0]) || null, sem, dias, asig || []);
+    o.asignadosOk = Array.isArray(asig);
+    return o;
   }
   function calGuardarCache(key, datos){ try{ localStorage.setItem(key, JSON.stringify({ at: Date.now(), datos })); }catch(e){} }
   function calLeerCache(key){ try{ const c = JSON.parse(localStorage.getItem(key) || 'null'); return c && c.datos ? c : null; }catch(e){ return null; } }
@@ -8278,7 +8465,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // ---- pintar la semana para VER (cuadrilla y temporal) ----
   // soloDesdeHoy: el temporal ve de hoy en adelante; su pantalla es para apuntar
   // sus horas y la semana entera se las empujaba muy abajo.
-  function calHtmlSemana(datos, lunes, hoy, soloDesdeHoy){
+  // asis (24 sep 2026, opcional): quien soy yo, para los botones de "¿Va?".
+  function calHtmlSemana(datos, lunes, hoy, soloDesdeHoy, asis){
     const aj = calAjDe(datos);
     const tel = aj.telefono ? '<a href="tel:' + esc(aj.telefono.replace(/[^\d+]/g, '')) + '">' + esc(aj.telefono) + '</a>' + (aj.telefono_de ? ' (' + esc(aj.telefono_de) + ')' : '') : '';
     let h = '<div class="card amgcard" style="padding-top:12px;"><div class="cal-fijo">'
@@ -8307,6 +8495,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         + (r.camiones ? '<span class="ic">&#128666;</span><span>' + esc(r.camiones) + '</span>' : '')
         + '<span class="ic">&#128205;</span><span>' + esc(r.lugar || aj.lugar) + '</span>'
         + '<span class="ic">&#128339;</span>' + hora
+        + (datos.asignados && datos.asignados[f] && datos.asignados[f].length ? calHtmlAsistencia(datos, f, hoy, asis) : '')
         + '<div class="cal-nota">Nota: ' + (r.nota ? esc(r.nota) : '&mdash;') + '</div>'
         + '</div></div>';
     }
@@ -8325,7 +8514,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   function calCrewPintar(){
     const box = $('#calCrewCuerpo'); if(!box || !calCrewDatos) return;
     const hoy = todayStr(), lunes = calSumar(calLunes(hoy), calCrewSemana * 7);
-    box.innerHTML = calHtmlSemana(calCrewDatos, lunes, hoy);
+    box.innerHTML = calHtmlSemana(calCrewDatos, lunes, hoy, false, calAsis('crew', calCrewDatos));
     if($('#calCrewEsta')) $('#calCrewEsta').classList.toggle('on', calCrewSemana === 0);
     if($('#calCrewProx')) $('#calCrewProx').classList.toggle('on', calCrewSemana === 1);
   }
@@ -8337,12 +8526,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(cache && cache.datos.desde === desde){ calCrewDatos = cache.datos; calCrewPintar(); }
     else box.innerHTML = '<p class="clockhint">Cargando&hellip;</p>';
     if(msg) msg.textContent = '';
+    const t0 = Date.now();
     try{
       const d = await calLeer(desde, hasta);
+      calAplicarMias('crew', d, t0);          // lo que contesto mientras se leia no se pierde
       calCrewDatos = d; calGuardarCache(CAL_CACHE, d);
       if($('#calCrewCambio')) $('#calCrewCambio').hidden = !calCambioDesdeVisto(d, CAL_VISTO);
       calMarcarVisto(d, CAL_VISTO);
       calCrewPintar(); calPintarHint(d);
+      calTrasLeer('crew');                 // "Ya me levanté" de la alarma + las alarmas de este telefono
     }catch(e){
       const falta = String(e && e.message) === CAL_FALTA_SQL;
       if(calCrewDatos){
@@ -8362,7 +8554,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const hoy = todayStr(), aj = calAjDe(datos);
     let prox = null;
     for(let f = hoy; f <= datos.hasta; f = calSumar(f, 1)){ if(datos.dias[f]){ prox = f; break; } }
-    const cambio = calCambioDesdeVisto(datos, CAL_VISTO) ? '&#128276; Cambió el calendario · ' : '';
+    let cambio = calCambioDesdeVisto(datos, CAL_VISTO) ? '&#128276; Cambió el calendario · ' : '';
+    // Lo primero: las mudanzas que le preguntaron y no ha contestado.
+    const np = calPendientesMios(datos, calYoCrew(), hoy);
+    if(np) cambio = '<span style="font-weight:700; color:#ff9f0a;">' + esc(calPendientesTexto(np)) + '</span> · ' + cambio;
     if(!prox){ el.innerHTML = cambio + 'No hay mudanzas programadas por ahora'; return; }
     const r = datos.dias[prox];
     const cuando = prox === hoy ? 'hoy' : (prox === calSumar(hoy, 1) ? 'mañana' : calDiaCorto(prox).toLowerCase());
@@ -8373,9 +8568,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(!isAmgSide() || !signedIn()) return;
     const cache = calLeerCache(CAL_CACHE);
     if(cache) calPintarHint(cache.datos);
+    const t0 = Date.now();
     try{
       const desde = calLunes(todayStr()), d = await calLeer(desde, calSumar(desde, 13));
+      calAplicarMias('crew', d, t0);
+      // Tambien lo que se ve: si la pestaña esta abierta (llego la pregunta con
+      // la app delante), salen los botones sin salir y volver a entrar.
+      if(d.desde === calLunes(todayStr())) calCrewDatos = d;
       calGuardarCache(CAL_CACHE, d); calPintarHint(d);
+      calTrasLeer('crew');
     }catch(e){}
   }
 
@@ -8384,7 +8585,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   function calCasualPintar(){
     const box = $('#casualCalCuerpo'); if(!box || !calCasualDatos) return;
     const hoy = todayStr(), lunes = calSumar(calLunes(hoy), calCasualSemana * 7);
-    box.innerHTML = calHtmlSemana(calCasualDatos, lunes, hoy, true);
+    box.innerHTML = calHtmlSemana(calCasualDatos, lunes, hoy, true, calAsis('temporal', calCasualDatos));
     if($('#casualCalEsta')) $('#casualCalEsta').classList.toggle('on', calCasualSemana === 0);
     if($('#casualCalProx')) $('#casualCalProx').classList.toggle('on', calCasualSemana === 1);
   }
@@ -8398,13 +8599,20 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const desde = calLunes(todayStr());
     if(cache && cache.datos.desde === desde){ calCasualDatos = cache.datos; card.hidden = false; calCasualPintar(); }
     if(msg) msg.textContent = '';
+    const t0 = Date.now();
     try{
       const d = await authPost('/rest/v1/rpc/casual_amg_calendario', { p_join_code: ses.amgCode, p_name: ses.name, p_pin: ses.pin, p_desde: desde });
-      calCasualDatos = calArmar(d.desde, d.hasta, d.ajustes, d.semanas, d.dias);
+      const nd = calArmar(d.desde, d.hasta, d.ajustes, d.semanas, d.dias, d.asignados);
+      // Con el RPC viejo no vienen 'yo' ni 'asignados': se ve igual, sin botones ni alarmas.
+      nd.yo = d.yo || null;
+      nd.asignadosOk = Array.isArray(d.asignados) && !!d.yo;
+      calAplicarMias('temporal', nd, t0);
+      calCasualDatos = nd;
       calGuardarCache(key, calCasualDatos);
       if($('#casualCalCambio')) $('#casualCalCambio').hidden = !calCambioDesdeVisto(calCasualDatos, visto);
       calMarcarVisto(calCasualDatos, visto);
       card.hidden = false; calCasualPintar();
+      calTrasLeer('temporal');
     }catch(e){
       // Sin el SQL la tarjeta no sale (como Sus pagos); sin señal, lo ultimo que bajo.
       if(calCasualDatos){ if(msg) msg.textContent = 'Sin señal: esto es lo último que se bajó.'; }
@@ -8414,6 +8622,261 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   const calCasualArriba = () => { const c = $('#casualCalCard'); if(c) c.scrollIntoView({ block: 'start' }); };
   if($('#casualCalEsta')) $('#casualCalEsta').addEventListener('click', () => { calCasualSemana = 0; calCasualPintar(); calCasualArriba(); });
   if($('#casualCalProx')) $('#casualCalProx').addEventListener('click', () => { calCasualSemana = 1; calCasualPintar(); calCasualArriba(); });
+
+  // ---- ¿VA O NO VA?: contestar, "Ya me levanté" y las alarmas (24 sep 2026) ----
+  // El plugin nativo Alarma solo existe en la app del iPhone (no en la web ni en
+  // Android): todo pregunta si esta y todo va en try/catch.
+  let calAlarmaInfo = null;                  // lo ultimo que dijo Alarma.estado()
+  const calAbiertos = new Set();             // dias con "Cambiar" tocado (se ven los dos botones)
+  const calYaDespiertos = new Set();         // "Ya me levanté" que la nube ya sabe en esta sesion
+  let calRespondiendo = false;
+  function calPlugAlarma(){
+    try{ const P = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Alarma; return (isNative() && P) ? P : null; }catch(e){ return null; }
+  }
+  function calYoCrew(){ return (signedIn() && SES && SES.user_id) ? { tipo: 'crew', persona: String(SES.user_id) } : null; }
+  function calYoDe(quien, datos){ return quien === 'crew' ? calYoCrew() : (datos && datos.yo ? { tipo: 'temporal', persona: String(datos.yo) } : null); }
+  // Sin alarma: la web, Android, iOS < 26, o sin permiso. Mientras no se sabe
+  // (el plugin no ha contestado) no se dice nada.
+  function calSinAlarma(){
+    if(!isNative() || !calPlugAlarma()) return true;
+    if(!calAlarmaInfo) return false;
+    return !(calAlarmaInfo.soportado && calAlarmaInfo.alarma === 'autorizado');
+  }
+  function calAsis(quien, datos){
+    const yo = calYoDe(quien, datos); if(!yo) return null;
+    return Object.assign(yo, { sinAlarma: calSinAlarma(), abiertos: calAbiertos, ahora: new Date() });
+  }
+  // "Ya me levanté" tocado en la alarma y que la nube todavia no sabe: se guarda
+  // en el telefono hasta que se pueda mandar (despiertos() los borra al leerlos).
+  const CAL_DESP = 'amgCalDesp:v1';
+  function calDespPend(){ try{ const a = JSON.parse(localStorage.getItem(CAL_DESP) || '[]'); return Array.isArray(a) ? a : []; }catch(e){ return []; } }
+  function calDespGuardar(a){ try{ if(a.length) localStorage.setItem(CAL_DESP, JSON.stringify(a)); else localStorage.removeItem(CAL_DESP); }catch(e){} }
+  // Quien tiene el telefono en la mano ahora: la cuadrilla de AMG (cuenta) o el
+  // temporal de AMG (codigo + nombre + PIN). No depende de la puerta: el
+  // "Ya me levanté" de la alarma abre la app EN LA PUERTA (arranque en frio) o
+  // en la de Restoration Doctor, y la nube solo necesita saber quien es; si no
+  // se mandaba ahi, a los 20 minutos la asistente recibia una alerta falsa.
+  function calQuienSoy(){
+    try{
+      const temporal = () => { const ses = loadCasualSes(); return (ses && ses.amgCode) ? { tipo: 'temporal', ses } : null; };
+      if($('#casualHome') && !$('#casualHome').hidden && SIDE === 'mudanza') return temporal();
+      if(signedIn() && SES && (SES.amg_unlocked || isManager())) return { tipo: 'crew' };
+      if(!signedIn()) return temporal();
+    }catch(e){}
+    return null;
+  }
+  function calErrTexto(e){
+    const m = String((e && e.message) || '');
+    if(/404|Could not find|does not exist/i.test(m)) return 'Todavía no se puede contestar desde la app. Avísele al manager.';
+    if(/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Sin señal: no se mandó. Vuelva a intentar.';
+    return m || 'No se pudo mandar. Vuelva a intentar.';
+  }
+  async function calRpcCrew(nombre, body){
+    const res = await authFetch('/rest/v1/rpc/' + nombre, { method: 'POST', headers: cloudHeaders(), body: JSON.stringify(body) });
+    const txt = await res.text(); let d = null; try{ d = txt ? JSON.parse(txt) : null; }catch(e){}
+    if(!res.ok) throw new Error((d && (d.message || d.msg)) || ('HTTP ' + res.status));
+    return d;
+  }
+  function calRpc(quien, nombre, body){
+    if(quien.tipo === 'crew') return calRpcCrew(nombre, body);
+    const s = quien.ses;
+    return authPost('/rest/v1/rpc/casual_' + nombre.replace(/^amg_cal_/, 'amg_'), Object.assign({ p_join_code: s.amgCode, p_name: s.name, p_pin: s.pin }, body));
+  }
+  // Lo que contesto en ESTA sesion ('tipo|dia' -> { cambios, t }). Una lectura
+  // que empezo ANTES de contestar y llega DESPUES traia 'pendiente': pisaba la
+  // respuesta, volvian los botones y la lista vacia borraba las alarmas.
+  const calMisResp = new Map();
+  function calAnotarMia(quien, f, cambios){
+    const k = quien + '|' + f, v = calMisResp.get(k);
+    calMisResp.set(k, { cambios: Object.assign({}, v && v.cambios, cambios), t: Date.now() });
+  }
+  // A una lectura que empezo en t0 se le pone lo que se contesto desde entonces.
+  function calAplicarMias(quien, datos, t0){
+    if(!datos) return;
+    const yo = calYoDe(quien, datos); if(!yo) return;
+    calMisResp.forEach((v, k) => {
+      const i = k.indexOf('|');
+      if(k.slice(0, i) === quien && v.t >= t0) calPonerFila(datos, yo, k.slice(i + 1), v.cambios);
+    });
+  }
+  // La fila que devolvio la nube se pone en lo que se ve y en lo guardado.
+  function calPonerEnTodo(quien, f, fila){
+    if(Array.isArray(fila)) fila = fila[0];
+    const cambios = {};
+    ['estado', 'respondido_at', 'despierto_at'].forEach(k => { if(fila && fila[k] !== undefined) cambios[k] = fila[k]; });
+    calAnotarMia(quien, f, cambios);
+    if(quien === 'crew'){
+      if(calCrewDatos) calPonerFila(calCrewDatos, calYoCrew(), f, cambios);
+      const c = calLeerCache(CAL_CACHE);
+      if(c && calPonerFila(c.datos, calYoCrew(), f, cambios)) calGuardarCache(CAL_CACHE, c.datos);
+    } else if(calCasualDatos){
+      calPonerFila(calCasualDatos, calYoDe('temporal', calCasualDatos), f, cambios);
+      calGuardarCache('amgCalCasual:v1', calCasualDatos);
+    }
+  }
+  let calReportandoP = null;
+  function calReportarDespiertos(){
+    if(calReportandoP) return calReportandoP;
+    calReportandoP = (async () => {
+      let pend = calDespPend();
+      const A = calPlugAlarma();
+      if(A){
+        try{ const r = await A.despiertos(); ((r && r.dias) || []).forEach(d => { if(/^\d{4}-\d{2}-\d{2}$/.test(d) && !pend.includes(d)) pend.push(d); }); }catch(e){}
+      }
+      const ayer = calSumar(todayStr(), -1);
+      pend = pend.filter(d => d >= ayer);          // lo de hace dias ya no le sirve a nadie
+      calDespGuardar(pend);                        // antes de mandar: si la app muere, no se pierde
+      const quien = calQuienSoy();
+      if(!quien || !pend.length) return;
+      const quedan = [];
+      for(const d of pend){
+        try{
+          const fila = await calRpc(quien, 'amg_cal_despierto', { p_fecha: d });
+          calYaDespiertos.add(d); calPonerEnTodo(quien.tipo, d, fila || { despierto_at: 'ya' });
+        }catch(e){ if(!/No est[aá] en la lista/i.test(String(e && e.message))) quedan.push(d); }
+      }
+      calDespGuardar(quedan);
+    })().finally(() => { calReportandoP = null; });
+    return calReportandoP;
+  }
+  // Las alarmas de ESTE telefono: la lista completa cada vez que se lee (el
+  // plugin es idempotente; lista vacia = cancelar todo). Nunca con datos a
+  // medias: sin la lista de quienes van, no se toca nada.
+  // En COLA, una a la vez: la push tocada, la pista del azulejo, contestar y
+  // volver a la app llamaban casi juntos y el plugin ponia dos veces las mismas
+  // alarmas (las de sobra nadie las podia cancelar). La lista se arma DENTRO de
+  // la cola, con los datos mas nuevos de esa pantalla (quien: 'crew' | 'temporal').
+  let calProgCola = Promise.resolve();
+  function calDatosDe(quien){ return quien === 'crew' ? calCrewDatos : calCasualDatos; }
+  function calSincronizarAlarmas(quien){
+    calProgCola = calProgCola.then(async () => {
+      const A = calPlugAlarma();
+      const datos = calDatosDe(quien), yo = calYoDe(quien, datos);
+      if(!A || !datos || datos.asignadosOk !== true || !yo) return;
+      try{ calAlarmaInfo = await A.estado(); }catch(e){}
+      const excluir = [...calYaDespiertos].concat(calDespPend());
+      const l = calAlarmasDe(datos, yo, new Date(), excluir);
+      try{ await A.programar({ alarmas: l.alarmas, recordatorios: l.recordatorios }); }catch(e){}
+    }).catch(() => {});
+    return calProgCola;
+  }
+  // El boton de la alarma con la app YA abierta: no hay visibilitychange, asi
+  // que el plugin avisa ("despierto") y se manda enseguida. Si esto no llega
+  // (build viejo), el reloj de cada minuto lo recoge.
+  function calEscucharAlarma(){
+    const A = calPlugAlarma(); if(!A || !A.addListener) return;
+    try{ A.addListener('despierto', () => { calReportarDespiertos().then(calRepintarAsis, calRepintarAsis); }); }catch(e){}
+  }
+  function calRepintarAsis(){
+    try{
+      if(calRespondiendo) return;
+      const act = document.querySelector('.tab-panel.active');
+      if(act && act.dataset.tab === 'amgcal' && !document.body.classList.contains('menu')) calCrewPintar();
+      if($('#casualHome') && !$('#casualHome').hidden && $('#casualCalCard') && !$('#casualCalCard').hidden) calCasualPintar();
+    }catch(e){}
+  }
+  async function calTrasLeer(quien){
+    try{ await calReportarDespiertos(); }catch(e){}
+    try{ await calSincronizarAlarmas(quien); }catch(e){}
+    try{ if(!calRespondiendo){ if(quien === 'crew') calCrewPintar(); else calCasualPintar(); } }catch(e){}
+  }
+  // Pide lo que falte: la alarma (iOS 26) o, si no, el permiso de avisos (el
+  // temporal no tiene cuenta y nadie se lo habia pedido: sin el, el
+  // recordatorio de "En 1 hora" no sale). pedirPermiso solo pide lo que falta.
+  async function calPedirPermisoAlarma(){
+    const A = calPlugAlarma(); if(!A) return;
+    try{
+      let e = await A.estado();
+      if(e && (e.alarma === 'sin-preguntar' || e.notificaciones === 'sin-preguntar')) e = await A.pedirPermiso();
+      if(e) calAlarmaInfo = e;
+    }catch(e){}
+  }
+  async function calContestar(quienTipo, f, accion){
+    if(calRespondiendo) return;
+    const msg = quienTipo === 'crew' ? $('#calCrewMsg') : $('#casualCalMsg');
+    const quien = quienTipo === 'crew' ? (signedIn() ? { tipo: 'crew' } : null) : (() => { const s = loadCasualSes(); return (s && s.amgCode) ? { tipo: 'temporal', ses: s } : null; })();
+    if(!quien) return;
+    if(navigator.onLine === false){ if(msg) msg.textContent = 'Sin internet: no se mandó. Vuelva a intentar con señal.'; return; }
+    calRespondiendo = true;
+    const box = quienTipo === 'crew' ? $('#calCrewCuerpo') : $('#casualCalCuerpo');
+    if(box) box.querySelectorAll('.cal-si, .cal-no, .cal-desp').forEach(b => { b.disabled = true; });
+    if(msg) msg.textContent = 'Mandando…';
+    try{
+      let fila;
+      if(accion === 'despierto'){
+        fila = await calRpc(quien, 'amg_cal_despierto', { p_fecha: f });
+        calYaDespiertos.add(f);
+        calPonerEnTodo(quienTipo, f, fila || { despierto_at: 'ya' });
+        if(msg) msg.textContent = 'Listo: ya saben que se levantó.';
+      } else {
+        if(accion === 'si') await calPedirPermisoAlarma();       // en el iPhone: la alarma pide permiso ANTES
+        fila = await calRpc(quien, 'amg_cal_responder', { p_fecha: f, p_respuesta: accion });
+        calPonerEnTodo(quienTipo, f, fila || { estado: accion });
+        calAbiertos.delete(f);
+        if(msg) msg.textContent = accion === 'si' ? 'Listo: dijo que SÍ va.' : 'Listo: dijo que NO va. El manager ya lo sabe.';
+      }
+      if(quienTipo === 'crew'){ calCrewPintar(); if(calCrewDatos) calPintarHint(calCrewDatos); } else calCasualPintar();
+      await calSincronizarAlarmas(quienTipo);
+    }catch(e){
+      if(msg) msg.textContent = calErrTexto(e);
+    }finally{
+      calRespondiendo = false;
+      try{ if(quienTipo === 'crew') calCrewPintar(); else calCasualPintar(); }catch(e){}
+    }
+  }
+  function calClickAsistencia(quienTipo, ev){
+    const r = ev.target.closest('[data-cal-resp]');
+    if(r){ calContestar(quienTipo, r.dataset.calF, r.dataset.calResp); return; }
+    const d = ev.target.closest('[data-cal-desp]');
+    if(d){ calContestar(quienTipo, d.dataset.calDesp, 'despierto'); return; }
+    const c = ev.target.closest('[data-cal-cambiar]');
+    if(c){ calAbiertos.add(c.dataset.calCambiar); if(quienTipo === 'crew') calCrewPintar(); else calCasualPintar(); }
+  }
+  if($('#calCrewCuerpo')) $('#calCrewCuerpo').addEventListener('click', ev => calClickAsistencia('crew', ev));
+  if($('#casualCalCuerpo')) $('#casualCalCuerpo').addEventListener('click', ev => calClickAsistencia('temporal', ev));
+  // "☀️ Ya me levanté" sale desde 3 horas antes: si la pantalla quedo prendida
+  // desde antes, el boton no aparecia. Cada minuto se vuelve a pintar lo que se
+  // ve (nunca a mitad de mandar una respuesta).
+  setInterval(() => {
+    try{
+      if(document.visibilityState !== 'visible' || calRespondiendo) return;
+      const act = document.querySelector('.tab-panel.active');
+      if(act && act.dataset.tab === 'amgcal' && !document.body.classList.contains('menu')) calCrewPintar();
+      if($('#casualHome') && !$('#casualHome').hidden && $('#casualCalCard') && !$('#casualCalCard').hidden) calCasualPintar();
+      // El "Ya me levanté" de la alarma que no se ha mandado (el plugin lo guarda).
+      if(calPlugAlarma()) calReportarDespiertos().then(calRepintarAsis, () => {});
+    }catch(e){}
+  }, 60000);
+  calEscucharAlarma();
+
+  // ---- AL TOCAR UN AVISO DEL CALENDARIO (abrir === 'amgcal') ----
+  // Manager -> AMG Moving -> Calendario. Cuadrilla de AMG -> su pestaña. Si
+  // todavia esta en la puerta (la app estaba cerrada), se recuerda y se abre al
+  // entrar. La web (la asistente) llega con ?abrir=amgcal desde sw.js.
+  let calAbrirPend = false;
+  // Se quita de la URL al leerlo: si no, cada recarga (checkWebUpdate, Cambiar
+  // de empresa) volvia a abrir el calendario.
+  try{
+    const u = new URL(location.href);
+    if(u.searchParams.get('abrir') === 'amgcal'){
+      calAbrirPend = true;
+      u.searchParams.delete('abrir');
+      history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+    }
+  }catch(e){}
+  function calTocoAviso(data){
+    if(!data || data.abrir !== 'amgcal') return;
+    calAbrirPend = true; calAbrirPendiente();
+  }
+  function calAbrirPendiente(){
+    if(!calAbrirPend) return;
+    const g = $('#authGate');
+    if(!SIDE || (g && !g.classList.contains('done'))) return;       // en la puerta: al entrar
+    calAbrirPend = false;
+    if(SIDE === 'manager' && isManager()){ navStack = []; pushBack('manager'); showTab('amgmoving'); amgShow('cal'); return; }
+    if(SIDE === 'mudanza' && signedIn()){ navStack = []; updateNavButtons(); showTab('amgcal'); }
+    // Por la puerta de Restoration Doctor no se abre nada de AMG.
+  }
 
   // ---- EL MANAGER (caja #amgCalBox en AMG Moving) ----
   let calMgr = null;                 // lo que se bajo de la semana que se ve
@@ -8447,6 +8910,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         ? '<b>' + (r.personas ? r.personas + (r.personas == 1 ? ' persona' : ' personas') : 'Mudanza') + '</b>' + (r.camiones ? ' · ' + esc(r.camiones) : '')
           + '<br>' + esc(r.lugar || aj.lugar) + ' · ' + (r.por_confirmar ? '<span class="cal-porconf">Hora por confirmar</span>' : '<b>' + esc(calHora(r.hora) || calHora(aj.hora)) + '</b>')
           + (r.nota ? '<br><span style="color:var(--ink-soft);">' + esc(r.nota) + '</span>' : '')
+          + ((calMgr.asignados && calMgr.asignados[f] && calMgr.asignados[f].length) ? '<br><span class="cal-van-m">' + esc(calVanTexto(calMgr.asignados[f])) + '</span>' : '')
         : 'No hay trabajo programado';
       h += '<button type="button" class="cal-res' + cls + '" data-cal-dia="' + f + '"><span class="d"><small>' + CAL_DIAS_C[d.getDay()] + '</small><b>' + d.getDate() + '</b></span>'
         + '<span class="t">' + t + '</span><span class="e">Editar</span></button>';
@@ -8490,7 +8954,24 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     }
   }
   const CAL_NO_LISTA = 'Todavía no se pudo leer esta semana. Revise su internet.';
-  function calAbrirMgr(){ calMgrCargar(); }
+  function calAbrirMgr(){ calMgrCargar(); calCargarGente(); }
+  // "Los que van a mudanza", para las pastillas de Quienes van (como loadMgHours).
+  let calGente = null;              // null = todavia no se sabe
+  async function calCargarGente(){
+    if(!isManager() || !SES || !SES.company_id) return;
+    const H = { headers: cloudHeaders() }, c = encodeURIComponent(SES.company_id);
+    try{
+      const [pr, cw, ck, tk] = await Promise.all([
+        authFetch('/rest/v1/profiles?select=id,full_name,role,status,amg_unlocked_at&company_id=eq.' + c + '&order=full_name', H),
+        authFetch('/rest/v1/casual_workers?select=id,name,status&company_id=eq.' + c + '&status=eq.active&order=name', H),
+        authFetch('/rest/v1/crew_kind_rates?select=user_id&work_kind=eq.mudanza', H),
+        authFetch('/rest/v1/casual_kind_rates?select=casual_worker_id&work_kind=eq.mudanza', H)
+      ]);
+      if(!pr.ok || !cw.ok || !ck.ok || !tk.ok) throw new Error('lectura');
+      calGente = calGenteDe(await pr.json(), await cw.json(), await ck.json(), await tk.json());
+    }catch(e){ if(calGente === null) calGente = false; }       // false = no se pudo leer
+    if(calHojaFecha) calHojaPintarQuien();
+  }
   if($('#calMgrPrev')) $('#calMgrPrev').addEventListener('click', () => { if(calOcupado) return; calMgrLunes = calSumar(calMgrLunes || calLunes(todayStr()), -7); calMgrCargar(); });
   if($('#calMgrNext')) $('#calMgrNext').addEventListener('click', () => { if(calOcupado) return; calMgrLunes = calSumar(calMgrLunes || calLunes(todayStr()), 7); calMgrCargar(); });
   if($('#calMgrDias')) $('#calMgrDias').addEventListener('click', ev => {
@@ -8511,6 +8992,25 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
 
   // ---- la hoja de un dia ----
   let calHojaFecha = null, calHojaHay = true, calHojaPers = 4, calHojaCamion = '', calHojaLugar = '';
+  let calHojaSel = new Map();       // quienes van: 'tipo:persona' -> { tipo, persona, nombre }
+  function calHojaPintarQuien(){
+    const box = $('#calQuienes'); if(!box || !calMgr || !calHojaFecha) return;
+    if(calMgr.asignadosOk !== true){ box.innerHTML = '<p class="clockhint" style="margin:0;">No se pudo leer quiénes van. Revise su internet y vuelva a abrir el día.</p>'; return; }
+    const asig = calMgr.asignados[calHojaFecha] || [];
+    const lista = calGenteHoja(calGente || [], asig);
+    if(!lista.length){
+      box.innerHTML = '<p class="clockhint" style="margin:0;">' + (calGente === null ? 'Cargando&hellip;' : (calGente === false ? 'No se pudo leer la lista de la cuadrilla. Revise su internet.' : 'Nadie tiene tarifa de AMG todavía. Póngasela en AMG Moving &rarr; Horas AMG.')) + '</p>';
+      return;
+    }
+    box.innerHTML = lista.map(p => {
+      const k = p.tipo + ':' + p.persona, on = calHojaSel.has(k);
+      const fila = asig.find(a => a.tipo === p.tipo && String(a.persona) === p.persona);
+      return '<button type="button" class="cal-pill cal-quien' + (on ? ' on' : '') + '" data-quien="' + esc(k) + '">'
+        + (on && fila ? calMarca(fila.estado) + ' ' : '') + esc(p.nombre)
+        + (p.tipo === 'temporal' ? '<small>temporal</small>' : '')
+        + (p.sinPuerta ? '<small>no ve el calendario</small>' : '') + '</button>';
+    }).join('');
+  }
   function calHojaPintarPills(){
     const aj = calAjDe(calMgr);
     const cams = calLineas(aj.camiones);
@@ -8547,7 +9047,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if($('#calHojaMsg')) $('#calHojaMsg').textContent = '';
     if($('#calCamionOtro')) $('#calCamionOtro').value = '';        // lo que se escribio en OTRO dia no se arrastra
     if($('#calLugarOtro')) $('#calLugarOtro').value = '';
-    calHojaPintarPills();
+    calHojaSel = new Map(((calMgr.asignados && calMgr.asignados[fecha]) || []).map(a => [a.tipo + ':' + a.persona, { tipo: a.tipo, persona: String(a.persona), nombre: a.nombre }]));
+    calHojaPintarPills(); calHojaPintarQuien();
+    if(calGente === null || calGente === false) calCargarGente();
     $('#calVelo').hidden = false; $('#calHoja').hidden = false; $('#calHoja').scrollTop = 0;
   }
   function calCerrarHoja(){ $('#calVelo').hidden = true; $('#calHoja').hidden = true; calHojaFecha = null; }
@@ -8555,7 +9057,19 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   if($('#calHojaCancelar')) $('#calHojaCancelar').addEventListener('click', calCerrarHoja);
   if($('#calHay')) $('#calHay').addEventListener('click', () => { calHojaHay = true; calHojaPintarPills(); });
   if($('#calNoHay')) $('#calNoHay').addEventListener('click', () => { calHojaHay = false; calHojaPintarPills(); });
-  if($('#calMenos')) $('#calMenos').addEventListener('click', () => { calHojaPers = Math.max(1, calHojaPers - 1); calHojaPintarPills(); });
+  if($('#calMenos')) $('#calMenos').addEventListener('click', () => { calHojaPers = Math.max(1, calHojaSel.size, calHojaPers - 1); calHojaPintarPills(); });
+  // Escoger quien va. Mas escogidos que Personas: Personas sube sola.
+  if($('#calQuienes')) $('#calQuienes').addEventListener('click', ev => {
+    const b = ev.target.closest('[data-quien]'); if(!b) return;
+    const k = b.dataset.quien;
+    if(calHojaSel.has(k)) calHojaSel.delete(k);
+    else {
+      const p = calGenteHoja(calGente || [], (calMgr && calMgr.asignados[calHojaFecha]) || []).find(x => x.tipo + ':' + x.persona === k);
+      if(p) calHojaSel.set(k, { tipo: p.tipo, persona: p.persona, nombre: p.nombre });
+    }
+    if(calHojaSel.size > calHojaPers) calHojaPers = calHojaSel.size;
+    calHojaPintarPills(); calHojaPintarQuien();
+  });
   if($('#calMas')) $('#calMas').addEventListener('click', () => { calHojaPers = Math.min(60, calHojaPers + 1); calHojaPintarPills(); });
   if($('#calPorConf')) $('#calPorConf').addEventListener('change', calHojaPintarPills);
   if($('#calCamiones')) $('#calCamiones').addEventListener('click', ev => {
@@ -8599,10 +9113,39 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         delete calMgr.dias[f];
       }
       if(calFirma(antes) !== calFirma(calMgr.dias[f])) calCambio(f, calDiaCorto(f) + ': ' + (calMgr.dias[f] ? calLinea(calMgr.dias[f], aj) : 'ya no hay trabajo'));
-      calCerrarHoja(); calMgrPintar(); calMgrMsg('Guardado.');
+      // Quienes van: DESPUES del dia (la nube pide que el dia exista). Sin dia,
+      // la nube borra sola a los escogidos (disparador en amg_cal_dias).
+      let preguntados = 0;
+      if(!fila){ if(calMgr.asignados) delete calMgr.asignados[f]; }
+      else if(calMgr.asignadosOk === true){
+        try{ preguntados = await calGuardarQuienes(f); }
+        catch(e){ calMgrPintar(); if(msg) msg.textContent = 'El día quedó guardado, pero no se guardó quiénes van: ' + ((e && e.message) || 'revise su internet') + '. Toque Guardar otra vez.'; return; }
+      }
+      const deNoche = preguntados && fila && calPreguntaDeNoche(f, fila, new Date());
+      calCerrarHoja(); calMgrPintar();
+      calMgrMsg('Guardado.' + (preguntados ? ' A ' + preguntados + (preguntados === 1 ? ' persona le llega' : ' personas les llega') + ' la pregunta en su teléfono'
+        + (deNoche ? ' a las 7 AM (de noche no se manda).' : '.') : ''));
     }catch(e){
       if(msg) msg.textContent = (e && e.message) || 'No se guardó.';
     }finally{ if(btn) btn.disabled = false; }
+  }
+  // Agrega a los nuevos y quita a los que ya no van. Devuelve cuantos de la
+  // cuadrilla (con cuenta) se agregaron: a esos les llega la pregunta.
+  async function calGuardarQuienes(f){
+    const antes = calMgr.asignados[f] || [];
+    const plan = calPlanQuienes(antes, calHojaSel, f, SES.company_id);
+    if(plan.quitar.length){
+      await calEscribir('/rest/v1/amg_cal_asignados?id=in.(' + plan.quitar.map(encodeURIComponent).join(',') + ')', 'DELETE');
+      calMgr.asignados[f] = antes.filter(a => !plan.quitar.includes(a.id));
+    }
+    if(plan.nuevos.length){
+      const r = await calEscribir('/rest/v1/amg_cal_asignados?on_conflict=company_id,fecha,tipo,persona', 'POST', plan.nuevos);
+      if(r.length !== plan.nuevos.length) throw new Error('la nube aceptó ' + r.length + ' de ' + plan.nuevos.length);
+      const ya = new Set((calMgr.asignados[f] || []).map(a => a.id));
+      calMgr.asignados[f] = (calMgr.asignados[f] || []).concat(r.filter(x => !ya.has(x.id)))
+        .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || '')));
+    }
+    return calCuantosPreguntados(plan.nuevos, calGente);
   }
   if($('#calHojaGuardar')) $('#calHojaGuardar').addEventListener('click', calGuardarHoja);
 
@@ -8722,6 +9265,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // la app la proxima vez si iOS la cerro.
   document.addEventListener('visibilitychange', () => {
     if(document.visibilityState === 'hidden'){ if(calCambios.size && amgSeg !== 'cal') calAvisar(); return; }
+    // "Ya me levanté" tocado en la alarma (la app se abre con el boton).
+    try{ calReportarDespiertos(); }catch(e){}
     // De vuelta: lo que ve la cuadrilla o el temporal se vuelve a leer (la app
     // puede haber pasado dias dormida; el manager pudo cambiar algo).
     try{
@@ -28585,7 +29130,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       });
       PN.addListener('registrationError', ()=>{});
       const onPush = ()=>{ if(isManager()) refreshInbox(); else { loadMyEntries(); loadMyPayments(); } if(isAmgSide()){ try{ calRefrescarHint(); }catch(e){} } };
-      PN.addListener('pushNotificationActionPerformed', onPush);
+      // Tocar un aviso del calendario (abrir: 'amgcal') abre el calendario (24 sep 2026).
+      PN.addListener('pushNotificationActionPerformed', a => { onPush(); try{ calTocoAviso(a && a.notification && a.notification.data); }catch(e){} });
       PN.addListener('pushNotificationReceived', onPush);
       await PN.register();
     }catch(e){}
@@ -29652,7 +30198,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   });
   async function doorTap(side){
     if(doorOverlay){                                        // 'Cambiar de empresa' o la re-pregunta
-      if(side === SIDE){ gate.classList.add('done'); doorOverlay = false; return; }
+      if(side === SIDE){ gate.classList.add('done'); doorOverlay = false; try{ calAbrirPendiente(); }catch(e){} return; }
       commitPending(); saveDraft();
       try{ sessionStorage.setItem('sideOnce', side); }catch(e){}
       location.reload(); return;                            // de un solo uso, lo consume el proximo boot; JS limpio
@@ -29751,6 +30297,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     flushOutbox();
     // El azulejo 📅 Calendario dice la proxima mudanza (solo por la puerta de AMG).
     if(isAmgSide()) setTimeout(() => { try{ calRefrescarHint(); }catch(e){} }, 1200);
+    // Tocó un aviso del calendario con la app cerrada (o llegó con ?abrir=amgcal): se abre ahora.
+    setTimeout(() => { try{ calAbrirPendiente(); }catch(e){} }, 0);
     // Un aviso del calendario que quedo sin mandar (la app se cerro de golpe) sale ahora.
     if(isManager()) setTimeout(() => { try{ if(calHayCambiosSinAvisar()) calAvisar(); }catch(e){} }, 3000);
     // Los planos y medidas: sube lo que falte y baja lo que hizo en otro telefono.
@@ -31611,6 +32159,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // La puerta va ANTES de enterApp y del auto-login del temporal, en cada
     // apertura en frio.
     showDoor(false);
+    // "Ya me levanté" de la alarma abre la app EN FRIO y se queda en la puerta:
+    // se manda ya (la nube solo necesita la sesion), no hasta que toque una puerta.
+    setTimeout(() => { try{ calReportarDespiertos(); }catch(e){} }, 800);
     if(expired) authErr('Su sesión venció. Entre otra vez.');
     if(once) doorTap(once);                                              // Cambiar de empresa -> la puerta tocada, pasando por todas las rejas
     // Un enlace puede traer la puerta puesta (?door=restauracion | mudanza | manager): sirve para
