@@ -813,6 +813,10 @@
   .cal-notas li{margin:0 0 5px 18px; font-size:14px;}
   .cal-importante{margin-top:10px; padding:10px 12px; border-radius:12px; background:rgba(212,175,55,.12); border:1px solid rgba(212,175,55,.45); font-size:13px; line-height:1.4;}
   .cal-importante b{color:#d4af37;}
+  /* La tira del calendario arriba de "Sus horas" (temporal de AMG): una linea,
+     y el calendario completo va abajo de su historial. */
+  .cal-tira{display:block; width:100%; text-align:left; font:inherit; font-size:15px; line-height:1.4; color:var(--text); cursor:pointer; padding:12px 14px !important;}
+  .cal-tira b{color:var(--text);}
   .cal-cambio{margin:0 0 10px; padding:10px 12px; border-radius:12px; background:rgba(255,159,10,.14); border:1px solid rgba(255,159,10,.5); font-size:14px; font-weight:600;}
   .cal-cambio[hidden]{display:none !important;}
   .cal-seg{display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line); border-radius:12px; overflow:hidden; margin-bottom:12px;}
@@ -1941,6 +1945,23 @@ body.menu main{
   overflow-y:auto;
   -webkit-overflow-scrolling:touch; /* el arrastre con impulso de siempre */
   padding-bottom:24px;
+}
+/* EL TEMPORAL NO ES EL MENÚ (25 sep 2026). Su pantalla (#casualHome) vive
+   FUERA del <main> de arriba: con el candado del menú (fixed + overflow
+   hidden) la página no bajaba, y en su teléfono "Su historial" y el total
+   quedaban debajo del borde — por AMG, hasta "Sus horas". La clase 'menu' NO
+   se quita (sus botones Cambiar de empresa / Salir cuelgan de ella):
+   enterCasualHome pone 'casual-home'. Dos reglas separadas a propósito: un
+   :has() que el navegador no entienda tumbaría la regla entera. */
+body.menu.casual-home{
+  position:static; inset:auto;
+  overflow:visible;
+  display:block;
+}
+body.menu:has(#casualHome:not([hidden])){
+  position:static; inset:auto;
+  overflow:visible;
+  display:block;
 }
 
 /* 12 · ¿EN QUÉ FORMA LA QUIERE? (17 sep 2026) */
@@ -4375,16 +4396,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
          una notificacion al telefono cerrado: el aviso vive aqui arriba y es
          lo primero que ve al abrir la app. -->
     <div id="casualPayAlert" hidden></div>
-    <!-- EL CALENDARIO DE MUDANZAS para el temporal de AMG (23 sep 2026: "si,
-         temporales tambien"). No tiene cuenta, asi que no le llega el aviso al
-         telefono: por eso va aqui arriba, y si cambio desde la ultima vez, lo dice. -->
-    <section class="card amgcard" id="casualCalCard" hidden>
-      <h2>&#128197; Calendario de mudanzas</h2>
-      <div class="cal-cambio" id="casualCalCambio" hidden>&#128276; El calendario cambi&oacute; desde la &uacute;ltima vez que lo vio.</div>
-      <div class="cal-seg"><button type="button" class="on" id="casualCalEsta">Esta semana</button><button type="button" id="casualCalProx">Pr&oacute;xima semana</button></div>
-      <div id="casualCalCuerpo"></div>
-      <p class="clockhint" id="casualCalMsg"></p>
-    </section>
+    <!-- EL CALENDARIO, EN UNA LINEA (25 sep 2026): arriba iba el calendario
+         entero y empujaba "Sus horas" y "Su historial" fuera de la pantalla.
+         Aqui solo la proxima mudanza (y si cambio o le falta contestar);
+         al tocarla baja al calendario completo. -->
+    <button type="button" class="card amgcard cal-tira" id="casualCalTira" hidden></button>
     <section class="card">
       <div class="inboxhead" style="margin-bottom:2px;"><h2 style="margin:0;" id="casualMyTitle">Sus horas</h2></div>
       <div class="field"><label>Fecha</label><input type="date" id="casualMyDate"></div>
@@ -4399,6 +4415,17 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     <section class="card">
       <h2 id="casualHistoryTitle">Su historial</h2>
       <div id="casualMyHistory"><p class="clockhint">Nada todavía.</p></div>
+    </section>
+    <!-- EL CALENDARIO DE MUDANZAS para el temporal de AMG (23 sep 2026: "si,
+         temporales tambien"). No tiene cuenta, asi que no le llega el aviso al
+         telefono: la tira de arriba lo dice y trae aqui. Va DEBAJO de su
+         historial (25 sep 2026): lo de todos los dias es anotar sus horas. -->
+    <section class="card amgcard" id="casualCalCard" hidden>
+      <h2>&#128197; Calendario de mudanzas</h2>
+      <div class="cal-cambio" id="casualCalCambio" hidden>&#128276; El calendario cambi&oacute; desde la &uacute;ltima vez que lo vio.</div>
+      <div class="cal-seg"><button type="button" class="on" id="casualCalEsta">Esta semana</button><button type="button" id="casualCalProx">Pr&oacute;xima semana</button></div>
+      <div id="casualCalCuerpo"></div>
+      <p class="clockhint" id="casualCalMsg"></p>
     </section>
     <section class="card" id="casualPaysCard" hidden>
       <h2>Sus pagos</h2>
@@ -6776,7 +6803,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-24-KY';
+  const APP_BUILD = '2026-09-25-KZ';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -8431,6 +8458,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(rG && rG.ok){ try{ asig = await rG.json(); }catch(e){ asig = null; } }
     const o = calArmar(desde, hasta, (aj && aj[0]) || null, sem, dias, asig || []);
     o.asignadosOk = Array.isArray(asig);
+    // 404 = la nube todavia no tiene supabase-amg-calendario-2.sql: no es falta
+    // de internet, asi que "Quienes van" ni se muestra.
+    o.asignadosFalta = !!(rG && rG.status === 404);
     return o;
   }
   function calGuardarCache(key, datos){ try{ localStorage.setItem(key, JSON.stringify({ at: Date.now(), datos })); }catch(e){} }
@@ -8588,11 +8618,35 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     box.innerHTML = calHtmlSemana(calCasualDatos, lunes, hoy, true, calAsis('temporal', calCasualDatos));
     if($('#casualCalEsta')) $('#casualCalEsta').classList.toggle('on', calCasualSemana === 0);
     if($('#casualCalProx')) $('#casualCalProx').classList.toggle('on', calCasualSemana === 1);
+    calCasualTira();
+  }
+  // Lo que dice la tira de arriba (texto plano; se escapa al pintar):
+  // primero lo que le falta contestar, luego si cambio, luego la proxima.
+  function calTiraTexto(datos, yo, hoy, cambio){
+    const partes = [];
+    const np = calPendientesMios(datos, yo, hoy);
+    if(np) partes.push(calPendientesTexto(np));
+    if(cambio) partes.push('\u{1F514} Cambió el calendario');
+    let prox = null;
+    for(let f = hoy; f <= datos.hasta; f = calSumar(f, 1)){ if(datos.dias[f]){ prox = f; break; } }
+    if(prox){
+      const r = datos.dias[prox], aj = calAjDe(datos);
+      const cuando = prox === hoy ? 'hoy' : (prox === calSumar(hoy, 1) ? 'mañana' : calDiaCorto(prox));
+      partes.push('Próxima mudanza: ' + cuando + ' · ' + (r.por_confirmar ? 'hora por confirmar' : (calHora(r.hora) || calHora(aj.hora))));
+    } else partes.push('No hay mudanzas programadas por ahora');
+    return '\u{1F4C5} ' + partes.join(' · ') + '  \u2193';
+  }
+  function calCasualTira(){
+    const tira = $('#casualCalTira'), card = $('#casualCalCard'); if(!tira) return;
+    if(!calCasualDatos || !card || card.hidden){ tira.hidden = true; return; }
+    const cambio = !!($('#casualCalCambio') && !$('#casualCalCambio').hidden);
+    tira.textContent = calTiraTexto(calCasualDatos, calYoDe('temporal', calCasualDatos), todayStr(), cambio);
+    tira.hidden = false;
   }
   async function loadCasualCal(ses){
     const card = $('#casualCalCard'), msg = $('#casualCalMsg'); if(!card) return;
     // Solo por la puerta de AMG y SOLO con el codigo de AMG (nunca el de restauracion).
-    if(!ses || SIDE !== 'mudanza' || !ses.amgCode){ card.hidden = true; return; }
+    if(!ses || SIDE !== 'mudanza' || !ses.amgCode){ card.hidden = true; calCasualTira(); return; }
     const key = 'amgCalCasual:v1', visto = 'amgCalCasualVisto:v1';
     calCasualSemana = 0;
     const cache = calLeerCache(key);
@@ -8617,9 +8671,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       // Sin el SQL la tarjeta no sale (como Sus pagos); sin señal, lo ultimo que bajo.
       if(calCasualDatos){ if(msg) msg.textContent = 'Sin señal: esto es lo último que se bajó.'; }
       else card.hidden = true;
+      calCasualTira();
     }
   }
   const calCasualArriba = () => { const c = $('#casualCalCard'); if(c) c.scrollIntoView({ block: 'start' }); };
+  if($('#casualCalTira')) $('#casualCalTira').addEventListener('click', calCasualArriba);
   if($('#casualCalEsta')) $('#casualCalEsta').addEventListener('click', () => { calCasualSemana = 0; calCasualPintar(); calCasualArriba(); });
   if($('#casualCalProx')) $('#casualCalProx').addEventListener('click', () => { calCasualSemana = 1; calCasualPintar(); calCasualArriba(); });
 
@@ -8995,6 +9051,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   let calHojaSel = new Map();       // quienes van: 'tipo:persona' -> { tipo, persona, nombre }
   function calHojaPintarQuien(){
     const box = $('#calQuienes'); if(!box || !calMgr || !calHojaFecha) return;
+    const campo = box.closest('.field'); if(campo) campo.hidden = !!calMgr.asignadosFalta;
+    if(calMgr.asignadosFalta) return;
     if(calMgr.asignadosOk !== true){ box.innerHTML = '<p class="clockhint" style="margin:0;">No se pudo leer quiénes van. Revise su internet y vuelva a abrir el día.</p>'; return; }
     const asig = calMgr.asignados[calHojaFecha] || [];
     const lista = calGenteHoja(calGente || [], asig);
@@ -30735,7 +30793,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     gate.classList.add('done');
     $('header.top').hidden = true;
     $('main').hidden = true;
+    // La pantalla del temporal NO se clava como el menu: con body.menu (fixed +
+    // overflow hidden, para el encabezado clavado) su pagina no bajaba y no
+    // veia "Su historial" ni el total (25 sep 2026). La clase 'menu' se queda:
+    // de ella cuelgan sus botones "Cambiar de empresa" y "Salir".
+    document.body.classList.add('casual-home');
     $('#casualHome').hidden = false;
+    window.scrollTo(0, 0);
     $('#casualHomeName').textContent = ses.name;
     if(!$('#casualMyDate').value) $('#casualMyDate').value = todayStr();
     casualMyPreview();
