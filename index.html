@@ -6803,7 +6803,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-25-KZ';
+  const APP_BUILD = '2026-09-26-LA';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -7662,12 +7662,20 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         // El monto es EXACTAMENTE horas x precio unitario: el cliente hace la multiplicacion en el papel
         // y le tiene que dar. (Antes salia de los minutos exactos y la linea no cuadraba por centavos.)
         const place = invPlaceOfShift(sh);
-        out.push({ d:'Labor service\n' + people + ' worker' + (people===1?'':'s') + '\n' + invQty(hours) + ' hours total\n(Time worked by the team) ' + date + (place ? '\n' + place : ''), q:hours, u:unit, a:Math.round(hours * unit * 100)/100, src:String(log.id) });
+        const horario = (fmtTime12(sh.f) && fmtTime12(sh.o)) ? fmtTime12(sh.f) + ' - ' + fmtTime12(sh.o) : '';
+        out.push({ d:'Labor service\n' + people + ' worker' + (people===1?'':'s') + '\n' + invQty(hours) + ' hours total'
+                     + (horario ? '\n' + horario : '')
+                     + '\n(Time worked by the team) ' + date + (place ? '\n' + place : ''),
+                   q:hours, u:unit, a:Math.round(hours * unit * 100)/100, src:String(log.id) });
       });
     }
     (p.s || []).forEach(sh => extraItemsOfShift(sh).forEach(it => {
       const x = parseFloat(it.x);
-      if(Number.isFinite(x) && x !== 0) out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + extraLabel(it) + ' ' + date, q:1, u:x, a:x, src:String(log.id) });
+      if(Number.isFinite(x) && x !== 0){
+        out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + extraLabel(it) + ' ' + date, q:1, u:x, a:x, src:String(log.id) });
+      } else if(it.e || (it.eo || '').trim()){
+        out.unpriced.push(extraLabel(it) + ' (extra sin monto)');
+      }
     }));
     // Materiales que el lider anoto en el reporte, al precio por unidad del manager (Clientes -> Precios de materiales).
     (p.mat || []).forEach(m => {
@@ -7844,7 +7852,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(!inv.client_name){ msg.textContent = 'Escoja el cliente.'; return; }
     if(!inv.lines.length){ msg.textContent = 'El invoice no tiene líneas: marque arriba un reporte de mudanza. Si el reporte marcado dice "sin precio", póngale el precio al cliente en AMG Moving → Clientes y vuelva a entrar.'; return; }
     if(!(inv.number > 0)){ msg.textContent = 'Ponga el número del invoice.'; return; }
-    if(INV.unpriced && INV.unpriced.length && !confirm('Estos materiales del reporte NO tienen precio y no van en el invoice: ' + INV.unpriced.join(', ') + '.\n\nPóngales precio en AMG Moving → Clientes → Precios de materiales y vuelva a marcar el reporte, o guarde así.\n\n¿Guardar sin ellos?')) return;
+    if(INV.unpriced && INV.unpriced.length && !confirm('Esto del reporte NO tiene precio y NO va en el invoice: ' + INV.unpriced.join(', ') + '.\n\nPóngales precio en AMG Moving → Clientes → Precios de materiales y vuelva a marcar el reporte.\n\nSi es un EXTRA (renta de camión, material de empaque), el monto va en el turno del reporte: ábralo con Convertir, escriba el monto y guarde los cambios.\n\n¿Guardar sin eso?')) return;
     if(!cloudOn() || !navigator.onLine){ msg.textContent = 'Sin internet. Intente cuando tenga señal.'; return; }
     const b = $('#invSave'); b.disabled = true; const old = b.textContent; b.textContent = 'Guardando…';
     try{
