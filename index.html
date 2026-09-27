@@ -4241,6 +4241,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         <p class="hint" id="invLogsSum" style="margin:0 0 6px;"></p>
         <div id="invLogs"><p class="clockhint">Escoja un cliente.</p></div>
                 <div id="invLines"></div>
+        <div id="invAddBox" style="margin-top:10px; border-top:1px solid var(--line); padding-top:10px;">
+          <p class="clockhint" style="margin:0 0 6px;">Agregar una l&iacute;nea que no venga de un reporte (renta de cami&oacute;n, un cobro aparte).</p>
+          <div class="field"><label>Descripci&oacute;n</label><input type="text" id="inv-ldesc" autocomplete="off" placeholder="Truck rental"></div>
+          <div class="row2">
+            <div class="field"><label>Cantidad</label><input type="number" id="inv-lqty" inputmode="decimal" value="1" step="0.01"></div>
+            <div class="field"><label>Precio unitario ($)</label><input type="number" id="inv-lunit" inputmode="decimal" step="0.01" placeholder="170"></div>
+          </div>
+          <button type="button" class="btn btn-outline" id="invAddLine">+ Agregar la l&iacute;nea</button>
+        </div>
         <div class="paysum" style="margin-top:8px;"><div class="grand"><span>TOTAL (USD)</span><span id="invTotal">$0.00</span></div></div>
         <div class="row2" style="margin-top:10px;">
           <button type="button" class="btn btn-outline" id="invPreview">Vista previa</button>
@@ -6812,7 +6821,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-26-LB';
+  const APP_BUILD = '2026-09-26-LC';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -7696,6 +7705,27 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     return out;
   }
   const invTotalOf = lines => Math.round(lines.reduce((s, l) => s + (+l.a||0), 0) * 100) / 100;
+  // Dos reportes del mismo cliente, el mismo dia y con los MISMOS
+  // horarios son la misma mudanza mandada dos veces. Paso de verdad
+  // (Susan, 26 sep 2026: la cuadrilla la remando 41 minutos despues
+  // para agregarle la renta del camion) y no habia ningun aviso: marcar
+  // los dos le cobra al cliente la mano de obra dos veces.
+  // Se compara por HORARIOS, no por nombres: los nombres vienen con
+  // mayusculas y orden distintos y dejarian pasar el repetido.
+  function invHuella(l){
+    const p = l.payload || {};
+    const turnos = (p.s || []).map(sh => (sh.f || '') + '-' + (sh.o || ''))
+                              .filter(t => t !== '-').sort().join('|');
+    return turnos ? String(l.log_date || p.d || '') + '#' + turnos : '';
+  }
+  function invRepetidos(logs){
+    const cuenta = {};
+    logs.forEach(l => { const h = invHuella(l); if(h) cuenta[h] = (cuenta[h] || 0) + 1; });
+    const set = new Set();
+    logs.forEach(l => { const h = invHuella(l); if(h && cuenta[h] > 1) set.add(String(l.id)); });
+    return set;
+  }
+
   function invPaintLogs(){
     const box = $('#invLogs'); if(!box) return;
     const c = invClient();
@@ -7718,6 +7748,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     }
     if(!all.length){ box.innerHTML = '<p class="clockhint">No hay reportes de mudanza guardados con este cliente.</p>'; return; }
     if(!logs.length){ box.innerHTML = '<p class="clockhint">Todos los reportes de este cliente ya están facturados (' + all.length + ').</p>'; return; }
+    const repes = invRepetidos(all);          // contra TODOS, no solo los sin facturar
     const cut = logs.length > 60 ? '<p class="clockhint">Mostrando los 60 reportes más recientes sin facturar de ' + logs.length + '.</p>' : '';
     box.innerHTML = cut + logs.slice(0, 60).map(l => {
       const lines = invLinesFromLog(l, c); const amt = invTotalOf(lines); const was = done.has(String(l.id)); const on = INV.logIds.includes(String(l.id));
@@ -7732,7 +7763,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         ? 'Sin dirección en el reporte: el invoice no va a decir a dónde fueron'
         : sinLugar ? sinLugar + ' de ' + svc.length + ' turnos sin dirección: esas líneas del invoice no van a decir a dónde fueron' : '';
       const placeHtml = (places.length ? '<br><span class="when">' + esc(places.join(' · ')) + '</span>' : '')
-        + (aviso ? '<br><span class="when" style="color:var(--danger);">' + esc(aviso) + '</span>' : '');
+        + (aviso ? '<br><span class="when" style="color:var(--danger);">' + esc(aviso) + '</span>' : '')
+        + (repes.has(String(l.id)) ? '<br><span class="when" style="color:var(--danger);font-weight:700;">⚠ MISMO DÍA Y MISMAS HORAS que otro reporte de este cliente. Casi seguro es la misma mudanza mandada dos veces: marque UNO solo, o le cobra las horas dos veces.</span>' : '');
       return '<label class="entryrow" style="align-items:center;gap:10px;cursor:pointer;"><input type="checkbox" class="invLogChk" data-id="' + esc(l.id) + '"' + (on ? ' checked' : '') + ' style="width:22px;height:22px;">'
         + '<span style="flex:1;"><span class="who">' + esc(invDate(l.log_date)) + (l.crew_leader ? ' · ' + esc(l.crew_leader) : '') + '</span><br><span class="when">' + esc(names) + '</span>' + placeHtml + '</span>'
         + '<span class="hrs">' + (lines.length ? '$' + invMoney(amt) : '<span style="color:var(--danger);">sin precio</span>') + (lines.unpriced && lines.unpriced.length ? '<br><span style="color:var(--danger);font-size:11px;font-weight:400;">sin precio: ' + esc(lines.unpriced.join(', ')) + '</span>' : '') + '</span></label>';
@@ -7770,17 +7802,46 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   });
   function invRender(){
     const box = $('#invLines'); if(!box) return;
-    box.innerHTML = INV.lines.length ? INV.lines.map((l, i) => '<div class="entryrow"><span><span class="who" style="white-space:pre-line;">' + esc(l.d) + '</span><br><span class="when">' + invQty(l.q) + ' × $' + invMoney(l.u) + (l.src ? ' · del reporte (desmárquelo arriba para quitarlo)' : '') + '</span></span><span style="display:flex;gap:6px;align-items:center;"><span class="hrs">$' + invMoney(l.a) + '</span>' + (l.src ? '' : '<button type="button" class="minibtn invDelLine" data-i="' + i + '" title="Quitar">✕</button>') + '</span></div>').join('')
+    box.innerHTML = INV.lines.length ? INV.lines.map((l, i) => '<div class="entryrow"><span style="flex:1;"><span class="who" style="white-space:pre-line;">' + esc(l.d) + '</span><br><span class="when">' + invQty(l.q) + ' × $' + invMoney(l.u)
+        + (l.src ? ' · del reporte' : '')
+        + (l.edit ? ' · <span style="color:var(--warn,#d98c00);">cambiado a mano</span>' : '')
+        + '</span></span><span style="display:flex;gap:6px;align-items:center;"><span class="hrs">$' + invMoney(l.a) + '</span>'
+        + '<button type="button" class="minibtn invEditLine" data-i="' + i + '" title="Cambiar">&#9998;</button>'
+        + (l.src ? '' : '<button type="button" class="minibtn invDelLine" data-i="' + i + '" title="Quitar">✕</button>') + '</span></div>').join('')
       : '<p class="clockhint">Todavía no hay líneas. Marque arriba los reportes de mudanza que va a cobrar: de ahí salen las horas y los materiales.</p>';
     $('#invTotal').textContent = '$' + invMoney(invTotalOf(INV.lines));
     const pw = $('#invPreviewWrap'); if(pw && !pw.hidden) invPreview();
   }
   if($('#invLines')) $('#invLines').addEventListener('click', (e) => {
+    const ed = e.target.closest('.invEditLine');
+    if(ed){ invEditarLinea(+ed.dataset.i); return; }
     const b = e.target.closest('.invDelLine'); if(!b) return;
     const l = INV.lines[+b.dataset.i]; if(!l) return;
     if(l.src){ INV.logIds = INV.logIds.filter(x => x !== l.src); const chk = $('#invLogs .invLogChk[data-id="' + l.src + '"]'); if(chk) chk.checked = false; invRebuildLogLines(); return; }
     INV.lines.splice(+b.dataset.i, 1); invRender();
   });
+  function invEditarLinea(i){
+    const l = INV.lines[i]; if(!l) return;
+    const d = prompt('Descripción de la línea:', l.d);
+    if(d === null) return;
+    if(!String(d).trim()){ $('#invMsg').textContent = 'La descripción no puede quedar vacía.'; return; }
+    const qs = prompt('Cantidad:', invQty(l.q));
+    if(qs === null) return;
+    const us = prompt('Precio unitario ($):', l.u);
+    if(us === null) return;
+    const q = parseFloat(qs), u = parseFloat(us);
+    if(!Number.isFinite(q) || q <= 0 || !Number.isFinite(u)){
+      $('#invMsg').textContent = 'Cantidad y precio tienen que ser números, y la cantidad mayor que 0.'; return;
+    }
+    const cambio = String(d) !== l.d || q !== l.q || u !== l.u;
+    l.d = String(d); l.q = q; l.u = u; l.a = Math.round(q * u * 100) / 100;
+    // Solo se marca lo que salio de un reporte: una linea suya a mano no
+    // tiene con que "no cuadrar".
+    if(cambio && l.src) l.edit = true;
+    $('#invMsg').textContent = '';
+    invRender();
+  }
+
   // El invoice como objeto (lo que se guarda y lo que se dibuja).
   function invCurrent(){
     const c = invClient();
@@ -7861,6 +7922,20 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(!inv.client_name){ msg.textContent = 'Escoja el cliente.'; return; }
     if(!inv.lines.length){ msg.textContent = 'El invoice no tiene líneas: marque arriba un reporte de mudanza. Si el reporte marcado dice "sin precio", póngale el precio al cliente en AMG Moving → Clientes y vuelva a entrar.'; return; }
     if(!(inv.number > 0)){ msg.textContent = 'Ponga el número del invoice.'; return; }
+    // La reja que de verdad cuida el bolsillo del cliente: dos reportes
+    // marcados con el mismo dia y las mismas horas son la misma mudanza
+    // mandada dos veces. Aqui no alcanza con pintarlo de rojo arriba:
+    // hay que preguntarselo antes de guardar.
+    const marcados = INV.logIds.map(id => INV_LOGS.find(x => String(x.id) === String(id))).filter(Boolean);
+    const vistas = {}; const choques = [];
+    marcados.forEach(l => {
+      const h = invHuella(l); if(!h) return;
+      if(vistas[h]) choques.push(invDate(l.log_date)); else vistas[h] = true;
+    });
+    if(choques.length && !confirm('⚠ Marcó DOS reportes con el mismo día y las mismas horas: ' +
+        [...new Set(choques)].join(', ') + '.\n\nCasi seguro es la misma mudanza mandada dos veces. ' +
+        'Si los cobra los dos, al cliente le va la mano de obra DOS VECES.\n\nDeje marcado uno solo ' +
+        '(el más completo) y archive el otro.\n\n¿Guardar así de todos modos?')) return;
     if(INV.unpriced && INV.unpriced.length && !confirm('Esto del reporte NO tiene precio y NO va en el invoice: ' + INV.unpriced.join(', ') + '.\n\nPóngales precio en AMG Moving → Clientes → Precios de materiales y vuelva a marcar el reporte.\n\nSi es un EXTRA (renta de camión, material de empaque), el monto va en el turno del reporte: ábralo con Convertir, escriba el monto y guarde los cambios.\n\n¿Guardar sin eso?')) return;
     if(!cloudOn() || !navigator.onLine){ msg.textContent = 'Sin internet. Intente cuando tenga señal.'; return; }
     const b = $('#invSave'); b.disabled = true; const old = b.textContent; b.textContent = 'Guardando…';
