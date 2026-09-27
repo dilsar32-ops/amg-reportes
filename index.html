@@ -2975,6 +2975,21 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       <button class="btn btn-outline" id="addKitchenBtn">+ Agregar Sección<span class="en"> / Add Section</span></button>
     </section>
 
+    <!-- ============ BAÑO (27 sep 2026) ============
+         Su pedido: "en esa sección falta cocina y baño". Cocina ya estaba (sus
+         artículos salen dentro de Pared cuando el cuarto es la cocina, como él
+         pidió el 13 de septiembre); Baño no existía en ninguna parte.
+         UNA DIFERENCIA A PROPÓSITO CON COCINA: la cocina es una sola y sus
+         renglones no preguntan el cuarto. Un trabajo de agua toca VARIOS baños
+         (el de abajo, el del máster), y si todos se guardaran como "Bathroom"
+         se mezclarían en la hoja del seguro. Por eso este SÍ pregunta cuál. -->
+    <section class="card" data-step="medidas">
+      <h2><span class="num">3</span>Baño<span class="en"> / Bathroom</span></h2>
+      <p class="hint" style="margin-top:0;">Tocador, inodoro, tina, regadera, azulejo, cualquier cosa removida del baño. Diga de cuál baño es.<span class="en"> / Vanity, toilet, tub, shower, tile, anything removed. Say which bathroom.</span></p>
+      <div id="bathroomContainer"></div>
+      <button class="btn btn-outline" id="addBathroomBtn">+ Agregar Baño<span class="en"> / Add Bathroom</span></button>
+    </section>
+
     <!-- ============ MATERIALES USADOS EN EL CUARTO ============
          Su pedido del 13 de septiembre: "ya seleccionamos el nivel, ya
          seleccionamos el cuarto, ahí está piso, techo, pared, materiales".
@@ -6886,7 +6901,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-27-LH';
+  const APP_BUILD = '2026-09-27-LI';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -12698,7 +12713,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // MEASURE_SECTIONS[x].labelEn: el de cocina es 'Item' (es la etiqueta del
   // campo, "Artículo / Item"), y en el papel del seguro la columna diría
   // "Item" en vez de "Kitchen".
-  const MED_SUPERFICIE_EN = { floor:'Floor', wall:'Wall', ceiling:'Ceiling', kitchen:'Kitchen', materiales:'Materials' };
+  const MED_SUPERFICIE_EN = { floor:'Floor', wall:'Wall', ceiling:'Ceiling', kitchen:'Kitchen', bathroom:'Bathroom', materiales:'Materials' };
   const MEASURE_SECTIONS = {
     floor: { labelEn:'Floor', labelEs:'Piso', options: [
       {value:'Laminate', label:'Laminate / Laminado'},
@@ -12761,6 +12776,24 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       // kick de las cocinas". Es la tira de abajo del gabinete, la primera cosa
       // que se moja y la primera que se quita.
       {value:'Toe Kick', label:'Toe Kick / Zócalo de Gabinete'},
+      {value:'Other', label:'Otro / Other'}
+    ]},
+    // EL BAÑO (27 sep 2026). Mismo orden que en las otras secciones: la palabra
+    // del oficio en inglés primero, que es como la dice la cuadrilla, y el
+    // español atrás. Son las piezas que de verdad se quitan en un trabajo de
+    // agua, no un catálogo de ferretería.
+    bathroom: { labelEn:'Item', labelEs:'Artículo', options: [
+      {value:'Vanity', label:'Vanity / Tocador'},
+      {value:'Vanity Top', label:'Vanity Top / Cubierta del Tocador'},
+      {value:'Toilet', label:'Toilet / Inodoro'},
+      {value:'Bathtub', label:'Bathtub / Tina'},
+      {value:'Shower', label:'Shower / Regadera'},
+      {value:'Shower Pan', label:'Shower Pan / Base de Regadera'},
+      {value:'Tile', label:'Tile / Azulejo'},
+      {value:'Mirror', label:'Mirror / Espejo'},
+      {value:'Medicine Cabinet', label:'Medicine Cabinet / Botiquín'},
+      {value:'Exhaust Fan', label:'Exhaust Fan / Extractor'},
+      {value:'Towel Bar', label:'Towel Bar / Toallero'},
       {value:'Other', label:'Otro / Other'}
     ]},
     // LOS MATERIALES QUE SE USARON EN ESE CUARTO. Su pedido del 13 de
@@ -12899,7 +12932,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // haberlo escogido, que es peor que no decir nada.
   function renumberTodasLasMedidas(){
     [['floor', floorContainer], ['wall', wallContainer],
-     ['ceiling', ceilingContainer], ['kitchen', kitchenContainer]]
+     ['ceiling', ceilingContainer], ['kitchen', kitchenContainer], ['bathroom', bathroomContainer]]
       .forEach(([s, c]) => renumberMeasures(s, c));
   }
   // Same idea as Emergency Protection's size box: the crew types the two
@@ -13307,13 +13340,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // que fuera a cobrarse.
   function medQuitarSinTerminar(){
     const cortes = [];
-    [floorContainer, wallContainer, ceilingContainer, kitchenContainer, materialesContainer].forEach(c => {
+    [floorContainer, wallContainer, ceilingContainer, kitchenContainer, bathroomContainer, materialesContainer].forEach(c => {
       if(!c) return;
       $$('.meas-cut', c).forEach(cut => { if(medCorteSinTerminar(cut)) cortes.push(cut); });
     });
     cortes.forEach(medQuitarCorte);
     // Y las tarjetas que quedaron sin ningún corte.
-    [floorContainer, wallContainer, ceilingContainer, kitchenContainer, materialesContainer].forEach(c => {
+    [floorContainer, wallContainer, ceilingContainer, kitchenContainer, bathroomContainer, materialesContainer].forEach(c => {
       if(!c) return;
       $$('.measure-card', c).forEach(card => {
         const box = $('.meas-cuts', card);
@@ -13548,7 +13581,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           // sin decir de qué, no se entiende a la primera.
           cuartoBox.appendChild(medNodo('div', 'med-mas-tit', 'Agregar a este cuarto'));
           const mas = medNodo('div', 'med-mas');
-          [['floor','Piso'], ['wall','Pared'], ['ceiling','Techo'], ['kitchen','Cocina'], ['materiales','Materiales']]
+          [['floor','Piso'], ['wall','Pared'], ['ceiling','Techo'], ['kitchen','Cocina'], ['bathroom','Baño'], ['materiales','Materiales']]
             .forEach(([seccion, etiqueta]) => {
               const b = medNodo('button', 'btn btn-outline', '+ ' + etiqueta);
               b.type = 'button';
@@ -14698,20 +14731,24 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   const wallContainer = $('#wallContainer');
   const ceilingContainer = $('#ceilingContainer');
   const kitchenContainer = $('#kitchenContainer');
+  const bathroomContainer = $('#bathroomContainer');
   // El recorrido necesita llegar al contenedor de CUALQUIER seccion, no solo
   // a la de la tarjeta que toco.
   CONTENEDOR_DE.floor = floorContainer;
   CONTENEDOR_DE.wall = wallContainer;
   CONTENEDOR_DE.ceiling = ceilingContainer;
   CONTENEDOR_DE.kitchen = kitchenContainer;
+  CONTENEDOR_DE.bathroom = bathroomContainer;
   wireMeasureContainer('floor', floorContainer);
   wireMeasureContainer('wall', wallContainer);
   wireMeasureContainer('ceiling', ceilingContainer);
   wireMeasureContainer('kitchen', kitchenContainer);
+  wireMeasureContainer('bathroom', bathroomContainer);
   function addFloorRow(){ return addMeasureRow('floor', floorContainer); }
   function addWallRow(){ return addMeasureRow('wall', wallContainer); }
   function addCeilingRow(){ return addMeasureRow('ceiling', ceilingContainer); }
   function addKitchenRow(){ return addMeasureRow('kitchen', kitchenContainer); }
+  function addBathroomRow(){ return addMeasureRow('bathroom', bathroomContainer); }
 
   // MATERIALES: la cuarta seccion de captura, igual que las otras. Su pedido
   // del 13 de septiembre: "solo le estamos agregando algo más, ya
@@ -14726,6 +14763,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   $('#addWallBtn').addEventListener('click', addWallRow);
   $('#addCeilingBtn').addEventListener('click', addCeilingRow);
   $('#addKitchenBtn').addEventListener('click', addKitchenRow);
+  if($('#addBathroomBtn')) $('#addBathroomBtn').addEventListener('click', addBathroomRow);
 
   let xPhotos = [];
   let xPhotoCounter = 0;
@@ -14810,7 +14848,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   function medRecogerCortes(incluirIncompletos){
     const salida = [];
     [['floor', floorContainer], ['wall', wallContainer],
-     ['ceiling', ceilingContainer], ['kitchen', kitchenContainer], ['materiales', materialesContainer]].forEach(([seccion, container]) => {
+     ['ceiling', ceilingContainer], ['kitchen', kitchenContainer], ['bathroom', bathroomContainer], ['materiales', materialesContainer]].forEach(([seccion, container]) => {
       if(!container) return;
       const superficie = MED_SUPERFICIE_EN[seccion] || seccion;
       $$('.measure-card', container).forEach(card => {
@@ -15181,6 +15219,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     wallContainer.innerHTML = ''; addWallRow();
     ceilingContainer.innerHTML = ''; addCeilingRow();
     kitchenContainer.innerHTML = ''; addKitchenRow();
+    bathroomContainer.innerHTML = ''; addBathroomRow();
     materialesContainer.innerHTML = ''; addMaterialesRow();
     xPhotos = []; renderXPhotos();
     $('#x-notes').value = '';
@@ -15775,7 +15814,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // Las medidas de un trabajo guardado, SIN pantalla: se leen de sus `vals`
   // (las llaves de fieldKey: "measurements|wall#1.#0|meas-dimA|2"). Es lo que
   // deja al manager ver un trabajo de otro sin cargarlo en su propio formulario.
-  const MED_SECCIONES_NUBE = [['floor','Piso'], ['wall','Pared'], ['ceiling','Techo'], ['kitchen','Cocina'], ['materiales','Materiales']];
+  const MED_SECCIONES_NUBE = [['floor','Piso'], ['wall','Pared'], ['ceiling','Techo'], ['kitchen','Cocina'], ['bathroom','Baño'], ['materiales','Materiales']];
   function medCortesDeTrabajo(t){
     const vals = (t && t.vals) || {}, rows = (t && t.rows) || {};
     const mapa = {};
@@ -30639,6 +30678,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   addWallRow();
   addCeilingRow();
   addKitchenRow();
+  addBathroomRow();
 
   // keep the badge honest while the app is open
   if(cloudOn()){
@@ -33033,7 +33073,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
 
   function medHayTarjetas(){
-    return ['floorContainer','wallContainer','ceilingContainer','kitchenContainer','materialesContainer']
+    return ['floorContainer','wallContainer','ceilingContainer','kitchenContainer','bathroomContainer','materialesContainer']
       .some(id => { const c = document.getElementById(id); return c && c.children.length > 0; });
   }
 
@@ -33060,7 +33100,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       at: Date.now(),
       cliente: cliente, dir: dir,
       fecha: (($('#x-date')||{}).value || ''),
-      cuartos: ['floorContainer','wallContainer','ceilingContainer','kitchenContainer','materialesContainer']
+      cuartos: ['floorContainer','wallContainer','ceilingContainer','kitchenContainer','bathroomContainer','materialesContainer']
                  .reduce((t,id) => t + ((document.getElementById(id)||{children:[]}).children.length), 0),
       rows: rowCounts(), vals: vals
     };
@@ -33160,7 +33200,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       ? (Array.isArray(v) ? v.map(orden) : Object.keys(v).sort().reduce((a, k) => { a[k] = orden(v[k]); return a; }, {}))
       : v;
     const r = t.rows || {};
-    const filas = ['floor', 'wall', 'ceiling', 'kitchen', 'materiales'].reduce((a, k) => {
+    const filas = ['floor', 'wall', 'ceiling', 'kitchen', 'bathroom', 'materiales'].reduce((a, k) => {
       a[k] = +r[k] || 0;
       a[k + 'Cuts'] = Array.isArray(r[k + 'Cuts']) ? r[k + 'Cuts'].map(n => +n || 0) : [];
       return a;
@@ -33263,6 +33303,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const r = t.rows || {};
     [['floorContainer', r.floor, addFloorRow], ['wallContainer', r.wall, addWallRow],
      ['ceilingContainer', r.ceiling, addCeilingRow], ['kitchenContainer', r.kitchen, addKitchenRow],
+     ['bathroomContainer', r.bathroom, addBathroomRow],
      ['materialesContainer', r.materiales, addMaterialesRow]]
       .forEach(([id2, cuantas, agregar]) => {
         const c = document.getElementById(id2);
