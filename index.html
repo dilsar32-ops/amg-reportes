@@ -6879,7 +6879,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-27-LD';
+  const APP_BUILD = '2026-09-27-LE';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -9362,7 +9362,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         await calEscribir('/rest/v1/amg_cal_dias?company_id=eq.' + encodeURIComponent(SES.company_id) + '&fecha=eq.' + f, 'DELETE');
         delete calMgr.dias[f];
       }
-      if(calFirma(antes) !== calFirma(calMgr.dias[f])) calCambio(f, calDiaCorto(f) + ': ' + (calMgr.dias[f] ? calLinea(calMgr.dias[f], aj) : 'ya no hay trabajo'));
+      if(calFirma(antes) !== calFirma(calMgr.dias[f])) calCambio(f, calQuePaso(f, antes, calMgr.dias[f], aj));
       // Quienes van: DESPUES del dia (la nube pide que el dia exista). Sin dia,
       // la nube borra sola a los escogidos (disparador en amg_cal_dias).
       let preguntados = 0;
@@ -9481,11 +9481,42 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   }
 
   // ---- EL AVISO: uno solo, cuando termina de cambiar ----
+  // QUE CAMBIO EXACTAMENTE (27 sep 2026). Su pedido: "la alerta debe decir de
+  // AMG que se agrego un dia o cambio el horario". Antes TODO decia lo mismo
+  // ("Cambio el calendario de mudanzas") y luego el estado nuevo del dia, asi
+  // que un dia NUEVO se leia igual que un cambio de hora: el trabajador no
+  // podia saber si tenia que apartar un dia mas o solo llegar mas temprano.
+  // El titulo del aviso ya dice "AMG Moving" (notify-manager, linea 294).
+  function calSoloHora(a, b){
+    if(!a || !b) return false;
+    const resto = r => [r.personas || '', r.camiones || '', r.lugar || '', r.nota || ''].join('|');
+    const hora  = r => (r.por_confirmar ? 'pc' : String(r.hora || '').slice(0, 5));
+    return resto(a) === resto(b) && hora(a) !== hora(b);
+  }
+  function calQuePaso(f, antes, ahora, aj){
+    const dia = calDiaCorto(f);
+    if(!ahora) return dia + ': ya no hay trabajo';
+    if(!antes) return 'NUEVO ' + dia + ': ' + calLinea(ahora, aj);
+    if(calSoloHora(antes, ahora)){
+      const laHora = r => r.por_confirmar ? 'hora por confirmar' : (calHora(r.hora) || calHora(aj.hora));
+      return 'NUEVA HORA ' + dia + ': ' + laHora(ahora) + ' (antes ' + laHora(antes) + ')';
+    }
+    return dia + ' cambió: ' + calLinea(ahora, aj);
+  }
   function calTextoAviso(cambios){
     const ent = [...cambios.entries()], esDia = k => /^\d{4}-\d{2}-\d{2}$/.test(k);
     const dias = ent.filter(([k]) => esDia(k)).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([, t]) => String(t).slice(0, 70));
     const otros = ent.filter(([k]) => !esDia(k)).map(([, t]) => String(t).slice(0, 70));
-    const base = 'Cambió el calendario de mudanzas. ';
+    // La primera frase dice DE QUE se trata, para que se entienda sin abrir la
+    // app. Solo cuando TODOS los dias son del mismo tipo: mezclado se queda con
+    // la frase general, que sigue siendo cierta.
+    const cuantos = re => dias.filter(t => re.test(t)).length;
+    const nuevos = cuantos(/^NUEVO /), horas = cuantos(/^NUEVA HORA /), fuera = cuantos(/ya no hay trabajo$/);
+    const base = !dias.length ? 'Cambió el calendario de mudanzas. '
+      : nuevos === dias.length ? (nuevos === 1 ? 'Se agregó un día de mudanza. ' : 'Se agregaron ' + nuevos + ' días de mudanza. ')
+      : horas  === dias.length ? (horas  === 1 ? 'Cambió la hora de una mudanza. ' : 'Cambiaron las horas de ' + horas + ' mudanzas. ')
+      : fuera  === dias.length ? (fuera  === 1 ? 'Se quitó un día de mudanza. ' : 'Se quitaron ' + fuera + ' días de mudanza. ')
+      : 'Cambió el calendario de mudanzas. ';
     // Hasta tres dias con su detalle; si no cabe en 240, van menos y "y N más".
     for(let n = Math.min(dias.length, 3); n >= 0; n--){
       const resto = dias.length - n;
