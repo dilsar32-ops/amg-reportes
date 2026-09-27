@@ -6886,7 +6886,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-27-LF';
+  const APP_BUILD = '2026-09-27-LG';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -10452,7 +10452,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
              openMins: Math.round(openRows.reduce((s,r)=>s+(+r.reported_hours||0),0)*60),
              plus: led.plus, favor: led.favor, net: led.net,
              balance: Math.round((earned - led.net)*100)/100,
-             unpriced: rate === null && openRows.length > 0 };
+             unpriced: rate === null && openRows.length > 0,
+             // HORAS SIN PRECIO (27 sep 2026). El caso de Gustavo: tiene tarifa
+             // de restauracion ($20) pero NINGUNA de AMG, asi que sus 9.50 h de
+             // mudanza quedan fuera de la cuenta. payForCasual siempre las
+             // separo (nunca las cobra a $0), pero el numero no salia a ninguna
+             // pantalla: el papel decia "LE FALTA $250.00" como si eso fuera
+             // todo. Un documento de pago NO puede dar un total final sabiendo
+             // que deja horas afuera.
+             sinPrecio: p.sinPrecio, sinPrecioHrs: Math.round((p.sinPrecioHrs||0)*100)/100 };
   }
   // Only flag it when the person claimed MORE hours than the leader's labor
   // log shows - that's the only direction that actually risks overpaying
@@ -11132,7 +11140,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         `<div class="line"><span>Trabajo hecho${b.openMins ? ' · ' + hhmm(b.openMins) + ' sin cerrar' : ''}</span><span>${money(b.earned)}</span></div>`
       + (b.plus ? `<div class="line"><span>Dinero que le dimos</span><span>&minus;${money(b.plus)}</span></div>` : '')
       + (b.favor ? `<div class="line"><span>Extras a su favor</span><span>+${money(b.favor)}</span></div>` : '')
-      + state;
+      + state
+      + (b.sinPrecioHrs > 0.005
+          ? `<div class="line" style="color:var(--danger); font-weight:700;"><span>\u26a0 NO incluye ${b.sinPrecioHrs.toFixed(2)} h sin tarifa</span><span></span></div>`
+            + `<div class="line" style="color:var(--ink-soft);"><span>Esas horas se le deben igual. P\u00f3ngales precio en AMG Moving \u2192 Horas AMG.</span><span></span></div>`
+          : '');
     }
     $('#casualPayMark').style.display = (casualPaidView || rate === null) ? 'none' : '';
     if(casualPaidView && $('#casualSettleBox')) $('#casualSettleBox').hidden = true;
@@ -11507,7 +11519,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     line('AMG Moving ', mgRows, mgR);
     if(restRows.length && mgRows.length){
       pdf.setFont('helvetica','bold');
-      pdf.text('TOTAL  ' + pay.hours.toFixed(2) + ' h', L, y); pdf.text(money(pay.amount), 470, y);
+      // Si hay horas sin tarifa, el TOTAL de horas y el de dinero hablan de
+      // cosas distintas (22 h pero solo 12.5 con precio). Se dice en la misma
+      // linea, no en una nota arriba que nadie ata al numero.
+      const sinP = (pay.sinPrecioHrs || 0);
+      pdf.text('TOTAL  ' + pay.hours.toFixed(2) + ' h'
+               + (sinP > 0.005 ? '   (' + sinP.toFixed(2) + ' h sin tarifa, NO incluidas)' : ''), L, y);
+      pdf.text(money(pay.amount), 470, y);
       pdf.setFont('helvetica','normal'); y += 16;
     }
 
@@ -11567,6 +11585,22 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       pdf.text('ADELANTO A SU FAVOR', L, y);   pdf.text(money(-bal.balance), 420, y);
     }else{
       pdf.text('AL DIA / SETTLED UP', L, y);   pdf.text(money(0), 420, y);
+    }
+
+    // EL PAPEL NO PUEDE MENTIR POR OMISION (27 sep 2026). Caso Gustavo: el PDF
+    // decia "LE FALTA / STILL OWED $250.00" dejando fuera 9.50 h de AMG que no
+    // tienen tarifa. La nota "sin tarifa" iba arriba, chiquita, lejos del
+    // numero grande: quien lee el papel se lleva los $250 y no sabe que faltan
+    // horas. Si hay horas sin precio se dice AQUI, debajo del total.
+    if(bal.sinPrecioHrs > 0.005){
+      y += 20;
+      pdf.setFont('helvetica','bold'); pdf.setFontSize(11);
+      pdf.text('NO INCLUYE ' + bal.sinPrecioHrs.toFixed(2) + ' h SIN TARIFA / DOES NOT INCLUDE '
+               + bal.sinPrecioHrs.toFixed(2) + ' h WITH NO RATE', L, y);
+      y += 14;
+      pdf.setFont('helvetica','normal'); pdf.setFontSize(9);
+      pdf.text('Esas horas se le deben igual: falta ponerles el precio por hora.', L, y); y += 11;
+      pdf.text('Those hours are still owed - an hourly rate has not been set for them yet.', L, y);
     }
 
     const safe = (w?w.name:'').replace(/[^A-Za-z0-9]+/g,'_') || 'trabajador';
