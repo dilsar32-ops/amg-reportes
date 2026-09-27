@@ -6906,7 +6906,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-27-LJ';
+  const APP_BUILD = '2026-09-27-LK';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -15007,6 +15007,18 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // lineales NO se suman entre sí: son unidades distintas y sumarlas es cobrar
   // mal. Van lado a lado, siempre.
   // Tres unidades, nunca sumadas entre si: area, tramo y PIEZAS (27 sep 2026).
+  // LA CANTIDAD Y SU UNIDAD, POR SEPARADO (27 sep 2026). Su pedido viendo el
+  // PDF: "ahi debe ver la seccion de QTY y en esa linea debe ir la cantidad".
+  // Es como se lee un estimado: descripcion, cantidad, unidad. Cuando un mismo
+  // material trae dos unidades (area y tramo) no se inventa una sola: la
+  // cantidad queda vacia y todo se dice en la columna de la unidad.
+  function medQtyUnidad(sqft, linear, piezas){
+    const cuantas = (sqft > 0 ? 1 : 0) + (linear > 0 ? 1 : 0) + (piezas > 0 ? 1 : 0);
+    if(cuantas !== 1) return { qty: '', unidad: medTotalTexto(sqft, linear, piezas) };
+    if(piezas > 0) return { qty: String(Math.round(piezas)), unidad: 'EA' };
+    if(sqft > 0)   return { qty: String(med2(sqft)),   unidad: 'sq ft' };
+    return { qty: String(med2(linear)), unidad: 'linear ft' };
+  }
   function medTotalTexto(sqft, linear, piezas){
     const bits = [];
     if(sqft > 0)   bits.push(med2(sqft) + ' sq ft');
@@ -15076,14 +15088,19 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       .sort((x, y) => (x.rango - y.rango) || (x.orden - y.orden))
       .map(nv => ({
         nivel: nv.nivel, titulo: nv.titulo, rango: nv.rango,
-        sqft: med2(nv.sqft), linear: med2(nv.linear),
+        sqft: med2(nv.sqft), linear: med2(nv.linear), piezas: nv.piezas || 0,
         cuartos: Array.from(nv.cuartos.values()).sort(porOrden).map(ct => ({
           cuarto: ct.cuarto, titulo: ct.titulo,
-          sqft: med2(ct.sqft), linear: med2(ct.linear),
+          sqft: med2(ct.sqft), linear: med2(ct.linear), piezas: ct.piezas || 0,
           materiales: Array.from(ct.materiales.values()).sort(porOrden).map(mt => ({
             material: mt.material, superficie: mt.superficie, seccion: mt.seccion,
             sinMaterial: !!mt.sinMaterial,
-            n: mt.n, sqft: med2(mt.sqft), linear: med2(mt.linear), cortes: mt.cortes
+            // LAS PIEZAS SE PIERDEN AQUI SI NO SE COPIAN (27 sep 2026). Este
+            // .map arma objetos NUEVOS escogiendo campo por campo: lo que no
+            // se nombre aqui no existe rio abajo. Asi salio el PDF de Amilcar
+            // con el inodoro y la tina en la columna TOTAL vacias.
+            n: mt.n, sqft: med2(mt.sqft), linear: med2(mt.linear), piezas: mt.piezas || 0,
+            cortes: mt.cortes
           }))
         }))
       }));
@@ -15113,7 +15130,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     lista.forEach(nv => nv.cuartos.forEach(ct => {
       let cuenta = false;
       ct.materiales.forEach(mt => {
-        if(mt.sinMaterial || !(mt.sqft > 0 || mt.linear > 0)) return;
+        // Una pieza no tiene pies: sin nombrarla aqui, el inodoro y la tina
+        // desaparecian ENTEROS de la tabla de totales del trabajo.
+        if(mt.sinMaterial || !(mt.sqft > 0 || mt.linear > 0 || mt.piezas > 0)) return;
         if(!cuenta){ cuenta = true; nCuartos++; }
         const clave = mt.material + '|' + mt.seccion;
         let pt = partidasMap.get(clave);
@@ -15154,8 +15173,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         <table style="width:100%; border-collapse:collapse; font-size:13px; margin-bottom:2px;">
           <tr data-nocorte data-cuarto-cab><th style="text-align:left; ${MED_TH}">Material</th>
               <th style="${MED_TH}">Surface</th>
-              <th style="${MED_TH}">Measurements</th>
-              <th style="${MED_TH}">Total</th></tr>`;
+              <th style="${MED_TH}">Qty</th>
+              <th style="${MED_TH}">Unit</th></tr>`;
         // ---- UNA LINEA POR MATERIAL Y SUPERFICIE, YA SUMADA ----
         //
         // Su pedido del 12 de septiembre:
@@ -15180,12 +15199,17 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         // donde ella comprueba que estén todas. El papel y la pantalla usan el
         // mismo `medAgruparPorNivel`, así que los totales no pueden discrepar.
         ct.materiales.forEach(mt => {
-          const tm = medTotalTexto(mt.sqft, mt.linear, mt.piezas);
+          const qu = medQtyUnidad(mt.sqft, mt.linear, mt.piezas);
+          // De cuantas medidas salio el numero sigue estando - su regla del 12
+          // de septiembre ("un total sin decir de cuantas partes viene no se
+          // puede auditar") - pero ya no ocupa una columna entera: va chiquito
+          // al lado del material, y la columna es la CANTIDAD.
+          const deCuantas = mt.n > 1 ? ' <span style="font-weight:400; color:#6B7684; font-size:11px;">(' + mt.n + ' medidas)</span>' : '';
           html += `<tr>
-            <td style="${MED_TD} font-weight:700;">${esc(mt.material)}</td>
+            <td style="${MED_TD} font-weight:700;">${esc(mt.material)}${deCuantas}</td>
             <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;">${esc(mt.superficie)}</td>
-            <td style="${MED_TD} text-align:center; color:#3A4552;">${mt.n}</td>
-            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(tm)}</td>
+            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(qu.qty)}</td>
+            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(qu.unidad)}</td>
           </tr>`;
         });
         html += '</table>';
@@ -15208,13 +15232,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           <tr data-nocorte data-cuarto-cab><th style="text-align:left; ${MED_TH}">Material</th>
               <th style="${MED_TH}">Surface</th>
               <th style="${MED_TH}">Rooms</th>
-              <th style="${MED_TH}">Total</th></tr>`;
+              <th style="${MED_TH}">Qty</th>
+              <th style="${MED_TH}">Unit</th></tr>`;
       agrupado.partidas.forEach(pt => {
         html += `<tr>
             <td style="${MED_TD} font-weight:700;">${esc(pt.material)}</td>
             <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;">${esc(pt.superficie)}</td>
             <td style="${MED_TD} text-align:center; color:#3A4552;">${pt.cuartos}</td>
-            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medTotalTexto(pt.sqft, pt.linear, pt.piezas))}</td>
+            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medQtyUnidad(pt.sqft, pt.linear, pt.piezas).qty)}</td>
+            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medQtyUnidad(pt.sqft, pt.linear, pt.piezas).unidad)}</td>
           </tr>`;
       });
       html += '</table></div>';
