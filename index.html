@@ -6886,7 +6886,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-27-LG';
+  const APP_BUILD = '2026-09-27-LH';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -7783,6 +7783,32 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
                               .filter(t => t !== '-').sort().join('|');
     return turnos ? String(l.log_date || p.d || '') + '#' + turnos : '';
   }
+  // SU GEMELO YA ESTA FACTURADO (27 sep 2026). El caso Susan del 26 de
+  // septiembre: la misma mudanza se mando DOS veces (92325b6c a las 22:30 y
+  // c1d656e2 a las 23:11), y salieron DOS invoices a la clienta - el 4006 por
+  // $1,711.15 y el 4007 por $1,886.10.
+  // El hueco: invInvoicedLogIds esconde el reporte que YA se facturo, pero su
+  // GEMELO sigue apareciendo como "sin facturar", asi que "Marcar todos" lo
+  // vuelve a cobrar. El aviso de "mismo dia y mismas horas" salia, pero decia
+  // "marque uno solo", como si los dos siguieran libres.
+  // Devuelve: huella -> numeros de invoice donde ya se cobro esa mudanza.
+  function invHuellasFacturadas(){
+    const m = new Map();
+    const porId = new Map((INV_LOGS || []).map(l => [String(l.id), l]));
+    (INVOICES || []).forEach(i => (i.log_ids || []).forEach(id => {
+      const l = porId.get(String(id)); if(!l) return;
+      const h = invHuella(l); if(!h) return;
+      if(!m.has(h)) m.set(h, []);
+      const n = String(i.number || '?');
+      if(!m.get(h).includes(n)) m.get(h).push(n);
+    }));
+    return m;
+  }
+  // Los numeros de invoice donde YA se cobro la misma mudanza que este reporte.
+  function invYaCobrada(l){
+    const h = invHuella(l); if(!h) return [];
+    return invHuellasFacturadas().get(h) || [];
+  }
   function invRepetidos(logs){
     const cuenta = {};
     logs.forEach(l => { const h = invHuella(l); if(h) cuenta[h] = (cuenta[h] || 0) + 1; });
@@ -7817,6 +7843,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const cut = logs.length > 60 ? '<p class="clockhint">Mostrando los 60 reportes más recientes sin facturar de ' + logs.length + '.</p>' : '';
     box.innerHTML = cut + logs.slice(0, 60).map(l => {
       const lines = invLinesFromLog(l, c); const amt = invTotalOf(lines); const was = done.has(String(l.id)); const on = INV.logIds.includes(String(l.id));
+      const yaCobrada = invYaCobrada(l);
       const p = l.payload || {}; const names = ((p.s||[])[0]||{}).n || '';
       // La direccion se ve ANTES de marcar. El aviso rojo sale de las LINEAS que se van a cobrar, no del
       // reporte entero: una direccion puesta solo en un turno sin horas, o solo en el primer turno, no
@@ -7829,8 +7856,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         : sinLugar ? sinLugar + ' de ' + svc.length + ' turnos sin dirección: esas líneas del invoice no van a decir a dónde fueron' : '';
       const placeHtml = (places.length ? '<br><span class="when">' + esc(places.join(' · ')) + '</span>' : '')
         + (aviso ? '<br><span class="when" style="color:var(--danger);">' + esc(aviso) + '</span>' : '')
-        + (repes.has(String(l.id)) ? '<br><span class="when" style="color:var(--danger);font-weight:700;">⚠ MISMO DÍA Y MISMAS HORAS que otro reporte de este cliente. Casi seguro es la misma mudanza mandada dos veces: marque UNO solo, o le cobra las horas dos veces.</span>' : '');
-      return '<label class="entryrow" style="align-items:center;gap:10px;cursor:pointer;"><input type="checkbox" class="invLogChk" data-id="' + esc(l.id) + '"' + (on ? ' checked' : '') + ' style="width:22px;height:22px;">'
+        + (yaCobrada.length
+            ? '<br><span class="when" style="color:var(--danger);font-weight:700;">\u26d4 ESTA MUDANZA YA SE COBR\u00d3 en el invoice #' + esc(yaCobrada.join(', #')) + '. Es el mismo d\u00eda y las mismas horas, mandado dos veces. NO lo marque: al cliente le ir\u00eda la misma mudanza dos veces.</span>'
+            : (repes.has(String(l.id)) ? '<br><span class="when" style="color:var(--danger);font-weight:700;">⚠ MISMO DÍA Y MISMAS HORAS que otro reporte de este cliente. Casi seguro es la misma mudanza mandada dos veces: marque UNO solo, o le cobra las horas dos veces.</span>' : ''));
+      return '<label class="entryrow" style="align-items:center;gap:10px;cursor:pointer;' + (yaCobrada.length ? 'background:rgba(255,69,58,.10);' : '') + '"><input type="checkbox" class="invLogChk" data-id="' + esc(l.id) + '"' + (on ? ' checked' : '') + (yaCobrada.length ? ' data-yacobrada="' + esc(yaCobrada.join(',')) + '"' : '') + ' style="width:22px;height:22px;">'
         + '<span style="flex:1;"><span class="who">' + esc(invDate(l.log_date)) + (l.crew_leader ? ' · ' + esc(l.crew_leader) : '') + '</span><br><span class="when">' + esc(names) + '</span>' + placeHtml + '</span>'
         + '<span class="hrs">' + (lines.length ? '$' + invMoney(amt) : '<span style="color:var(--danger);">sin precio</span>') + (lines.unpriced && lines.unpriced.length ? '<br><span style="color:var(--danger);font-size:11px;font-weight:400;">sin precio: ' + esc(lines.unpriced.join(', ')) + '</span>' : '') + '</span></label>';
     }).join('');
@@ -7849,8 +7878,17 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   });
   // Todos los dias del cliente de un golpe: es lo normal cuando se trabaja toda la semana para el mismo.
   if($('#invLogsAll')) $('#invLogsAll').addEventListener('click', ()=>{
-    const ids = $$('#invLogs .invLogChk').map(chk => { chk.checked = true; return chk.dataset.id; });
+    // "Marcar todos" SALTA las mudanzas que ya se cobraron con otro reporte.
+    // Un toque marcaba tambien al gemelo y el cliente recibia la misma mudanza
+    // dos veces: asi paso con Susan el 26 de septiembre (invoices 4006 y 4007).
+    let saltadas = 0;
+    const ids = [];
+    $$('#invLogs .invLogChk').forEach(chk => {
+      if(chk.dataset.yacobrada){ chk.checked = false; saltadas++; return; }
+      chk.checked = true; ids.push(chk.dataset.id);
+    });
     INV.logIds = ids.slice(); invRebuildLogLines(); invPaintLogs(); invRender();
+    if(saltadas) alert('Se marcaron ' + ids.length + ' reporte(s).\n\n' + saltadas + ' NO se marc\u00f3 porque esa misma mudanza ya se cobr\u00f3 en otro invoice. Si de verdad la quiere cobrar, m\u00e1rquela usted a mano.');
   });
   if($('#invLogsNone')) $('#invLogsNone').addEventListener('click', ()=>{
     $$('#invLogs .invLogChk').forEach(chk => chk.checked = false);
@@ -8008,6 +8046,20 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       const fresh = await invLoadInvoices(); if(!fresh) throw new Error('No se pudieron leer los invoices guardados. Revise su internet y vuelva a intentar.');
       const done = invInvoicedLogIds(); const dup = inv.log_ids.filter(id => done.has(id));
       if(dup.length){ const who = INVOICES.find(i => (i.log_ids||[]).some(x => dup.includes(String(x)))); invPaintLogs(); invRebuildLogLines(); throw new Error('Un reporte marcado ya está en el invoice #' + (who ? who.number : '?') + '. Se quitó de la lista; revise y guarde otra vez.'); }
+      // Y SU GEMELO TAMBIEN (27 sep 2026). El id no se repite, pero la MUDANZA
+      // si: mismo dia, mismas horas, mandada dos veces. Se revisa contra la
+      // lista FRESCA, ya recargada arriba, porque otro telefono pudo facturarla
+      // mientras este armaba el invoice.
+      const gemelos = [];
+      inv.log_ids.forEach(id => {
+        const l = (INV_LOGS || []).find(x => String(x.id) === String(id)); if(!l) return;
+        const ns = invYaCobrada(l);
+        if(ns.length) gemelos.push(invDate(l.log_date) + ' (ya en el invoice #' + ns.join(', #') + ')');
+      });
+      if(gemelos.length && !confirm('\u26d4 ESTA MUDANZA YA SE COBR\u00d3:\n\n' + gemelos.join('\n')
+          + '\n\nEs el mismo d\u00eda y las mismas horas, mandado dos veces. Si guarda esto, al cliente le va la MISMA mudanza en dos invoices.\n\n\u00bfGuardar de todos modos?')) {
+        throw new Error('No se guard\u00f3. Desmarque el reporte repetido.');
+      }
       if(INVOICES.some(i => +i.number === +inv.number)){ $('#inv-number').value = invNextNumber(); throw new Error('Ya hay un invoice con el número ' + inv.number + '. Se cambió al ' + invNextNumber() + '; toque Guardar otra vez.'); }
       const res = await authFetch('/rest/v1/amg_invoices', { method:'POST', headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}), body: JSON.stringify(inv) });
       if(res.status === 404) throw new Error('Falta correr supabase-amg-invoices.sql en Supabase.');
