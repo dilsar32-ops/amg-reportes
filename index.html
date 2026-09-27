@@ -4447,6 +4447,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         <button type="button" class="menubtn" data-casual-go="cierres" id="casualTileCierres" hidden>
           <b>&#128203; Cierres para revisar</b><small id="casualTileCierresH">Un cierre de AMG Moving que le mandaron</small></button>
       </div>
+      <!-- LOS AVISOS DEL TEMPORAL (27 sep 2026). Su reporte: "Cristian no ha
+           recibido nada". No es un boton de adorno: si el telefono dijo que NO
+           a los avisos, el trabajador nunca se entera de un cambio de horario
+           y NADIE puede saber por que. Aqui se ve el estado y se puede
+           prender. Ademas el navegador prefiere pedir el permiso desde un
+           toque de verdad, no al cargar la pagina. -->
+      <button type="button" class="minibtn" id="casualAvisos" hidden></button>
     </section>
 
     <div class="casualpan" data-casual-pan="horas" hidden>
@@ -6879,7 +6886,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-27-LE';
+  const APP_BUILD = '2026-09-27-LF';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -29376,6 +29383,118 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     }catch(e){ /* browser refused - the app still works, just no alert */ }
   }
 
+  // ---- AVISOS PARA QUIEN ENTRA CON PIN (27 sep 2026) ----
+  // Un trabajador temporal NO tiene cuenta, y device_tokens cuelga de
+  // auth.users: por eso a Cristian no le llegaba nada, ninguna de las 8
+  // alertas. Su telefono se guarda en casual_device_tokens con la misma reja
+  // de siempre (codigo + nombre + PIN). Se apaga sola si
+  // supabase-avisos-temporales.sql todavia no ha corrido: entonces la app se
+  // comporta exactamente como antes.
+  let CASUAL_PUSH_READY = true;
+
+  async function guardarTokenTemporal(token, plataforma){
+    if(!CASUAL_PUSH_READY || !token) return false;
+    const ses = loadCasualSes();
+    if(!ses || !ses.name || !ses.pin) return false;
+    // Se manda con los DOS codigos que tenga guardados. El de AMG es el que
+    // prende el aviso del calendario, y el mismo telefono sirve para las dos
+    // puertas: Cristian usa las dos (10 turnos de mudanza y 7 de restauracion).
+    const codes = [];
+    if(ses.amgCode) codes.push(ses.amgCode);
+    if(ses.joinCode && ses.joinCode !== ses.amgCode) codes.push(ses.joinCode);
+    let ok = false;
+    for(const code of codes){
+      try{
+        await authPost('/rest/v1/rpc/casual_save_token',
+          { p_join_code: code, p_name: ses.name, p_pin: ses.pin,
+            p_token: token, p_platform: plataforma });
+        ok = true;
+      }catch(e){
+        const m = String((e && e.message) || '');
+        // Sin el SQL la funcion no existe. Se apaga y ya: no se le miente al
+        // trabajador diciendole que los avisos quedaron prendidos.
+        if(/casual_save_token|PGRST202|Could not find|does not exist/i.test(m)){ CASUAL_PUSH_READY = false; return false; }
+      }
+    }
+    return ok;
+  }
+
+  async function registerCasualPush(pedir){
+    if(!cloudOn() || !CASUAL_PUSH_READY) return false;
+    const ses = loadCasualSes(); if(!ses || !ses.pin) return false;
+    const plataforma = (window.Capacitor && typeof window.Capacitor.getPlatform === 'function')
+      ? window.Capacitor.getPlatform() : '';
+    // La misma regla del 18 sep: en Android nativo el plugin mata la app
+    // (Fire OS no trae los servicios de Google). El telefono de Cristian es
+    // Android con la app WEB, que no pasa por aqui.
+    if(plataforma === 'android') return false;
+    const PN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+    if(PN){
+      try{
+        let perm = await PN.checkPermissions();
+        if(perm.receive !== 'granted'){ if(!pedir) return false; perm = await PN.requestPermissions(); }
+        if(perm.receive !== 'granted') return false;
+        PN.addListener('registration', t => { const tok = t && t.value; if(tok) guardarTokenTemporal(tok, 'ios').then(pintarAvisosTemporal); });
+        PN.addListener('registrationError', ()=>{});
+        const alTocar = ()=>{ try{ const s2 = loadCasualSes(); if(s2){ loadCasualCal(s2); loadCasualMyPays(); } }catch(e){} };
+        PN.addListener('pushNotificationActionPerformed', alTocar);
+        PN.addListener('pushNotificationReceived', alTocar);
+        await PN.register();
+        return true;
+      }catch(e){ return false; }
+    }
+    if(!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+    if(location.protocol !== 'https:' && location.hostname !== 'localhost') return false;
+    try{
+      const reg = await navigator.serviceWorker.register('sw.js');
+      await navigator.serviceWorker.ready;
+      if(Notification.permission === 'denied') return false;
+      if(Notification.permission !== 'granted'){
+        if(!pedir) return false;
+        if(await Notification.requestPermission() !== 'granted') return false;
+      }
+      let sub = await reg.pushManager.getSubscription();
+      if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToBytes(VAPID_PUBLIC) });
+      const ok = await guardarTokenTemporal(JSON.stringify(sub), 'web');
+      pintarAvisosTemporal();
+      return ok;
+    }catch(e){ return false; }
+  }
+
+  // El estado, a la vista. Un permiso negado en silencio es la razon numero
+  // uno por la que "no me llego nada" y nadie sabe por que.
+  function pintarAvisosTemporal(){
+    const b = $('#casualAvisos'); if(!b) return;
+    const nativo = !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications);
+    const hayWeb = ('serviceWorker' in navigator) && ('PushManager' in window) && typeof Notification !== 'undefined';
+    if(!CASUAL_PUSH_READY || (!nativo && !hayWeb)){ b.hidden = true; return; }
+    b.hidden = false;
+    const perm = (typeof Notification !== 'undefined') ? Notification.permission : 'default';
+    if(nativo || perm === 'granted'){
+      b.textContent = '\u{1F514} Avisos prendidos';
+      b.classList.remove('pide');
+      b.disabled = true;
+    } else if(perm === 'denied'){
+      b.textContent = '\u{1F515} Los avisos est\u00e1n apagados en este tel\u00e9fono';
+      b.classList.add('pide');
+      b.disabled = true;
+    } else {
+      b.textContent = '\u{1F514} Prender los avisos';
+      b.classList.add('pide');
+      b.disabled = false;
+    }
+  }
+  if($('#casualAvisos')) $('#casualAvisos').addEventListener('click', async ()=>{
+    const b = $('#casualAvisos'); const antes = b.textContent;
+    b.disabled = true; b.textContent = 'Prendiendo\u2026';
+    const ok = await registerCasualPush(true);
+    pintarAvisosTemporal();
+    if(!ok && Notification && Notification.permission !== 'denied'){
+      b.textContent = antes; b.disabled = false;
+      alert('No se pudieron prender los avisos. Revise su internet y vuelva a intentar.');
+    }
+  });
+
   async function registerPush(){
     if(!cloudOn() || !signedIn()) return;
     // EN LA TABLET ANDROID NO SE PIDEN LAS PUSH (18 sep 2026).
@@ -31104,6 +31223,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     casualMyHistory = history || [];
     renderCasualMyHistory(casualMyHistory);
     casualShow('menu');
+    pintarAvisosTemporal();
+    // Se intenta sin pedir permiso: si ya lo dio antes, el telefono queda
+    // registrado solo. Si nunca lo dio, el boton del menu lo pide con un
+    // toque de verdad, que es como los navegadores lo quieren.
+    registerCasualPush(false);
     loadCasualCierres(ses);
     loadCasualMyPays();
     loadCasualCal(ses);
