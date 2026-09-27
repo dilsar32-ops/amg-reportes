@@ -475,6 +475,11 @@
   .eq-name-cell{min-width:130px;}
   .dims-row{display:flex; align-items:center; gap:4px;}
   .dims-row input[type=number]{width:50px; padding:8px 2px;}
+  .dims-row input[type=number][hidden]{display:none !important;}
+  .dims-x[hidden]{display:none !important;}
+  /* Por pieza: la casilla sola se ve mas ancha, que es lo que se espera de
+     "cuantos" - no de una medida. */
+  .meas-dims-wrap.por-pieza .dims-row input[type=number]{width:84px; text-align:center;}
   .dims-x{color:var(--ink-soft); font-weight:700; font-size:13px;}
   .ep-sqft{font-size:11px; color:var(--ink-soft); margin-top:3px; white-space:nowrap;}
   .eq-name-fixed{display:block; padding:8px 2px; font-size:14px; font-weight:600; color:var(--text);}
@@ -6901,7 +6906,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-27-LI';
+  const APP_BUILD = '2026-09-27-LJ';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -12782,17 +12787,34 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // del oficio en inglés primero, que es como la dice la cuadrilla, y el
     // español atrás. Son las piezas que de verdad se quitan en un trabajo de
     // agua, no un catálogo de ferretería.
+    // Su corrección del 27 de septiembre: "cuando digo materiales me refiero al
+    // tile, al sheetrock, si lleva plywood... mayormente en la parte del shower
+    // qué materiales son que se remueven". La primera lista iba cargada de
+    // accesorios y le faltaba LO QUE SE DEMUELE. Ahora va primero la pared de
+    // la regadera, de adentro hacia afuera - que es el orden en que se saca:
+    // azulejo, mortero, cemento en tabla, barrera de vapor, tablaroca verde.
     bathroom: { labelEn:'Item', labelEs:'Artículo', options: [
-      {value:'Vanity', label:'Vanity / Tocador'},
-      {value:'Vanity Top', label:'Vanity Top / Cubierta del Tocador'},
-      {value:'Toilet', label:'Toilet / Inodoro'},
+      {value:'Shower Tile', label:'Shower Tile / Azulejo de la regadera'},
+      {value:'Floor Tile', label:'Floor Tile / Azulejo del piso'},
+      {value:'Thinset / Mortar Bed', label:'Thinset / Mortar Bed / Mortero'},
+      // Durock / Wonderboard / HardieBacker: la tabla de cemento que va detrás
+      // del azulejo de la regadera. No estaba en NINGUNA lista y es de lo
+      // primero que se saca en un baño mojado.
+      {value:'Cement Board', label:'Cement Board (Durock) / Tabla de cemento'},
+      {value:'Greenboard', label:'Greenboard / Tablaroca verde (de humedad)'},
+      {value:'Vapor Barrier', label:'Vapor Barrier / Barrera de vapor'},
+      {value:'Shower Pan', label:'Shower Pan / Base de la regadera'},
+      {value:'Shower Surround', label:'Shower Surround / Cubierta de la regadera'},
+      {value:'Shower Door', label:'Shower Door / Puerta de la regadera'},
+      {value:'Plywood / Underlayment', label:'Plywood / Underlayment / Triplay'},
+      {value:'Subfloor', label:'Subfloor / Subpiso'},
       {value:'Bathtub', label:'Bathtub / Tina'},
-      {value:'Shower', label:'Shower / Regadera'},
-      {value:'Shower Pan', label:'Shower Pan / Base de Regadera'},
-      {value:'Tile', label:'Tile / Azulejo'},
-      {value:'Mirror', label:'Mirror / Espejo'},
+      {value:'Vanity', label:'Vanity / Tocador'},
+      {value:'Vanity Top', label:'Vanity Top / Cubierta del tocador'},
+      {value:'Toilet', label:'Toilet / Inodoro'},
       {value:'Medicine Cabinet', label:'Medicine Cabinet / Botiquín'},
       {value:'Exhaust Fan', label:'Exhaust Fan / Extractor'},
+      {value:'Mirror', label:'Mirror / Espejo'},
       {value:'Towel Bar', label:'Towel Bar / Toallero'},
       {value:'Other', label:'Otro / Other'}
     ]},
@@ -12827,6 +12849,27 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // at all. Rather than making the crew re-measure the exact same
   // rectangle a second time, one tap copies the dimensions they already
   // captured into a new cut with the companion material already picked.
+  // POR PIEZA, NO POR MEDIDA (27 sep 2026). Su pedido: "tienes que dar opción
+  // que se anote por unidad también lo que hay que anotar por unidad".
+  // Un inodoro no tiene largo ni ancho: es UNO. Lo mismo la tina, el extractor,
+  // el botiquín. En Xactimate son EA, igual que las líneas que ya usa Flood
+  // Doctor ("Light fixture - Detach — EA").
+  // EL NUMERO VIAJA EN EL MISMO CAMPO DEL LARGO, a propósito: así no cambia
+  // nada de lo guardado, ni el borrador, ni la nube, ni los trabajos viejos.
+  // Lo que cambia es lo que se PREGUNTA y lo que se IMPRIME: el material mismo
+  // dice que es por pieza, y eso se puede saber en cualquier lado sin arrastrar
+  // un campo nuevo.
+  const MEASURE_POR_PIEZA = new Set([
+    // Baño
+    'Toilet', 'Bathtub', 'Shower Pan', 'Shower Surround', 'Shower Door',
+    'Medicine Cabinet', 'Exhaust Fan', 'Mirror', 'Towel Bar',
+    // Cocina - ya venía mal desde que se armó: una estufa tampoco se mide
+    'Stove / Range', 'Refrigerator', 'Sink'
+  ]);
+  const esPorPieza = v => MEASURE_POR_PIEZA.has(String(v || '').trim());
+  // "2 piezas" / "1 pieza", nunca "2 pies lineales" para un inodoro.
+  const piezasTexto = n => n + ' ' + (Math.abs(n) === 1 ? 'pieza' : 'piezas');
+
   const MATERIAL_COMPANION = {
     // EL ZOCALO PREGUNTA POR SU SHOE MOLDING. Es la misma maquinaria que ya
     // pregunta "¿lleva insulación?" detrás del drywall: NUNCA lo escoge sola -
@@ -12842,7 +12885,14 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     'Popcorn / Texture': { value:'Insulation', labelEn:'Insulation', labelEs:'Insulación' },
     'Carpet': { value:'Carpet Pad', labelEn:'Carpet Pad', labelEs:'Almohadilla de Alfombra' },
     'Vinyl (LVP)': { value:'Underlayment', labelEn:'Underlayment', labelEs:'Base/Underlayment' },
-    'Laminate': { value:'Underlayment', labelEn:'Underlayment', labelEs:'Base/Underlayment' }
+    'Laminate': { value:'Underlayment', labelEn:'Underlayment', labelEs:'Base/Underlayment' },
+    // Detrás del azulejo de la regadera casi siempre hay tabla de cemento, y
+    // debajo del azulejo del piso, mortero. Se PREGUNTA, nunca se escoge solo:
+    // es la misma regla del 11 de septiembre.
+    'Shower Tile': { value:'Cement Board', labelEn:'Cement Board', labelEs:'tabla de cemento (Durock)' },
+    'Floor Tile': { value:'Thinset / Mortar Bed', labelEn:'Thinset / Mortar Bed', labelEs:'mortero' },
+    'Cement Board': { value:'Vapor Barrier', labelEn:'Vapor Barrier', labelEs:'barrera de vapor' },
+    'Greenboard': { value:'Insulation', labelEn:'Insulation', labelEs:'Insulación' }
   };
 
   function optionsHtml(opts){
@@ -12945,7 +12995,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const a = parseFloat($('.meas-dimA', cut).value);
     const b = parseFloat($('.meas-dimB', cut).value);
     const out = $('.measure-result', cut);
+    const sel = $('.meas-material', cut);
     const aOk = a > 0, bOk = b > 0;
+    if(sel && esPorPieza(sel.value)){
+      out.textContent = aOk ? '= ' + piezasTexto(Math.round(a)) + ' / ' + Math.round(a) + ' EA' : '';
+      updateCardTotal(cut.closest('.measure-card'));
+      return;
+    }
     if(aOk && bOk) out.textContent = '= ' + (Math.round(a*b*100)/100) + ' sq ft';
     else if(aOk) out.textContent = '= ' + a + ' linear ft';
     else out.textContent = '';
@@ -12967,12 +13023,14 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       const sel = $('.meas-material', cut);
       const v = sel ? sel.value : '';
       const nombre = String(v === 'Other' ? (($('.meas-material-other', cut) || {}).value || '') : (v || '')).trim() || '— Material —';
-      const t = porMaterial.get(nombre) || { sqft: 0, linear: 0 };
-      if(b > 0) t.sqft += Math.round(a * b * 100) / 100;
+      const t = porMaterial.get(nombre) || { sqft: 0, linear: 0, piezas: 0 };
+      if(esPorPieza(v)) t.piezas += Math.round(a);
+      else if(b > 0) t.sqft += Math.round(a * b * 100) / 100;
       else t.linear += Math.round(a * 100) / 100;
       porMaterial.set(nombre, t);
     });
-    const lineas = Array.from(porMaterial, ([nombre, t]) => nombre + ': ' + medTotalTexto(t.sqft, t.linear));
+    const lineas = Array.from(porMaterial, ([nombre, t]) =>
+      nombre + ': ' + (t.piezas ? piezasTexto(t.piezas) : medTotalTexto(t.sqft, t.linear)));
     out.textContent = lineas.length ? 'Total por material / By material:\n' + lineas.join('\n') : '';
   }
   // "Other" reveals a free-text field instead of leaving the crew stuck when
@@ -12980,6 +13038,24 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // after a draft restore, since setting .value directly doesn't fire
   // 'change'. Level/Room live on the card (one room per card); Material
   // lives on each individual cut (each cut can be a different material).
+  // POR PIEZA O POR MEDIDA (27 sep 2026). Un inodoro no tiene largo ni ancho.
+  // Se esconde el "x ancho" y la etiqueta pasa a "¿Cuántos?": el numero cae en
+  // el MISMO campo del largo, asi que no cambia nada de lo guardado.
+  function refreshCutUnidad(cut){
+    if(!cut) return;
+    const sel = $('.meas-material', cut); if(!sel) return;
+    const pieza = esPorPieza(sel.value);
+    const wrap = $('.meas-dims-wrap', cut), lab = $('.meas-dims-label', cut);
+    const b = $('.meas-dimB', cut), x = $('.dims-x', cut), a = $('.meas-dimA', cut);
+    if(lab) lab.innerHTML = pieza
+      ? '&iquest;Cu&aacute;ntos?<span class="en"> / How many? (each)</span>'
+      : 'Dimensiones (pies)<span class="en"> / Dimensions (ft)</span>';
+    if(b){ b.hidden = pieza; if(pieza && b.value){ b.value = ''; } }
+    if(x) x.hidden = pieza;
+    if(a){ a.placeholder = pieza ? '1' : 'L'; a.step = pieza ? '1' : '0.1'; }
+    if(wrap) wrap.classList.toggle('por-pieza', pieza);
+    calcCutResult(cut);
+  }
   function refreshLevelRoomOther(card){
     const lvlSel = $('.meas-level', card), lvlOther = $('.meas-level-other-wrap', card);
     if(lvlSel && lvlOther) lvlOther.hidden = lvlSel.value !== 'Other';
@@ -12987,6 +13063,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(roomSel && roomOther) roomOther.hidden = roomSel.value !== 'Other';
   }
   function refreshMaterialOther(cut){
+    // Escoger el material decide si se pregunta la medida o la CANTIDAD.
+    // Va aqui y no en el listener del 'change' porque este se llama tambien al
+    // restaurar el borrador y al abrir un trabajo guardado, donde poner el
+    // .value a mano no dispara ningun evento (misma razon que el "Other").
+    try{ refreshCutUnidad(cut); }catch(e){}
     const matSel = $('.meas-material', cut), matOther = $('.meas-material-other-wrap', cut);
     if(matSel && matOther) matOther.hidden = matSel.value !== 'Other';
   }
@@ -13003,8 +13084,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         <select class="meas-material">${optionsConVacio(cfg.options, '— Escoger material / Pick material —')}</select>
       </div>
       <div class="field meas-material-other-wrap" hidden><label>Material / Item Name</label><input type="text" class="meas-material-other" placeholder="Ej. Escalones / Stair treads"></div>
-      <div class="field">
-        <label>Dimensiones (pies)<span class="en"> / Dimensions (ft)</span></label>
+      <div class="field meas-dims-wrap">
+        <label class="meas-dims-label">Dimensiones (pies)<span class="en"> / Dimensions (ft)</span></label>
         <div class="dims-row">
           <input type="number" class="meas-dimA" placeholder="L" inputmode="decimal" step="0.1" min="0">
           <span class="dims-x">&times;</span>
@@ -13296,6 +13377,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   function medTextoDeCorte(cut){
     const a = parseFloat($('.meas-dimA', cut).value);
     const b = parseFloat($('.meas-dimB', cut).value);
+    const sel = $('.meas-material', cut);
+    if(sel && esPorPieza(sel.value)) return a > 0 ? Math.round(a) + ' EA' : '—';
     if(a > 0 && b > 0) return med2(a * b) + ' sq ft';
     if(a > 0) return med2(a) + ' linear ft';
     // Un número solo en la casilla del ancho NO es un tramo. Decía
@@ -13612,7 +13695,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           const totCuarto = medNodo('div', 'med-total-cuarto');
           if(!partidasCuarto.length) totCuarto.textContent = 'Sin medidas todavía';
           partidasCuarto.forEach(mt => totCuarto.appendChild(medNodo('div', '',
-            mt.material + ' · ' + mt.superficie + ': ' + medTotalTexto(mt.sqft, mt.linear))));
+            mt.material + ' · ' + mt.superficie + ': ' + medTotalTexto(mt.sqft, mt.linear, mt.piezas))));
           cuartoBox.appendChild(totCuarto);
           bloque.appendChild(cuartoBox);
         });
@@ -13626,7 +13709,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         tj.appendChild(medNodo('div', '', 'Total del trabajo por partida'));
         g.partidas.forEach(pt => {
           const r = medNodo('div', 'med-total-partida',
-            pt.material + ' · ' + pt.superficie + ': ' + medTotalTexto(pt.sqft, pt.linear));
+            pt.material + ' · ' + pt.superficie + ': ' + medTotalTexto(pt.sqft, pt.linear, pt.piezas));
           tj.appendChild(r);
         });
         caja.appendChild(tj);
@@ -14896,7 +14979,12 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
             // Y redondeado, porque el área se redondea corte por corte: si los
             // renglones se redondean y el total no, la hoja no cuadra consigo
             // misma y quien la revisa no sabe a cuál creerle.
-            linear: (aOk && bOk) ? 0 : (aOk ? Math.round(a * 100) / 100 : 0)
+            // POR PIEZA (27 sep 2026): un inodoro no son "2 linear ft". El
+            // numero viaja en el mismo campo del largo, pero aqui se separa a
+            // su propia cuenta para que NADA lo sume con los pies lineales -
+            // son unidades distintas y mezclarlas es cobrar mal.
+            piezas: esPorPieza(material) && aOk ? Math.round(a) : 0,
+            linear: esPorPieza(material) ? 0 : ((aOk && bOk) ? 0 : (aOk ? Math.round(a * 100) / 100 : 0))
           });
         });
       });
@@ -14918,10 +15006,12 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "120 sq ft + 40 linear ft", o '' si no hay nada. Pies cuadrados y pies
   // lineales NO se suman entre sí: son unidades distintas y sumarlas es cobrar
   // mal. Van lado a lado, siempre.
-  function medTotalTexto(sqft, linear){
+  // Tres unidades, nunca sumadas entre si: area, tramo y PIEZAS (27 sep 2026).
+  function medTotalTexto(sqft, linear, piezas){
     const bits = [];
     if(sqft > 0)   bits.push(med2(sqft) + ' sq ft');
     if(linear > 0) bits.push(med2(linear) + ' linear ft');
+    if(piezas > 0) bits.push(Math.round(piezas) + ' EA');
     return bits.join(' + ');
   }
 
@@ -14976,9 +15066,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       // terminar, porque `medRecogerCortes` ya los filtró.
       mt.n++; mt.cortes.push(c);
       if(c.vaAlPapel){
-        mt.sqft += c.sqft; mt.linear += c.linear;
-        ct.sqft += c.sqft; ct.linear += c.linear;
-        nv.sqft += c.sqft; nv.linear += c.linear;
+        mt.sqft += c.sqft; mt.linear += c.linear; mt.piezas = (mt.piezas || 0) + (c.piezas || 0);
+        ct.sqft += c.sqft; ct.linear += c.linear; ct.piezas = (ct.piezas || 0) + (c.piezas || 0);
+        nv.sqft += c.sqft; nv.linear += c.linear; nv.piezas = (nv.piezas || 0) + (c.piezas || 0);
       }
     });
     const porOrden = (x, y) => x.orden - y.orden;
@@ -15032,7 +15122,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
                  orden: partidasMap.size, cuartos: 0, n: 0, sqft: 0, linear: 0 };
           partidasMap.set(clave, pt);
         }
-        pt.cuartos++; pt.n += mt.n; pt.sqft += mt.sqft; pt.linear += mt.linear;
+        pt.cuartos++; pt.n += mt.n; pt.sqft += mt.sqft; pt.linear += mt.linear; pt.piezas = (pt.piezas || 0) + (mt.piezas || 0);
       });
     }));
     // Agrupadas por superficie (piso, pared, techo, cocina, materiales), como se
@@ -15090,7 +15180,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         // donde ella comprueba que estén todas. El papel y la pantalla usan el
         // mismo `medAgruparPorNivel`, así que los totales no pueden discrepar.
         ct.materiales.forEach(mt => {
-          const tm = medTotalTexto(mt.sqft, mt.linear);
+          const tm = medTotalTexto(mt.sqft, mt.linear, mt.piezas);
           html += `<tr>
             <td style="${MED_TD} font-weight:700;">${esc(mt.material)}</td>
             <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;">${esc(mt.superficie)}</td>
@@ -15124,7 +15214,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
             <td style="${MED_TD} font-weight:700;">${esc(pt.material)}</td>
             <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;">${esc(pt.superficie)}</td>
             <td style="${MED_TD} text-align:center; color:#3A4552;">${pt.cuartos}</td>
-            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medTotalTexto(pt.sqft, pt.linear))}</td>
+            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medTotalTexto(pt.sqft, pt.linear, pt.piezas))}</td>
           </tr>`;
       });
       html += '</table></div>';
