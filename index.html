@@ -6906,7 +6906,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-27-LK';
+  const APP_BUILD = '2026-09-27-LL';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -15012,6 +15012,12 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // Es como se lee un estimado: descripcion, cantidad, unidad. Cuando un mismo
   // material trae dos unidades (area y tramo) no se inventa una sola: la
   // cantidad queda vacia y todo se dice en la columna de la unidad.
+  // SF / LF / EA, que es como vienen escritas las lineas que Flood Doctor
+  // acepta ("Tear out baseboard and bag for disposal - LF", "Light fixture -
+  // Detach - EA"). En la PANTALLA se queda "sq ft" y "linear ft", que es lo
+  // que la cuadrilla entiende; la abreviatura es solo para la hoja del seguro.
+  const MED_UNIDAD_CORTA = { 'sq ft':'SF', 'linear ft':'LF', 'EA':'EA' };
+  const medUnidadCorta = u => MED_UNIDAD_CORTA[u] || u;
   function medQtyUnidad(sqft, linear, piezas){
     const cuantas = (sqft > 0 ? 1 : 0) + (linear > 0 ? 1 : 0) + (piezas > 0 ? 1 : 0);
     if(cuantas !== 1) return { qty: '', unidad: medTotalTexto(sqft, linear, piezas) };
@@ -15174,7 +15180,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           <tr data-nocorte data-cuarto-cab><th style="text-align:left; ${MED_TH}">Material</th>
               <th style="${MED_TH}">Surface</th>
               <th style="${MED_TH}">Qty</th>
-              <th style="${MED_TH}">Unit</th></tr>`;
+              <th style="${MED_TH}">Unit</th>
+              <th style="${MED_TH}" >Meas.</th></tr>`;
         // ---- UNA LINEA POR MATERIAL Y SUPERFICIE, YA SUMADA ----
         //
         // Su pedido del 12 de septiembre:
@@ -15198,18 +15205,24 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         // LAS MEDIDAS DE UNA EN UNA SIGUEN EN LA PANTALLA DE REVISAR, que es
         // donde ella comprueba que estén todas. El papel y la pantalla usan el
         // mismo `medAgruparPorNivel`, así que los totales no pueden discrepar.
+        // CINCO COLUMNAS (27 sep 2026, su correccion): Material, Surface,
+        // Measurements, Quantity, Total. La columna de medidas NO se cambia por
+        // la cantidad - se AGREGA la cantidad. "Measurements" dice de cuantas
+        // partes viene el numero (su regla del 12 de septiembre), "Quantity" es
+        // el numero pelado y "Total" lo trae con su unidad.
+        // COMO LO LEE UN AJUSTADOR (27 sep 2026). Su pedido final: "that's the
+        // way insurance will read it... professional and easy to understand".
+        // Orden de estimado: descripcion, cantidad, unidad. La cuenta de
+        // medidas NO se quita - es su regla del 12 de septiembre - pero va al
+        // final y chiquita: sirve para auditar en la oficina, no para cobrar.
         ct.materiales.forEach(mt => {
           const qu = medQtyUnidad(mt.sqft, mt.linear, mt.piezas);
-          // De cuantas medidas salio el numero sigue estando - su regla del 12
-          // de septiembre ("un total sin decir de cuantas partes viene no se
-          // puede auditar") - pero ya no ocupa una columna entera: va chiquito
-          // al lado del material, y la columna es la CANTIDAD.
-          const deCuantas = mt.n > 1 ? ' <span style="font-weight:400; color:#6B7684; font-size:11px;">(' + mt.n + ' medidas)</span>' : '';
           html += `<tr>
-            <td style="${MED_TD} font-weight:700;">${esc(mt.material)}${deCuantas}</td>
+            <td style="${MED_TD} font-weight:700;">${esc(mt.material)}</td>
             <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;">${esc(mt.superficie)}</td>
             <td style="${MED_TD} text-align:center; font-weight:700;">${esc(qu.qty)}</td>
-            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(qu.unidad)}</td>
+            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medUnidadCorta(qu.unidad))}</td>
+            <td style="${MED_TD} text-align:center; color:#6B7684; font-size:11px;">${mt.n}</td>
           </tr>`;
         });
         html += '</table>';
@@ -15231,16 +15244,16 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         <table style="width:100%; border-collapse:collapse; font-size:13px; margin-bottom:2px;">
           <tr data-nocorte data-cuarto-cab><th style="text-align:left; ${MED_TH}">Material</th>
               <th style="${MED_TH}">Surface</th>
-              <th style="${MED_TH}">Rooms</th>
               <th style="${MED_TH}">Qty</th>
-              <th style="${MED_TH}">Unit</th></tr>`;
+              <th style="${MED_TH}">Unit</th>
+              <th style="${MED_TH}">Rooms</th></tr>`;
       agrupado.partidas.forEach(pt => {
         html += `<tr>
             <td style="${MED_TD} font-weight:700;">${esc(pt.material)}</td>
             <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;">${esc(pt.superficie)}</td>
-            <td style="${MED_TD} text-align:center; color:#3A4552;">${pt.cuartos}</td>
             <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medQtyUnidad(pt.sqft, pt.linear, pt.piezas).qty)}</td>
-            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medQtyUnidad(pt.sqft, pt.linear, pt.piezas).unidad)}</td>
+            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medUnidadCorta(medQtyUnidad(pt.sqft, pt.linear, pt.piezas).unidad))}</td>
+            <td style="${MED_TD} text-align:center; color:#6B7684; font-size:11px;">${pt.cuartos}</td>
           </tr>`;
       });
       html += '</table></div>';
