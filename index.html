@@ -6904,7 +6904,16 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-28-LQ';
+  const APP_BUILD = '2026-09-28-LR';
+
+  // LA REJA DEL AUTO-ACTUALIZADOR.
+  // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
+  // que este paquete web funcione. El telefono NO se baja solo un paquete que
+  // pida mas de lo que tiene instalado: si lo hiciera, la web llamaria a algo
+  // que el binario no trae y reventaria en pleno trabajo.
+  // SE SUBE AQUI SOLO cuando un cambio web EMPIEZA A DEPENDER de codigo Swift
+  // nuevo. Subirla de mas obliga a un cable que no hacia falta.
+  const NATIVE_MIN = '2026-09-28';
 
   // ---- ¿Hay una version nueva? ----
   // Una app instalada que nunca se cierra sigue corriendo el codigo viejo para
@@ -30821,6 +30830,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     refreshInbox();
     setTimeout(checkWebUpdate, 4000); setInterval(checkWebUpdate, 10*60*1000);
     document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') checkWebUpdate(); });
+    // Dentro del app: confirmar que abrio bien, y avisar si ya hay una lista.
+    setTimeout(avisarQueAbrioBien, 3000);
+    setTimeout(checkAppUpdate, 12000); setInterval(checkAppUpdate, 15*60*1000);
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') checkAppUpdate(); });
     setInterval(()=>{ if(document.visibilityState==='visible') refreshInbox(); }, 60000);
     document.addEventListener('visibilitychange', ()=>{
       if(document.visibilityState==='visible'){ flushOutbox(); refreshInbox(); }
@@ -32872,6 +32885,54 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
 
   // En la web (no en el iPhone), una pestaña abierta hace días sigue con la versión vieja hasta que alguien
   // la recargue. Cada rato se pregunta al servidor qué versión hay y, si cambió, se ofrece actualizar.
+  // ---- DENTRO DEL APP DEL TELEFONO ----
+  // Lo de arriba (checkWebUpdate) es para el enlace de la web, que se arregla
+  // recargando. Aqui es distinto: el nativo ya bajo la version nueva y la
+  // dejo lista, pero solo entra al abrir el app EN FRIO. Un recargar no basta,
+  // asi que no se ofrece un boton que no funcionaria.
+  let avisoAppPuesto = false;
+  async function checkAppUpdate(){
+    if(typeof isNative !== 'function' || !isNative()) return;
+    const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Actualizador;
+    if(!A) return;                                   // version vieja del app, sin el plugin
+    try{
+      const e = await A.estado();
+      if(avisoAppPuesto) return;
+      let texto = null, color = null;
+      if(e && e.lista){
+        texto = 'Ya se bajo la version ' + e.lista + '. Cierre el app por completo y abralo otra vez.';
+        color = '#1f6f5b';
+      }else if(e && e.esperandoCable){
+        // Honesto a proposito: no se le promete algo que el telefono no puede
+        // hacer solo. Esta version toca camara o escaner.
+        texto = 'Hay una version nueva (' + e.esperandoCable + ') que trae cambios de camara o escaner. ' +
+                'Esa no se puede bajar sola: hay que instalarla.';
+        color = '#8a5c08';
+      }
+      if(!texto) return;
+      avisoAppPuesto = true;
+      const b = document.createElement('div');
+      b.id = 'appUpdateBar';
+      b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:400;background:' + color +
+        ';color:#fff;padding:10px 14px;font-weight:700;display:flex;gap:10px;align-items:center;' +
+        'justify-content:center;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.35);';
+      b.innerHTML = '<span>' + esc(texto) + '</span>';
+      b.addEventListener('click', ()=>{ b.remove(); avisoAppPuesto = false; });
+      document.body.appendChild(b);
+    }catch(err){}
+  }
+
+  // LA CONFIRMACION QUE SOSTIENE TODA LA RED DE SEGURIDAD.
+  // Si esto no se llama, el nativo asume que el paquete bajado NO abrio bien
+  // y en el siguiente arranque vuelve al que trae el binario. Por eso va
+  // tarde a proposito: solo despues de que la pantalla ya pinto.
+  function avisarQueAbrioBien(){
+    try{
+      const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Actualizador;
+      if(A && A.abrioBien) A.abrioBien();
+    }catch(e){}
+  }
+
   function checkWebUpdate(){
     if(typeof isNative === 'function' && isNative()) return;
     if(!navigator.onLine) return;
