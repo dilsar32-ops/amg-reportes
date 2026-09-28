@@ -3896,7 +3896,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           <b>&#128666; AMG Moving</b>
           <small>Horas, precio, c&oacute;digo y reportes de mudanza</small></button>
         <button type="button" class="menubtn amg" id="mgrGoCal">
-          <b>&#128197; Calendario</b>
+          <b>&#128197; Calendario AMG</b>
           <small>La semana de mudanzas: qu&eacute; d&iacute;as hay trabajo, cu&aacute;ntas personas, camiones y a qu&eacute; hora. La cuadrilla de AMG la ve.</small></button>
         <button type="button" class="menubtn" id="mgrGoHours">
           <b>Horas del equipo y pagos</b>
@@ -3904,6 +3904,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         <button type="button" class="menubtn" id="mgrGoLogs">
           <b>Labor logs recibidos</b>
           <small id="mgrLogsHint">Los reportes que mandó el crew</small></button>
+        <button type="button" class="menubtn amg" id="amgSegInbox">
+          <b>&#128229; Mudanzas recibidas<span class="badge" id="amgInboxBadge" hidden></span></b>
+          <small>Los reportes de mudanza que mand&oacute; la cuadrilla</small></button>
         <!-- EXTRAS (28 sep 2026, pedido suyo): lo que no abre todos los dias
              vive detras de un azulejo, para que lo de diario se vea primero. -->
         <button type="button" class="menubtn" id="mgrGoExtras">
@@ -4219,9 +4222,6 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
            que dice que se hace ahi. Los ids NO cambian -- son los mismos
            botones, con la misma mano que los atiende. -->
       <div class="menugrid" style="margin-bottom:10px;">
-        <button type="button" class="menubtn amg" id="amgSegInbox">
-          <b>&#128229; Mudanzas recibidas<span class="badge" id="amgInboxBadge" hidden></span></b>
-          <small>Los reportes de mudanza que mand&oacute; la cuadrilla</small></button>
         <button type="button" class="menubtn amg" id="amgSegHours">
           <b>&#9201; Horas AMG</b>
           <small>Qui&eacute;n va a mudanza, su tarifa y sus horas sin pagar</small></button>
@@ -6920,7 +6920,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-28-LU';
+  const APP_BUILD = '2026-09-28-LV';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -9742,7 +9742,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // LA UNICA PUERTA a mandar o recibir labor logs de AMG. El precio se revisa
   // en la ENTRADA (y otra vez al mandar); un borrador de la otra empresa
   // nunca se convierte en silencio: se pregunta.
-  async function amgOpenLabor(view){
+  async function amgOpenLabor(view, volverA){
     if(!isManager()) return;
     if(view === 'form'){
       if(!WORK_KINDS_OK){ const ok = await loadWorkKinds(); if(!ok){ alert('No se pudo leer el precio de AMG. Revise su internet y vuelva a intentar.'); return; } }
@@ -9768,12 +9768,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if($('#inboxSegActive')) $('#inboxSegActive').classList.add('on');
     if($('#inboxSegArchived')) $('#inboxSegArchived').classList.remove('on');
     renderInbox();                                                               // lista vacia de AMG - nunca la lista de la otra empresa
-    pushBack('amgmoving');                                                       // ANTES de showTab: con navStack=['amgmoving'] inMgrContext('labor') ya es true
+    // ANTES de showTab: inMgrContext('labor') lee navStack, y tanto
+    // 'amgmoving' como 'manager' lo dejan en true. Se regresa a donde lo
+    // abrieron: desde el menu de enfrente, al menu.
+    pushBack(volverA || 'amgmoving');
     showTab('labor');
     if(view === 'form'){ setTimeout(() => goStep('labor', 0), 0); }              // resetLabor difirio un goStep con laborFormOpen=false; este gana y dibuja el wizard
     else { refreshInbox(); setTimeout(()=>{ const c=$('#inboxWrap'); if(c) c.scrollIntoView({block:'start'}); }, 250); }
   }
-  if($('#amgSegInbox')) $('#amgSegInbox').addEventListener('click', () => amgOpenLabor('inbox'));
+  if($('#amgSegInbox')) $('#amgSegInbox').addEventListener('click', () => amgOpenLabor('inbox', 'manager'));
   if($('#mgMgActivate'))  $('#mgMgActivate').addEventListener('click', activateMg);
   // DENTRO DE CLIENTES: la gente primero; los materiales, en su propia pagina.
   //
