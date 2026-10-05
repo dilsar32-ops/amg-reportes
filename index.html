@@ -6957,7 +6957,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-05-MB';
+  const APP_BUILD = '2026-10-05-MC';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -30518,26 +30518,105 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     }
     return avisos;
   }
-  // Devuelve true si hay que seguir y mandar; false si quiere volver a revisar.
+  // HUECO Y ENCIME NO SON LO MISMO, Y NO PUEDEN TENER LA MISMA SALIDA.
+  //
+  //   HUECO  = tiempo que NO se cobra. Avisa y deja mandar: puede ser real
+  //            (se fueron a comer) y el que sabe es el que estuvo ahi.
+  //   ENCIME = la misma hora contada DOS VECES. Eso no es una opinion, es un
+  //            sobrecobro al cliente. La app ya NO ofrece mandarlo.
+  //
+  // Su correccion del 5 oct 2026, viendo un reporte de Harold con 7:10 AM a
+  // 12:00 AM y 12:00 PM a 4:00 AM - 32 h 50 min en un dia, 12 de ellas
+  // cobradas dos veces: "no deberia darle la opcion de enviarlos... ahi mismo
+  // dice si esta bien asi toque esta bien mandar, y todavia lo pueden enviar
+  // asi y podemos tener problemas como el que estamos teniendo ahora".
+  // Tenia razon: un aviso que se puede saltar con un toque no es una reja.
+  //
+  // Y el aviso ENSENA LAS HORAS. Antes decia "12 horas encimadas entre el
+  // Turno 1 y el Turno 2" sin decir cuales, y por eso no se veia donde estaba
+  // el dedazo. Con los turnos y su duracion a la vista, un turno de 16 h 50
+  // min salta solo.
+  function laborFilaTurno(t){
+    const dur = t.fin - t.ini;
+    const noche = t.fin > 1440;
+    return '<div style="display:flex; justify-content:space-between; gap:12px; padding:7px 0; '
+      + 'border-bottom:1px solid #E6E9ED; font-size:15px;">'
+      + '<span><b>Turno ' + t.n + '</b> &middot; ' + esc(minAHora(t.ini)) + ' a ' + esc(minAHora(t.fin)) + '</span>'
+      + '<span style="white-space:nowrap; color:' + (dur > 840 ? '#B42318' : '#3A4552') + ';">'
+      + minEnPalabras(dur) + (noche ? ' &middot; pasa la medianoche' : '') + '</span></div>';
+  }
+  // Devuelve true si hay que seguir y mandar; false si hay que volver a revisar.
   async function laborAvisarHuecos(){
     const avisos = laborHuecos();
     if(!avisos.length) return true;
-    const total = avisos.filter(a => a.tipo === 'hueco').reduce((n, a) => n + a.minutos, 0);
+    const turnos = laborTurnosEnLinea();
+    const encimes = avisos.filter(a => a.tipo === 'encima');
+    const huecos  = avisos.filter(a => a.tipo === 'hueco');
+    const total = huecos.reduce((n, a) => n + a.minutos, 0);
+    const tabla = '<div style="background:#F6F7F9; border-radius:10px; padding:4px 14px 10px; margin-bottom:14px;">'
+      + '<div style="font-size:13px; color:#3A4552; padding-top:8px;">Los turnos como están ahora:</div>'
+      + turnos.map(laborFilaTurno).join('') + '</div>';
+
     const filas = avisos.map(a => a.tipo === 'hueco'
       ? '<li style="margin:0 0 10px;"><b>' + minEnPalabras(a.minutos) + '</b> sin cobrar entre <b>'
         + esc(minAHora(a.desde)) + '</b> y <b>' + esc(minAHora(a.hasta)) + '</b>'
         + '<div style="font-size:14px; color:#3A4552;">Turno ' + a.a + ' terminó y el Turno ' + a.b
         + ' empezó después. Esa hora no está en ningún turno, así que no sale en el reporte.</div></li>'
-      : '<li style="margin:0 0 10px;"><b>' + minEnPalabras(a.minutos) + ' encimados</b> entre el Turno '
+      : '<li style="margin:0 0 10px;"><b>' + minEnPalabras(a.minutos) + ' encimadas</b> entre el Turno '
         + a.a + ' y el Turno ' + a.b
-        + '<div style="font-size:14px; color:#3A4552;">Se cobrarían dos veces. Revise las horas.</div></li>'
+        + '<div style="font-size:14px; color:#3A4552;">Esas horas se cobrarían <b>dos veces</b>: de '
+        + esc(minAHora(a.desde)) + ' a ' + esc(minAHora(a.hasta)) + ' está en los dos turnos.</div></li>'
     ).join('');
+
+    // EL DEDAZO DE SIEMPRE: 12:00 AM es medianoche, 12:00 PM es mediodía, y la
+    // ruedita del teléfono las deja juntas. Se PREGUNTA, no se corrige solo:
+    // en restauración sí hay trabajos de noche de verdad.
+    // OJO CON LOS LIMITES, que la primera version los dejo fuera y la pista
+    // nunca salio en el caso que la motivo: un turno que termina EXACTO a
+    // medianoche tiene fin === 1440 (no mayor), y uno que empieza AL
+    // mediodia tiene ini === 720 (no menor). Los dos son sospechosos.
+    const sospechoso = turnos.filter(t => t.fin >= 1440 && t.ini <= 720);
+    const pista = (encimes.length && sospechoso.length)
+      ? '<div style="background:#FFF4E5; border:1px solid #F0C48A; border-radius:10px; padding:12px 14px; margin:14px 0 0; font-size:15px;">'
+        + sospechoso.map(t => 'El <b>Turno ' + t.n + '</b> empieza a las ' + esc(minAHora(t.ini))
+            + ' y termina a las ' + esc(minAHora(t.fin % 1440)) + ' <b>del día siguiente</b>.').join('<br>')
+        + '<div style="margin-top:6px;">¿No quiso poner <b>PM</b>? Medianoche es 12:00 <b>AM</b> y mediodía es 12:00 <b>PM</b>.</div></div>'
+      : '';
+
+    // ---- CON ENCIME: no se ofrece mandar. Una sola salida, a corregir. ----
+    if(encimes.length){
+      const dobles = encimes.reduce((n, a) => n + a.minutos, 0);
+      const html =
+          '<div style="padding:18px 20px; color:#1C2530; font-family:-apple-system,system-ui,sans-serif;">'
+        + '<div style="font-size:20px; font-weight:700; margin-bottom:4px;">Así no se puede mandar</div>'
+        + '<div style="font-size:14px; color:#3A4552; margin-bottom:14px;">This cannot be sent as it is</div>'
+        + '<div style="background:#FEF3F2; border:1px solid #FDA29B; border-radius:10px; padding:12px 14px; margin-bottom:14px; font-size:16px;">'
+        + 'Hay <b>' + minEnPalabras(dobles) + '</b> contadas dos veces. Si esto se manda, al cliente se le '
+        + 'cobran esas horas de más.</div>'
+        + tabla
+        + '<ul style="margin:0; padding-left:20px; font-size:16px; line-height:1.4;">' + filas + '</ul>'
+        + pista
+        + '<div style="font-size:14px; color:#3A4552; margin-top:16px;">Corrija los turnos y vuelva a mandar. '
+        + 'En cuanto no haya horas encimadas, el reporte se manda normal.</div></div>';
+      await previaVer({
+        titulo: 'Horas encimadas / Overlapping hours',
+        html: html,
+        cancelar: 'Volver a revisar<span class="en"> / Go back</span>'
+      });
+      const i = stepsFor('labor').findIndex(x => x.k === 'shifts');
+      if(i >= 0) goStep('labor', i);
+      window.scrollTo(0, 0);
+      return false;
+    }
+
+    // ---- SOLO HUECOS: se avisa, y el decide. Puede ser real. ----
     const html =
         '<div style="padding:18px 20px; color:#1C2530; font-family:-apple-system,system-ui,sans-serif;">'
       + '<div style="font-size:20px; font-weight:700; margin-bottom:4px;">Revise las horas antes de mandar</div>'
       + '<div style="font-size:14px; color:#3A4552; margin-bottom:14px;">Check the hours before sending</div>'
       + (total ? '<div style="background:#FFF4E5; border:1px solid #F0C48A; border-radius:10px; padding:12px 14px; margin-bottom:14px; font-size:16px;">'
                  + 'En total hay <b>' + minEnPalabras(total) + '</b> que no se están cobrando.</div>' : '')
+      + tabla
       + '<ul style="margin:0; padding-left:20px; font-size:16px; line-height:1.4;">' + filas + '</ul>'
       + '<div style="font-size:14px; color:#3A4552; margin-top:16px;">Si está bien así, toque <b>Está bien, mandar</b>. '
       + 'Si falta una hora, toque <b>Volver a revisar</b> y corrija los turnos.</div></div>';
@@ -33491,7 +33570,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
             // cliquearle hasta ahi arriba"). Ahora abajo hay un boton ancho que
             // hace lo mismo.
             : '<div class="med-previa-pie">'
-              + '<button type="button" class="btn btn-outline" data-previa-cerrar style="width:100%;">&#9664; Atrás<span class="en"> / Back</span></button></div>');
+              // Sin confirmar, el rotulo tambien se puede cambiar: el aviso de
+              // horas encimadas NO ofrece mandar, y su unica salida tiene que
+              // decir que lleva a corregir, no un "Atras" que suena a cancelar.
+              + '<button type="button" class="btn btn-outline" data-previa-cerrar style="width:100%;">'
+              + (o.cancelar || '&#9664; Atrás<span class="en"> / Back</span>') + '</button></div>');
       document.body.appendChild(capa);
       const antes = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
