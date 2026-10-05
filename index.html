@@ -3172,6 +3172,26 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         <summary><span id="fpValidationSummaryLabel">Revisión del plano</span></summary>
         <div id="floorplanValidation" style="margin-top:8px;"></div>
       </details>
+      <!-- NOMBRES DESDE EL OTRO PLANO (Matterport). Su pedido del 5 oct:
+           sacan el plano en Matterport con sus nombres y el plano aqui con el
+           escaner, y los nombres tienen que coincidir en los dos, del mismo
+           cliente. Se trae una captura del plano de Matterport, el telefono le
+           lee los nombres, y el asistente PROPONE cual va con cual. Nada se
+           aplica solo: cada nombre se confirma. Un nombre equivocado aqui se
+           va derecho al scope sheet que lee el ajustador. -->
+      <details class="fp-collapse" id="fpImportCollapse">
+        <summary><span id="fpImportSummaryLabel">Names from the other plan</span></summary>
+        <div style="margin-top:8px;">
+          <p class="hint" id="fpImportIntro">Add a screenshot of the Matterport floor plan for this client.
+            The phone reads the room names off it and suggests which one goes with each scanned room.
+            You confirm every name before anything changes.</p>
+          <input type="file" id="fpImportFile" accept="image/*" style="display:none;">
+          <button class="btn btn-outline" type="button" id="fpImportPick" style="width:100%;">Add the Matterport plan</button>
+          <div id="fpImportStatus" class="hint" style="margin-top:8px;"></div>
+          <div id="fpImportPreview" style="margin-top:10px;" hidden></div>
+          <div id="fpImportMatches" style="margin-top:10px;"></div>
+        </div>
+      </details>
       <details class="fp-collapse" id="fpRoomsCollapse">
         <summary><span id="fpRoomsSummaryLabel">Cuartos</span></summary>
         <div id="floorplanRoomList" style="margin-top:6px;"></div>
@@ -5141,6 +5161,23 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   }
   // Seguro y storage los paga la empresa: se escoge solo (si nadie lo ha cambiado a mano) para que no queden
   // anotados como dinero que se le debe al manager.
+  // Los botones de importar viven en su propia seccion, FUERA de
+  // #floorplanRoomList - por eso el oyente va en el documento. (Primero los
+  // colgue del oyente de la lista de cuartos y los clics nunca llegaban: eso
+  // no lo ve un chequeo de sintaxis, solo se ve tocando el boton.)
+  document.addEventListener('click', e => {
+    if(e.target.closest('#fpImportPick')){ const f = $('#fpImportFile'); if(f) f.click(); return; }
+    if(e.target.closest('#fpImportApply')){ fpImportAplicar(); return; }
+  });
+
+  // La captura del otro plano. Delegado, porque la seccion vive dentro de un
+  // <details> que puede no estar abierto cuando arranca la pagina.
+  document.addEventListener('change', e => {
+    const f = e.target.closest('#fpImportFile');
+    if(!f || !f.files || !f.files[0]) return;
+    fpImportLeer(f.files[0]);
+    f.value = '';                      // para poder traer la MISMA captura otra vez
+  });
   document.addEventListener('change', e => {
     if(e.target && e.target.id === 'g-what'){
       const w = $('#g-what'), who = $('#g-who');
@@ -6920,7 +6957,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-09-28-MA';
+  const APP_BUILD = '2026-10-05-MB';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -20314,6 +20351,298 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       return `${name}: ${en.count != null ? en.count : '?'}`;
     }).join(' &middot; ');
   }
+
+  // ================= NOMBRES DESDE EL OTRO PLANO (Matterport) =================
+  // Su pedido del 5 oct 2026: "sacamos el floor plan en Matterport, pero tambien
+  // sacamos el floor plan en la aplicacion, y los nombres tienen que coincidir
+  // en ambos planos, del mismo cliente".
+  //
+  // POR QUE NO SE HACE POR LA API, que seria mejor: el tiene acceso de
+  // produccion, pero sus 5 tokens estan ocupados y uno lo usa otra aplicacion.
+  // Con la API el plano guardaria el ID del cuarto y un renombre alla se
+  // reflejaria solo, para siempre. Con la captura se guarda TEXTO: si manana
+  // renombran en Matterport, hay que traer otra captura. Es manual cada vez, y
+  // asi se lo dije. Si algun dia se libera un token, esta misma pantalla sirve.
+  //
+  // POR QUE EL ASISTENTE PROPONE Y NO APLICA: los dos planos no tienen la misma
+  // forma a proposito - en Matterport enderezan paredes, borran la pared falsa
+  // del plastico de contencion y meten paredes invisibles. Y no comparten
+  // origen ni rotacion. Emparejar solo, a ciegas, pondria un nombre equivocado
+  // limpio y seguro en un scope sheet que lee el ajustador. Propone; el confirma.
+  var fpImport = null;        // { img, nombres:[], propuesta:{} } - vive en memoria
+
+  // ---- Separar NOMBRES de lo demas que trae un plano -------------------
+  // Una captura de Matterport trae tambien medidas (12' 3" x 10' 6"), areas
+  // (129 sq ft), el titulo y su logo. Nada de eso es un nombre de cuarto.
+  var FP_IMPORT_RUIDO = /^(matterport|floor\s*plan|scale|north|page|sq\.?\s*ft|sf)$/i;
+  function fpEsMedida(t){ return /^[\s\d'"×xX.,\-–—]+$/.test(t); }
+  function fpAreaDeLinea(t){
+    var m = String(t).match(/([\d.,]+)\s*(?:sq\.?\s*ft|sf|ft²|ft2)\b/i);
+    return m ? parseFloat(m[1].replace(/,/g, '')) : null;
+  }
+  // "12' 3" x 10' 6"" -> 128.6. Sirve cuando el plano no imprime los sq ft:
+  // el area sale de las medidas, que casi siempre si estan.
+  function fpPiesDeTexto(t){
+    var m = String(t).match(/(\d+)\s*'\s*(?:(\d+(?:\.\d+)?)\s*")?/);
+    return m ? (parseFloat(m[1]) + (m[2] ? parseFloat(m[2]) / 12 : 0)) : null;
+  }
+  function fpAreaDeMedidas(t){
+    var p = String(t).split(/\s*[×xX]\s*/);
+    if(p.length !== 2) return null;
+    var a = fpPiesDeTexto(p[0]), b = fpPiesDeTexto(p[1]);
+    return (a && b) ? a * b : null;
+  }
+  function fpImportDetectar(lineas){
+    var crudo = (lineas || []).map(function(l){
+      return { texto: String(l.texto || '').trim(),
+               x: Number(l.x) + Number(l.w) / 2, y: Number(l.y) + Number(l.h) / 2 };
+    }).filter(function(l){ return l.texto; });
+
+    var nombres = [], sueltos = [];
+    crudo.forEach(function(l){
+      var t = l.texto;
+      var area = fpAreaDeLinea(t) || fpAreaDeMedidas(t);
+      if(area){ sueltos.push({ area: area, x: l.x, y: l.y }); return; }
+      if(fpEsMedida(t) || FP_IMPORT_RUIDO.test(t)) return;
+      var letras = (t.match(/[A-Za-zÁÉÍÓÚÑáéíóúñ]/g) || []).length;
+      var sinEspacio = t.replace(/\s/g, '').length;
+      // Un nombre es sobre todo letras. Asi se cae "1st", "3 of 5", "0'-6"".
+      if(letras < 2 || sinEspacio === 0 || letras / sinEspacio < 0.55) return;
+      if(t.length > 40) return;
+      nombres.push({ nombre: t, x: l.x, y: l.y, area: null });
+    });
+
+    // Pegarle a cada nombre el area que tenga mas cerca (normalmente justo
+    // debajo). Si queda lejos no se le pega: mejor sin area que con la del
+    // cuarto de al lado.
+    nombres.forEach(function(n){
+      var mejor = null, d = 0.08;
+      sueltos.forEach(function(s){
+        var dd = Math.hypot(s.x - n.x, s.y - n.y);
+        if(dd < d){ d = dd; mejor = s; }
+      });
+      if(mejor) n.area = mejor.area;
+    });
+    return nombres;
+  }
+
+  // ---- El asistente compara los dos planos -----------------------------
+  // Dos senales, y las dos se le ensenan al usuario para que pueda juzgar:
+  //   AREA   - el area del cuarto escaneado contra la que trae el otro plano.
+  //            Es la fuerte: un numero contra un numero.
+  //   LUGAR  - donde cae cada nombre en la imagen contra donde cae cada cuarto
+  //            en el plano. Como no comparten origen ni rotacion, se prueban
+  //            las 8 orientaciones (4 giros x espejo) y se queda la que cuadra
+  //            mejor en conjunto.
+  function fpNormalizar(pts){
+    if(!pts.length) return [];
+    var xs = pts.map(function(p){ return p.x; }), ys = pts.map(function(p){ return p.y; });
+    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+    var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    var ax = (x1 - x0) || 1, ay = (y1 - y0) || 1;
+    return pts.map(function(p){ return { x: (p.x - x0) / ax, y: (p.y - y0) / ay, ref: p }; });
+  }
+  function fpOrientar(pts, giro, espejo){
+    return pts.map(function(p){
+      var x = espejo ? 1 - p.x : p.x, y = p.y, t;
+      if(giro === 1){ t = x; x = 1 - y; y = t; }
+      else if(giro === 2){ x = 1 - x; y = 1 - y; }
+      else if(giro === 3){ t = x; x = y; y = 1 - t; }
+      return { x: x, y: y, ref: p.ref };
+    });
+  }
+  function fpProponerNombres(rooms, nombres){
+    var cuartos = rooms.map(function(r, i){
+      var a = floorplanLabelAnchor(r) || { x: 0, y: 0 };
+      return { idx: i, x: a.x, y: a.y, area: fpRoomDisplayAreaSqFt(r) };
+    });
+    if(!cuartos.length || !nombres.length) return {};
+
+    var nc = fpNormalizar(cuartos), nn = fpNormalizar(nombres);
+    var mejorOrient = null, mejorCosto = Infinity;
+    for(var g = 0; g < 4; g++){
+      for(var e = 0; e < 2; e++){
+        var puestos = fpOrientar(nn, g, !!e);
+        var costo = 0;
+        nc.forEach(function(c){
+          var d = Infinity;
+          puestos.forEach(function(p){ d = Math.min(d, Math.hypot(p.x - c.x, p.y - c.y)); });
+          costo += d;
+        });
+        if(costo < mejorCosto){ mejorCosto = costo; mejorOrient = puestos; }
+      }
+    }
+
+    // Todas las parejas posibles, ordenadas de la mas barata a la mas cara, y
+    // se van tomando sin repetir. Con 5-15 cuartos esto es exacto en la
+    // practica y, sobre todo, se puede explicar: cada propuesta dice por que.
+    // CON POCOS CUARTOS EL LUGAR NO DICE NADA. Normalizar dos o tres puntos
+    // los pega a las esquinas de la misma caja y la distancia sale casi cero
+    // siempre - la senal se vuelve ruido que ADEMAS tapa un area que no cuadra.
+    // Con menos de tres de cada lado, manda el area o no se propone.
+    var hayLugar = nc.length >= 3 && mejorOrient.length >= 3;
+
+    var pares = [];
+    nc.forEach(function(c) {
+      mejorOrient.forEach(function(p){
+        var dist = Math.hypot(p.x - c.x, p.y - c.y);
+        var areaDif = null;
+        if(c.ref.area > 0 && p.ref.area > 0){
+          areaDif = Math.abs(c.ref.area - p.ref.area) / Math.max(c.ref.area, p.ref.area);
+        }
+        // EL AREA MANDA SOLA cuando los dos la tienen. Dos numeros tan
+        // separados no son el mismo cuarto, caiga donde caiga en el dibujo:
+        // asi un plano de otra casa no propone nada en vez de proponer
+        // cualquier cosa con cara de segura.
+        if(areaDif !== null && areaDif > 0.35) return;
+        if(!hayLugar && areaDif === null) return;      // sin area y sin lugar, no se adivina
+        var costo = areaDif === null ? dist
+                  : (hayLugar ? 0.45 * dist + 0.55 * areaDif : areaDif);
+        pares.push({ roomIdx: c.ref.idx, nombre: p.ref.nombre, dist: dist,
+                     areaDif: areaDif, areaOtro: p.ref.area, areaMia: c.ref.area, costo: costo });
+      });
+    });
+    pares.sort(function(a, b){ return a.costo - b.costo; });
+
+    var out = {}, usados = {};
+    pares.forEach(function(p){
+      if(out[p.roomIdx] || usados[p.nombre]) return;
+      // Una pareja francamente mala no se propone: dejarla vacia es mas
+      // honesto que ofrecer un nombre al azar y que alguien lo acepte.
+      if(p.costo > 0.62) return;
+      usados[p.nombre] = 1;
+      out[p.roomIdx] = {
+        nombre: p.nombre,
+        porque: p.areaDif !== null && p.areaDif < 0.18
+          ? ('area ' + p.areaMia.toFixed(0) + ' vs ' + p.areaOtro.toFixed(0) + ' sq ft')
+          : (p.areaDif !== null ? 'position (areas differ: ' + p.areaMia.toFixed(0) + ' vs ' + p.areaOtro.toFixed(0) + ')'
+                                : 'position on the plan')
+      };
+    });
+    return out;
+  }
+
+  // ---- Leer la captura -------------------------------------------------
+  async function fpImportLeer(file){
+    var est = $('#fpImportStatus');
+    var Texto = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Texto;
+    if(!isNative() || !Texto){
+      if(est) est.textContent = 'Reading a plan only works in the phone app.';
+      return;
+    }
+    if(!floorplanData){ if(est) est.textContent = 'Scan a plan first.'; return; }
+    if(est) est.textContent = 'Reading the plan…';
+    try{
+      var base64 = await cliFotoABase64(file);
+      var r = await Texto.reconocer({ base64 });
+      var nombres = fpImportDetectar((r && r.lineas) || []);
+      if(!nombres.length){
+        fpImport = null;
+        $('#fpImportPreview').hidden = true;
+        $('#fpImportMatches').innerHTML = '';
+        if(est) est.textContent = 'I could not find any room names in that image. Try a bigger screenshot, or one zoomed in on the plan.';
+        return;
+      }
+      // La imagen se queda a la vista mientras empareja: esta mirando los dos.
+      fpImport = { img: 'data:image/jpeg;base64,' + base64, nombres: nombres, propuesta: {} };
+      var rooms = fpImportCuartos();
+      fpImport.propuesta = fpProponerNombres(rooms.map(function(x){ return x.room; }), nombres);
+      // fpProponerNombres indexa sobre la lista que recibe; se traduce al
+      // indice real del cuarto en floorplanData.rooms.
+      var trad = {};
+      Object.keys(fpImport.propuesta).forEach(function(k){
+        var real = rooms[Number(k)];
+        if(real) trad[real.idx] = fpImport.propuesta[k];
+      });
+      fpImport.propuesta = trad;
+      var conProp = Object.keys(trad).length;
+      if(est) est.textContent = 'Found ' + nombres.length + ' name' + (nombres.length === 1 ? '' : 's') +
+        ' - matched ' + conProp + ' of ' + rooms.length + ' scanned rooms. Check every one before applying.';
+      fpImportPintar();
+    }catch(err){
+      if(est) est.textContent = 'Could not read that image. Try another screenshot.';
+    }
+  }
+  // Solo los cuartos que se ven ahorita: una captura de Matterport es de UN
+  // piso, y ofrecerle los del otro piso seria invitarlo a equivocarse.
+  function fpImportCuartos(){
+    var rooms = (floorplanData && floorplanData.rooms) || [];
+    var multi = floorplanLevels(floorplanData).length > 1;
+    var out = [];
+    rooms.forEach(function(r, i){
+      if(r.deleted) return;
+      if(multi && (r.level || 1) !== floorplanSelectedLevel) return;
+      out.push({ idx: i, room: r });
+    });
+    return out;
+  }
+  function fpImportPintar(){
+    var prev = $('#fpImportPreview'), caja = $('#fpImportMatches');
+    if(!prev || !caja) return;
+    if(!fpImport){ prev.hidden = true; caja.innerHTML = ''; return; }
+    prev.hidden = false;
+    prev.innerHTML = '<img src="' + fpImport.img + '" alt="Matterport plan" ' +
+      'style="width:100%; border-radius:10px; border:1px solid var(--line); background:#fff;">';
+
+    var ops = fpImport.nombres.map(function(n){
+      return '<option value="' + esc(n.nombre) + '">' + esc(n.nombre) +
+             (n.area ? ' (' + n.area.toFixed(0) + ' sq ft)' : '') + '</option>';
+    }).join('');
+
+    caja.innerHTML = fpImportCuartos().map(function(c){
+      var p = fpImport.propuesta[c.idx];
+      var area = fpRoomDisplayAreaSqFt(c.room).toFixed(1);
+      var ahora = c.room.roomName ? 'now: "' + esc(c.room.roomName) + '"' : 'no name yet';
+      // PRIMERA OPCION VACIA, SIEMPRE. Un select que llega con algo escogido y
+      // sin salida hace que se acepte lo que sea; aqui lo escogido es una
+      // PROPUESTA y "leave as is" tiene que estar disponible de entrada.
+      var sel = '<select class="fpImportSel" data-room-idx="' + c.idx + '">' +
+        '<option value="">&mdash; leave as is &mdash;</option>' + ops + '</select>';
+      return '<div class="field" style="margin-top:10px;">' +
+        '<label>Room ' + (c.idx + 1) + ' &middot; ' + area + ' sq ft &middot; ' + ahora + '</label>' +
+        sel +
+        (p ? '<div class="hint" style="margin-top:4px;">Suggested by ' + esc(p.porque) + '</div>'
+           : '<div class="hint" style="margin-top:4px;">No confident match &mdash; pick one yourself if you know it.</div>') +
+        '</div>';
+    }).join('') +
+      '<button class="btn" type="button" id="fpImportApply" style="width:100%; margin-top:12px;">Apply the names I picked</button>' +
+      '<p class="hint" style="margin-top:6px;">These names are copied as text. If you rename a room in Matterport later, bring a new screenshot &mdash; the app will not find out on its own.</p>';
+
+    // La propuesta se deja escogida DESPUES de pintar, no en el HTML, para que
+    // un nombre con comillas no rompa el select.
+    fpImportCuartos().forEach(function(c){
+      var p = fpImport.propuesta[c.idx];
+      var s = $('.fpImportSel[data-room-idx="' + c.idx + '"]');
+      if(s && p) s.value = p.nombre;
+    });
+  }
+  function fpImportAplicar(){
+    if(!fpImport || !floorplanData) return;
+    var cambios = [];
+    fpImportCuartos().forEach(function(c){
+      var s = $('.fpImportSel[data-room-idx="' + c.idx + '"]');
+      var v = (s && s.value || '').trim();
+      if(v && v !== (c.room.roomName || '')) cambios.push({ idx: c.idx, room: c.room, nombre: v });
+    });
+    if(!cambios.length){
+      $('#fpImportStatus').textContent = 'Nothing to change - no names were picked.';
+      return;
+    }
+    fpPushUndo();
+    cambios.forEach(function(ch){
+      ch.room.roomName = ch.nombre;
+      ch.room._suggestedConfidence = null;
+      ch.room._namedByVoice = false;
+      ch.room._nameFromPlan = true;          // vino del otro plano, no del escaner
+      if(typeof fpMemRememberRoom === 'function') fpMemRememberRoom(ch.nombre, ch.room);
+    });
+    saveFloorplanDraft();
+    renderFloorplanSvg(floorplanData);
+    renderFloorplanRoomList(floorplanData);
+    $('#fpImportStatus').textContent = '✓ Renamed ' + cambios.length + ' room' +
+      (cambios.length === 1 ? '' : 's') + '. Undo is available if something went to the wrong room.';
+  }
+
   function renderFloorplanRoomList(data){
     const rooms = data.rooms || [];
     const multi = floorplanLevels(data).length > 1;
