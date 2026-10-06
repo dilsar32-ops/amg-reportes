@@ -7103,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MW';
+  const APP_BUILD = '2026-10-06-MX';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -13338,6 +13338,38 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     return c;
   }
 
+  // ---- QUE CONTESTE HABLANDO ----
+  // Su pedido: "deberia de tener sonido, como cuando me esta escuchando".
+  // En el campo, con las manos sucias y el telefono en el bolsillo, una
+  // pregunta escrita en la pantalla no sirve de nada.
+  //
+  // Devuelve cuanto va a tardar en decirlo, para no volver a oir encima de su
+  // propia voz.
+  // Lo que contesta cuando anoto algo. Corto a proposito: repetir la lista
+  // entera en cada frase cansa y tapa lo que sigue diciendo.
+  function avLoAnotado(vista){
+    try{
+      var ultima = (vista.habitaciones || [])[vista.habitaciones.length - 1];
+      if(!ultima || !(ultima.items || []).length) return '';
+      var i = ultima.items[ultima.items.length - 1];
+      if(!i.delCatalogo) return '';
+      var cuantos = (i.n == null ? '' : i.n + ' ');
+      var nom = i.enLista || i.delCatalogo;
+      if(i.n === 1) nom = String(nom).replace(/s$/, '');
+      var verbo = i.accion === 'quito' ? 'Quitó' : i.accion === 'sigue' ? 'Quedan' : 'Anotado';
+      return verbo + ' ' + cuantos + nom + (ultima.nombre ? ' en ' + ultima.nombre : '');
+    }catch(e){ return ''; }
+  }
+
+  async function avHablar(texto){
+    var S = avPlugin();
+    if(!S || !S.hablar || !texto) return 0;
+    try{
+      var r = await S.hablar({ texto: String(texto), idioma: AV.idioma });
+      return (r && r.segundos) ? r.segundos * 1000 : 1500;
+    }catch(e){ return 0; }
+  }
+
   // EL SI / NO DE LA CONFIRMACION. Aqui es donde el asistente aprende, y por
   // eso guarda las DOS respuestas: un "no" pesa igual que un "si". Si estan
   // empatados, la proxima vez vuelve a preguntar en vez de dar por hecho.
@@ -13384,6 +13416,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(!AV.anim) avDibujar();
     // Arranca oyendo de una: abrirlo YA ES decir que quiere hablar.
     avEscuchar();
+    // Y lo dice, para que no tenga que mirar la pantalla para saber que ya
+    // lo esta oyendo.
+    avHablar('Lo escucho.');
   }
   async function avCerrar(){
     var ov = $('#avOverlay');
@@ -13404,8 +13439,18 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     }
     if(AV.estado === 'escuchando'){ await avParar(); return; }
     try{
-      avTexto(''); avPintarPrueba(null); avEstado('escuchando');
-      var ovl = $('#avOverlay'); if(ovl){ ovl.classList.remove('con-lectura'); ovl.scrollTop = 0; }
+      // SE LIMPIA LO QUE SE OYO, NO LO QUE SE ANOTO.
+      //
+      // Esto era lo que el veia como "cierra la ventana rapido": al seguir
+      // oyendo para que contestara hablando, se borraba el panel con el
+      // resultado. Lo anotado es de toda la conversacion y tiene que quedarse
+      // a la vista; lo unico que empieza de cero es la frase nueva.
+      avTexto(''); avEstado('escuchando');
+      var ovl = $('#avOverlay');
+      if(ovl && !(AV.acum && AV.acum.habitaciones && AV.acum.habitaciones.length)){
+        avPintarPrueba(null);
+        ovl.classList.remove('con-lectura'); ovl.scrollTop = 0;
+      }
       AV.otras = []; AV.dudosos = []; AV.porIdioma = {};
       S.removeAllListeners && S.removeAllListeners();
       S.addListener('nivel', function(d){ AV.nivel = Math.max(0, Math.min(1, (d && d.nivel) || 0)); });
@@ -13496,17 +13541,24 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       AV.acum.pendiente = falta.length ? falta[0] : null;
       avPintarLectura(vista);
       if(vista.pregunta){
-        // SIGUE OYENDO. El chiste de una conversacion es contestar hablando,
-        // no tener que tocar la pantalla con las manos sucias.
+        // LA PREGUNTA SE DICE EN VOZ ALTA, y se vuelve a oir SOLO cuando
+        // termino de decirla: si no, el asistente se oiria a si mismo o le
+        // cortaria la respuesta a media pregunta.
         avEstado('respondiendo', 'Conteste hablando. Toque la esfera si ya terminó.');
-        setTimeout(function(){
-          if(AV.abierto && AV.estado === 'respondiendo') avEscuchar();
-        }, 600);
+        avHablar(vista.pregunta).then(function(ms){
+          setTimeout(function(){
+            if(AV.abierto && AV.estado === 'respondiendo') avEscuchar();
+          }, Math.max(600, ms));
+        });
       }else{
+        // Sin pregunta, una confirmacion corta: que sepa que quedo anotado
+        // sin tener que mirar la pantalla.
         avEstado('esperando', 'Anotado. Siga hablando o toque la esfera para terminar.');
-        setTimeout(function(){
-          if(AV.abierto && AV.estado === 'esperando') avEscuchar();
-        }, 600);
+        avHablar(avLoAnotado(vista)).then(function(ms){
+          setTimeout(function(){
+            if(AV.abierto && AV.estado === 'esperando') avEscuchar();
+          }, Math.max(600, ms));
+        });
       }
     }).catch(function(err){
       if(acabo || !AV.abierto) return;
@@ -13988,14 +14040,18 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         : (llanos.length ? llanos.indexOf(vozLlano(h.nombre)) > -1
                          : !!avBuscarFrase(vozLlano(h.nombre).split(' '), AV_CUARTOS, 'k'));
       (h.items || []).forEach(function(it){
-        // Si el modelo ya lo amarro al catalogo, ese es. La lista aqui solo
-        // CONFIRMA que el nombre existe de verdad - el modelo no puede
-        // inventarse una fila que no esta en la plantilla.
+        // Si el modelo ya lo amarro al catalogo, ese es - PERO tiene que ser
+        // un nombre de verdad de la plantilla.
+        //
+        // Esto fallaba: el modelo devolvia "jepa" como si fuera del catalogo,
+        // y yo lo dejaba pasar tal cual. Resultado: en pantalla salia "jepa"
+        // como si fuera un equipo, y nunca llegaba ni a la lista ni al oido,
+        // que son los que SI lo convierten en HEPAs. Si no es un nombre real,
+        // se suelta y sigue el camino normal.
         if(it.delCatalogo){
           var fila = VOZ_EQUIPO.filter(function(e){ return vozLlano(e.en) === vozLlano(it.delCatalogo); })[0];
-          it.conocido = !!fila;
-          if(fila) it.enLista = fila.en;
-          return;
+          if(fila){ it.conocido = true; it.enLista = fila.en; return; }
+          it.delCatalogo = '';
         }
         // Sin amarre del modelo se intenta por la lista exacta.
         var p = vozLlano(it.nombre).split(' ');
