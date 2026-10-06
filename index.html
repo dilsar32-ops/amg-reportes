@@ -2343,6 +2343,14 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
              dentro el que ya existe, no rearma nada. -->
         <button class="btn btn-outline" type="button" id="convPrevia" style="width:100%; margin-top:10px;">&#128065; Vista previa<span class="en"> / Preview</span></button>
         <button class="btn btn-ink" type="button" id="convPdf" style="width:100%; margin-top:6px;">Descargar PDF</button>
+        <!-- CAMBIAR LOS TURNOS. Al abrir un reporte recibido, loadPayload SI
+             llena el formulario, pero en la vista del manager las tarjetas de
+             pasos estan escondidas: habia "Guardar cambios" y nada que
+             cambiar. Medido en el navegador: con el reporte abierto,
+             ninguna .shift-card es visible. Este boton abre el formulario
+             DIRECTO EN LOS TURNOS - no en Job Info, que para el manager es
+             la pregunta que ya rechazo una vez. -->
+        <button class="btn btn-outline" type="button" id="convEdit" style="width:100%; margin-top:6px;" hidden>&#9999;&#65039; Cambiar los turnos<span class="en"> / Edit shifts</span></button>
         <button class="btn btn-outline" type="button" id="convSave" style="width:100%; margin-top:6px;" hidden>Guardar cambios</button>
         <button class="btn btn-amg" type="button" id="convInvoice" style="width:100%; margin-top:6px;" hidden>&#129534; Hacer invoice de este cliente</button>
         <p class="hint" id="convInvoiceHint" hidden style="margin:4px 0 0;"></p>
@@ -6963,7 +6971,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-05-MD';
+  const APP_BUILD = '2026-10-05-ME';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -11865,6 +11873,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // una hoja sin precio no se manda, pero MIRARLA es justo como se ve que
   // falta. El PDF si se apaga porque ese si es un documento que sale.
   $('#convPrevia').addEventListener('click', ()=>{ $('[data-previa-tab="labor"]').click(); });
+  // Abre el formulario parado EN LOS TURNOS. El panel del manager (con
+  // Guardar cambios) sigue abajo: cambia arriba, baja y guarda.
+  $('#convEdit').addEventListener('click', ()=>{
+    laborFormOpen = true;
+    const i = stepsFor('labor').findIndex(x => x.k === 'shifts');
+    goStep('labor', i >= 0 ? i : 0);
+    const c = $$('.shift-card', shiftsContainer)[0];
+    if(c) c.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0);
+  });
 
   $('#convSave').addEventListener('click', async ()=>{
     if(!openLogId) return;
@@ -12198,9 +12215,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     laborMode = (row.work_kind === 'mudanza') ? 'mudanza' : 'restauracion';   // un log SIEMPRE se abre bajo su propia empresa
     openLogId = row.id;
     loadPayload(row.payload, row.work_kind);
+    // Abrir un reporte SIEMPRE devuelve al panel, aunque venga de estar
+    // editando otro: si no, caeria en el formulario del anterior pero con los
+    // datos del nuevo, y no se entenderia donde esta parado.
+    laborFormOpen = false;
+    goStep('labor', 0);
     showConversion();
     $('#convDelete').hidden = false;
     $('#convSave').hidden = false;
+    $('#convEdit').hidden = false;
     $('#convArchive').hidden = !!row.archived_at;
     $('#convUnarchive').hidden = !row.archived_at;
     if(!row.seen){ row.seen = true; renderInbox(); markSeen(row.id); }
@@ -12229,9 +12252,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     showTab('labor');
     openLogId = row.id;
     loadPayload(row.payload, row.work_kind);
+    // Abrir un reporte SIEMPRE devuelve al panel, aunque venga de estar
+    // editando otro: si no, caeria en el formulario del anterior pero con los
+    // datos del nuevo, y no se entenderia donde esta parado.
+    laborFormOpen = false;
+    goStep('labor', 0);
     showConversion();
     $('#convDelete').hidden = false;
     $('#convSave').hidden = false;
+    $('#convEdit').hidden = false;
     $('#convArchive').hidden = !!row.archived_at;
     $('#convUnarchive').hidden = !row.archived_at;
     if(!row.seen){ row.seen = true; renderInbox(); markSeen(row.id); }
