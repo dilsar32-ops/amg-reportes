@@ -7103,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MX';
+  const APP_BUILD = '2026-10-06-MY';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -13177,6 +13177,21 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       });
     }catch(e){ return []; }
   }
+  // EL CATALOGO CORTO, para el modelo del telefono.
+  //
+  // El de arriba lleva todas las formas y todas las pistas: ~2.300 letras. Al
+  // modelo chico eso le come la memoria que necesita para la conversacion, y
+  // a los pocos turnos se ahoga. Aqui va lo minimo: el nombre y las tres
+  // formas mas cortas, que son las que mas se oyen mal.
+  function avCatalogoCorto(){
+    try{
+      return VOZ_EQUIPO.map(function(e){
+        var cortas = (e.k || []).slice().sort(function(a, b){ return a.length - b.length; }).slice(0, 3);
+        return e.en + ' (' + cortas.join(', ') + ')';
+      });
+    }catch(e){ return []; }
+  }
+
   function avNombresCat(){
     try{ return VOZ_EQUIPO.map(function(e){ return e.en; }); }catch(e){ return []; }
   }
@@ -13988,7 +14003,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   //   3. Si el modelo no esta (Apple Intelligence apagada, telefono viejo),
   //      se cae al parser de reglas Y SE DICE cual esta oyendo. Nunca se hace
   //      pasar uno por el otro.
-  var AV_IA = { disponible: null, motivo: '', usando: 'reglas' };
+  var AV_IA = { disponible: null, motivo: '', detalle: '', usando: 'reglas' };
 
   function avCerebro(){
     return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CerebroVoz;
@@ -14004,6 +14019,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     return AV_IA.disponible;
   }
   var AV_MOTIVOS = {
+    fallo: 'no le cupo la conversación o no pudo con la frase',
     apple_intelligence_apagada: 'Apple Intelligence está apagada. Ajustes → Apple Intelligence y Siri.',
     modelo_bajando: 'El modelo del teléfono todavía se está bajando. Inténtelo en un rato.',
     este_telefono_no: 'Este teléfono no trae el modelo de Apple.',
@@ -14209,8 +14225,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         ? '¿Qué equipo es "' + sinAmarrar[0].oido + '"' + (sinAmarrar[0].cuarto ? ' en ' + sinAmarrar[0].cuarto : '') + '? Dígalo otra vez.'
         : 'No entendí ' + sinAmarrar.length + ' equipos: ' + sinAmarrar.map(function(x){ return '"' + x.oido + '"'; }).join(', ') + '. Dígalos otra vez.';
     }
+    // EL MODULO SOLO PUEDE SER UNO DE LOS DE VERDAD. En el telefono salio
+    // "Ventiladores" como modulo, que no existe: lo puso el parser de reglas
+    // agarrando la primera palabra que reconocio. Por ahora solo se anota
+    // equipo, asi que cualquier otra cosa se descarta.
+    var MODULOS = ['Equipment','Labor','Drying','Materials','Measurements','Comms'];
+    var mod = String(r.modulo || '').trim();
+    if(MODULOS.indexOf(mod) < 0) mod = (habs.length || datos.length) ? 'Equipment' : null;
     var L = avValidar({
-      modulo: r.modulo || null,
+      modulo: mod,
       pregunta: preg,
       datos: datos,
       inventados: inventados,
@@ -14229,12 +14252,17 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(AV_IA.disponible === null) await avRevisarCerebro();
     if(AV_IA.disponible && C){
       try{
-        var r = await C.interpretar({ texto: texto, cuartos: avCuartosDelProyecto(),
-                                      catalogo: avCatalogo(), aprendido: avAprendido(),
-                                      llevamos: avResumenAcum(AV.acum || avAcumNuevo()),
-                                      suenaA: avSuenaA(texto),
-                                      otras: AV.otras || [], dudosos: AV.dudosos || [] });
-        AV_IA.usando = 'ia';
+        // AL MODELO DEL TELEFONO SE LE MANDA LO JUSTO. Su memoria de trabajo
+        // es chica; cada cosa de mas le quita sitio a la conversacion, que es
+        // lo que de verdad hace falta para entender una correccion.
+        var r = await C.interpretar({ texto: texto, cuartos: avCuartosDelProyecto().slice(0, 12),
+                                      catalogo: avCatalogoCorto(),
+                                      aprendido: avAprendido().slice(0, 5),
+                                      llevamos: avResumenAcum(AV.acum || avAcumNuevo()).slice(0, 6),
+                                      suenaA: avSuenaA(texto).slice(0, 4),
+                                      otras: (AV.otras || []).slice(0, 1),
+                                      dudosos: (AV.dudosos || []).slice(0, 4) });
+        AV_IA.usando = 'ia'; AV_IA.detalle = '';
         var L = avDeLectura(r, texto);
         // SI EL TELEFONO QUEDO CON DUDAS, se le pregunta al grande. Si
         // entendio todo con seguridad, no se gasta nada.
@@ -14243,7 +14271,14 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           if(mejor){ AV_IA.usando = 'nube'; return avDeLectura(mejor, texto); }
         }
         return L;
-      }catch(e){ /* cae a reglas abajo */ }
+      }catch(e){
+        // SE GUARDA EL MOTIVO. Tragarse esto fue lo que me tuvo adivinando:
+        // en la pantalla salia "Reglas de respaldo" sin decir por que, y el
+        // de verdad era que al modelo del telefono ya no le cabia la
+        // conversacion.
+        AV_IA.motivo = 'fallo';
+        AV_IA.detalle = (e && (e.message || e.errorMessage)) || String(e || '');
+      }
     }
     // EL TELEFONO NO PUDO. Antes de caer a las reglas se le pregunta al
     // grande: entre un modelo que entiende y un parser de palabras, no hay
@@ -14321,7 +14356,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     h += '<div class="av-coido av-cquien">' +
       (AV_IA.usando === 'nube' ? 'El modelo del teléfono no estaba seguro, así que preguntó al asistente grande.'
        : AV_IA.usando === 'ia' ? 'El modelo del teléfono, leyendo toda la conversación.'
-                             : 'Reglas de respaldo' + (AV_MOTIVOS[AV_IA.motivo] ? ' — ' + esc(AV_MOTIVOS[AV_IA.motivo]) : '') + '.') +
+                             : 'Reglas de respaldo' +
+                               (AV_MOTIVOS[AV_IA.motivo] ? ' — ' + esc(AV_MOTIVOS[AV_IA.motivo]) : '') + '.' +
+                               (AV_IA.detalle ? '<div class="av-cduda">El modelo del teléfono falló: ' + esc(AV_IA.detalle) + '</div>' : '')) +
       '</div>';
     // Lo que ARREGLO de una palabra mal oida. Esto es el corazon de la
     // estrategia: se ve que corrigio y por que, en vez de que lo haga a
