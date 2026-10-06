@@ -2333,6 +2333,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         </div>
         <button class="btn btn-accent" type="button" id="mgrLoad" style="width:100%;">Convertir</button>
       </details>
+      <!-- La casa del panel cuando no hay nada abierto. Al abrir un reporte
+           el panel se MUEVE pegado a su fila; esto es a donde regresa. -->
+      <div id="convHome"></div>
       <div class="convresult" id="convResult" hidden>
         <div class="convhead">Listo — ya está calculado</div>
         <div class="convrows" id="convRows"></div>
@@ -6971,7 +6974,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-05-ME';
+  const APP_BUILD = '2026-10-05-MF';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -11866,7 +11869,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if($('#convPdf')) $('#convPdf').disabled = anyNoPrice;
     if($('#convSave')) $('#convSave').disabled = anyNoPrice;
     $('#convResult').hidden = false;
-    $('#convResult').scrollIntoView({block:'nearest'});
+    // 'nearest' no mueve nada si el panel ya asoma un poco, y entonces sus
+    // botones se quedan abajo del borde. Con el panel pegado a su fila,
+    // 'start' deja la fila y sus opciones juntas y a la vista.
+    $('#convResult').scrollIntoView({block:'start'});
   }
   $('#convPdf').addEventListener('click', ()=>{ $('[data-pdf="labor"]').click(); });
   // La vista previa NO se apaga cuando falta un precio, al reves que el PDF:
@@ -12221,6 +12227,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     laborFormOpen = false;
     goStep('labor', 0);
     showConversion();
+    colocarPanel();                 // pegado a su fila, no al final de la pagina
     $('#convDelete').hidden = false;
     $('#convSave').hidden = false;
     $('#convEdit').hidden = false;
@@ -12258,6 +12265,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     laborFormOpen = false;
     goStep('labor', 0);
     showConversion();
+    colocarPanel();                 // pegado a su fila, no al final de la pagina
     $('#convDelete').hidden = false;
     $('#convSave').hidden = false;
     $('#convEdit').hidden = false;
@@ -30278,11 +30286,37 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           ? (unread === 1 ? (mg ? 'Hay 1 mudanza nueva' : 'Hay 1 labor log nuevo') : 'Hay ' + unread + (mg ? ' mudanzas nuevas' : ' labor logs nuevos'))
           : (rows.length ? (mg ? 'Nada nuevo en mudanzas' : 'Nada nuevo') : (mg ? 'Todavía no hay mudanzas' : 'Todavía no llega nada')));
     // Nada de mudanzas aqui: los reportes de AMG Moving se avisan y se abren solo en AMG Moving -> Mudanzas recibidas.
+    // EL PANEL VIVE DENTRO DE LA LISTA, y esta linea la reescribe entera. Si
+    // no se saca primero, se destruye con todo y sus botones. Se pone a salvo
+    // en su casa y colocarPanel() lo vuelve a meter donde toca.
+    const panelAfuera = $('#convResult');
+    if(panelAfuera && $('#convHome')) $('#convHome').appendChild(panelAfuera);
     list.innerHTML = rows.map(r=>`
       <button type="button" class="inboxitem${r.seen?'':' unread'}" data-id="${r.id}">
         <span class="who">${esc(r.crew_leader || (r.work_kind === 'mudanza' ? 'Manager' : 'Crew'))}${r.work_kind === 'mudanza' ? ' <span class="kindtag amg">AMG</span>' : ''}</span>
         <span class="when">${esc(r.log_date||'')} · ${(r.payload&&r.payload.s?r.payload.s.length:0)} turno(s)</span>
       </button>`).join('');
+    colocarPanel();
+  }
+
+  // EL PANEL SE ABRE PEGADO A SU FILA, no al final de la pagina.
+  //
+  // Su pedido del 5 oct: "me la manda hasta abajo... si abro uno, las opciones
+  // las abre ahi abajo. Si abro otro, cierra el que esta arriba y abre el otro.
+  // De esa manera puedo ver donde estoy". Tenia razon: con el panel siempre al
+  // final, abrir el tercer reporte de la lista lo mandaba lejos de donde
+  // estaba mirando y perdia el hilo.
+  //
+  // Hay UN solo panel y se mueve. Por eso "cerrar el de arriba" sale gratis:
+  // al llevarselo a la fila nueva, deja de estar en la vieja.
+  function colocarPanel(){
+    const caja = $('#convResult');
+    if(!caja) return;
+    const fila = (openLogId !== null && openLogId !== undefined)
+      ? $('#inboxList .inboxitem[data-id="' + String(openLogId).replace(/"/g, '\\"') + '"]')
+      : null;
+    if(fila) fila.insertAdjacentElement('afterend', caja);
+    else if($('#convHome')) $('#convHome').appendChild(caja);
   }
   async function refreshInbox(){
     if(!cloudOn()) return;
