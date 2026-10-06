@@ -7103,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MV';
+  const APP_BUILD = '2026-10-06-MW';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12579,6 +12579,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     acum: null,        // TODO lo que se lleva dicho en esta conversacion
     ultima: null,      // la lectura en pantalla, para los botones de confirmar
     sinRegistrar: false,
+    sinAyuda: false,   // se prende si el asistente grande no esta configurado
     historial: []      // lo de cada intento, para ver si los nombres salen parejos
   };
 
@@ -12753,6 +12754,114 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(!ea || !eb) return 0;
     var d = avDistancia(ea, eb), m = Math.max(ea.length, eb.length);
     return m ? Math.max(0, 1 - d / m) : 0;
+  }
+
+  // ================= COMO SE LEE, EN SONIDOS =================
+  //
+  // Su pedido del 6 oct: "haz que aprenda", sin pagar nada.
+  //
+  // Aqui esta la pieza que faltaba. El reconocedor de espanol NO CONOCE las
+  // palabras del oficio en ingles, y por eso escribia "Fence" por "fans" y
+  // "jefa" por "HEPA". No estaba oyendo mal: no tenia esa palabra.
+  //
+  // Apple deja ENSENARLE como suena una palabra (`CustomPronunciation`), con
+  // los sonidos que ese idioma admite. Los saque del propio sistema: el
+  // espanol admite 49, entre ellos la jota (x) - que es justo por lo que la
+  // cuadrilla dice "jepa" cuando lee "HEPA".
+  //
+  // Y no se escriben a mano una por una: se GENERAN leyendo la palabra como
+  // la leeria un hispanohablante. "Fans" se lee /fans/. "Drip pan" se lee
+  // /drip pan/. Asi, cuando manana entre un equipo nuevo al catalogo, su
+  // pronunciacion sale sola.
+  var AV_FONEMAS_ES = ('. S x s f r J k d p 4 n t b o e N m tS g a i u l dZ T w j').split(' ');
+  function avFonemas(palabra, aLaInglesa){
+    var t = vozLlano(palabra).replace(/[^a-zñ ]/g, ' ').trim();
+    if(!t) return '';
+    // Las dobles suenan una sola vez (menos ll y rr, que son otro sonido).
+    t = t.replace(/([bcdfgjkmnpqstvxz])\1/g, '$1');
+    // A LA INGLESA: estas palabras son inglesas y la cuadrilla las dice a
+    // medio camino. Leidas con reglas del espanol, "fogger" seria /foxer/ y
+    // "HEPA" seria /epa/ - pero dicen /foger/ y /xepa/. Asi que de cada
+    // palabra se generan las DOS lecturas y se le ensenan las dos.
+    if(aLaInglesa){
+      t = t.replace(/g([ei])/g, 'gu$1');        // la ge siempre suena fuerte
+      if(t[0] === 'h') t = 'j' + t.slice(1);    // la hache inglesa suena a jota
+    }
+    var out = [], pal = t.split(/\s+/);
+    pal.forEach(function(w, wi){
+      if(wi) out.push('.');                      // pausa entre palabras
+      var son = [], vocales = [];
+      for(var i = 0; i < w.length; i++){
+        var c = w[i], sig = w[i+1] || '', ant = w[i-1] || '';
+        if('aeiou'.indexOf(c) > -1){ vocales.push(son.length); son.push(c); continue; }
+        if(c === 'h'){ continue; }                // muda en espanol
+        if(c === 'c' && sig === 'h'){ son.push('tS'); i++; continue; }
+        if(c === 'c'){ son.push('ei'.indexOf(sig) > -1 ? 's' : 'k'); continue; }
+        if(c === 'q'){ son.push('k'); if(sig === 'u') i++; continue; }
+        // "gue"/"gui": la u no suena, la ge queda fuerte.
+        if(c === 'g' && sig === 'u' && 'ei'.indexOf(w[i+2] || '') > -1){ son.push('g'); i++; continue; }
+        if(c === 'g'){ son.push('ei'.indexOf(sig) > -1 ? 'x' : 'g'); continue; }
+        if(c === 'j'){ son.push('x'); continue; }
+        if(c === 'l' && sig === 'l'){ son.push('dZ'); i++; continue; }
+        if(c === 'r' && sig === 'r'){ son.push('r'); i++; continue; }
+        if(c === 'r'){ son.push(i === 0 ? 'r' : '4'); continue; }   // vibrante al principio, simple adentro
+        if(c === 'v'){ son.push('b'); continue; }
+        if(c === 'z'){ son.push('s'); continue; }
+        if(c === 'ñ'){ son.push('J'); continue; }
+        if(c === 'y'){ if(sig){ son.push('dZ'); } else { vocales.push(son.length); son.push('i'); } continue; }
+        if(c === 'x'){ son.push('k'); son.push('s'); continue; }
+        if(c === 'w'){ son.push('w'); continue; }
+        if(AV_FONEMAS_ES.indexOf(c) > -1) son.push(c);
+      }
+      if(!vocales.length){ out = out.concat(son); return; }
+      // EL ACENTO, con la regla del espanol: palabra terminada en vocal, n o s
+      // lleva la fuerza en la penultima; cualquier otra, en la ultima.
+      var fin = w[w.length-1];
+      var grave = 'aeiouns'.indexOf(fin) > -1;
+      var cual = grave ? (vocales.length > 1 ? vocales[vocales.length-2] : vocales[0])
+                       : vocales[vocales.length-1];
+      son[cual] = '"' + son[cual];
+      out = out.concat(son);
+    });
+    // Solo sonidos que el idioma de verdad admite: uno inventado hace que
+    // Apple rechace el modelo entero y nos quedariamos sin nada.
+    return out.filter(function(x){ return AV_FONEMAS_ES.indexOf(x.replace('"','')) > -1 || x === '.'; }).join(' ');
+  }
+
+  // LO QUE SE LE ENSENA A PRONUNCIAR: cada nombre del catalogo, como lo
+  // dirian ellos, MAS lo que este trabajador ya confirmo. Ahi esta el
+  // aprendizaje: si el dijo que "fence" era Fans, el sonido de "fence" pasa a
+  // ser OTRA forma valida de decir Fans, y el telefono deja de equivocarse.
+  function avPronunciaciones(){
+    var out = [], visto = {};
+    function add(palabra, deQuien){
+      if(!deQuien) return;
+      [avFonemas(palabra, false), avFonemas(palabra, true)].forEach(function(f){
+        if(!f) return;
+        var llave = deQuien + '|' + f;
+        if(visto[llave]) return;
+        visto[llave] = 1;
+        out.push({ palabra: deQuien, sonidos: f });
+      });
+    }
+    try{
+      VOZ_EQUIPO.forEach(function(e){
+        add(e.en, e.en);                                   // "Fans" leido en espanol
+        // LAS CORTAS PRIMERO. Salio probando: "fen" estaba al final de la
+        // lista y se quedaba fuera del corte - y es justo la que mas falla.
+        // Una palabra larga aguanta sola; una de tres letras no.
+        (e.k || []).slice().sort(function(a, b){ return a.length - b.length; })
+                   .slice(0, 7).forEach(function(k){ add(k, e.en); });
+      });
+      // LO APRENDIDO. Cada variante que el confirmo se vuelve una forma mas de
+      // decir ese equipo - para el reconocedor, no solo para el interprete.
+      var mio = avAprMio();
+      Object.keys(mio).forEach(function(v){
+        var r = mio[v];
+        if(r && r.cat && (r.si || 0) > (r.no || 0)) add(v, r.cat);
+      });
+    }catch(e){}
+    return out.slice(0, 160);
   }
 
   // LOS UMBRALES NO SON A OJO: se midieron contra las 15 palabras que de
@@ -12982,6 +13091,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       p.item.certeza = bueno.i.certeza || 'alta';
       // El nombre crudo se guarda: es la prueba de que el dictado fallo ahi.
       p.item.oidoAntes = p.item.nombre;
+      // Y SE APRENDE. El acaba de decir, hablando, que lo que se oyo mal era
+      // este equipo. Eso vale igual que tocar el boton de Si: la proxima vez
+      // ese sonido va a entrar al modelo del telefono como otra forma valida
+      // de decirlo, y el reconocedor deja de equivocarse.
+      try{ avAprAnotar(p.item.oidoAntes, bueno.i.delCatalogo, true, p.hab && p.hab.nombre); }catch(e){}
       p.item.nombre = bueno.i.nombre;
       if(bueno.i.n != null) p.item.n = bueno.i.n;
       // Si el mismo cuarto ya tenia ESE equipo con ese estado, se funden en
@@ -13327,7 +13441,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         AV.modelos = (AV.modelos || []).concat([(d && d.idioma) || '']);
         avEstado('escuchando', 'Ya cargó el vocabulario del oficio. Hable normal.');
       });
-      await S.empezar({ idioma: AV.idioma, vocabulario: avVocabulario(), frases: avFrases() });
+      await S.empezar({ idioma: AV.idioma, vocabulario: avVocabulario(), frases: avFrases(),
+                        pronunciaciones: avPronunciaciones() });
     }catch(err){
       AV.nivel = 0;
       var code = (err && (err.code || err.message)) || '';
@@ -13962,13 +14077,19 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       // cloudOn es una FUNCION, no una bandera. Y las dos viven mas abajo en
       // el archivo: esto solo corre cuando el usuario habla, mucho despues de
       // que todo cargo, asi que no hay problema de orden.
-      if(!cloudOn()) return null;
+      if(!cloudOn() || AV.sinAyuda) return null;
       var paquete = avPaqueteSeguro(texto);
       if(!paquete) return null;
       var res = await authFetch('/functions/v1/entender-voz', {
         method:'POST', headers: cloudHeaders(), body: JSON.stringify(paquete)
       });
-      if(!res || !res.ok) return null;
+      if(!res || !res.ok){
+        // 503 = no hay llave puesta. No tiene caso volver a intentarlo en cada
+        // frase: se apaga por esta sesion y se sigue con el telefono, sin
+        // gastar un viaje de red cada vez que haya una duda.
+        if(res && res.status === 503) AV.sinAyuda = true;
+        return null;
+      }
       var j = await res.json();
       if(!j || !j.ok || !j.lectura) return null;
       AV.ultimoGasto = j.gasto || null;
