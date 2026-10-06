@@ -7103,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MS';
+  const APP_BUILD = '2026-10-06-MT';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12706,6 +12706,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // Funde una lectura nueva con lo que ya se llevaba.
   function avFundir(acum, nueva){
     if(!nueva) return acum;
+    // Primero: ¿esto es la respuesta a lo que acabo de preguntar?
+    if(avAplicarRespuesta(acum, nueva)) return acum;
+    // ¿Y es una CORRECCION de lo que dijo antes? "perdon, era en la cocina"
+    // tiene que MOVER el equipo, no dejarlo en los dos cuartos. Probando
+    // conversaciones salio que quedaba contado doble - y eso en una factura
+    // se cobra dos veces.
+    if(nueva.corrige) avQuitarDeOtrosCuartos(acum, nueva);
     // El cuarto del que se viene hablando. Si en la frase nueva no nombro
     // ninguno ("y ahi tambien dos fans"), es el ultimo que nombro.
     var ultimo = acum.ultimoCuarto || '';
@@ -12760,15 +12767,141 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     var faltan = [];
     (acum.habitaciones || []).forEach(function(h){
       (h.items || []).forEach(function(it){
+        // Cada hueco se lleva una REFERENCIA a la cosa que le falta. Sin eso
+        // la respuesta no tiene a que pegarse, y la app vuelve a preguntar lo
+        // mismo para siempre - que es justo lo que pasaba.
         if(!it.delCatalogo)
-          faltan.push({ tipo:'cual', q:'¿Qué equipo es "' + it.nombre + '"' + (h.nombre ? ' en ' + h.nombre : '') + '?' });
+          faltan.push({ tipo:'cual', item:it, hab:h,
+            q:'¿Qué equipo es "' + it.nombre + '"' + (h.nombre ? ' en ' + h.nombre : '') + '?' });
         else if(!h.nombre)
-          faltan.push({ tipo:'cuarto', q:'¿En qué cuarto van ' + (it.n != null ? it.n + ' ' : 'los ') + (it.enLista || it.delCatalogo) + '?' });
+          faltan.push({ tipo:'cuarto', item:it, hab:h,
+            q:'¿En qué cuarto van ' + (it.n != null ? it.n + ' ' : 'los ') + (it.enLista || it.delCatalogo) + '?' });
         else if(it.n == null)
-          faltan.push({ tipo:'cuantos', q:'¿Cuántos ' + (it.enLista || it.delCatalogo) + ' en ' + h.nombre + '?' });
+          faltan.push({ tipo:'cuantos', item:it, hab:h,
+            q:'¿Cuántos ' + (it.enLista || it.delCatalogo) + ' en ' + h.nombre + '?' });
       });
     });
     return faltan;
+  }
+
+  // Una correccion de cuarto saca el equipo de donde estaba. Solo se quita lo
+  // que de verdad coincide (mismo equipo y mismo estado), y solo de OTROS
+  // cuartos: dentro del que nombro, el fundido normal se encarga.
+  function avQuitarDeOtrosCuartos(acum, nueva){
+    var mover = [];
+    (nueva.habitaciones || []).forEach(function(h){
+      var dest = (h.nombre || '').trim();
+      (h.items || []).forEach(function(i){ if(i.delCatalogo) mover.push({ cat:i.delCatalogo, acc:i.accion || 'puso', dest:dest }); });
+    });
+    if(!mover.length) return;
+    acum.habitaciones.forEach(function(h){
+      h.items = (h.items || []).filter(function(x){
+        return !mover.some(function(m){
+          return m.dest && !avMismoCuarto(h.nombre, m.dest) &&
+                 vozLlano(x.delCatalogo || '') === vozLlano(m.cat) &&
+                 (x.accion || 'puso') === m.acc;
+        });
+      });
+    });
+    acum.habitaciones = acum.habitaciones.filter(function(h){ return (h.items || []).length || !(h.nombre || '').trim(); });
+  }
+
+  // ---- UNA FRASE PUEDE SER LA RESPUESTA A LA PREGUNTA ANTERIOR ----
+  //
+  // Esto salio corriendo conversaciones de verdad antes de darsela a probar:
+  //   - "puse dos de Fire" (mal oido) -> "dehumidifiers" anotaba LAS DOS
+  //     COSAS, o sea el mismo equipo contado dos veces. En una factura eso es
+  //     cobrar doble.
+  //   - Contestar "en el basement" creaba un cuarto vacio y dejaba el equipo
+  //     huerfano, y la app seguia preguntando lo mismo para siempre.
+  //
+  // Si habia una pregunta en el aire, la frase que sigue se trata primero como
+  // su RESPUESTA: compone lo que faltaba en vez de agregar un renglon nuevo.
+  // Devuelve true si la consumio.
+  function avAplicarRespuesta(acum, nueva){
+    var p = acum.pendiente;
+    if(!p || !p.item) return false;
+    var items = [];
+    (nueva.habitaciones || []).forEach(function(h){ (h.items || []).forEach(function(i){ items.push({ i:i, h:h }); }); });
+
+    if(p.tipo === 'cual'){
+      // Contesto QUE equipo era. El que trae nombre del catalogo resuelve al
+      // que no lo tenia; no se agrega nada.
+      var bueno = items.filter(function(x){ return x.i.delCatalogo; })[0];
+      if(!bueno){
+        // TAMPOCO SE LE ENTENDIO. Esto salio probando: el segundo intento se
+        // anotaba como un renglon nuevo, y quedaban dos basuras en vez de una,
+        // preguntando para siempre. Un intento de contestar no es equipo
+        // nuevo: se actualiza lo que se oyo y se vuelve a preguntar.
+        var otro = items.filter(function(x){ return (x.i.nombre || '').trim(); })[0];
+        if(otro){
+          p.item.nombre = otro.i.nombre;
+          if(otro.i.n != null) p.item.n = otro.i.n;
+          return true;    // consumida: no se agrega nada
+        }
+        return false;
+      }
+      p.item.delCatalogo = bueno.i.delCatalogo;
+      p.item.enLista = bueno.i.enLista || bueno.i.delCatalogo;
+      p.item.conocido = bueno.i.conocido !== false;
+      p.item.certeza = bueno.i.certeza || 'alta';
+      // El nombre crudo se guarda: es la prueba de que el dictado fallo ahi.
+      p.item.oidoAntes = p.item.nombre;
+      p.item.nombre = bueno.i.nombre;
+      if(bueno.i.n != null) p.item.n = bueno.i.n;
+      // Si el mismo cuarto ya tenia ESE equipo con ese estado, se funden en
+      // uno: si no, quedarian dos renglones del mismo aparato.
+      var h = p.hab;
+      for(var j = 0; j < h.items.length; j++){
+        var x = h.items[j];
+        if(x !== p.item && vozLlano(x.delCatalogo || '') === vozLlano(p.item.delCatalogo) &&
+           (x.accion || 'puso') === (p.item.accion || 'puso')){
+          if(p.item.n != null) x.n = p.item.n;
+          h.items.splice(h.items.indexOf(p.item), 1);
+          break;
+        }
+      }
+      acum.pendiente = null;
+      return true;
+    }
+
+    if(p.tipo === 'cuarto'){
+      // Contesto el cuarto. Se mueve lo que estaba sin cuarto.
+      var nombre = '';
+      (nueva.habitaciones || []).forEach(function(h){ if(!nombre && (h.nombre || '').trim()) nombre = h.nombre.trim(); });
+      if(!nombre) return false;
+      // Si la respuesta ADEMAS trae equipo nuevo, no es solo una respuesta:
+      // se deja seguir por el camino normal con el cuarto ya puesto.
+      var huerfanos = (acum.habitaciones.filter(function(h){ return !(h.nombre || '').trim(); })[0] || {}).items || [];
+      if(!huerfanos.length) return false;
+      var dest = null;
+      for(var k = 0; k < acum.habitaciones.length; k++){
+        if(avMismoCuarto(acum.habitaciones[k].nombre, nombre) && (acum.habitaciones[k].nombre || '').trim()){ dest = acum.habitaciones[k]; break; }
+      }
+      if(!dest){ dest = { nombre: nombre, conocida: true, items: [] }; acum.habitaciones.push(dest); }
+      huerfanos.slice().forEach(function(i){ dest.items.push(i); });
+      acum.habitaciones = acum.habitaciones.filter(function(h){ return (h.nombre || '').trim() || (h.items || []).length; });
+      acum.habitaciones.forEach(function(h){ if(!(h.nombre || '').trim()) h.items = []; });
+      acum.habitaciones = acum.habitaciones.filter(function(h){ return (h.nombre || '').trim(); });
+      acum.ultimoCuarto = nombre;
+      acum.pendiente = null;
+      // Si la respuesta traia equipo nuevo tambien, que siga el camino normal.
+      return !items.length;
+    }
+
+    if(p.tipo === 'cuantos'){
+      var mismo = items.filter(function(x){
+        return x.i.n != null && vozLlano(x.i.delCatalogo || '') === vozLlano(p.item.delCatalogo || '');
+      })[0];
+      // "cinco" a secas: viene sin equipo, pero la pregunta decia de cual.
+      var solo = items.filter(function(x){ return x.i.n != null && !x.i.delCatalogo; })[0];
+      var n = mismo ? mismo.i.n : (solo ? solo.i.n : null);
+      if(n == null) return false;
+      p.item.n = n;
+      acum.pendiente = null;
+      return true;
+    }
+    return false;
   }
 
   // Lo que ya se lleva anotado, en texto, para que el interprete no repita ni
@@ -13108,6 +13241,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         pregunta: (L && L.pregunta) || (falta.length ? falta[0].q : ''),
         nada: !AV.acum.habitaciones.length && !AV.acum.datos.length
       };
+      // SE RECUERDA QUE SE PREGUNTO. Sin esto, la frase que sigue no tiene a
+      // que pegarse y la app vuelve a preguntar lo mismo para siempre.
+      AV.acum.pendiente = falta.length ? falta[0] : null;
       avPintarLectura(vista);
       if(vista.pregunta){
         // SIGUE OYENDO. El chiste de una conversacion es contestar hablando,
@@ -13690,6 +13826,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           porConfirmar: porConfirmar,
           habitaciones: habs,
           corrigio: (r.corrigio || '').trim(),
+          corrige: !!r.corrige,
           nada: !(r.modulo || habs.length || datos.length)
         });
       }catch(e){ /* cae a reglas abajo */ }
