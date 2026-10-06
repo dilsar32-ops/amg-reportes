@@ -7103,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MR';
+  const APP_BUILD = '2026-10-06-MS';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12576,6 +12576,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     otras: [],
     dudosos: [],
     porIdioma: {},     // lo que oyo CADA idioma, sin mezclar
+    acum: null,        // TODO lo que se lleva dicho en esta conversacion
     ultima: null,      // la lectura en pantalla, para los botones de confirmar
     sinRegistrar: false,
     historial: []      // lo de cada intento, para ver si los nombres salen parejos
@@ -12681,6 +12682,109 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // El catalogo contra el que TIENE que caer cada articulo, CON como lo dice
   // la cuadrilla y con las pistas de alrededor. Sale de la misma tabla que
   // llena la plantilla de equipo, no de una lista aparte.
+  // ================= LA CONVERSACION =================
+  // Su pedido del 6 oct: "hay que ensenarle al Voice Assistant a poder tener
+  // conversaciones largas y que pueda hacer preguntas tambien".
+  //
+  // Hasta hoy cada frase vivia sola: se hablaba, se interpretaba, se ensenaba
+  // y la siguiente frase BORRABA la anterior. Eso no es una conversacion, es
+  // un dictado de una sola linea.
+  //
+  // Ahora hay un ESTADO que se va juntando durante toda la sesion. Cada frase
+  // se FUNDE con lo que ya habia: lo nuevo se agrega, y una correccion
+  // REEMPLAZA en vez de duplicar - que es su regla textual: "la ultima
+  // correccion explicita reemplaza el valor anterior; no crear dos registros".
+  //
+  // POR AHORA SOLO EQUIPO. El lo acoto: "ahorita tenemos que hacer el test con
+  // solo la carpeta de equipment", y despues se va carpeta por carpeta.
+  function avAcumNuevo(){ return { habitaciones: [], datos: [] }; }
+
+  function avMismoCuarto(a, b){
+    return vozLlano(String(a || '')).trim() === vozLlano(String(b || '')).trim();
+  }
+
+  // Funde una lectura nueva con lo que ya se llevaba.
+  function avFundir(acum, nueva){
+    if(!nueva) return acum;
+    // El cuarto del que se viene hablando. Si en la frase nueva no nombro
+    // ninguno ("y ahi tambien dos fans"), es el ultimo que nombro.
+    var ultimo = acum.ultimoCuarto || '';
+    (nueva.habitaciones || []).forEach(function(h){
+      var nombre = (h.nombre || '').trim() || ultimo;
+      if(nombre) acum.ultimoCuarto = nombre;
+      var dest = null;
+      for(var i = 0; i < acum.habitaciones.length; i++){
+        if(avMismoCuarto(acum.habitaciones[i].nombre, nombre)){ dest = acum.habitaciones[i]; break; }
+      }
+      if(!dest){ dest = { nombre: nombre, conocida: h.conocida, items: [] }; acum.habitaciones.push(dest); }
+      else if(h.conocida != null) dest.conocida = h.conocida;
+      (h.items || []).forEach(function(it){
+        // Mismo equipo y mismo estado en el mismo cuarto = es el MISMO
+        // renglon. Se reemplaza, no se suma: si dijo "cuatro fans" y luego
+        // "no, eran cinco", son cinco, no nueve.
+        var ya = null;
+        for(var j = 0; j < dest.items.length; j++){
+          var x = dest.items[j];
+          var mismoEq = it.delCatalogo
+            ? vozLlano(x.delCatalogo || '') === vozLlano(it.delCatalogo)
+            : vozLlano(x.nombre || '') === vozLlano(it.nombre || '');
+          if(mismoEq && (x.accion || 'puso') === (it.accion || 'puso')){ ya = x; break; }
+        }
+        if(ya){
+          // La cantidad nueva manda, salvo que la nueva venga sin numero: en
+          // ese caso no se pierde lo que ya se sabia.
+          if(it.n != null) ya.n = it.n;
+          if(it.delCatalogo){ ya.delCatalogo = it.delCatalogo; ya.enLista = it.enLista || ya.enLista; ya.conocido = it.conocido; }
+          if(it.certeza) ya.certeza = it.certeza;
+          if(it.porque) ya.porque = it.porque;
+        }else{
+          dest.items.push(it);
+        }
+      });
+    });
+    (nueva.datos || []).forEach(function(d){
+      if(!d || !d.campo) return;
+      var ya = acum.datos.filter(function(x){ return vozLlano(x.campo) === vozLlano(d.campo); })[0];
+      if(ya) ya.valor = d.valor; else acum.datos.push(d);
+    });
+    if(nueva.modulo) acum.modulo = nueva.modulo;
+    acum.corrigio = nueva.corrigio || '';
+    acum.inventados = nueva.inventados || 0;
+    return acum;
+  }
+
+  // ---- LAS PREGUNTAS QUE HACE EL ASISTENTE ----
+  // De a UNA, la mas importante primero, y cortas. Lo que no se sabe se
+  // pregunta; lo que se sabe no se vuelve a preguntar por cortesia.
+  function avQueFalta(acum){
+    var faltan = [];
+    (acum.habitaciones || []).forEach(function(h){
+      (h.items || []).forEach(function(it){
+        if(!it.delCatalogo)
+          faltan.push({ tipo:'cual', q:'¿Qué equipo es "' + it.nombre + '"' + (h.nombre ? ' en ' + h.nombre : '') + '?' });
+        else if(!h.nombre)
+          faltan.push({ tipo:'cuarto', q:'¿En qué cuarto van ' + (it.n != null ? it.n + ' ' : 'los ') + (it.enLista || it.delCatalogo) + '?' });
+        else if(it.n == null)
+          faltan.push({ tipo:'cuantos', q:'¿Cuántos ' + (it.enLista || it.delCatalogo) + ' en ' + h.nombre + '?' });
+      });
+    });
+    return faltan;
+  }
+
+  // Lo que ya se lleva anotado, en texto, para que el interprete no repita ni
+  // se contradiga de una frase a otra.
+  function avResumenAcum(acum){
+    var out = [];
+    (acum.habitaciones || []).forEach(function(h){
+      var l = (h.items || []).map(function(i){
+        return (i.n == null ? '?' : i.n) + ' ' + (i.delCatalogo || i.nombre) +
+               (i.accion && i.accion !== 'puso' ? ' (' + i.accion + ')' : '');
+      }).join(', ');
+      if(l) out.push((h.nombre || 'sin cuarto') + ': ' + l);
+    });
+    return out;
+  }
+
   function avCatalogo(){
     try{
       return VOZ_EQUIPO.map(function(e){
@@ -12889,7 +12993,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     var ov = $('#avOverlay'); if(!ov) return;
     AV.abierto = true; AV.nivel = 0; AV.suave = 0;
     ov.hidden = false; ov.classList.remove('con-lectura'); ov.scrollTop = 0;
-    AV.historial = [];
+    AV.historial = []; AV.acum = avAcumNuevo();
     avTexto(''); avPintarPrueba(null); avEstado('esperando');
     // Conversacion nueva: el contexto de la anterior no se arrastra, o un
     // "ahi" de hace una hora apuntaria a un cuarto de otra casa.
@@ -12987,11 +13091,37 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       if(acabo) return;
       acabo = true;
       if(!AV.abierto) return;
-      avPintarLectura(L);
-      // "Respondiendo" es para cuando HAY algo que contestar. Si no quedo
-      // duda, no se pregunta por cortesia - el lo pidio asi.
-      if(L && L.pregunta) avEstado('respondiendo', 'Conteste y toque la esfera.');
-      else avEstado('esperando', 'Listo. Toque la esfera para seguir hablando.');
+      // SE FUNDE con lo que ya se llevaba: una conversacion, no una frase
+      // suelta. Lo que se ensena es TODO lo acumulado.
+      AV.acum = avFundir(AV.acum || avAcumNuevo(), L);
+      var falta = avQueFalta(AV.acum);
+      var vista = {
+        modulo: AV.acum.modulo || (L && L.modulo) || null,
+        habitaciones: AV.acum.habitaciones,
+        datos: AV.acum.datos,
+        corrigio: AV.acum.corrigio,
+        inventados: AV.acum.inventados,
+        porConfirmar: (L && L.porConfirmar) || [],
+        sinAmarrar: falta.filter(function(f){ return f.tipo === 'cual'; }).length,
+        // La pregunta del modelo manda; si no hizo ninguna pero falta algo, la
+        // arma la app. De a UNA: tres preguntas juntas no se contestan.
+        pregunta: (L && L.pregunta) || (falta.length ? falta[0].q : ''),
+        nada: !AV.acum.habitaciones.length && !AV.acum.datos.length
+      };
+      avPintarLectura(vista);
+      if(vista.pregunta){
+        // SIGUE OYENDO. El chiste de una conversacion es contestar hablando,
+        // no tener que tocar la pantalla con las manos sucias.
+        avEstado('respondiendo', 'Conteste hablando. Toque la esfera si ya terminó.');
+        setTimeout(function(){
+          if(AV.abierto && AV.estado === 'respondiendo') avEscuchar();
+        }, 600);
+      }else{
+        avEstado('esperando', 'Anotado. Siga hablando o toque la esfera para terminar.');
+        setTimeout(function(){
+          if(AV.abierto && AV.estado === 'esperando') avEscuchar();
+        }, 600);
+      }
     }).catch(function(err){
       if(acabo || !AV.abierto) return;
       acabo = true;
@@ -13065,20 +13195,26 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   var VOZ_EQUIPO = [
     { en:'Dehumidifier Drip Pans', tipo:'DEHUMIDIFIER_DRIP_PANS',
       k:['dehumidifier drip pan','dehumidifier drip pans','bandeja de goteo','bandejas de goteo',
-         'drip pan','drip pans','plato gris','platos grises','bandeja','bandejas','plato','platos'],
+         'drip pan','drip pans','plato gris','platos grises','bandeja','bandejas',
+         'plato','platos','drip','drips'],
       pistas:['debajo del dehumidifier','debajo del dehu','debajo de los dehumidifiers','debajo de los dehus',
-              'abajo del dehu','van debajo'] },
+              'platos debajo del dehumidifier','drips debajo del dehumidifier','abajo del dehu','van debajo'] },
     { en:'Zip Wall Poles', tipo:'ZIP_WALL_POLES',
-      k:['zip wall pole','zip wall poles','poste de pared','postes de pared','zipwall','paral','parales','poste','postes'],
+      k:['zip wall pole','zip wall poles','poste de pared','postes de pared','zipwall','zip wall',
+         'paral','parales','palo','palos','poste','postes'],
       pistas:['area de contencion','contencion','para sostener el plastico','sostener el plastico'] },
     { en:'Ozone Machine', tipo:'OZONE_MACHINE',
-      k:['maquina de ozono','maquinas de ozono','ozone machine','maquina de humo','ozone','ozono'] },
+      // "Fogger" / "Foggy" es como le dice la cuadrilla de verdad - el lo
+      // dicto el 6 oct. Ninguna lista de catalogo lo traia.
+      k:['maquina de ozono','maquinas de ozono','ozone machine','maquina de humo','maquina de humo',
+         'fogger','foggers','foggy','fogueador','ozone','ozono'] },
     { en:'Trash Cans', tipo:'TRASH_CANS',
       k:['bote de basura','botes de basura','bote de agua','botes de agua','trash can','trash cans',
          'basurero','basureros','bote','botes'] },
     { en:'Air Ducts', tipo:'AIR_DUCTS',
       k:['ducto de aire','ductos de aire','air duct','air ducts','tubo gris','tubos grises',
-         'ducto','ductos','duct','ducts','tubo','tubos'],
+         'manguera gris','mangueras grises','ducto','ductos','duct','ducts','tubo','tubos',
+         'manguera','mangueras'],
       pistas:['del dehumidifier hacia el techo','del dehu hacia el techo','hacia el techo','al techo',
               'tubo que va hacia arriba','para secar el techo','para secar el cielo'] },
     { en:'Dry Mats', tipo:'DRY_MATS',
@@ -13090,7 +13226,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       k:['filtro hepa','filtros hepa','air scrubber','air scrubbers','hepa','hepas','jepa','jepas',
          'scrubber','scrubbers'] },
     { en:'Generators', tipo:'GENERATORS',
-      k:['generador','generadores','generator','generators'] },
+      k:['generador','generadores','generator','generators','planta de luz','plantas de luz','planta'] },
     { en:'Heaters', tipo:'HEATERS',
       k:['calentador','calentadores','heater','heaters'] },
     { en:'Zippers', tipo:'ZIPPERS',
@@ -13494,6 +13630,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       try{
         var r = await C.interpretar({ texto: texto, cuartos: avCuartosDelProyecto(),
                                       catalogo: avCatalogo(), aprendido: avAprendido(),
+                                      llevamos: avResumenAcum(AV.acum || avAcumNuevo()),
                                       otras: AV.otras || [], dudosos: AV.dudosos || [] });
         AV_IA.usando = 'ia';
         // Todo lo que se oyo, en los dos idiomas: contra esto se comprueba
