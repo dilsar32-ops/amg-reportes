@@ -1073,16 +1073,28 @@
      porque el asistente va a trabajar sobre esa pantalla. z-index 600 lo deja
      encima de todo lo de la app (lo mas alto era 500) y debajo de la reja de
      entrada (9999), que nunca debe quedar tapada. */
-  .av-overlay{position:fixed; inset:0; z-index:600; display:flex; align-items:center; justify-content:center;
+  /* Con las tres capas el contenido pasa del alto del telefono. Centrado con
+     `align-items` el sobrante queda INALCANZABLE (el navegador recorta arriba
+     y abajo), y justo la capa 3 - el resultado - es la que se perderia. Con
+     flex-start + margin automatico se sigue viendo centrado cuando es corto y
+     se puede desplazar cuando es largo. */
+  .av-overlay{position:fixed; inset:0; z-index:600; display:flex; align-items:flex-start; justify-content:center;
+    overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain;
     background:rgba(8,12,18,.78); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
-    padding:24px 18px; animation:avEntra .18s ease-out;}
+    padding:24px 18px calc(28px + env(safe-area-inset-bottom)); animation:avEntra .18s ease-out;}
   .av-overlay[hidden]{display:none !important;}
   @keyframes avEntra{from{opacity:0;} to{opacity:1;}}
   .av-cerrar{position:absolute; top:max(14px, env(safe-area-inset-top)); right:16px; width:44px; height:44px;
     border-radius:999px; border:1px solid rgba(255,255,255,.22); background:rgba(255,255,255,.08);
     color:#fff; font-size:19px; line-height:1; cursor:pointer;}
-  .av-centro{display:flex; flex-direction:column; align-items:center; gap:14px; width:100%; max-width:430px;}
-  .av-esfera{width:min(62vw,230px); height:min(62vw,230px); display:block; cursor:pointer;}
+  .av-centro{display:flex; flex-direction:column; align-items:center; gap:14px; width:100%; max-width:430px;
+    margin-block:auto;}
+  .av-esfera{width:min(62vw,230px); height:min(62vw,230px); display:block; cursor:pointer;
+    transition:width .25s ease, height .25s ease;}
+  /* Con resultado en pantalla la esfera cede espacio: lo que hay que leer son
+     las tres capas, no la animacion. */
+  .av-overlay.con-lectura .av-esfera{width:min(34vw,128px); height:min(34vw,128px);}
+  .av-overlay.con-lectura .av-texto{display:none;}
   .av-estado{font-size:13px; letter-spacing:.09em; text-transform:uppercase; color:rgba(255,255,255,.72); font-weight:700;}
   /* La transcripcion tiene alto fijo: si creciera con el texto, la esfera
      brincaria de lugar en cuanto el empiece a hablar. */
@@ -1093,6 +1105,15 @@
   .av-ojo{font-style:normal; font-size:12px; color:rgba(255,255,255,.55); font-weight:400;}
   .av-preg{margin-top:12px; padding:11px 13px; border-radius:10px; background:rgba(255,255,255,.10);
     border:1px solid rgba(255,255,255,.2); color:#fff; font-size:15.5px; text-align:center;}
+  .av-capa{margin-bottom:14px; padding:10px 12px; border-radius:10px;
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.13);}
+  .av-ctit{font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; font-weight:700;
+    color:rgba(255,255,255,.52); margin-bottom:6px;}
+  .av-coido{font-size:16px; line-height:1.4; color:#fff;}
+  .av-cquien{font-size:14.5px; color:rgba(255,255,255,.88);}
+  .av-cduda{margin-top:5px; font-size:13px; line-height:1.4; color:rgba(255,255,255,.6);}
+  .av-cduda b{color:#ffd98a; font-weight:700;}
+  .av-ccorr{margin-top:6px; font-size:14px; line-height:1.4; color:#8fe3a2; font-weight:600;}
   .av-prueba{width:100%; margin-top:4px;}
   .av-prueba:empty{display:none;}
   .av-pnota{font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.5);
@@ -7064,7 +7085,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MK';
+  const APP_BUILD = '2026-10-06-ML';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12529,11 +12550,46 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     idioma: 'es-MX',
     abierto: false,
     anim: null,
-    onTexto: null      // FASE 2 lo usara. Hoy nadie escucha, a proposito.
+    onTexto: null,     // FASE 2 lo usara. Hoy nadie escucha, a proposito.
+    // LA INCERTIDUMBRE DEL DICTADO. El reconocedor no entrega una verdad:
+    // entrega su mejor intento, otras lecturas completas del mismo audio y,
+    // por pedacito, que tan seguro estaba. Eso se guarda y se le pasa al
+    // interprete; no se tira.
+    otras: [],
+    dudosos: []
   };
 
   function avPlugin(){
     return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AsistenteVoz;
+  }
+
+  // EL VOCABULARIO DEL OFICIO, ANTES DE QUE EL DICTADO DECIDA.
+  //
+  // Su pedido: "no quiero que intentes parchear palabras especificas, quiero
+  // una estrategia general para manejar transcripciones imprecisas".
+  //
+  // Esto NO es parchar. `contextualStrings` es el mecanismo de Apple para
+  // avisarle al reconocedor de que se va a hablar: pesa en la decision, no
+  // despues de ella. Y no hay ni una palabra escrita a mano aqui - sale del
+  // catalogo de equipo que la app YA tiene y de los cuartos del plano que
+  // este abierto. El dia que cambie el catalogo, cambia esto solo.
+  function avVocabulario(){
+    var v = [], visto = {};
+    function add(t){
+      t = String(t || '').trim();
+      if(!t || t.length < 3 || visto[t.toLowerCase()]) return;
+      visto[t.toLowerCase()] = 1; v.push(t);
+    }
+    try{
+      // El catalogo de equipo: el nombre de la fila y como se dice.
+      VOZ_EQUIPO.forEach(function(e){ add(e.en); (e.k || []).forEach(add); });
+      // Los cuartos REALES de este trabajo. Lo mas valioso: 'Master Bedroom'
+      // o 'Crawl Space' no los oye bien solo.
+      avCuartosDelProyecto().forEach(add);
+      // Los campos de la plantilla, que tambien se dictan.
+      (VOZ_CAMPOS || []).forEach(function(c){ (c.k || []).forEach(add); });
+    }catch(e){}
+    return v;
   }
   function avEstado(e, detalle){
     if(!AV_ESTADOS[e]) return;
@@ -12611,7 +12667,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   function avAbrir(){
     var ov = $('#avOverlay'); if(!ov) return;
     AV.abierto = true; AV.nivel = 0; AV.suave = 0;
-    ov.hidden = false;
+    ov.hidden = false; ov.classList.remove('con-lectura'); ov.scrollTop = 0;
     avTexto(''); avPintarPrueba(null); avEstado('esperando');
     // Conversacion nueva: el contexto de la anterior no se arrastra, o un
     // "ahi" de hace una hora apuntaria a un cuarto de otra casa.
@@ -12641,10 +12697,14 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(AV.estado === 'escuchando'){ await avParar(); return; }
     try{
       avTexto(''); avPintarPrueba(null); avEstado('escuchando');
+      var ovl = $('#avOverlay'); if(ovl){ ovl.classList.remove('con-lectura'); ovl.scrollTop = 0; }
+      AV.otras = []; AV.dudosos = [];
       S.removeAllListeners && S.removeAllListeners();
       S.addListener('nivel', function(d){ AV.nivel = Math.max(0, Math.min(1, (d && d.nivel) || 0)); });
       S.addListener('texto', function(d){
         avTexto((d && d.texto) || '');
+        // Se guarda la duda del propio dictado para pasarsela al interprete.
+        if(d){ AV.otras = d.otras || []; AV.dudosos = d.dudosos || []; }
         // Gancho para quien quiera lo crudo. Lo que INTERPRETA es avParar.
         // Mientras habla solo se ENSENA lo que va oyendo. Interpretar cada
         // resultado parcial seria correr el modelo sobre frases a medias -
@@ -12655,7 +12715,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         avEstado('error', (d && d.mensaje) || 'No se pudo oír.');
         AV.nivel = 0;
       });
-      await S.empezar({ idioma: AV.idioma });
+      await S.empezar({ idioma: AV.idioma, vocabulario: avVocabulario() });
     }catch(err){
       AV.nivel = 0;
       var code = (err && (err.code || err.message)) || '';
@@ -13122,7 +13182,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(AV_IA.disponible === null) await avRevisarCerebro();
     if(AV_IA.disponible && C){
       try{
-        var r = await C.interpretar({ texto: texto, cuartos: avCuartosDelProyecto() });
+        var r = await C.interpretar({ texto: texto, cuartos: avCuartosDelProyecto(),
+                                      otras: AV.otras || [], dudosos: AV.dudosos || [] });
         AV_IA.usando = 'ia';
         return avValidar({
           modulo: r.modulo || null,
@@ -13134,6 +13195,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
                        return { nombre: i.nombre, n: (i.cantidad === -1 ? null : i.cantidad), accion: i.accion || 'puso' };
                      }) };
           }),
+          corrigio: (r.corrigio || '').trim(),
           nada: !(r.modulo || (r.habitaciones||[]).length || (r.datos||[]).length)
         });
       }catch(e){ /* cae a reglas abajo */ }
@@ -13151,36 +13213,87 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   }
 
 
-  // Pinta una lectura del modelo: VARIAS habitaciones, lo que no reconocio
-  // marcado, y la pregunta solo si de verdad la hizo.
+  // ================= LAS TRES CAPAS, SEPARADAS =================
+  // Su pedido: "muestrame por separado la transcripcion, la interpretacion y
+  // el resultado final".
+  //
+  // Van separadas porque son tres cosas distintas y cuando algo sale mal hay
+  // que poder ver EN CUAL de las tres se rompio. Si el telefono oyo
+  // "ventanas", eso es un problema del dictado; si lo oyo bien y aun asi lo
+  // puso en el cuarto equivocado, es del interprete. Antes las tres se veian
+  // como una sola cosa y no habia forma de distinguirlas.
   function avPintarLectura(L){
     var caja = $('#avPrueba'); if(!caja) return;
-    if(!L || L.nada){ caja.innerHTML = '<div class="av-pfila"><span>No reconocí nada de eso.</span></div>'; return; }
-    var f = [];
-    f.push('<div class="av-pfila"><span>módulo</span><b>' + esc(L.modulo || '— no lo supe —') + '</b></div>');
-    (L.datos || []).forEach(function(d){
-      if(d && d.campo && d.valor) f.push('<div class="av-pfila"><span>' + esc(d.campo) + '</span><b>' + esc(d.valor) + '</b></div>');
+    // El area de arriba era la transcripcion EN VIVO. Ya se dejo de hablar,
+    // asi que se apaga: la transcripcion final es la capa 1 de aqui abajo, y
+    // tenerla en dos lados a la vez solo confunde.
+    var vista = $('#avTexto'); if(vista) vista.textContent = '';
+    var ov = $('#avOverlay'); if(ov) ov.classList.add('con-lectura');
+
+    var h = '<div class="av-pnota">MODO PRUEBA · no se guarda nada</div>';
+
+    // ---- CAPA 1: LO QUE OYO EL TELEFONO ----
+    h += '<div class="av-capa"><div class="av-ctit">1 · lo que oyó el teléfono</div>';
+    h += '<div class="av-coido">' + (AV.texto ? '“' + esc(AV.texto) + '”' : '— nada —') + '</div>';
+    var duda = (AV.dudosos || []).filter(function(d){ return d && d.palabra; });
+    if(duda.length){
+      h += '<div class="av-cduda">Dudó en: ' + duda.map(function(d){
+        var par = (d.parecidas || []).filter(Boolean);
+        return '<b>' + esc(d.palabra) + '</b>' + (par.length ? ' (¿' + esc(par.join(' / ')) + '?)' : '');
+      }).join(' · ') + '</div>';
+    }
+    (AV.otras || []).slice(0,2).forEach(function(o){
+      if(o && String(o).trim() && String(o).trim() !== String(AV.texto).trim())
+        h += '<div class="av-cduda">También pudo ser: “' + esc(o) + '”</div>';
     });
-    (L.habitaciones || []).forEach(function(h){
-      var lista = (h.items || []).map(function(i){
-        var nom = i.enLista || i.nombre;
-        if(i.n === 1) nom = String(nom).replace(/s$/, '');
-        // Lo que la lista NO reconoce se ensena IGUAL, con marca. Marcar es
-        // informacion; cambiarlo por el parecido mas cercano seria inventar.
-        return (i.n == null ? '¿cuántos? ' : i.n + ' ') + esc(nom) +
-               (i.conocido === false ? ' <i class="av-ojo">(no está en la lista)</i>' : '') +
-               (i.accion === 'quito' ? ' <i class="av-ojo">(quitó)</i>' : '');
-      }).join(', ');
-      var nombre = h.nombre || '(sin cuarto)';
-      f.push('<div class="av-pfila"><span>habitación</span><b>' + esc(nombre) +
-             (h.conocida === false ? ' <i class="av-ojo">(no está en el plano)</i>' : '') + '</b></div>');
-      if(lista) f.push('<div class="av-pfila"><span>items</span><b>' + lista + '</b></div>');
-    });
-    var pie = '<div class="av-pnota">MODO PRUEBA · no se guarda nada · ' +
-      (AV_IA.usando === 'ia' ? 'interpretado por el modelo del teléfono'
-                             : 'interpretado por reglas' + (AV_MOTIVOS[AV_IA.motivo] ? ' — ' + esc(AV_MOTIVOS[AV_IA.motivo]) : '')) + '</div>';
-    var preg = L.pregunta ? '<div class="av-preg">' + esc(L.pregunta) + '</div>' : '';
-    caja.innerHTML = pie + f.join('') + preg;
+    if(!duda.length && !(AV.otras || []).length)
+      h += '<div class="av-cduda">El dictado quedó seguro de todas las palabras.</div>';
+    h += '</div>';
+
+    // ---- CAPA 2: COMO LO ENTENDIO ----
+    h += '<div class="av-capa"><div class="av-ctit">2 · cómo lo entendió</div>';
+    h += '<div class="av-coido av-cquien">' +
+      (AV_IA.usando === 'ia' ? 'El modelo del teléfono, leyendo toda la conversación.'
+                             : 'Reglas de respaldo' + (AV_MOTIVOS[AV_IA.motivo] ? ' — ' + esc(AV_MOTIVOS[AV_IA.motivo]) : '') + '.') +
+      '</div>';
+    // Lo que ARREGLO de una palabra mal oida. Esto es el corazon de la
+    // estrategia: se ve que corrigio y por que, en vez de que lo haga a
+    // escondidas.
+    var corr = (L && L.corrigio || '').split('\n').map(function(x){ return x.trim(); }).filter(Boolean);
+    if(corr.length) h += '<div class="av-ccorr">Arregló: ' + corr.map(esc).join(' · ') + '</div>';
+    else if(duda.length) h += '<div class="av-cduda">No cambió ninguna palabra.</div>';
+    h += '</div>';
+
+    // ---- CAPA 3: EL RESULTADO ----
+    h += '<div class="av-capa"><div class="av-ctit">3 · resultado</div>';
+    if(!L || L.nada){
+      h += '<div class="av-coido">No reconocí nada de eso.</div>';
+    }else{
+      var f = [];
+      f.push('<div class="av-pfila"><span>módulo</span><b>' + esc(L.modulo || '— no lo supe —') + '</b></div>');
+      (L.datos || []).forEach(function(d){
+        if(d && d.campo && d.valor) f.push('<div class="av-pfila"><span>' + esc(d.campo) + '</span><b>' + esc(d.valor) + '</b></div>');
+      });
+      (L.habitaciones || []).forEach(function(hb){
+        var lista = (hb.items || []).map(function(i){
+          var nom = i.enLista || i.nombre;
+          if(i.n === 1) nom = String(nom).replace(/s$/, '');
+          // Lo que la lista NO reconoce se ensena IGUAL, con marca. Marcar es
+          // informacion; cambiarlo por el parecido mas cercano seria inventar.
+          return (i.n == null ? '¿cuántos? ' : i.n + ' ') + esc(nom) +
+                 (i.conocido === false ? ' <i class="av-ojo">(no está en la lista)</i>' : '') +
+                 (i.accion === 'quito' ? ' <i class="av-ojo">(quitó)</i>' : '');
+        }).join(', ');
+        f.push('<div class="av-pfila"><span>habitación</span><b>' + esc(hb.nombre || '(sin cuarto)') +
+               (hb.conocida === false ? ' <i class="av-ojo">(no está en el plano)</i>' : '') + '</b></div>');
+        if(lista) f.push('<div class="av-pfila"><span>items</span><b>' + lista + '</b></div>');
+      });
+      h += f.join('');
+    }
+    h += '</div>';
+
+    if(L && L.pregunta) h += '<div class="av-preg">' + esc(L.pregunta) + '</div>';
+    caja.innerHTML = h;
   }
 
   // ---- EL MICROFONO Y EL LLENADO -------------------------------
