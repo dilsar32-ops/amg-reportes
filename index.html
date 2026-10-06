@@ -1090,6 +1090,9 @@
     font-size:17.5px; line-height:1.45; color:#fff;}
   .av-texto:empty{opacity:0;}
   .av-ayuda{font-size:13.5px; color:rgba(255,255,255,.58); text-align:center;}
+  .av-ojo{font-style:normal; font-size:12px; color:rgba(255,255,255,.55); font-weight:400;}
+  .av-preg{margin-top:12px; padding:11px 13px; border-radius:10px; background:rgba(255,255,255,.10);
+    border:1px solid rgba(255,255,255,.2); color:#fff; font-size:15.5px; text-align:center;}
   .av-prueba{width:100%; margin-top:4px;}
   .av-prueba:empty{display:none;}
   .av-pnota{font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.5);
@@ -7061,7 +7064,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MJ';
+  const APP_BUILD = '2026-10-06-MK';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12610,6 +12613,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     AV.abierto = true; AV.nivel = 0; AV.suave = 0;
     ov.hidden = false;
     avTexto(''); avPintarPrueba(null); avEstado('esperando');
+    // Conversacion nueva: el contexto de la anterior no se arrastra, o un
+    // "ahi" de hace una hora apuntaria a un cuarto de otra casa.
+    var C = avCerebro(); if(C && C.nuevaConversacion){ try{ C.nuevaConversacion(); }catch(e){} }
+    avRevisarCerebro();
     if(!AV.anim) avDibujar();
     // Arranca oyendo de una: abrirlo YA ES decir que quiere hablar.
     avEscuchar();
@@ -12638,11 +12645,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       S.addListener('nivel', function(d){ AV.nivel = Math.max(0, Math.min(1, (d && d.nivel) || 0)); });
       S.addListener('texto', function(d){
         avTexto((d && d.texto) || '');
-        // FASE 2 enganchara aqui. Hoy no hay nadie escuchando a proposito.
-        // MODO PRUEBA. Lo unico que hace con lo oido es DIBUJARLO. No toca
-        // la base, ni un formulario, ni el borrador. Cuando llegue la fase 2,
-        // lo que se agrega es un consumidor aparte - esto se queda igual.
-        avPintarPrueba(avInterpretar((d && d.texto) || ''));
+        // Gancho para quien quiera lo crudo. Lo que INTERPRETA es avParar.
+        // Mientras habla solo se ENSENA lo que va oyendo. Interpretar cada
+        // resultado parcial seria correr el modelo sobre frases a medias -
+        // caro, lento, y encima cambiaria de opinion a cada palabra.
         if(typeof AV.onTexto === 'function') AV.onTexto(d);
       });
       S.addListener('error', function(d){
@@ -12666,7 +12672,19 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // verse y se queda esperando. En la fase 2 aqui es donde entra el
     // interprete, y de ahi pasa a "respondiendo".
     avEstado('entendiendo');
-    setTimeout(function(){ if(AV.abierto && AV.estado === 'entendiendo') avEstado('esperando', 'Listo. Toque la esfera para hablar otra vez.'); }, 700);
+    var dicho = AV.texto;
+    if(!dicho.trim()){ avEstado('esperando', 'No se oyó nada. Toque la esfera e inténtelo otra vez.'); return; }
+    avInterpretarIA(dicho).then(function(L){
+      if(!AV.abierto) return;
+      avPintarLectura(L);
+      // "Respondiendo" es para cuando HAY algo que contestar. Si no quedo
+      // duda, no se pregunta por cortesia - el lo pidio asi.
+      if(L && L.pregunta) avEstado('respondiendo', 'Conteste y toque la esfera.');
+      else avEstado('esperando', 'Listo. Toque la esfera para seguir hablando.');
+    }).catch(function(err){
+      if(!AV.abierto) return;
+      avEstado('error', 'No se pudo interpretar: ' + ((err && err.message) || err));
+    });
   }
 
   // ================= ASISTENTE DE VOZ DEL EQUIPO =================
@@ -13021,6 +13039,148 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       f.push('<div class="av-pfila"><span>items</span><b>' + esc(lista) + '</b></div>');
     }
     caja.innerHTML = '<div class="av-pnota">MODO PRUEBA · no se guarda nada</div>' + f.join('');
+  }
+
+
+  // ---- EL CEREBRO: PRIMERO EL MODELO, LAS LISTAS SOLO VALIDAN -----
+  // Su correccion del 6 oct: "no quiero listas fijas ni reglas como base
+  // principal... las listas solo deben servir para validar".
+  //
+  // Asi quedo el orden, y es al reves de como estaba:
+  //   1. El modelo del telefono interpreta TODA la conversacion. Una sola
+  //      sesion, asi que "no, eran cinco" sabe a que se refiere.
+  //   2. Las listas se usan DESPUES, para marcar lo que no reconocen. No
+  //      filtran ni corrigen: un cuarto que no esta en la lista igual se
+  //      ensena, con una marca de "no lo tengo en la lista".
+  //   3. Si el modelo no esta (Apple Intelligence apagada, telefono viejo),
+  //      se cae al parser de reglas Y SE DICE cual esta oyendo. Nunca se hace
+  //      pasar uno por el otro.
+  var AV_IA = { disponible: null, motivo: '', usando: 'reglas' };
+
+  function avCerebro(){
+    return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CerebroVoz;
+  }
+  async function avRevisarCerebro(){
+    var C = avCerebro();
+    if(!isNative() || !C){ AV_IA.disponible = false; AV_IA.motivo = 'no_es_el_telefono'; return false; }
+    try{
+      var r = await C.disponible();
+      AV_IA.disponible = !!(r && r.ok);
+      AV_IA.motivo = (r && r.motivo) || '';
+    }catch(e){ AV_IA.disponible = false; AV_IA.motivo = 'error'; }
+    return AV_IA.disponible;
+  }
+  var AV_MOTIVOS = {
+    apple_intelligence_apagada: 'Apple Intelligence está apagada. Ajustes → Apple Intelligence y Siri.',
+    modelo_bajando: 'El modelo del teléfono todavía se está bajando. Inténtelo en un rato.',
+    este_telefono_no: 'Este teléfono no trae el modelo de Apple.',
+    ios_viejo: 'Este teléfono tiene un iOS anterior al que trae el modelo.',
+    no_es_el_telefono: 'Solo funciona en la app del teléfono.'
+  };
+
+  // LOS CUARTOS REALES DEL TRABAJO. No es una lista fija: son los del plano
+  // que este abierto para este cliente. Si no hay plano, no se manda nada y el
+  // modelo usa el nombre que el diga, tal cual.
+  function avCuartosDelProyecto(){
+    try{
+      var d = (typeof floorplanData !== 'undefined') ? floorplanData : null;
+      if(!d || !d.rooms) return [];
+      var vistos = {}, out = [];
+      d.rooms.forEach(function(r){
+        if(r.deleted) return;
+        var n = String(r.roomName || '').trim();
+        if(!n || vistos[n.toLowerCase()]) return;
+        vistos[n.toLowerCase()] = 1; out.push(n);
+      });
+      return out;
+    }catch(e){ return []; }
+  }
+
+  // LA VALIDACION. Marca, no corrige. Que la pantalla diga "esto no lo tengo
+  // en la lista" es informacion; cambiarlo por el parecido mas cercano seria
+  // inventar.
+  function avValidar(lectura){
+    var cuartos = avCuartosDelProyecto();
+    var llanos = cuartos.map(vozLlano);
+    (lectura.habitaciones || []).forEach(function(h){
+      h.conocida = !h.nombre ? null
+        : (llanos.length ? llanos.indexOf(vozLlano(h.nombre)) > -1
+                         : !!avBuscarFrase(vozLlano(h.nombre).split(' '), AV_CUARTOS, 'k'));
+      (h.items || []).forEach(function(it){
+        var p = vozLlano(it.nombre).split(' ');
+        var m = avBuscarFrase(p, VOZ_EQUIPO.map(function(e){ return { k:e.k, n:e.en }; }), 'k');
+        it.conocido = !!m;
+        if(m) it.enLista = m.fila.n;        // el nombre de la fila que le toca
+      });
+    });
+    return lectura;
+  }
+
+  // Interpreta con el modelo. Si no se puede, cae a las reglas Y LO DICE.
+  async function avInterpretarIA(texto){
+    var C = avCerebro();
+    if(AV_IA.disponible === null) await avRevisarCerebro();
+    if(AV_IA.disponible && C){
+      try{
+        var r = await C.interpretar({ texto: texto, cuartos: avCuartosDelProyecto() });
+        AV_IA.usando = 'ia';
+        return avValidar({
+          modulo: r.modulo || null,
+          pregunta: (r.pregunta || '').trim(),
+          datos: r.datos || [],
+          habitaciones: (r.habitaciones || []).map(function(h){
+            return { nombre: (h.nombre || '').trim(),
+                     items: (h.items || []).map(function(i){
+                       return { nombre: i.nombre, n: (i.cantidad === -1 ? null : i.cantidad), accion: i.accion || 'puso' };
+                     }) };
+          }),
+          nada: !(r.modulo || (r.habitaciones||[]).length || (r.datos||[]).length)
+        });
+      }catch(e){ /* cae a reglas abajo */ }
+    }
+    // RESPALDO. Es el parser de reglas, y la pantalla lo va a decir.
+    AV_IA.usando = 'reglas';
+    var v = avInterpretar(texto);
+    return avValidar({
+      modulo: v.modulo, pregunta: '', datos: [],
+      habitaciones: v.habitacion || v.items.length
+        ? [{ nombre: v.habitacion || '', items: v.items.map(function(i){ return { nombre:i.en, n:i.n, accion:'puso' }; }) }]
+        : [],
+      nada: v.nada
+    });
+  }
+
+
+  // Pinta una lectura del modelo: VARIAS habitaciones, lo que no reconocio
+  // marcado, y la pregunta solo si de verdad la hizo.
+  function avPintarLectura(L){
+    var caja = $('#avPrueba'); if(!caja) return;
+    if(!L || L.nada){ caja.innerHTML = '<div class="av-pfila"><span>No reconocí nada de eso.</span></div>'; return; }
+    var f = [];
+    f.push('<div class="av-pfila"><span>módulo</span><b>' + esc(L.modulo || '— no lo supe —') + '</b></div>');
+    (L.datos || []).forEach(function(d){
+      if(d && d.campo && d.valor) f.push('<div class="av-pfila"><span>' + esc(d.campo) + '</span><b>' + esc(d.valor) + '</b></div>');
+    });
+    (L.habitaciones || []).forEach(function(h){
+      var lista = (h.items || []).map(function(i){
+        var nom = i.enLista || i.nombre;
+        if(i.n === 1) nom = String(nom).replace(/s$/, '');
+        // Lo que la lista NO reconoce se ensena IGUAL, con marca. Marcar es
+        // informacion; cambiarlo por el parecido mas cercano seria inventar.
+        return (i.n == null ? '¿cuántos? ' : i.n + ' ') + esc(nom) +
+               (i.conocido === false ? ' <i class="av-ojo">(no está en la lista)</i>' : '') +
+               (i.accion === 'quito' ? ' <i class="av-ojo">(quitó)</i>' : '');
+      }).join(', ');
+      var nombre = h.nombre || '(sin cuarto)';
+      f.push('<div class="av-pfila"><span>habitación</span><b>' + esc(nombre) +
+             (h.conocida === false ? ' <i class="av-ojo">(no está en el plano)</i>' : '') + '</b></div>');
+      if(lista) f.push('<div class="av-pfila"><span>items</span><b>' + lista + '</b></div>');
+    });
+    var pie = '<div class="av-pnota">MODO PRUEBA · no se guarda nada · ' +
+      (AV_IA.usando === 'ia' ? 'interpretado por el modelo del teléfono'
+                             : 'interpretado por reglas' + (AV_MOTIVOS[AV_IA.motivo] ? ' — ' + esc(AV_MOTIVOS[AV_IA.motivo]) : '')) + '</div>';
+    var preg = L.pregunta ? '<div class="av-preg">' + esc(L.pregunta) + '</div>' : '';
+    caja.innerHTML = pie + f.join('') + preg;
   }
 
   // ---- EL MICROFONO Y EL LLENADO -------------------------------
