@@ -1114,6 +1114,14 @@
   .av-cduda{margin-top:5px; font-size:13px; line-height:1.4; color:rgba(255,255,255,.6);}
   .av-cduda b{color:#ffd98a; font-weight:700;}
   .av-ccorr{margin-top:6px; font-size:14px; line-height:1.4; color:#8fe3a2; font-weight:600;}
+  .av-cfalta{color:#ffb4a0; font-weight:600;}
+  .av-cidio{margin-top:7px; font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+    color:rgba(255,255,255,.42); font-weight:700;}
+  .av-chist{margin-top:5px; font-size:13.5px; color:rgba(255,255,255,.8);
+    padding:5px 0; border-bottom:1px solid rgba(255,255,255,.08);}
+  .av-chist b{color:rgba(255,255,255,.5); font-weight:700; margin-right:7px; font-size:11px;
+    text-transform:uppercase; letter-spacing:.06em;}
+  .av-chist.malo{color:#ffb4a0;}
   .av-prueba{width:100%; margin-top:4px;}
   .av-prueba:empty{display:none;}
   .av-pnota{font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.5);
@@ -7085,7 +7093,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-ML';
+  const APP_BUILD = '2026-10-06-MM';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12556,7 +12564,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // por pedacito, que tan seguro estaba. Eso se guarda y se le pasa al
     // interprete; no se tira.
     otras: [],
-    dudosos: []
+    dudosos: [],
+    porIdioma: {},     // lo que oyo CADA idioma, sin mezclar
+    historial: []      // lo de cada intento, para ver si los nombres salen parejos
   };
 
   function avPlugin(){
@@ -12573,6 +12583,70 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // despues de ella. Y no hay ni una palabra escrita a mano aqui - sale del
   // catalogo de equipo que la app YA tiene y de los cuartos del plano que
   // este abierto. El dia que cambie el catalogo, cambia esto solo.
+  // LAS FRASES QUE DE VERDAD DICE LA CUADRILLA, generadas del catalogo.
+  //
+  // Esto alimenta el modelo de lenguaje del telefono. No es una lista de
+  // correcciones ni estan escritas a mano: es el producto de los numeros x el
+  // catalogo de equipo x los verbos que usan x los cuartos del plano abierto.
+  // El dia que entre un equipo nuevo al catalogo, sus frases aparecen solas.
+  //
+  // Por que frases y no solo palabras sueltas: el reconocedor decide por
+  // contexto. "cinco Fence" le suena posible si nunca ha visto "cinco fans";
+  // dandole la frase entera con peso, "cinco fans" gana.
+  var AV_NUMEROS = ['un','una','uno','dos','tres','cuatro','cinco','seis','siete','ocho','nueve','diez',
+                    'one','two','three','four','five','six','seven','eight','nine','ten'];
+  var AV_VERBOS  = ['instalamos','instalé','puse','pusimos','dejé','dejamos','quité','quitamos','recogimos',
+                    'we installed','I put','we put','we picked up'];
+  function avFrases(){
+    var out = [], cuartos = avCuartosDelProyecto();
+    try{
+      // Los nombres del catalogo tal como se dicen: el de la fila (ingles) y
+      // la forma mas comun en espanol.
+      var nombres = [];
+      VOZ_EQUIPO.forEach(function(e){
+        nombres.push(e.en);
+        // la primera clave suele ser la forma larga en espanol
+        if(e.k && e.k.length) nombres.push(e.k[0]);
+        // y la forma corta en ingles si la hay (air mover, dehu...)
+        (e.k || []).forEach(function(k){ if(/^[a-z ]+$/.test(k) && k.length > 3 && nombres.indexOf(k) < 0) nombres.push(k); });
+      });
+      nombres = nombres.filter(function(x,i){ return x && nombres.indexOf(x) === i; });
+      AV_VERBOS.forEach(function(v){
+        AV_NUMEROS.forEach(function(n){
+          nombres.forEach(function(q){ out.push(v + ' ' + n + ' ' + q); });
+        });
+      });
+      // Y donde. El cuarto es lo otro que se oye mal ("Master Room").
+      cuartos.forEach(function(c){
+        nombres.forEach(function(q){ out.push('dos ' + q + ' en el ' + c); });
+        out.push('estoy en el ' + c); out.push('en el ' + c);
+      });
+      // Las correcciones a media frase, que son parte normal de como habla.
+      AV_NUMEROS.forEach(function(n){ out.push('no, eran ' + n); out.push('perdón, ' + n); });
+    }catch(e){}
+    return out;
+  }
+
+  // El catalogo contra el que TIENE que caer cada articulo. Sale de la misma
+  // tabla que llena la plantilla de equipo, no de una lista aparte.
+  function avCatalogo(){
+    try{ return VOZ_EQUIPO.map(function(e){ return e.en; }); }catch(e){ return []; }
+  }
+
+  // LO QUE NO SE DIJO, NO SE ANOTA.
+  //
+  // En la prueba del telefono el modelo lleno cliente, direccion, fecha,
+  // visita, lider y cuadrilla con la palabra "test", que no estaba en ninguna
+  // parte de lo que se oyo. Eso es inventar, y en una pantalla que manda a una
+  // factura es lo peor que puede hacer. Regla: un dato cuyo valor no aparece
+  // en NINGUNA de las lecturas se tira. No hay excepciones y no depende de
+  // ninguna palabra en particular.
+  function avDatoSeDijo(valor, textos){
+    var v = vozLlano(String(valor || '')).trim();
+    if(!v) return false;
+    return textos.some(function(t){ return vozLlano(String(t || '')).indexOf(v) > -1; });
+  }
+
   function avVocabulario(){
     var v = [], visto = {};
     function add(t){
@@ -12668,6 +12742,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     var ov = $('#avOverlay'); if(!ov) return;
     AV.abierto = true; AV.nivel = 0; AV.suave = 0;
     ov.hidden = false; ov.classList.remove('con-lectura'); ov.scrollTop = 0;
+    AV.historial = [];
     avTexto(''); avPintarPrueba(null); avEstado('esperando');
     // Conversacion nueva: el contexto de la anterior no se arrastra, o un
     // "ahi" de hace una hora apuntaria a un cuarto de otra casa.
@@ -12698,13 +12773,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     try{
       avTexto(''); avPintarPrueba(null); avEstado('escuchando');
       var ovl = $('#avOverlay'); if(ovl){ ovl.classList.remove('con-lectura'); ovl.scrollTop = 0; }
-      AV.otras = []; AV.dudosos = [];
+      AV.otras = []; AV.dudosos = []; AV.porIdioma = {};
       S.removeAllListeners && S.removeAllListeners();
       S.addListener('nivel', function(d){ AV.nivel = Math.max(0, Math.min(1, (d && d.nivel) || 0)); });
       S.addListener('texto', function(d){
         avTexto((d && d.texto) || '');
         // Se guarda la duda del propio dictado para pasarsela al interprete.
-        if(d){ AV.otras = d.otras || []; AV.dudosos = d.dudosos || []; }
+        if(d){ AV.otras = d.otras || []; AV.dudosos = d.dudosos || []; AV.porIdioma = d.porIdioma || {}; }
         // Gancho para quien quiera lo crudo. Lo que INTERPRETA es avParar.
         // Mientras habla solo se ENSENA lo que va oyendo. Interpretar cada
         // resultado parcial seria correr el modelo sobre frases a medias -
@@ -12715,7 +12790,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         avEstado('error', (d && d.mensaje) || 'No se pudo oír.');
         AV.nivel = 0;
       });
-      await S.empezar({ idioma: AV.idioma, vocabulario: avVocabulario() });
+      await S.empezar({ idioma: AV.idioma, vocabulario: avVocabulario(), frases: avFrases() });
     }catch(err){
       AV.nivel = 0;
       var code = (err && (err.code || err.message)) || '';
@@ -13167,10 +13242,21 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         : (llanos.length ? llanos.indexOf(vozLlano(h.nombre)) > -1
                          : !!avBuscarFrase(vozLlano(h.nombre).split(' '), AV_CUARTOS, 'k'));
       (h.items || []).forEach(function(it){
+        // Si el modelo ya lo amarro al catalogo, ese es. La lista aqui solo
+        // CONFIRMA que el nombre existe de verdad - el modelo no puede
+        // inventarse una fila que no esta en la plantilla.
+        if(it.delCatalogo){
+          var fila = VOZ_EQUIPO.filter(function(e){ return vozLlano(e.en) === vozLlano(it.delCatalogo); })[0];
+          it.conocido = !!fila;
+          if(fila) it.enLista = fila.en;
+          return;
+        }
+        // Sin amarre del modelo se intenta por la lista, y si tampoco cae,
+        // queda marcado para preguntar. No se escoge el mas parecido.
         var p = vozLlano(it.nombre).split(' ');
         var m = avBuscarFrase(p, VOZ_EQUIPO.map(function(e){ return { k:e.k, n:e.en }; }), 'k');
         it.conocido = !!m;
-        if(m) it.enLista = m.fila.n;        // el nombre de la fila que le toca
+        if(m){ it.enLista = m.fila.n; it.delCatalogo = m.fila.n; }
       });
     });
     return lectura;
@@ -13183,20 +13269,48 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(AV_IA.disponible && C){
       try{
         var r = await C.interpretar({ texto: texto, cuartos: avCuartosDelProyecto(),
+                                      catalogo: avCatalogo(),
                                       otras: AV.otras || [], dudosos: AV.dudosos || [] });
         AV_IA.usando = 'ia';
+        // Todo lo que se oyo, en los dos idiomas: contra esto se comprueba
+        // que un dato no salio de la nada.
+        var oidos = [texto].concat(AV.otras || []).concat(Object.keys(AV.porIdioma || {}).map(function(k){ return AV.porIdioma[k]; }));
+        var datos = (r.datos || []).filter(function(d){
+          return d && d.campo && avDatoSeDijo(d.valor, oidos);
+        });
+        var inventados = (r.datos || []).length - datos.length;
+        var habs = (r.habitaciones || []).map(function(h){
+          return { nombre: (h.nombre || '').trim(),
+                   items: (h.items || []).map(function(i){
+                     return { nombre: i.nombre,
+                              delCatalogo: (i.delCatalogo || '').trim(),
+                              n: (i.cantidad === -1 ? null : i.cantidad),
+                              accion: i.accion || 'puso' };
+                   }) };
+        });
+        // SI NO HAY CERTEZA, SE PREGUNTA. Un articulo que el modelo no pudo
+        // amarrar al catalogo no se anota con el nombre que sea: se queda
+        // marcado y se pide que lo repita. Su regla, textual: preguntar en
+        // lugar de inventar.
+        var sinAmarrar = [];
+        habs.forEach(function(h){ (h.items || []).forEach(function(i){
+          if(!i.delCatalogo) sinAmarrar.push({ oido: i.nombre, cuarto: h.nombre });
+        }); });
+        var preg = (r.pregunta || '').trim();
+        if(sinAmarrar.length && !preg){
+          preg = sinAmarrar.length === 1
+            ? '¿Qué equipo es "' + sinAmarrar[0].oido + '"' + (sinAmarrar[0].cuarto ? ' en ' + sinAmarrar[0].cuarto : '') + '? Dígalo otra vez.'
+            : 'No entendí ' + sinAmarrar.length + ' equipos: ' + sinAmarrar.map(function(x){ return '"' + x.oido + '"'; }).join(', ') + '. Dígalos otra vez.';
+        }
         return avValidar({
           modulo: r.modulo || null,
-          pregunta: (r.pregunta || '').trim(),
-          datos: r.datos || [],
-          habitaciones: (r.habitaciones || []).map(function(h){
-            return { nombre: (h.nombre || '').trim(),
-                     items: (h.items || []).map(function(i){
-                       return { nombre: i.nombre, n: (i.cantidad === -1 ? null : i.cantidad), accion: i.accion || 'puso' };
-                     }) };
-          }),
+          pregunta: preg,
+          datos: datos,
+          inventados: inventados,
+          sinAmarrar: sinAmarrar.length,
+          habitaciones: habs,
           corrigio: (r.corrigio || '').trim(),
-          nada: !(r.modulo || (r.habitaciones||[]).length || (r.datos||[]).length)
+          nada: !(r.modulo || habs.length || datos.length)
         });
       }catch(e){ /* cae a reglas abajo */ }
     }
@@ -13234,7 +13348,18 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
 
     // ---- CAPA 1: LO QUE OYO EL TELEFONO ----
     h += '<div class="av-capa"><div class="av-ctit">1 · lo que oyó el teléfono</div>';
-    h += '<div class="av-coido">' + (AV.texto ? '“' + esc(AV.texto) + '”' : '— nada —') + '</div>';
+    // LAS DOS LECTURAS, SEPARADAS Y SIN MEZCLAR. El telefono oye con dos
+    // oidos a la vez porque la cuadrilla habla espanol con palabras en
+    // ingles: el oido espanol arma la frase, el de ingles clava los nombres
+    // del equipo. Verlas aparte es la unica forma de saber cual de los dos
+    // fallo cuando algo sale mal.
+    var pi = AV.porIdioma || {};
+    if(pi['es-MX'] || pi['en-US']){
+      if(pi['es-MX']) h += '<div class="av-cidio">oído en español</div><div class="av-coido">“' + esc(pi['es-MX']) + '”</div>';
+      if(pi['en-US']) h += '<div class="av-cidio">oído en inglés</div><div class="av-coido">“' + esc(pi['en-US']) + '”</div>';
+    }else{
+      h += '<div class="av-coido">' + (AV.texto ? '“' + esc(AV.texto) + '”' : '— nada —') + '</div>';
+    }
     var duda = (AV.dudosos || []).filter(function(d){ return d && d.palabra; });
     if(duda.length){
       h += '<div class="av-cduda">Dudó en: ' + duda.map(function(d){
@@ -13243,11 +13368,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       }).join(' · ') + '</div>';
     }
     (AV.otras || []).slice(0,2).forEach(function(o){
-      if(o && String(o).trim() && String(o).trim() !== String(AV.texto).trim())
+      var t = String(o || '').trim();
+      // El de ingles ya se ensena arriba con su rotulo; repetirlo aqui seria
+      // ruido.
+      if(t && t !== String(AV.texto).trim() && t !== String(pi['en-US'] || '').trim())
         h += '<div class="av-cduda">También pudo ser: “' + esc(o) + '”</div>';
     });
-    if(!duda.length && !(AV.otras || []).length)
-      h += '<div class="av-cduda">El dictado quedó seguro de todas las palabras.</div>';
+    if(!duda.length)
+      h += '<div class="av-cduda">El dictado dijo estar seguro de todas las palabras ' +
+           '— pero eso no quiere decir que acertó: también dijo estar seguro cuando escribió “Fence” por “fans”.</div>';
     h += '</div>';
 
     // ---- CAPA 2: COMO LO ENTENDIO ----
@@ -13262,6 +13391,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     var corr = (L && L.corrigio || '').split('\n').map(function(x){ return x.trim(); }).filter(Boolean);
     if(corr.length) h += '<div class="av-ccorr">Arregló: ' + corr.map(esc).join(' · ') + '</div>';
     else if(duda.length) h += '<div class="av-cduda">No cambió ninguna palabra.</div>';
+    if(L && L.inventados) h += '<div class="av-cduda">Se descartaron ' + L.inventados +
+      ' dato(s) que el modelo puso pero que no aparecen en lo que se oyó.</div>';
+    if(L && L.sinAmarrar) h += '<div class="av-cfalta">No pudo amarrar ' + L.sinAmarrar +
+      ' equipo(s) al catálogo. No los adivina: pregunta.</div>';
     h += '</div>';
 
     // ---- CAPA 3: EL RESULTADO ----
@@ -13280,6 +13413,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           if(i.n === 1) nom = String(nom).replace(/s$/, '');
           // Lo que la lista NO reconoce se ensena IGUAL, con marca. Marcar es
           // informacion; cambiarlo por el parecido mas cercano seria inventar.
+          if(!i.delCatalogo)
+            return '<span class="av-cfalta">' + (i.n == null ? '¿cuántos? ' : i.n + ' ') +
+                   '“' + esc(i.nombre) + '” — no lo entendí</span>';
           return (i.n == null ? '¿cuántos? ' : i.n + ' ') + esc(nom) +
                  (i.conocido === false ? ' <i class="av-ojo">(no está en la lista)</i>' : '') +
                  (i.accion === 'quito' ? ' <i class="av-ojo">(quitó)</i>' : '');
@@ -13292,6 +13428,31 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     }
     h += '</div>';
 
+    // ---- EL REGISTRO DE INTENTOS ----
+    // Su pedido: "deja visible la transcripcion cruda y la interpretacion
+    // hasta que los nombres de equipos sean consistentes en varias pruebas".
+    // Un intento suelto no dice nada: lo que dice si esto esta arreglado es
+    // ver cuatro o cinco seguidos y que el mismo equipo salga con el mismo
+    // nombre todas las veces. Esto vive en la memoria de la pantalla y se
+    // borra al cerrar: no se guarda nada, sigue en modo prueba.
+    try{
+      var nombres = [];
+      (L && L.habitaciones || []).forEach(function(hb){
+        (hb.items || []).forEach(function(i){ nombres.push(i.delCatalogo || ('¿' + i.nombre + '?')); });
+      });
+      AV.historial.unshift({ oido: AV.texto || '', en: (AV.porIdioma||{})['en-US'] || '', equipos: nombres });
+      AV.historial = AV.historial.slice(0, 8);
+    }catch(e){}
+    if(AV.historial.length > 1){
+      h += '<div class="av-capa"><div class="av-ctit">pruebas de esta sesión (' + AV.historial.length + ')</div>';
+      h += '<div class="av-cduda">Para saber si ya quedó, lo que importa es que el mismo equipo salga con el mismo nombre varias veces seguidas.</div>';
+      AV.historial.forEach(function(x, idx){
+        var eq = x.equipos.length ? x.equipos.map(esc).join(', ') : '—';
+        var malo = x.equipos.some(function(n){ return n.charAt(0) === '¿'; });
+        h += '<div class="av-chist' + (malo ? ' malo' : '') + '"><b>' + (idx === 0 ? 'ahora' : 'hace ' + idx) + '</b> ' + eq + '</div>';
+      });
+      h += '</div>';
+    }
     if(L && L.pregunta) h += '<div class="av-preg">' + esc(L.pregunta) + '</div>';
     caja.innerHTML = h;
   }
