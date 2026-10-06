@@ -6974,7 +6974,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-05-MF';
+  const APP_BUILD = '2026-10-05-MG';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -7748,13 +7748,21 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // Cancelar y Quitar solo salen mientras se edita: asi nadie borra un precio por un toque suelto.
     box.innerHTML = AMG_MATERIALS.filter(m => m.active !== false).map(m => {
       const edit = AMG_EDIT.has('m:' + m.id);
-      const precio = m.unit_price != null ? '$' + invMoney(m.unit_price) + ' por unidad' : '<span style="color:var(--danger);">sin precio</span>';
+      // PRECIO 0 NO ES "SIN PRECIO": es que no se cobra. En rojo va solo lo que
+      // de verdad falta poner; lo gratis va en gris, porque no hay nada que
+      // arreglar. Esta es la misma distincion que ahora hace el invoice.
+      const precio = m.unit_price == null
+        ? '<span style="color:var(--danger);">sin precio</span>'
+        : (+m.unit_price === 0
+            ? '<span style="color:var(--ink-soft);">no se cobra &mdash; va gratis</span>'
+            : '$' + invMoney(m.unit_price) + ' por unidad');
       return '<div class="entryrow" style="align-items:center;"><span><span class="who">' + esc(m.name) + '</span><br><span class="when">' + precio + '</span></span>'
         + '<span style="display:flex;gap:6px;align-items:center;">'
         + (edit
             ? '<input type="number" class="amgMatPrice" data-id="' + esc(m.id) + '" step="0.01" inputmode="decimal" placeholder="0.00" value="' + (m.unit_price != null ? +m.unit_price : '') + '" style="width:92px;">'
               + '<button type="button" class="minibtn amgMatSave" data-id="' + esc(m.id) + '">Guardar</button>'
               + '<button type="button" class="minibtn amgMatCancel" data-id="' + esc(m.id) + '">Cancelar</button>'
+              + '<button type="button" class="minibtn amgMatFree" data-id="' + esc(m.id) + '">No se cobra</button>'
               + '<button type="button" class="minibtn amgMatOff" data-id="' + esc(m.id) + '" style="color:var(--danger);">Quitar</button>'
             : '<button type="button" class="minibtn amgMatEdit" data-id="' + esc(m.id) + '">Editar</button>')
         + '</span></div>';
@@ -7778,6 +7786,12 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         await amgMatWrite('PATCH', '?id=eq.' + encodeURIComponent(b.dataset.id), { unit_price: v, updated_at: new Date().toISOString() });
         AMG_EDIT.delete('m:' + b.dataset.id);
         msg.textContent = (m ? m.name : 'Material') + ': ' + (v === null ? 'sin precio' : '$' + invMoney(v) + ' por unidad') + ' ✓';
+      } else if(b.classList.contains('amgMatFree')){
+        // Precio 0 = se entrega y no se cobra. A partir de aqui el invoice lo
+        // lista como "sin costo" y deja de pedir que le pongan precio.
+        await amgMatWrite('PATCH', '?id=eq.' + encodeURIComponent(b.dataset.id), { unit_price: 0, updated_at: new Date().toISOString() });
+        AMG_EDIT.delete('m:' + b.dataset.id);
+        msg.textContent = (m ? m.name : 'Material') + ': no se cobra, va gratis ✓';
       } else if(b.classList.contains('amgMatOff')){
         if(!confirm('¿Quitar ' + (m ? m.name : 'este material') + ' de la lista?')) { b.disabled = false; return; }
         await amgMatWrite('PATCH', '?id=eq.' + encodeURIComponent(b.dataset.id), { active: false, updated_at: new Date().toISOString() });
@@ -7827,7 +7841,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   }
   // Las lineas que salen de UN reporte de mudanza, con el precio congelado del reporte (o el del cliente hoy si no trae).
   function invLinesFromLog(log, client){
-    const p = (log && log.payload) || {}; const r = p.r || null; const out = []; out.unpriced = [];
+    const p = (log && log.payload) || {}; const r = p.r || null; const out = []; out.unpriced = []; out.gratis = [];
     const cfg = (r && r.d != null) ? { rateDay:+r.d, fixed:(+r.f > 0 ? +r.f : 0) } : (mgClientPrice(client ? client.name : p.t) || null);
     const date = invDate(log.log_date || p.d || '');
     if(!cfg) return out;                                              // sin precio: no se factura nada (nunca $0 escondido)
@@ -7861,8 +7875,28 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     (p.mat || []).forEach(m => {
       const q = +m.q; if(!(q > 0) || !m.n) return;
       const mm = (typeof AMG_MATERIALS !== 'undefined' ? AMG_MATERIALS : []).find(x => x && amgKey(x.name) === amgKey(m.n));
-      if(mm && mm.unit_price != null && +mm.unit_price >= 0) out.push({ d: mm.name + ' ' + date, q, u:+mm.unit_price, a: Math.round(q * (+mm.unit_price) * 100)/100, src:String(log.id) });
-      else out.unpriced.push(m.n + ' (' + q + ')');
+      // GRATIS NO ES LO MISMO QUE "FALTA EL PRECIO" (5 oct 2026). Su reclamo:
+      // "los blankets no tienen precio, esos son gratis, no se por que siempre
+      // lo pide la aplicacion". Tenia razon: el codigo metia las dos cosas en
+      // el mismo saco y avisaba igual, asi que no habia manera de callarlo sin
+      // inventarle un precio a algo que se da sin cobrar.
+      //   precio > 0            -> se cobra, va al invoice
+      //   precio 0, o APAGADO   -> no se cobra. Ni aviso ni linea: el apagarlo
+      //                            de la lista ES la forma de decir "este no
+      //                            se cobra", y es lo que el ya habia hecho.
+      //   sin precio y ACTIVO   -> eso si es un olvido, y ahi si se avisa.
+      // CUIDADO CON EL NULO: `+null` es 0 en JavaScript, asi que preguntar
+      // `+unit_price === 0` daba TRUE para un material SIN precio y se habria
+      // ido gratis en el invoice sin avisar - al reves de lo que se quiere.
+      // Lo atrapo la prueba, no la vista. Por eso el nulo se saca primero.
+      const pu = (mm && mm.unit_price != null) ? +mm.unit_price : null;
+      if(pu !== null && pu > 0){
+        out.push({ d: mm.name + ' ' + date, q, u:pu, a: Math.round(q * pu * 100)/100, src:String(log.id) });
+      } else if(mm && (pu === 0 || mm.active === false)){
+        out.gratis.push((mm.name || m.n) + ' (' + q + ')');
+      } else {
+        out.unpriced.push(m.n + ' (' + q + ')');
+      }
     });
     return out;
   }
@@ -7958,7 +7992,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
             : (repes.has(String(l.id)) ? '<br><span class="when" style="color:var(--danger);font-weight:700;">⚠ MISMO DÍA Y MISMAS HORAS que otro reporte de este cliente. Casi seguro es la misma mudanza mandada dos veces: marque UNO solo, o le cobra las horas dos veces.</span>' : ''));
       return '<label class="entryrow" style="align-items:center;gap:10px;cursor:pointer;' + (yaCobrada.length ? 'background:rgba(255,69,58,.10);' : '') + '"><input type="checkbox" class="invLogChk" data-id="' + esc(l.id) + '"' + (on ? ' checked' : '') + (yaCobrada.length ? ' data-yacobrada="' + esc(yaCobrada.join(',')) + '"' : '') + ' style="width:22px;height:22px;">'
         + '<span style="flex:1;"><span class="who">' + esc(invDate(l.log_date)) + (l.crew_leader ? ' · ' + esc(l.crew_leader) : '') + '</span><br><span class="when">' + esc(names) + '</span>' + placeHtml + '</span>'
-        + '<span class="hrs">' + (lines.length ? '$' + invMoney(amt) : '<span style="color:var(--danger);">sin precio</span>') + (lines.unpriced && lines.unpriced.length ? '<br><span style="color:var(--danger);font-size:11px;font-weight:400;">sin precio: ' + esc(lines.unpriced.join(', ')) + '</span>' : '') + '</span></label>';
+        + '<span class="hrs">' + (lines.length ? '$' + invMoney(amt) : '<span style="color:var(--danger);">sin precio</span>') + (lines.unpriced && lines.unpriced.length ? '<br><span style="color:var(--danger);font-size:11px;font-weight:400;">sin precio: ' + esc(lines.unpriced.join(', ')) + '</span>' : '')
+        // Lo que no se cobra tambien se dice, pero en gris: no es un problema
+        // que haya que arreglar, es que ese material va sin costo. Callarlo
+        // seria peor - parecería que el app no lo vio.
+        + (lines.gratis && lines.gratis.length ? '<br><span style="color:var(--ink-soft);font-size:11px;font-weight:400;">sin costo: ' + esc(lines.gratis.join(', ')) + '</span>' : '') + '</span></label>';
     }).join('');
   }
   function invRebuildLogLines(){
