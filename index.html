@@ -7103,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MQ';
+  const APP_BUILD = '2026-10-06-MR';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12607,22 +12607,37 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // dandole la frase entera con peso, "cinco fans" gana.
   var AV_NUMEROS = ['un','una','uno','dos','tres','cuatro','cinco','seis','siete','ocho','nueve','diez',
                     'one','two','three','four','five','six','seven','eight','nine','ten'];
-  var AV_VERBOS  = ['instalamos','instalé','puse','pusimos','dejé','dejamos','quité','quitamos','recogimos',
-                    'we installed','I put','we put','we picked up'];
+  // Pocos verbos a proposito. Cada verbo multiplica por el catalogo entero y
+  // por los numeros; con catorce salian 32 mil frases, y un peso repartido
+  // entre 32 mil frases no inclina nada. Mejor pocas y que pesen.
+  var AV_VERBOS  = ['instalamos','puse','pusimos','quitamos'];
   function avFrases(){
     var out = [], cuartos = avCuartosDelProyecto();
     try{
-      // Los nombres del catalogo tal como se dicen: el de la fila (ingles) y
-      // la forma mas comun en espanol.
+      // Los nombres del catalogo tal como se dicen.
       var nombres = [];
       VOZ_EQUIPO.forEach(function(e){
         nombres.push(e.en);
-        // TODAS las formas en que la cuadrilla lo dice, no solo las largas.
-        // (El filtro de antes pedia mas de 3 letras y dejaba fuera "fen" y
-        // "fan", que son justo las que se oyen mal.)
         (e.k || []).forEach(function(k){ if(k && k.length >= 3 && nombres.indexOf(k) < 0) nombres.push(k); });
       });
       nombres = nombres.filter(function(x,i){ return x && nombres.indexOf(x) === i; });
+
+      // ---- LA FORMA QUE MAS SE DICE: NUMERO + EQUIPO, SUELTO ----
+      // Prueba del 6 oct: contando ("un dehumidifier, dos fans, un jepa") el
+      // telefono clavo "dehumidifier" y "jepa" pero puso "Fence" por "fans".
+      // La razon estaba a la vista: TODAS las frases del modelo llevaban un
+      // verbo adelante, y asi nadie cuenta. Una palabra larga aguanta sola;
+      // una corta como "fans" pierde contra cualquier parecido.
+      // Esta es ahora la forma principal, y va primero.
+      AV_NUMEROS.forEach(function(n){
+        nombres.forEach(function(q){
+          out.push(n + ' ' + q);
+          out.push('y ' + n + ' ' + q);   // "y un jepa", como encadena al hablar
+        });
+      });
+      // ---- CON VERBO ----
+      // Menos verbos que antes a proposito: con 14 salian 32 mil frases y eso
+      // reparte el peso en vez de concentrarlo donde importa.
       AV_VERBOS.forEach(function(v){
         AV_NUMEROS.forEach(function(n){
           nombres.forEach(function(q){ out.push(v + ' ' + n + ' ' + q); });
@@ -12642,9 +12657,6 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       VOZ_EQUIPO.forEach(function(e){
         (e.pistas || []).forEach(function(pz){
           out.push(pz);
-          // Hasta 8 formas, no 4: las que la cuadrilla usa de verdad ("plato
-          // gris", "tubo gris") estan mas abajo en la lista que los nombres
-          // largos, y son justo las que hay que cubrir.
           (e.k || []).slice(0, 8).forEach(function(k){ out.push('dos ' + k + ' ' + pz); });
         });
       });
@@ -12654,9 +12666,6 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     return out;
   }
 
-  // El catalogo contra el que TIENE que caer cada articulo, CON como lo dice
-  // la cuadrilla y con las pistas de alrededor. Sale de la misma tabla que
-  // llena la plantilla de equipo, no de una lista aparte.
   // LOS TRES ESTADOS. Hasta hoy solo habia puso / quito, y su prueba trae el
   // tercero: "todavia quedan dos botes de agua" no es que los haya puesto hoy
   // ni que los haya quitado - es que SIGUEN ahi. En la plantilla de equipo esa
@@ -12669,6 +12678,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     return 'puso';
   }
 
+  // El catalogo contra el que TIENE que caer cada articulo, CON como lo dice
+  // la cuadrilla y con las pistas de alrededor. Sale de la misma tabla que
+  // llena la plantilla de equipo, no de una lista aparte.
   function avCatalogo(){
     try{
       return VOZ_EQUIPO.map(function(e){
@@ -12962,7 +12974,18 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     avEstado('entendiendo');
     var dicho = AV.texto;
     if(!dicho.trim()){ avEstado('esperando', 'No se oyó nada. Toque la esfera e inténtelo otra vez.'); return; }
+    // UN TOPE AL "UN MOMENTO...". El modelo del telefono casi siempre contesta
+    // en un par de segundos, pero si se traba no puede dejar la pantalla
+    // colgada para siempre: mejor decir que no se pudo y que vuelva a hablar.
+    var acabo = false;
+    setTimeout(function(){
+      if(acabo || !AV.abierto || AV.estado !== 'entendiendo') return;
+      acabo = true;
+      avEstado('esperando', 'Se tardó demasiado en entender. Toque la esfera e inténtelo otra vez.');
+    }, 20000);
     avInterpretarIA(dicho).then(function(L){
+      if(acabo) return;
+      acabo = true;
       if(!AV.abierto) return;
       avPintarLectura(L);
       // "Respondiendo" es para cuando HAY algo que contestar. Si no quedo
@@ -12970,7 +12993,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       if(L && L.pregunta) avEstado('respondiendo', 'Conteste y toque la esfera.');
       else avEstado('esperando', 'Listo. Toque la esfera para seguir hablando.');
     }).catch(function(err){
-      if(!AV.abierto) return;
+      if(acabo || !AV.abierto) return;
+      acabo = true;
       avEstado('error', 'No se pudo interpretar: ' + ((err && err.message) || err));
     });
   }
