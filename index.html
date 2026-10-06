@@ -7103,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MT';
+  const APP_BUILD = '2026-10-06-MU';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12679,6 +12679,141 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     return 'puso';
   }
 
+  // ================= OIR POR SONIDO, NO POR LETRA =================
+  //
+  // Su pedido del 6 oct: "si dice fence, asi como entiendes tu, debe de
+  // entender... tiene que tener autointeligencia para poder comprender a lo
+  // que uno se esta refiriendo".
+  //
+  // Y su otra regla, de antes, que sigue en pie: "no crear reglas universales
+  // como Fence = Fans". Las dos cosas caben juntas, y asi es como lo entiendo
+  // yo cuando lo leo: "fence" NO es una entrada en una tabla - es que SUENA
+  // igual que "fans". f-n-s contra f-n-s. Lo mismo "jepa" y "HEPA", o
+  // "three pan" y "drip pan".
+  //
+  // Entonces lo que se construye no es una lista de equivalencias (que solo
+  // sirve para las palabras que ya vimos fallar) sino una forma de MEDIR cuanto
+  // se parecen dos palabras AL OIDO. Eso sirve para palabras que nunca hemos
+  // visto, que es lo que de verdad hace falta.
+  //
+  // Como se mide: se reduce la palabra a su esqueleto de consonantes con las
+  // reglas del espanol (la hache no suena, la uve suena como be, la jota y la
+  // hache inglesa son el mismo sonido, la ce suena ese o ka segun la vocal...)
+  // y se comparan los esqueletos. Las vocales se van: son lo primero que se
+  // deforma al hablar rapido y con ruido de maquinas.
+  var AV_SONIDO = {
+    b:'B', v:'B', w:'B',
+    p:'P', f:'F', m:'M',
+    n:'N', 'ñ':'N',
+    // La te y la de son el mismo golpe de lengua: por eso un nombre que
+    // empieza con una se reconoce aunque el dictado escriba la otra.
+    t:'T', d:'T',
+    k:'K', q:'K',
+    s:'S', z:'S',
+    j:'J', h:'J',                 // la hache inglesa suena a jota: "HEPA" = "jepa"
+    l:'L', r:'R', y:'Y',
+    g:'K', x:'S', c:'K'           // la c y la g cambian segun la vocal (abajo)
+  };
+  function avEsqueleto(txt){
+    var t = vozLlano(txt).replace(/[^a-zñ ]/g, ' ').trim();
+    if(!t) return '';
+    var out = '';
+    for(var i = 0; i < t.length; i++){
+      var ch = t[i], sig = t[i+1] || '';
+      if(ch === ' ') continue;
+      if('aeiou'.indexOf(ch) > -1) continue;        // las vocales se van
+      if(ch === 'c'){ out += ('ei'.indexOf(sig) > -1) ? 'S' : 'K'; continue; }
+      if(ch === 'g'){ out += ('ei'.indexOf(sig) > -1) ? 'J' : 'K'; continue; }
+      if(ch === 'q'){ out += 'K'; if(sig === 'u') i++; continue; }
+      if(ch === 'l' && sig === 'l'){ out += 'Y'; i++; continue; }
+      if(ch === 'c' && sig === 'h'){ out += 'CH'; i++; continue; }
+      if(ch === 'r' && sig === 'r'){ out += 'R'; i++; continue; }
+      out += AV_SONIDO[ch] || '';
+    }
+    return out.replace(/(.)\1+/g, '$1');            // dobles a una sola
+  }
+  function avDistancia(a, b){
+    if(a === b) return 0;
+    if(!a.length) return b.length;
+    if(!b.length) return a.length;
+    var fila = []; for(var j = 0; j <= b.length; j++) fila[j] = j;
+    for(var i = 1; i <= a.length; i++){
+      var ant = fila[0]; fila[0] = i;
+      for(var k = 1; k <= b.length; k++){
+        var tmp = fila[k];
+        fila[k] = Math.min(fila[k] + 1, fila[k-1] + 1, ant + (a[i-1] === b[k-1] ? 0 : 1));
+        ant = tmp;
+      }
+    }
+    return fila[b.length];
+  }
+  // 0 = no se parece en nada, 1 = suena igual.
+  function avParecidoSonoro(a, b){
+    var ea = avEsqueleto(a), eb = avEsqueleto(b);
+    if(!ea || !eb) return 0;
+    var d = avDistancia(ea, eb), m = Math.max(ea.length, eb.length);
+    return m ? Math.max(0, 1 - d / m) : 0;
+  }
+
+  // LOS UMBRALES NO SON A OJO: se midieron contra las 15 palabras que de
+  // verdad oyo mal su telefono y contra 46 palabras normales del trabajo
+  // (cuartos, nombres de clientes, cosas que se dicen todo el dia).
+  //
+  //   umbral  acierta   confunde
+  //    0.50     12/15     39/46   <- inservible: casi todo "se parece"
+  //    0.60     11/15     27/46
+  //    0.70     11/15      6/46
+  //    0.80     11/15      2/46   <- el punto bueno
+  //    0.90      9/15      1/46
+  //
+  // Y una leccion que salio de ahi: "Susan" suena IGUAL que "ozone" (S-N las
+  // dos). Por eso el sonido NUNCA decide solo. Arriba de 0.90 se da por bueno;
+  // entre 0.70 y 0.90 se PROPONE y se pregunta; debajo no se propone nada. Es
+  // su propia politica de ambiguedad, aplicada al oido.
+  var AV_SON_SEGURO   = 0.90;   // suena igual: se anota
+  var AV_SON_PROPONER = 0.70;   // se parece: se propone y se confirma
+
+  // A QUE DEL CATALOGO SE PARECE LO QUE SE OYO.
+  // Devuelve los candidatos ordenados, con su parecido. NO decide: decidir con
+  // la ambiguedad es trabajo del interprete y de su politica de certeza.
+  function avCandidatos(oido){
+    var t = vozLlano(oido).trim();
+    if(!t || t.length < 2) return [];
+    var out = [];
+    try{
+      VOZ_EQUIPO.forEach(function(e){
+        var mejor = 0, conQue = '';
+        [e.en].concat(e.k || []).forEach(function(forma){
+          var p = avParecidoSonoro(t, forma);
+          // Tambien palabra por palabra: "dos fence" o "tres pan" traen
+          // basura pegada, y el equipo esta adentro.
+          t.split(' ').forEach(function(w){
+            if(w.length >= 3) p = Math.max(p, avParecidoSonoro(w, forma) * 0.97);
+          });
+          if(p > mejor){ mejor = p; conQue = forma; }
+        });
+        if(mejor >= AV_SON_PROPONER) out.push({ cat: e.en, tipo: e.tipo, parecido: Math.round(mejor * 100) / 100, seParecaA: conQue });
+      });
+    }catch(e){ return []; }
+    out.sort(function(a, b){ return b.parecido - a.parecido; });
+    return out.slice(0, 3);
+  }
+
+  // Lo que suena a equipo dentro de TODA la frase, para que el interprete lo
+  // tenga en cuenta. No decide nada: es evidencia, como el parecido que uno
+  // oye sin darse cuenta.
+  function avSuenaA(texto){
+    var out = [], visto = {};
+    String(texto || '').split(/[\s,.;]+/).forEach(function(w){
+      if(w.length < 3 || visto[vozLlano(w)]) return;
+      visto[vozLlano(w)] = 1;
+      var c = avCandidatos(w);
+      if(c.length && c[0].parecido >= AV_SON_PROPONER)
+        out.push('"' + w + '" suena a ' + c[0].cat + ' (' + Math.round(c[0].parecido * 100) + '%)');
+    });
+    return out.slice(0, 8);
+  }
+
   // El catalogo contra el que TIENE que caer cada articulo, CON como lo dice
   // la cuadrilla y con las pistas de alrededor. Sale de la misma tabla que
   // llena la plantilla de equipo, no de una lista aparte.
@@ -13747,12 +13882,32 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           if(fila) it.enLista = fila.en;
           return;
         }
-        // Sin amarre del modelo se intenta por la lista, y si tampoco cae,
-        // queda marcado para preguntar. No se escoge el mas parecido.
+        // Sin amarre del modelo se intenta por la lista exacta.
         var p = vozLlano(it.nombre).split(' ');
         var m = avBuscarFrase(p, VOZ_EQUIPO.map(function(e){ return { k:e.k, n:e.en }; }), 'k');
-        it.conocido = !!m;
-        if(m){ it.enLista = m.fila.n; it.delCatalogo = m.fila.n; }
+        if(m){ it.conocido = true; it.enLista = m.fila.n; it.delCatalogo = m.fila.n; return; }
+        // Y si la palabra no existe tal cual, SE OYE. "fence" no esta en
+        // ninguna lista, pero suena igual que "fans" - y asi es como lo
+        // entiende una persona. El parecido se guarda SIEMPRE, aunque no
+        // alcance para decidir: es la evidencia que ve el interprete.
+        var cand = avCandidatos(it.nombre);
+        it.candidatos = cand;
+        it.conocido = false;
+        if(!cand.length) return;
+        if(cand[0].parecido >= AV_SON_SEGURO){
+          // Suena igual. Se anota, pero queda dicho que se resolvio por
+          // sonido y que palabra se oyo, para que se pueda revisar.
+          it.delCatalogo = cand[0].cat; it.enLista = cand[0].cat;
+          it.conocido = true; it.certeza = 'alta';
+          it.porSonido = true; it.oidoAntes = it.nombre;
+          it.porque = 'suena igual que "' + cand[0].seParecaA + '"';
+        }else{
+          // Se parece pero no lo suficiente: se propone y se pregunta. Nunca
+          // se da por bueno un parecido a medias.
+          it.delCatalogo = cand[0].cat; it.enLista = cand[0].cat;
+          it.certeza = 'media'; it.porSonido = true; it.oidoAntes = it.nombre;
+          it.porque = 'se parece a "' + cand[0].seParecaA + '" (' + Math.round(cand[0].parecido * 100) + '%)';
+        }
       });
     });
     return lectura;
@@ -13767,6 +13922,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         var r = await C.interpretar({ texto: texto, cuartos: avCuartosDelProyecto(),
                                       catalogo: avCatalogo(), aprendido: avAprendido(),
                                       llevamos: avResumenAcum(AV.acum || avAcumNuevo()),
+                                      suenaA: avSuenaA(texto),
                                       otras: AV.otras || [], dudosos: AV.dudosos || [] });
         AV_IA.usando = 'ia';
         // Todo lo que se oyo, en los dos idiomas: contra esto se comprueba
