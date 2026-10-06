@@ -7103,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MU';
+  const APP_BUILD = '2026-10-06-MV';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -13913,7 +13913,140 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     return lectura;
   }
 
+  // ================= CUANDO PEDIR AYUDA =================
+  //
+  // Decision suya del 6 oct: mixto. El modelo del telefono resuelve lo facil -
+  // gratis, sin señal, sin que nada salga del aparato - y cuando NO ESTA
+  // SEGURO le pregunta a uno grande.
+  //
+  // Se escala solo si de verdad hace falta, porque cada escalada cuesta:
+  //   * algo quedo sin amarrar al catalogo, o
+  //   * algo quedo en certeza media (o sea, iba a preguntar), o
+  //   * el modelo del telefono no esta o fallo.
+  // Si entendio todo con seguridad, no se gasta nada.
+  function avNecesitaAyuda(L){
+    if(!L) return true;
+    if(L.nada) return true;
+    var duda = false;
+    (L.habitaciones || []).forEach(function(h){
+      (h.items || []).forEach(function(i){
+        if(!i.delCatalogo || i.certeza === 'media' || i.certeza === 'baja') duda = true;
+      });
+    });
+    return duda;
+  }
+
+  // LA REJA DE PRIVACIDAD. Solo viaja la frase del equipo y el catalogo.
+  // NUNCA el cliente, la direccion ni nada de la base de datos. Esto se revisa
+  // aqui Y en el servidor: una reja que depende de que el otro lado se porte
+  // bien no es una reja.
+  var AV_NO_SALE = /\b(direccion|direcci\u00f3n|address|email|correo|tel\u00e9fono|telefono|phone|tarjeta|card|ssn)\b/i;
+  function avPaqueteSeguro(texto){
+    var t = String(texto || '');
+    if(AV_NO_SALE.test(t)) return null;      // ante la duda, no sale
+    return {
+      texto: t,
+      catalogo: avCatalogo(),
+      cuartos: avCuartosDelProyecto(),
+      llevamos: avResumenAcum(AV.acum || avAcumNuevo()),
+      otras: (AV.otras || []).slice(0, 3),
+      suenaA: avSuenaA(t)
+    };
+  }
+
+  // Le pregunta al grande. Si no se puede (sin señal, sin llave, lo que sea)
+  // devuelve null y arriba se queda con lo que entendio el telefono: el
+  // asistente nunca se queda mudo por esto.
+  async function avPedirAyuda(texto){
+    try{
+      // cloudOn es una FUNCION, no una bandera. Y las dos viven mas abajo en
+      // el archivo: esto solo corre cuando el usuario habla, mucho despues de
+      // que todo cargo, asi que no hay problema de orden.
+      if(!cloudOn()) return null;
+      var paquete = avPaqueteSeguro(texto);
+      if(!paquete) return null;
+      var res = await authFetch('/functions/v1/entender-voz', {
+        method:'POST', headers: cloudHeaders(), body: JSON.stringify(paquete)
+      });
+      if(!res || !res.ok) return null;
+      var j = await res.json();
+      if(!j || !j.ok || !j.lectura) return null;
+      AV.ultimoGasto = j.gasto || null;
+      return j.lectura;
+    }catch(e){ return null; }
+  }
+
   // Interpreta con el modelo. Si no se puede, cae a las reglas Y LO DICE.
+  // UNA LECTURA DEL MODELO -> LA LECTURA DE LA APP.
+  //
+  // Lo usan LAS DOS rutas, la del telefono y la del grande. Un solo lugar
+  // donde se aplica la politica de ambiguedad, se tira lo inventado y se
+  // arman las preguntas: si fueran dos, tarde o temprano se separarian y la
+  // app se portaria distinto segun quien contesto.
+  function avDeLectura(r, texto){
+    // Todo lo que se oyo, en los dos idiomas: contra esto se comprueba
+    // que un dato no salio de la nada.
+    var oidos = [texto].concat(AV.otras || []).concat(Object.keys(AV.porIdioma || {}).map(function(k){ return AV.porIdioma[k]; }));
+    var datos = (r.datos || []).filter(function(d){
+      return d && d.campo && avDatoSeDijo(d.valor, oidos);
+    });
+    var inventados = (r.datos || []).length - datos.length;
+    var habs = (r.habitaciones || []).map(function(h){
+      return { nombre: (h.nombre || '').trim(),
+               items: (h.items || []).map(function(i){
+                 var cert = String(i.certeza || 'alta').toLowerCase();
+                 if(['alta','media','baja'].indexOf(cert) < 0) cert = 'media';
+                 var cat = (i.delCatalogo || '').trim();
+                 // SU POLITICA DE AMBIGUEDAD, textual:
+                 //   alta  -> interpretar sin interrumpir
+                 //   media -> proponer y pedir confirmacion
+                 //   baja  -> no inventar, preguntar
+                 // Con certeza baja el amarre se SUELTA aunque el modelo
+                 // haya puesto uno: anotarlo seria justo lo que el pidio
+                 // que no pasara.
+                 if(cert === 'baja') cat = '';
+                 return { nombre: i.nombre, delCatalogo: cat, certeza: cert,
+                          porque: (i.porque || '').trim(),
+                          n: (i.cantidad === -1 ? null : i.cantidad),
+                          accion: avEstadoDe(i.accion) };
+               }) };
+    });
+    // LO QUE HAY QUE CONFIRMAR. Van en una lista propia porque la pantalla
+    // les pone su boton de Si / No, y de ahi es de donde el asistente
+    // aprende.
+    var porConfirmar = [];
+    habs.forEach(function(h){ (h.items || []).forEach(function(i){
+      if(i.delCatalogo && i.certeza === 'media') porConfirmar.push({ oido: i.nombre, cat: i.delCatalogo, cuarto: h.nombre, porque: i.porque });
+    }); });
+    // SI NO HAY CERTEZA, SE PREGUNTA. Un articulo que el modelo no pudo
+    // amarrar al catalogo no se anota con el nombre que sea: se queda
+    // marcado y se pide que lo repita. Su regla, textual: preguntar en
+    // lugar de inventar.
+    var sinAmarrar = [];
+    habs.forEach(function(h){ (h.items || []).forEach(function(i){
+      if(!i.delCatalogo) sinAmarrar.push({ oido: i.nombre, cuarto: h.nombre });
+    }); });
+    var preg = (r.pregunta || '').trim();
+    if(sinAmarrar.length && !preg){
+      preg = sinAmarrar.length === 1
+        ? '¿Qué equipo es "' + sinAmarrar[0].oido + '"' + (sinAmarrar[0].cuarto ? ' en ' + sinAmarrar[0].cuarto : '') + '? Dígalo otra vez.'
+        : 'No entendí ' + sinAmarrar.length + ' equipos: ' + sinAmarrar.map(function(x){ return '"' + x.oido + '"'; }).join(', ') + '. Dígalos otra vez.';
+    }
+    var L = avValidar({
+      modulo: r.modulo || null,
+      pregunta: preg,
+      datos: datos,
+      inventados: inventados,
+      sinAmarrar: sinAmarrar.length,
+      porConfirmar: porConfirmar,
+      habitaciones: habs,
+      corrigio: (r.corrigio || '').trim(),
+      corrige: !!r.corrige,
+      nada: !(r.modulo || habs.length || datos.length)
+    });
+    return L;
+  }
+
   async function avInterpretarIA(texto){
     var C = avCerebro();
     if(AV_IA.disponible === null) await avRevisarCerebro();
@@ -13925,68 +14058,22 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
                                       suenaA: avSuenaA(texto),
                                       otras: AV.otras || [], dudosos: AV.dudosos || [] });
         AV_IA.usando = 'ia';
-        // Todo lo que se oyo, en los dos idiomas: contra esto se comprueba
-        // que un dato no salio de la nada.
-        var oidos = [texto].concat(AV.otras || []).concat(Object.keys(AV.porIdioma || {}).map(function(k){ return AV.porIdioma[k]; }));
-        var datos = (r.datos || []).filter(function(d){
-          return d && d.campo && avDatoSeDijo(d.valor, oidos);
-        });
-        var inventados = (r.datos || []).length - datos.length;
-        var habs = (r.habitaciones || []).map(function(h){
-          return { nombre: (h.nombre || '').trim(),
-                   items: (h.items || []).map(function(i){
-                     var cert = String(i.certeza || 'alta').toLowerCase();
-                     if(['alta','media','baja'].indexOf(cert) < 0) cert = 'media';
-                     var cat = (i.delCatalogo || '').trim();
-                     // SU POLITICA DE AMBIGUEDAD, textual:
-                     //   alta  -> interpretar sin interrumpir
-                     //   media -> proponer y pedir confirmacion
-                     //   baja  -> no inventar, preguntar
-                     // Con certeza baja el amarre se SUELTA aunque el modelo
-                     // haya puesto uno: anotarlo seria justo lo que el pidio
-                     // que no pasara.
-                     if(cert === 'baja') cat = '';
-                     return { nombre: i.nombre, delCatalogo: cat, certeza: cert,
-                              porque: (i.porque || '').trim(),
-                              n: (i.cantidad === -1 ? null : i.cantidad),
-                              accion: avEstadoDe(i.accion) };
-                   }) };
-        });
-        // LO QUE HAY QUE CONFIRMAR. Van en una lista propia porque la pantalla
-        // les pone su boton de Si / No, y de ahi es de donde el asistente
-        // aprende.
-        var porConfirmar = [];
-        habs.forEach(function(h){ (h.items || []).forEach(function(i){
-          if(i.delCatalogo && i.certeza === 'media') porConfirmar.push({ oido: i.nombre, cat: i.delCatalogo, cuarto: h.nombre, porque: i.porque });
-        }); });
-        // SI NO HAY CERTEZA, SE PREGUNTA. Un articulo que el modelo no pudo
-        // amarrar al catalogo no se anota con el nombre que sea: se queda
-        // marcado y se pide que lo repita. Su regla, textual: preguntar en
-        // lugar de inventar.
-        var sinAmarrar = [];
-        habs.forEach(function(h){ (h.items || []).forEach(function(i){
-          if(!i.delCatalogo) sinAmarrar.push({ oido: i.nombre, cuarto: h.nombre });
-        }); });
-        var preg = (r.pregunta || '').trim();
-        if(sinAmarrar.length && !preg){
-          preg = sinAmarrar.length === 1
-            ? '¿Qué equipo es "' + sinAmarrar[0].oido + '"' + (sinAmarrar[0].cuarto ? ' en ' + sinAmarrar[0].cuarto : '') + '? Dígalo otra vez.'
-            : 'No entendí ' + sinAmarrar.length + ' equipos: ' + sinAmarrar.map(function(x){ return '"' + x.oido + '"'; }).join(', ') + '. Dígalos otra vez.';
+        var L = avDeLectura(r, texto);
+        // SI EL TELEFONO QUEDO CON DUDAS, se le pregunta al grande. Si
+        // entendio todo con seguridad, no se gasta nada.
+        if(avNecesitaAyuda(L)){
+          var mejor = await avPedirAyuda(texto);
+          if(mejor){ AV_IA.usando = 'nube'; return avDeLectura(mejor, texto); }
         }
-        return avValidar({
-          modulo: r.modulo || null,
-          pregunta: preg,
-          datos: datos,
-          inventados: inventados,
-          sinAmarrar: sinAmarrar.length,
-          porConfirmar: porConfirmar,
-          habitaciones: habs,
-          corrigio: (r.corrigio || '').trim(),
-          corrige: !!r.corrige,
-          nada: !(r.modulo || habs.length || datos.length)
-        });
+        return L;
       }catch(e){ /* cae a reglas abajo */ }
     }
+    // EL TELEFONO NO PUDO. Antes de caer a las reglas se le pregunta al
+    // grande: entre un modelo que entiende y un parser de palabras, no hay
+    // comparacion.
+    var ayuda = await avPedirAyuda(texto);
+    if(ayuda){ AV_IA.usando = 'nube'; return avDeLectura(ayuda, texto); }
+
     // RESPALDO. Es el parser de reglas, y la pantalla lo va a decir.
     AV_IA.usando = 'reglas';
     var v = avInterpretar(texto);
@@ -14055,7 +14142,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // ---- CAPA 2: COMO LO ENTENDIO ----
     h += '<div class="av-capa"><div class="av-ctit">2 · cómo lo entendió</div>';
     h += '<div class="av-coido av-cquien">' +
-      (AV_IA.usando === 'ia' ? 'El modelo del teléfono, leyendo toda la conversación.'
+      (AV_IA.usando === 'nube' ? 'El modelo del teléfono no estaba seguro, así que preguntó al asistente grande.'
+       : AV_IA.usando === 'ia' ? 'El modelo del teléfono, leyendo toda la conversación.'
                              : 'Reglas de respaldo' + (AV_MOTIVOS[AV_IA.motivo] ? ' — ' + esc(AV_MOTIVOS[AV_IA.motivo]) : '') + '.') +
       '</div>';
     // Lo que ARREGLO de una palabra mal oida. Esto es el corazon de la
