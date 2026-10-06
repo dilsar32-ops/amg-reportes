@@ -7103,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MY';
+  const APP_BUILD = '2026-10-06-MZ';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12881,11 +12881,16 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // su propia politica de ambiguedad, aplicada al oido.
   var AV_SON_SEGURO   = 0.90;   // suena igual: se anota
   var AV_SON_PROPONER = 0.70;   // se parece: se propone y se confirma
+  // Para DUDAR basta menos. "jefa" suena a HEPAs al 50%: no alcanza para
+  // escogerlo, pero si para preguntar cuando el modelo dijo otra cosa.
+  var AV_SON_DUDAR    = 0.48;
 
   // A QUE DEL CATALOGO SE PARECE LO QUE SE OYO.
   // Devuelve los candidatos ordenados, con su parecido. NO decide: decidir con
   // la ambiguedad es trabajo del interprete y de su politica de certeza.
-  function avCandidatos(oido){
+  // `minimo` deja mirar MAS ABAJO del umbral de proponer. Se usa solo para
+  // DUDAR: un parecido flojo no alcanza para escoger, pero si para preguntar.
+  function avCandidatos(oido, minimo){
     var t = vozLlano(oido).trim();
     if(!t || t.length < 2) return [];
     var out = [];
@@ -12901,7 +12906,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           });
           if(p > mejor){ mejor = p; conQue = forma; }
         });
-        if(mejor >= AV_SON_PROPONER) out.push({ cat: e.en, tipo: e.tipo, parecido: Math.round(mejor * 100) / 100, seParecaA: conQue });
+        if(mejor >= (minimo || AV_SON_PROPONER)) out.push({ cat: e.en, tipo: e.tipo, parecido: Math.round(mejor * 100) / 100, seParecaA: conQue });
       });
     }catch(e){ return []; }
     out.sort(function(a, b){ return b.parecido - a.parecido; });
@@ -14066,7 +14071,26 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         // se suelta y sigue el camino normal.
         if(it.delCatalogo){
           var fila = VOZ_EQUIPO.filter(function(e){ return vozLlano(e.en) === vozLlano(it.delCatalogo); })[0];
-          if(fila){ it.conocido = true; it.enLista = fila.en; return; }
+          if(fila){
+            it.conocido = true; it.enLista = fila.en;
+            // ---- ¿COINCIDEN EL MODELO Y EL OIDO? ----
+            // Esto salio del telefono: el modelo dijo que "jefa" era una
+            // Ozone Machine, mientras el oido decia que suena a HEPAs. Nadie
+            // comparaba las dos opiniones, y ganaba el modelo en silencio.
+            //
+            // DUDAR con evidencia floja es seguro; DECIDIR con evidencia
+            // floja no lo es. Cuando no coinciden no se escoge ninguna: se
+            // pregunta cual de las dos.
+            var otro = avCandidatos(it.nombre, AV_SON_DUDAR)[0];
+            if(otro && otro.parecido >= 0.5 && vozLlano(otro.cat) !== vozLlano(fila.en)){
+              it.certeza = 'media';
+              it.oidoAntes = it.nombre;
+              it.suenaA = otro.cat;
+              it.porque = 'el modelo dice ' + fila.en + ', pero suena a ' + otro.cat +
+                          ' (' + Math.round(otro.parecido * 100) + '%)';
+            }
+            return;
+          }
           it.delCatalogo = '';
         }
         // Sin amarre del modelo se intenta por la lista exacta.
@@ -14209,7 +14233,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // aprende.
     var porConfirmar = [];
     habs.forEach(function(h){ (h.items || []).forEach(function(i){
-      if(i.delCatalogo && i.certeza === 'media') porConfirmar.push({ oido: i.nombre, cat: i.delCatalogo, cuarto: h.nombre, porque: i.porque });
+      if(i.delCatalogo && i.certeza === 'media')
+        porConfirmar.push({ oido: i.oidoAntes || i.nombre, cat: i.delCatalogo,
+                            suenaA: i.suenaA || '', cuarto: h.nombre, porque: i.porque });
     }); });
     // SI NO HAY CERTEZA, SE PREGUNTA. Un articulo que el modelo no pudo
     // amarrar al catalogo no se anota con el nombre que sea: se queda
@@ -14220,6 +14246,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       if(!i.delCatalogo) sinAmarrar.push({ oido: i.nombre, cuarto: h.nombre });
     }); });
     var preg = (r.pregunta || '').trim();
+    // UNA PREGUNTA CON EL HUECO SIN LLENAR NO SIRVE. En el telefono salio tal
+    // cual "¿Te refieres a X?" - el modelo copio la plantilla con la equis
+    // adentro. Si pasa, se tira y la arma la app, que si sabe de que habla.
+    if(/\s[XY]\s*\?/.test(preg) || preg.length < 8) preg = '';
     if(sinAmarrar.length && !preg){
       preg = sinAmarrar.length === 1
         ? '¿Qué equipo es "' + sinAmarrar[0].oido + '"' + (sinAmarrar[0].cuarto ? ' en ' + sinAmarrar[0].cuarto : '') + '? Dígalo otra vez.'
@@ -14446,7 +14476,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       h += '<div class="av-capa av-conf"><div class="av-ctit">confirme, por favor</div>';
       L.porConfirmar.forEach(function(c, idx){
         h += '<div class="av-cpreg">Oí <b>“' + esc(c.oido) + '”</b>' + (c.cuarto ? ' en ' + esc(c.cuarto) : '') +
-             '. ¿Se refiere a <b>' + esc(c.cat) + '</b>?' +
+             '. ¿Se refiere a <b>' + esc(c.cat) + '</b>' +
+             (c.suenaA && c.suenaA !== c.cat ? ' o a <b>' + esc(c.suenaA) + '</b>' : '') + '?' +
              (c.porque ? '<i class="av-ojo"> — ' + esc(c.porque) + '</i>' : '') +
              '<span class="av-cbtns"><button type="button" class="av-cbtn" data-avsi="' + idx + '">Sí</button>' +
              '<button type="button" class="av-cbtn no" data-avno="' + idx + '">No</button></span></div>';
