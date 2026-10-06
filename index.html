@@ -1115,6 +1115,16 @@
   .av-cduda b{color:#ffd98a; font-weight:700;}
   .av-ccorr{margin-top:6px; font-size:14px; line-height:1.4; color:#8fe3a2; font-weight:600;}
   .av-cfalta{color:#ffb4a0; font-weight:600;}
+  .av-dudoso{color:#ffd98a;}
+  .av-conf{border-color:rgba(255,217,138,.42); background:rgba(255,217,138,.08);}
+  .av-cpreg{font-size:15px; line-height:1.45; color:#fff; padding:8px 0;
+    border-bottom:1px solid rgba(255,255,255,.1);}
+  .av-cpreg:last-child{border-bottom:0;}
+  .av-cbtns{display:flex; gap:8px; margin-top:8px;}
+  .av-cbtn{flex:1; min-height:42px; border-radius:9px; cursor:pointer; font:inherit; font-weight:700;
+    border:1px solid rgba(255,255,255,.26); background:rgba(255,255,255,.14); color:#fff;}
+  .av-cbtn.no{background:rgba(255,255,255,.05);}
+  .av-cbtn:active{opacity:.6;}
   .av-cidio{margin-top:7px; font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
     color:rgba(255,255,255,.42); font-weight:700;}
   .av-chist{margin-top:5px; font-size:13.5px; color:rgba(255,255,255,.8);
@@ -7093,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MM';
+  const APP_BUILD = '2026-10-06-MN';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12566,6 +12576,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     otras: [],
     dudosos: [],
     porIdioma: {},     // lo que oyo CADA idioma, sin mezclar
+    ultima: null,      // la lectura en pantalla, para los botones de confirmar
+    sinRegistrar: false,
     historial: []      // lo de cada intento, para ver si los nombres salen parejos
   };
 
@@ -12605,10 +12617,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       var nombres = [];
       VOZ_EQUIPO.forEach(function(e){
         nombres.push(e.en);
-        // la primera clave suele ser la forma larga en espanol
-        if(e.k && e.k.length) nombres.push(e.k[0]);
-        // y la forma corta en ingles si la hay (air mover, dehu...)
-        (e.k || []).forEach(function(k){ if(/^[a-z ]+$/.test(k) && k.length > 3 && nombres.indexOf(k) < 0) nombres.push(k); });
+        // TODAS las formas en que la cuadrilla lo dice, no solo las largas.
+        // (El filtro de antes pedia mas de 3 letras y dejaba fuera "fen" y
+        // "fan", que son justo las que se oyen mal.)
+        (e.k || []).forEach(function(k){ if(k && k.length >= 3 && nombres.indexOf(k) < 0) nombres.push(k); });
       });
       nombres = nombres.filter(function(x,i){ return x && nombres.indexOf(x) === i; });
       AV_VERBOS.forEach(function(v){
@@ -12623,14 +12635,103 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       });
       // Las correcciones a media frase, que son parte normal de como habla.
       AV_NUMEROS.forEach(function(n){ out.push('no, eran ' + n); out.push('perdón, ' + n); });
+      // Y lo que queda ALREDEDOR del equipo, que es como se reconoce cuando el
+      // nombre se oye mal: "debajo de los dehus", "hacia el techo",
+      // "area de contencion". Si el telefono oye bien la pista, el interprete
+      // amarra el equipo aunque el nombre haya salido raro.
+      VOZ_EQUIPO.forEach(function(e){
+        (e.pistas || []).forEach(function(pz){
+          out.push(pz);
+          // Hasta 8 formas, no 4: las que la cuadrilla usa de verdad ("plato
+          // gris", "tubo gris") estan mas abajo en la lista que los nombres
+          // largos, y son justo las que hay que cubrir.
+          (e.k || []).slice(0, 8).forEach(function(k){ out.push('dos ' + k + ' ' + pz); });
+        });
+      });
+      // Y lo que ya quedan en el sitio, que es el tercer estado.
+      AV_NUMEROS.forEach(function(n){ out.push('todavía quedan ' + n); out.push('ya estaban ' + n); });
     }catch(e){}
     return out;
   }
 
-  // El catalogo contra el que TIENE que caer cada articulo. Sale de la misma
-  // tabla que llena la plantilla de equipo, no de una lista aparte.
+  // El catalogo contra el que TIENE que caer cada articulo, CON como lo dice
+  // la cuadrilla y con las pistas de alrededor. Sale de la misma tabla que
+  // llena la plantilla de equipo, no de una lista aparte.
+  // LOS TRES ESTADOS. Hasta hoy solo habia puso / quito, y su prueba trae el
+  // tercero: "todavia quedan dos botes de agua" no es que los haya puesto hoy
+  // ni que los haya quitado - es que SIGUEN ahi. En la plantilla de equipo esa
+  // diferencia es la que decide si se cobra un dia mas.
+  var AV_ESTADO_ROTULO = { puso:'instaló', quito:'quitó', sigue:'ya estaban' };
+  function avEstadoDe(a){
+    var v = vozLlano(String(a || 'puso')).trim();
+    if(/quit|saco|recog|retir|remov|pick|pull|took/.test(v)) return 'quito';
+    if(/sigue|siguen|quedan|queda|estaban|ya estab|still|remain/.test(v)) return 'sigue';
+    return 'puso';
+  }
+
   function avCatalogo(){
+    try{
+      return VOZ_EQUIPO.map(function(e){
+        var l = e.en + '  —  lo dicen: ' + (e.k || []).slice(0, 10).join(', ');
+        if(e.pistas && e.pistas.length) l += '  —  se reconoce por: ' + e.pistas.join('; ');
+        if(e.ojo) l += '  —  OJO: ' + e.ojo;
+        return l;
+      });
+    }catch(e){ return []; }
+  }
+  function avNombresCat(){
     try{ return VOZ_EQUIPO.map(function(e){ return e.en; }); }catch(e){ return []; }
+  }
+
+  // ---- LO QUE ESTE TRABAJADOR YA CONFIRMO ----
+  // Su regla, textual: "aprender de confirmaciones explicitas del usuario,
+  // pero no convertir una sola confirmacion en una regla universal".
+  //
+  // Asi que esto se guarda POR PERSONA y con la cuenta: cuantas veces lo
+  // confirmo y cuantas lo rechazo. Una confirmacion sola no manda - sube la
+  // confianza, no crea una equivalencia. Y si despues lo contradice, la
+  // confianza baja y se vuelve a preguntar.
+  //
+  // MODO PRUEBA: vive en ESTE telefono (localStorage), no en la base de datos.
+  // Cuando salgamos de modo prueba habra que decidir si se sube y se comparte
+  // con la cuadrilla.
+  var AV_APR_KEY = 'vozaprendido1';
+  function avAprKey(){
+    try{ return (session && session.user && session.user.id) || 'local'; }catch(e){ return 'local'; }
+  }
+  function avAprTodo(){
+    try{ return JSON.parse(localStorage.getItem(AV_APR_KEY) || '{}') || {}; }catch(e){ return {}; }
+  }
+  function avAprMio(){ var t = avAprTodo(); return t[avAprKey()] || {}; }
+  function avAprGuardar(mio){
+    try{ var t = avAprTodo(); t[avAprKey()] = mio; localStorage.setItem(AV_APR_KEY, JSON.stringify(t)); }catch(e){}
+  }
+  // Se le pasa al interprete en texto plano, solo lo que ya tiene peso.
+  function avAprendido(){
+    var mio = avAprMio(), out = [];
+    Object.keys(mio).forEach(function(v){
+      var r = mio[v];
+      if(!r || !r.cat) return;
+      // Un rechazo pesa igual que una confirmacion: si estan empatados, no se
+      // dice nada y se vuelve a preguntar.
+      if((r.si || 0) <= (r.no || 0)) return;
+      out.push('cuando dice "' + v + '" casi siempre es ' + r.cat +
+               ' (confirmado ' + r.si + (r.no ? ', rechazado ' + r.no : '') + ')' +
+               (r.ctx ? ' — contexto: ' + r.ctx : ''));
+    });
+    return out.slice(0, 20);
+  }
+  function avAprAnotar(variante, cat, acepto, ctx){
+    var v = vozLlano(String(variante || '')).trim();
+    if(!v || !cat) return;
+    var mio = avAprMio();
+    var r = mio[v] || { cat: cat, si: 0, no: 0, ctx: '' };
+    // Si ahora resulta que era OTRO equipo, se reinicia: la equivalencia vieja
+    // dejo de ser cierta para el.
+    if(r.cat !== cat && acepto){ r = { cat: cat, si: 0, no: 0, ctx: '' }; }
+    if(acepto){ r.si = (r.si || 0) + 1; if(ctx) r.ctx = String(ctx).slice(0, 60); }
+    else r.no = (r.no || 0) + 1;
+    mio[v] = r; avAprGuardar(mio);
   }
 
   // LO QUE NO SE DIJO, NO SE ANOTA.
@@ -12657,6 +12758,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     try{
       // El catalogo de equipo: el nombre de la fila y como se dice.
       VOZ_EQUIPO.forEach(function(e){ add(e.en); (e.k || []).forEach(add); });
+      // Y las pistas de alrededor, que valen tanto como el nombre.
+      VOZ_EQUIPO.forEach(function(e){ (e.pistas || []).forEach(add); });
       // Los cuartos REALES de este trabajo. Lo mas valioso: 'Master Bedroom'
       // o 'Crawl Space' no los oye bien solo.
       avCuartosDelProyecto().forEach(add);
@@ -12736,6 +12839,38 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     }
     return c;
   }
+
+  // EL SI / NO DE LA CONFIRMACION. Aqui es donde el asistente aprende, y por
+  // eso guarda las DOS respuestas: un "no" pesa igual que un "si". Si estan
+  // empatados, la proxima vez vuelve a preguntar en vez de dar por hecho.
+  function avConfirmar(idx, acepto){
+    var L = AV.ultima; if(!L) return;
+    var c = (L.porConfirmar || [])[idx]; if(!c) return;
+    avAprAnotar(c.oido, c.cat, acepto, c.cuarto);
+    (L.habitaciones || []).forEach(function(h){
+      (h.items || []).forEach(function(i){
+        if(i.nombre !== c.oido || i.delCatalogo !== c.cat) return;
+        if(acepto){ i.certeza = 'alta'; }
+        else {
+          // Dijo que no: NO se escoge el segundo mas parecido. Se suelta y se
+          // pregunta, que es su regla.
+          i.delCatalogo = ''; i.certeza = 'baja';
+        }
+      });
+    });
+    L.porConfirmar.splice(idx, 1);
+    if(!acepto) L.pregunta = '¿Qué equipo es "' + c.oido + '"' + (c.cuarto ? ' en ' + c.cuarto : '') + '? Dígalo otra vez.';
+    // Se repinta sin volver a anotar el intento en el registro.
+    AV.sinRegistrar = true;
+    avPintarLectura(L);
+    AV.sinRegistrar = false;
+  }
+  document.addEventListener('click', function(e){
+    var si = e.target.closest && e.target.closest('[data-avsi]');
+    if(si){ avConfirmar(+si.getAttribute('data-avsi'), true); return; }
+    var no = e.target.closest && e.target.closest('[data-avno]');
+    if(no){ avConfirmar(+no.getAttribute('data-avno'), false); }
+  });
 
   // ---- ABRIR / CERRAR ----
   function avAbrir(){
@@ -12867,20 +13002,67 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // su nombre en ingles, que es lo que lleva cada fila en dataset.en.
   // Primero las frases largas: "zip wall pole" tiene que ganarle a "pole", y
   // "bote de basura" a "bote".
+  // EL CATALOGO OFICIAL, CON EL VOCABULARIO REAL DE LA CUADRILLA.
+  //
+  // Su especificacion del 6 oct 2026. La diferencia que importa, y el la dejo
+  // escrita: "no crear reglas universales como Fence = Fans". Lo de aqui NO es
+  // eso. "fen", "jepa", "dehu", "tubo gris", "plato gris", "bote de agua" son
+  // palabras que la cuadrilla DICE de verdad - vocabulario del oficio, no
+  // parches de una mala transcripcion. Por eso entran:
+  //   * al modelo de lenguaje del telefono, para que las OIGA bien de entrada;
+  //   * al catalogo que lee el interprete, para que sepa a que se refieren.
+  // Lo que nunca entra es una palabra que solo existio porque el dictado se
+  // equivoco una vez.
+  //
+  //   en     = el nombre de la fila en la plantilla (es el que manda)
+  //   tipo   = el nombre interno, el que no cambia aunque cambie el rotulo
+  //   k      = como lo dicen, en los dos idiomas
+  //   pistas = lo que hay ALREDEDOR y lo identifica aunque el nombre se oiga
+  //            mal: un tubo que sale del dehu hacia el techo es un Air Duct,
+  //            se haya oido "tubo gris" o cualquier otra cosa.
   var VOZ_EQUIPO = [
-    { en:'Dehumidifier Drip Pans', k:['bandeja de goteo','bandejas de goteo','drip pan','drip pans','bandeja','bandejas'] },
-    { en:'Zip Wall Poles', k:['poste de pared','postes de pared','zip wall pole','zip wall poles','zipwall','poste','postes'] },
-    { en:'Ozone Machine',  k:['maquina de ozono','maquinas de ozono','ozone machine','ozone','ozono'] },
-    { en:'Trash Cans',     k:['bote de basura','botes de basura','trash can','trash cans','basurero','basureros'] },
-    { en:'Air Ducts',      k:['ducto de aire','ductos de aire','air duct','air ducts','ducto','ductos','duct','ducts'] },
-    { en:'Dry Mats',       k:['tapete seco','tapetes secos','dry mat','dry mats','tapete','tapetes'] },
-    { en:'Dehumidifiers',  k:['deshumidificador','deshumidificadores','dehumidifier','dehumidifiers','dehumidificador','dehu','dehus'] },
-    { en:'HEPAs',          k:['filtro hepa','filtros hepa','air scrubber','air scrubbers','hepa','hepas','scrubber','scrubbers'] },
-    { en:'Generators',     k:['generador','generadores','generator','generators'] },
-    { en:'Heaters',        k:['calentador','calentadores','heater','heaters'] },
-    { en:'Zippers',        k:['cierre de acceso','cierres de acceso','zipper door','zipper doors','zipper','zippers','cierre','cierres'] },
-    { en:'Fans',           k:['extractor de aire','extractores de aire','air mover','air movers','ventilador','ventiladores','extractor','extractores','fan','fans'] }
+    { en:'Dehumidifier Drip Pans', tipo:'DEHUMIDIFIER_DRIP_PANS',
+      k:['dehumidifier drip pan','dehumidifier drip pans','bandeja de goteo','bandejas de goteo',
+         'drip pan','drip pans','plato gris','platos grises','bandeja','bandejas','plato','platos'],
+      pistas:['debajo del dehumidifier','debajo del dehu','debajo de los dehumidifiers','debajo de los dehus',
+              'abajo del dehu','van debajo'] },
+    { en:'Zip Wall Poles', tipo:'ZIP_WALL_POLES',
+      k:['zip wall pole','zip wall poles','poste de pared','postes de pared','zipwall','paral','parales','poste','postes'],
+      pistas:['area de contencion','contencion','para sostener el plastico','sostener el plastico'] },
+    { en:'Ozone Machine', tipo:'OZONE_MACHINE',
+      k:['maquina de ozono','maquinas de ozono','ozone machine','maquina de humo','ozone','ozono'] },
+    { en:'Trash Cans', tipo:'TRASH_CANS',
+      k:['bote de basura','botes de basura','bote de agua','botes de agua','trash can','trash cans',
+         'basurero','basureros','bote','botes'] },
+    { en:'Air Ducts', tipo:'AIR_DUCTS',
+      k:['ducto de aire','ductos de aire','air duct','air ducts','tubo gris','tubos grises',
+         'ducto','ductos','duct','ducts','tubo','tubos'],
+      pistas:['del dehumidifier hacia el techo','del dehu hacia el techo','hacia el techo','al techo',
+              'tubo que va hacia arriba','para secar el techo','para secar el cielo'] },
+    { en:'Dry Mats', tipo:'DRY_MATS',
+      k:['tapete seco','tapetes secos','dry mat','dry mats','tapete','tapetes'],
+      pistas:['para secar el piso','coso para secar el piso','sistema para secar el piso'] },
+    { en:'Dehumidifiers', tipo:'DEHUMIDIFIERS',
+      k:['deshumidificador','deshumidificadores','dehumidifier','dehumidifiers','dehumidificador','dehu','dehus'] },
+    { en:'HEPAs', tipo:'HEPAS',
+      k:['filtro hepa','filtros hepa','air scrubber','air scrubbers','hepa','hepas','jepa','jepas',
+         'scrubber','scrubbers'] },
+    { en:'Generators', tipo:'GENERATORS',
+      k:['generador','generadores','generator','generators'] },
+    { en:'Heaters', tipo:'HEATERS',
+      k:['calentador','calentadores','heater','heaters'] },
+    { en:'Zippers', tipo:'ZIPPERS',
+      k:['cierre de acceso','cierres de acceso','zipper door','zipper doors','zipper','zippers','cierre','cierres'],
+      pistas:['area de contencion','entrada de la contencion','contencion'],
+      // Su aviso, textual: no confundir Zipper con Zip Wall Pole. Comparten la
+      // pista "contencion" y son cosas distintas - el poste sostiene el
+      // plastico, el zipper es la puerta por donde se entra.
+      ojo:'Zipper es la entrada de la contencion; Zip Wall Pole es el poste que sostiene el plastico. No son lo mismo.' },
+    { en:'Fans', tipo:'FANS',
+      k:['extractor de aire','extractores de aire','air mover','air movers','ventilador','ventiladores',
+         'extractor','extractores','fan','fans','fen','fens'] }
   ];
+
   // Puso / quito. Si no lo dice, se asume que PUSO: es lo normal y ademas el
   // panel ensena en que columna cayo, asi que un error se ve y se corrige.
   var VOZ_PUSO   = ['puse','pusimos','puso','pusieron','instale','instalamos','instalo','instalaron',
@@ -13269,7 +13451,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(AV_IA.disponible && C){
       try{
         var r = await C.interpretar({ texto: texto, cuartos: avCuartosDelProyecto(),
-                                      catalogo: avCatalogo(),
+                                      catalogo: avCatalogo(), aprendido: avAprendido(),
                                       otras: AV.otras || [], dudosos: AV.dudosos || [] });
         AV_IA.usando = 'ia';
         // Todo lo que se oyo, en los dos idiomas: contra esto se comprueba
@@ -13282,12 +13464,30 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         var habs = (r.habitaciones || []).map(function(h){
           return { nombre: (h.nombre || '').trim(),
                    items: (h.items || []).map(function(i){
-                     return { nombre: i.nombre,
-                              delCatalogo: (i.delCatalogo || '').trim(),
+                     var cert = String(i.certeza || 'alta').toLowerCase();
+                     if(['alta','media','baja'].indexOf(cert) < 0) cert = 'media';
+                     var cat = (i.delCatalogo || '').trim();
+                     // SU POLITICA DE AMBIGUEDAD, textual:
+                     //   alta  -> interpretar sin interrumpir
+                     //   media -> proponer y pedir confirmacion
+                     //   baja  -> no inventar, preguntar
+                     // Con certeza baja el amarre se SUELTA aunque el modelo
+                     // haya puesto uno: anotarlo seria justo lo que el pidio
+                     // que no pasara.
+                     if(cert === 'baja') cat = '';
+                     return { nombre: i.nombre, delCatalogo: cat, certeza: cert,
+                              porque: (i.porque || '').trim(),
                               n: (i.cantidad === -1 ? null : i.cantidad),
-                              accion: i.accion || 'puso' };
+                              accion: avEstadoDe(i.accion) };
                    }) };
         });
+        // LO QUE HAY QUE CONFIRMAR. Van en una lista propia porque la pantalla
+        // les pone su boton de Si / No, y de ahi es de donde el asistente
+        // aprende.
+        var porConfirmar = [];
+        habs.forEach(function(h){ (h.items || []).forEach(function(i){
+          if(i.delCatalogo && i.certeza === 'media') porConfirmar.push({ oido: i.nombre, cat: i.delCatalogo, cuarto: h.nombre, porque: i.porque });
+        }); });
         // SI NO HAY CERTEZA, SE PREGUNTA. Un articulo que el modelo no pudo
         // amarrar al catalogo no se anota con el nombre que sea: se queda
         // marcado y se pide que lo repita. Su regla, textual: preguntar en
@@ -13308,6 +13508,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
           datos: datos,
           inventados: inventados,
           sinAmarrar: sinAmarrar.length,
+          porConfirmar: porConfirmar,
           habitaciones: habs,
           corrigio: (r.corrigio || '').trim(),
           nada: !(r.modulo || habs.length || datos.length)
@@ -13376,7 +13577,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     });
     if(!duda.length)
       h += '<div class="av-cduda">El dictado dijo estar seguro de todas las palabras ' +
-           '— pero eso no quiere decir que acertó: también dijo estar seguro cuando escribió “Fence” por “fans”.</div>';
+           '— pero eso no quiere decir que acertó: también dice estar seguro cuando escribe mal el nombre de un equipo.</div>';
     h += '</div>';
 
     // ---- CAPA 2: COMO LO ENTENDIO ----
@@ -13408,7 +13609,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         if(d && d.campo && d.valor) f.push('<div class="av-pfila"><span>' + esc(d.campo) + '</span><b>' + esc(d.valor) + '</b></div>');
       });
       (L.habitaciones || []).forEach(function(hb){
-        var lista = (hb.items || []).map(function(i){
+        var pinta = function(i){
           var nom = i.enLista || i.nombre;
           if(i.n === 1) nom = String(nom).replace(/s$/, '');
           // Lo que la lista NO reconoce se ensena IGUAL, con marca. Marcar es
@@ -13418,11 +13619,20 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
                    '“' + esc(i.nombre) + '” — no lo entendí</span>';
           return (i.n == null ? '¿cuántos? ' : i.n + ' ') + esc(nom) +
                  (i.conocido === false ? ' <i class="av-ojo">(no está en la lista)</i>' : '') +
-                 (i.accion === 'quito' ? ' <i class="av-ojo">(quitó)</i>' : '');
-        }).join(', ');
+                 (i.accion && i.accion !== 'puso' ? ' <i class="av-ojo">(' + esc(AV_ESTADO_ROTULO[i.accion] || i.accion) + ')</i>' : '') +
+                 (i.certeza === 'media' ? ' <i class="av-ojo av-dudoso">· por confirmar</i>' : '');
+        };
         f.push('<div class="av-pfila"><span>habitación</span><b>' + esc(hb.nombre || '(sin cuarto)') +
                (hb.conocida === false ? ' <i class="av-ojo">(no está en el plano)</i>' : '') + '</b></div>');
-        if(lista) f.push('<div class="av-pfila"><span>items</span><b>' + lista + '</b></div>');
+        // Separados por estado: lo que instaló, lo que quitó y lo que ya
+        // estaba no son la misma columna en la plantilla, y mezclarlos aquí
+        // sería esconder justo la diferencia que decide el cobro.
+        ['puso','quito','sigue'].forEach(function(est){
+          var dellos = (hb.items || []).filter(function(i){ return (i.accion || 'puso') === est; });
+          if(!dellos.length) return;
+          f.push('<div class="av-pfila"><span>' + esc(AV_ESTADO_ROTULO[est]) + '</span><b>' +
+                 dellos.map(pinta).join(', ') + '</b></div>');
+        });
       });
       h += f.join('');
     }
@@ -13436,6 +13646,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // nombre todas las veces. Esto vive en la memoria de la pantalla y se
     // borra al cerrar: no se guarda nada, sigue en modo prueba.
     try{
+      if(AV.sinRegistrar) throw 0;
       var nombres = [];
       (L && L.habitaciones || []).forEach(function(hb){
         (hb.items || []).forEach(function(i){ nombres.push(i.delCatalogo || ('¿' + i.nombre + '?')); });
@@ -13453,8 +13664,24 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       });
       h += '</div>';
     }
+    // ---- LO QUE HAY QUE CONFIRMAR ----
+    // Certeza media: lo propone y pregunta, como el lo pidio. El Sí / No de
+    // aquí es de donde aprende: se guarda por persona, con la cuenta, y una
+    // sola confirmación nunca se vuelve una regla para todos.
+    if(L && (L.porConfirmar || []).length){
+      h += '<div class="av-capa av-conf"><div class="av-ctit">confirme, por favor</div>';
+      L.porConfirmar.forEach(function(c, idx){
+        h += '<div class="av-cpreg">Oí <b>“' + esc(c.oido) + '”</b>' + (c.cuarto ? ' en ' + esc(c.cuarto) : '') +
+             '. ¿Se refiere a <b>' + esc(c.cat) + '</b>?' +
+             (c.porque ? '<i class="av-ojo"> — ' + esc(c.porque) + '</i>' : '') +
+             '<span class="av-cbtns"><button type="button" class="av-cbtn" data-avsi="' + idx + '">Sí</button>' +
+             '<button type="button" class="av-cbtn no" data-avno="' + idx + '">No</button></span></div>';
+      });
+      h += '</div>';
+    }
     if(L && L.pregunta) h += '<div class="av-preg">' + esc(L.pregunta) + '</div>';
     caja.innerHTML = h;
+    AV.ultima = L;
   }
 
   // ---- EL MICROFONO Y EL LLENADO -------------------------------
