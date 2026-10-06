@@ -1068,6 +1068,30 @@
   }
   .inboxhead .btn{padding:6px 12px; font-size:12px;}
   .inboxnote{font-size:12.5px; color:var(--ink-soft); margin:0 0 8px;}
+  /* ---- ASISTENTE DE VOZ (overlay global) ----
+     Semi-transparente a proposito: se tiene que ver DONDE esta parado debajo,
+     porque el asistente va a trabajar sobre esa pantalla. z-index 600 lo deja
+     encima de todo lo de la app (lo mas alto era 500) y debajo de la reja de
+     entrada (9999), que nunca debe quedar tapada. */
+  .av-overlay{position:fixed; inset:0; z-index:600; display:flex; align-items:center; justify-content:center;
+    background:rgba(8,12,18,.78); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+    padding:24px 18px; animation:avEntra .18s ease-out;}
+  .av-overlay[hidden]{display:none !important;}
+  @keyframes avEntra{from{opacity:0;} to{opacity:1;}}
+  .av-cerrar{position:absolute; top:max(14px, env(safe-area-inset-top)); right:16px; width:44px; height:44px;
+    border-radius:999px; border:1px solid rgba(255,255,255,.22); background:rgba(255,255,255,.08);
+    color:#fff; font-size:19px; line-height:1; cursor:pointer;}
+  .av-centro{display:flex; flex-direction:column; align-items:center; gap:14px; width:100%; max-width:430px;}
+  .av-esfera{width:min(62vw,230px); height:min(62vw,230px); display:block; cursor:pointer;}
+  .av-estado{font-size:13px; letter-spacing:.09em; text-transform:uppercase; color:rgba(255,255,255,.72); font-weight:700;}
+  /* La transcripcion tiene alto fijo: si creciera con el texto, la esfera
+     brincaria de lugar en cuanto el empiece a hablar. */
+  .av-texto{min-height:74px; max-height:34vh; overflow-y:auto; width:100%; text-align:center;
+    font-size:17.5px; line-height:1.45; color:#fff;}
+  .av-texto:empty{opacity:0;}
+  .av-ayuda{font-size:13.5px; color:rgba(255,255,255,.58); text-align:center;}
+  .av-overlay.es-error .av-estado{color:#ff8e86;}
+  .av-overlay.es-escuchando .av-estado{color:var(--accent);}
   .vozpanel{margin-top:10px; padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--card-2,var(--card));}
   .vozpanel[hidden]{display:none !important;}
   .vozrow{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;}
@@ -2292,6 +2316,12 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       <button type="button" class="menubtn mgr" id="menuMgr" data-side="manager">
         <b>Manager<span class="badge" id="menuMgrPayBadge" hidden></span></b><small id="menuMgrHint">Ver precios, pagos y todo el equipo</small></button>
     </div>
+    <!-- ASISTENTE DE VOZ GLOBAL. Va al pie del menu, debajo de los cuadros:
+         es una herramienta que acompana a todas las pantallas, no una mas de
+         la lista. FASE 1 - solo la interfaz: oye, dibuja y transcribe. No
+         conecta todavia equipo, mano de obra ni secado. -->
+    <button type="button" class="btn btn-outline" id="avAbrir" style="width:100%; margin-top:16px;">
+      &#127908; Asistente de voz<span class="en"> / Voice assistant</span></button>
     <button type="button" class="btn btn-ghost" id="menuSwitchSide" style="width:100%; margin-top:16px; color:var(--ink-soft);">Cambiar de empresa</button>
     <button type="button" class="btn btn-ghost" id="menuSignOut" style="width:100%; margin-top:6px; color:var(--ink-soft);">Cerrar sesión</button>
   </section>
@@ -5213,6 +5243,24 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // #floorplanRoomList - por eso el oyente va en el documento. (Primero los
   // colgue del oyente de la lista de cuartos y los clics nunca llegaban: eso
   // no lo ve un chequeo de sintaxis, solo se ve tocando el boton.)
+  // Los tres toques del asistente. Delegado: el overlay vive al final del
+  // body, fuera de los paneles, y el boton vive en el menu.
+  document.addEventListener('click', e => {
+    if(e.target.closest('#avAbrir')){ avAbrir(); return; }
+    if(e.target.closest('#avCerrar')){ avCerrar(); return; }
+    if(e.target.closest('#avEsfera')){
+      if(AV.estado === 'escuchando') avParar(); else avEscuchar();
+      return;
+    }
+  });
+  // Escape cierra, como cualquier ventana. Y si la app se va al fondo con el
+  // microfono abierto, se suelta: dejarlo tomado es lo que deja sordas a las
+  // otras pantallas.
+  document.addEventListener('keydown', e => { if(e.key === 'Escape' && AV.abierto) avCerrar(); });
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState !== 'visible' && AV.abierto && AV.estado === 'escuchando') avParar();
+  });
+
   document.addEventListener('click', e => {
     if(e.target.closest('#fpImportPick')){ const f = $('#fpImportFile'); if(f) f.click(); return; }
     if(e.target.closest('#fpImportApply')){ fpImportAplicar(); return; }
@@ -7005,7 +7053,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MH';
+  const APP_BUILD = '2026-10-06-MI';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12441,6 +12489,173 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   }
 
   // ================= EQUIPMENT =================
+
+
+  // ================= ASISTENTE DE VOZ GLOBAL — FASE 1 =================
+  // Su pedido del 6 oct 2026, acotado por el mismo: "primero quiero crear la
+  // interfaz... detente despues del boton, el overlay, la animacion reactiva,
+  // el microfono y la base de estados. No conectes todavia equipo, mano de
+  // obra ni secado".
+  //
+  // Asi que esto OYE, DIBUJA y TRANSCRIBE. No interpreta nada y no toca ningun
+  // formulario. El dia que se conecten los modulos, lo unico que se agrega es
+  // quien escucha AV.onTexto - la capa de abajo ya no se mueve.
+  //
+  // LOS CINCO ESTADOS que pidio. Cada uno es una palabra en pantalla y un
+  // color, y la esfera se dibuja distinto en cada uno:
+  var AV_ESTADOS = {
+    esperando:   { rotulo:'Esperando',   ayuda:'Toque la esfera para empezar a escuchar.' },
+    escuchando:  { rotulo:'Escuchando',  ayuda:'Hable normal. Toque la esfera para terminar.' },
+    entendiendo: { rotulo:'Entendiendo', ayuda:'Un momento…' },
+    respondiendo:{ rotulo:'Respondiendo',ayuda:'' },
+    error:       { rotulo:'Error',       ayuda:'' }
+  };
+  var AV = {
+    estado: 'esperando',
+    nivel: 0,          // 0..1 - lo ULTIMO que mando el microfono
+    suave: 0,          // el que se dibuja, perseguiendo al de arriba
+    texto: '',
+    idioma: 'es-MX',
+    abierto: false,
+    anim: null,
+    onTexto: null      // FASE 2 lo usara. Hoy nadie escucha, a proposito.
+  };
+
+  function avPlugin(){
+    return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AsistenteVoz;
+  }
+  function avEstado(e, detalle){
+    if(!AV_ESTADOS[e]) return;
+    AV.estado = e;
+    var ov = $('#avOverlay'); if(!ov) return;
+    Object.keys(AV_ESTADOS).forEach(function(k){ ov.classList.toggle('es-' + k, k === e); });
+    $('#avEstado').textContent = AV_ESTADOS[e].rotulo;
+    $('#avAyuda').textContent = detalle != null ? detalle : AV_ESTADOS[e].ayuda;
+  }
+  function avTexto(t){
+    AV.texto = t || '';
+    var e = $('#avTexto'); if(e){ e.textContent = AV.texto; e.scrollTop = e.scrollHeight; }
+  }
+
+  // ---- LA ESFERA ----
+  // Reacciona al volumen DE VERDAD: AV.nivel lo manda el microfono (RMS en
+  // escala de decibeles), no es un bucle decorativo. En reposo late despacio
+  // para que se vea viva sin mentir que esta oyendo.
+  //
+  // AV.suave persigue a AV.nivel en vez de saltar: el nivel llega ~15 veces
+  // por segundo y el dibujo va a 60, asi que sin esto se veria a tirones.
+  function avDibujar(){
+    var cv = $('#avEsfera'); if(!cv) return;
+    var ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+    var cx = W/2, cy = H/2, t = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000;
+    // Sube rapido y baja despacio: asi acompana la voz y no parpadea en los
+    // huecos entre palabra y palabra.
+    var meta = (AV.estado === 'escuchando') ? AV.nivel : 0;
+    AV.suave += (meta - AV.suave) * (meta > AV.suave ? 0.35 : 0.08);
+
+    var acento = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#2fb98a';
+    var base = Math.min(W, H) * 0.26;
+    var late = AV.estado === 'escuchando' ? 0 : Math.sin(t * 1.6) * 0.02;
+    var r = base * (1 + late + AV.suave * 0.42);
+
+    ctx.clearRect(0, 0, W, H);
+    // Ondas que salen con el volumen. Con la voz callada no se ven: que la
+    // pantalla no sugiera que esta oyendo algo cuando no hay nada.
+    for(var i = 3; i >= 1; i--){
+      var rr = r + i * base * 0.20 * (0.25 + AV.suave);
+      ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI*2);
+      ctx.fillStyle = avConAlfa(acento, (0.055 + AV.suave * 0.10) / i);
+      ctx.fill();
+    }
+    var g = ctx.createRadialGradient(cx - r*0.3, cy - r*0.35, r*0.12, cx, cy, r);
+    g.addColorStop(0, avConAlfa('#ffffff', 0.55));
+    g.addColorStop(0.45, avConAlfa(acento, 0.95));
+    g.addColorStop(1, avConAlfa(acento, 0.62));
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fillStyle = g; ctx.fill();
+
+    if(AV.estado === 'entendiendo' || AV.estado === 'respondiendo'){
+      // Un aro que gira: dice "estoy trabajando" sin fingir que oye.
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + base*0.22, t*2.4, t*2.4 + Math.PI*0.6);
+      ctx.strokeStyle = avConAlfa('#ffffff', 0.85); ctx.lineWidth = Math.max(3, base*0.055);
+      ctx.lineCap = 'round'; ctx.stroke();
+    }
+    if(AV.estado === 'error'){
+      ctx.beginPath(); ctx.arc(cx, cy, r + base*0.22, 0, Math.PI*2);
+      ctx.strokeStyle = avConAlfa('#ff8e86', 0.9); ctx.lineWidth = Math.max(3, base*0.05); ctx.stroke();
+    }
+    AV.anim = requestAnimationFrame(avDibujar);
+  }
+  function avConAlfa(c, a){
+    c = String(c).trim();
+    if(c[0] === '#'){
+      if(c.length === 4) c = '#' + c[1]+c[1] + c[2]+c[2] + c[3]+c[3];
+      var n = parseInt(c.slice(1), 16);
+      return 'rgba(' + ((n>>16)&255) + ',' + ((n>>8)&255) + ',' + (n&255) + ',' + a + ')';
+    }
+    return c;
+  }
+
+  // ---- ABRIR / CERRAR ----
+  function avAbrir(){
+    var ov = $('#avOverlay'); if(!ov) return;
+    AV.abierto = true; AV.nivel = 0; AV.suave = 0;
+    ov.hidden = false;
+    avTexto(''); avEstado('esperando');
+    if(!AV.anim) avDibujar();
+    // Arranca oyendo de una: abrirlo YA ES decir que quiere hablar.
+    avEscuchar();
+  }
+  async function avCerrar(){
+    var ov = $('#avOverlay');
+    AV.abierto = false;
+    if(AV.anim){ cancelAnimationFrame(AV.anim); AV.anim = null; }
+    var S = avPlugin();
+    // Se para SIEMPRE, aunque la pantalla ya no se vea: un microfono que
+    // queda tomado deja sordas a las otras pantallas de la app.
+    if(S){ try{ await S.parar(); }catch(e){} }
+    if(ov) ov.hidden = true;
+    AV.nivel = 0; AV.suave = 0;
+  }
+  async function avEscuchar(){
+    var S = avPlugin();
+    if(!isNative() || !S){
+      avEstado('error', 'El asistente de voz solo funciona en la app del teléfono.');
+      return;
+    }
+    if(AV.estado === 'escuchando'){ await avParar(); return; }
+    try{
+      avTexto(''); avEstado('escuchando');
+      S.removeAllListeners && S.removeAllListeners();
+      S.addListener('nivel', function(d){ AV.nivel = Math.max(0, Math.min(1, (d && d.nivel) || 0)); });
+      S.addListener('texto', function(d){
+        avTexto((d && d.texto) || '');
+        // FASE 2 enganchara aqui. Hoy no hay nadie escuchando a proposito.
+        if(typeof AV.onTexto === 'function') AV.onTexto(d);
+      });
+      S.addListener('error', function(d){
+        avEstado('error', (d && d.mensaje) || 'No se pudo oír.');
+        AV.nivel = 0;
+      });
+      await S.empezar({ idioma: AV.idioma });
+    }catch(err){
+      AV.nivel = 0;
+      var code = (err && (err.code || err.message)) || '';
+      avEstado('error', /permiso_voz/.test(code) ? 'Falta el permiso de reconocimiento de voz. Ajustes → Field Reports.'
+                      : /permiso_mic/.test(code) ? 'Falta el permiso del micrófono. Ajustes → Field Reports.'
+                      : 'No se pudo escuchar: ' + ((err && err.message) || err));
+    }
+  }
+  async function avParar(){
+    var S = avPlugin();
+    if(S){ try{ await S.parar(); }catch(e){} }
+    AV.nivel = 0;
+    // Sin modulos conectados todavia, "entendiendo" dura lo que tarda en
+    // verse y se queda esperando. En la fase 2 aqui es donde entra el
+    // interprete, y de ahi pasa a "respondiendo".
+    avEstado('entendiendo');
+    setTimeout(function(){ if(AV.abierto && AV.estado === 'entendiendo') avEstado('esperando', 'Listo. Toque la esfera para hablar otra vez.'); }, 700);
+  }
 
   // ================= ASISTENTE DE VOZ DEL EQUIPO =================
   // Su pedido del 5 oct 2026: "que el asistente sepa lo que lleva la plantilla
@@ -36936,5 +37151,16 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   recalcDaysDrying();
 })();
 </script>
+
+<!-- ================= ASISTENTE DE VOZ (overlay global) ================= -->
+<div id="avOverlay" class="av-overlay" hidden role="dialog" aria-modal="true" aria-label="Asistente de voz">
+  <button type="button" class="av-cerrar" id="avCerrar" aria-label="Cerrar">&#10005;</button>
+  <div class="av-centro">
+    <canvas id="avEsfera" class="av-esfera" width="440" height="440" aria-hidden="true"></canvas>
+    <div class="av-estado" id="avEstado">Esperando</div>
+    <div class="av-texto" id="avTexto"></div>
+    <div class="av-ayuda" id="avAyuda">Toque la esfera para empezar a escuchar.</div>
+  </div>
+</div>
 </body>
 </html>
