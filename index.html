@@ -1090,6 +1090,14 @@
     font-size:17.5px; line-height:1.45; color:#fff;}
   .av-texto:empty{opacity:0;}
   .av-ayuda{font-size:13.5px; color:rgba(255,255,255,.58); text-align:center;}
+  .av-prueba{width:100%; margin-top:4px;}
+  .av-prueba:empty{display:none;}
+  .av-pnota{font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.5);
+    text-align:center; margin-bottom:8px;}
+  .av-pfila{display:flex; justify-content:space-between; gap:14px; padding:9px 2px;
+    border-bottom:1px solid rgba(255,255,255,.14); font-size:15.5px; color:#fff;}
+  .av-pfila span{color:rgba(255,255,255,.62);}
+  .av-pfila b{text-align:right; font-weight:700;}
   .av-overlay.es-error .av-estado{color:#ff8e86;}
   .av-overlay.es-escuchando .av-estado{color:var(--accent);}
   .vozpanel{margin-top:10px; padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--card-2,var(--card));}
@@ -2321,7 +2329,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
          la lista. FASE 1 - solo la interfaz: oye, dibuja y transcribe. No
          conecta todavia equipo, mano de obra ni secado. -->
     <button type="button" class="btn btn-outline" id="avAbrir" style="width:100%; margin-top:16px;">
-      &#127908; Asistente de voz<span class="en"> / Voice assistant</span></button>
+      Asistente de voz<span class="en"> / Voice assistant</span></button>
     <button type="button" class="btn btn-ghost" id="menuSwitchSide" style="width:100%; margin-top:16px; color:var(--ink-soft);">Cambiar de empresa</button>
     <button type="button" class="btn btn-ghost" id="menuSignOut" style="width:100%; margin-top:6px; color:var(--ink-soft);">Cerrar sesión</button>
   </section>
@@ -7053,7 +7061,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MI';
+  const APP_BUILD = '2026-10-06-MJ';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12601,7 +12609,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     var ov = $('#avOverlay'); if(!ov) return;
     AV.abierto = true; AV.nivel = 0; AV.suave = 0;
     ov.hidden = false;
-    avTexto(''); avEstado('esperando');
+    avTexto(''); avPintarPrueba(null); avEstado('esperando');
     if(!AV.anim) avDibujar();
     // Arranca oyendo de una: abrirlo YA ES decir que quiere hablar.
     avEscuchar();
@@ -12625,12 +12633,16 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     }
     if(AV.estado === 'escuchando'){ await avParar(); return; }
     try{
-      avTexto(''); avEstado('escuchando');
+      avTexto(''); avPintarPrueba(null); avEstado('escuchando');
       S.removeAllListeners && S.removeAllListeners();
       S.addListener('nivel', function(d){ AV.nivel = Math.max(0, Math.min(1, (d && d.nivel) || 0)); });
       S.addListener('texto', function(d){
         avTexto((d && d.texto) || '');
         // FASE 2 enganchara aqui. Hoy no hay nadie escuchando a proposito.
+        // MODO PRUEBA. Lo unico que hace con lo oido es DIBUJARLO. No toca
+        // la base, ni un formulario, ni el borrador. Cuando llegue la fase 2,
+        // lo que se agrega es un consumidor aparte - esto se queda igual.
+        avPintarPrueba(avInterpretar((d && d.texto) || ''));
         if(typeof AV.onTexto === 'function') AV.onTexto(d);
       });
       S.addListener('error', function(d){
@@ -12904,6 +12916,112 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     equipmentBody.appendChild(tr);
   }
   equipmentBody.addEventListener('click', (e) => { if(e.target.classList.contains('remove-eq')) e.target.closest('tr').remove(); });
+
+
+  // ---- MODO PRUEBA: SOLO ENSENA LO QUE ENTENDIO ----------------
+  // Su pedido del 6 oct 2026: "un modo prueba aislado. No escribas nada en la
+  // base de datos ni modifiques el proyecto, solo muestra en pantalla como
+  // interpretas el mensaje hablado... solo quiero confirmar que entiende bien
+  // antes de conectar con los datos reales".
+  //
+  // Esto NO escribe en ningun lado: ni base, ni formulario, ni borrador. Lee
+  // la frase y la pinta. Es el banco de pruebas del cerebro, y es la manera
+  // correcta de probar un interprete - mirarlo antes de dejarlo tocar datos.
+  //
+  // DE QUE MODULO ES. Se decide por lo que se oyo, y si no alcanza, SE DICE
+  // que no se supo. Adivinar el modulo equivocado seria peor que no contestar:
+  // mandaria el conteo de equipo a la hoja de secado.
+  var AV_MODULOS = [
+    { id:'Drying',       k:['secado','secador','lectura','lecturas','humedad','drying','moisture','reading','readings','dehu reading'] },
+    { id:'Labor',        k:['mano de obra','labor','turno','turnos','shift','shifts','horas trabajadas'] },
+    { id:'Materials',    k:['materiales','material','drywall','baseboard','plastico','materials','zipper door'] },
+    { id:'Measurements', k:['medidas','medida','pies cuadrados','square feet','measurement','measurements'] },
+    { id:'Comms',        k:['comunicacion','comunicaciones','comms','llame','llamé','hable con','called','spoke with'] }
+  ];
+  // Los cuartos, en los dos idiomas. Las frases largas PRIMERO: "living room"
+  // le tiene que ganar a "room", y "master bedroom" a "bedroom".
+  var AV_CUARTOS = [
+    { n:'Master Bedroom', k:['master bedroom','recamara principal','cuarto principal','dormitorio principal'] },
+    { n:'Living Room',    k:['living room','family room','sala de estar','sala'] },
+    { n:'Dining Room',    k:['dining room','comedor'] },
+    { n:'Laundry Room',   k:['laundry room','cuarto de lavado','lavanderia','laundry'] },
+    { n:'Powder Room',    k:['powder room','half bath','medio bano'] },
+    { n:'Kitchen',        k:['kitchen','cocina'] },
+    { n:'Bathroom',       k:['bathroom','bano','banos','bathrooms'] },
+    { n:'Bedroom',        k:['bedroom','bedrooms','recamara','recamaras','dormitorio','habitacion'] },
+    { n:'Basement',       k:['basement','sotano'] },
+    { n:'Hallway',        k:['hallway','corridor','pasillo'] },
+    { n:'Garage',         k:['garage','garaje','cochera'] },
+    { n:'Closet',         k:['closet','clositos','armario'] },
+    { n:'Attic',          k:['attic','atico'] },
+    { n:'Office',         k:['office','oficina','estudio'] },
+    { n:'Stairs',         k:['stairs','stairway','escaleras','escalera'] },
+    { n:'Entry',          k:['foyer','entry','entrada','recibidor'] }
+  ];
+  function avBuscarFrase(palabras, tabla, campoK){
+    for(var i = 0; i < palabras.length; i++){
+      for(var n = 3; n >= 1; n--){
+        var frase = palabras.slice(i, i + n).join(' ');
+        if(frase.length < 3) continue;
+        for(var t = 0; t < tabla.length; t++){
+          if(tabla[t][campoK].indexOf(frase) > -1) return { fila: tabla[t], i: i, fin: i + n };
+        }
+      }
+    }
+    return null;
+  }
+  // Devuelve SIEMPRE la misma forma, para que la pantalla no tenga que adivinar.
+  function avInterpretar(texto){
+    var llano = vozLlano(texto);
+    var palabras = llano ? llano.split(' ') : [];
+    var out = { modulo: null, habitacion: null, items: [], nada: true, oido: String(texto || '').trim() };
+    if(!palabras.length) return out;
+
+    // Los artefactos se reconocen con el MISMO vocabulario que ya usa el
+    // conteo de equipo, que esta probado. Un solo vocabulario, no dos que se
+    // desincronicen.
+    var anclas = vozAnclas(palabras);
+    anclas.forEach(function(a){
+      if(a.tipo !== 'equipo') return;
+      out.items.push({ en: a.dato, n: vozNumeroAntes(palabras, a.i) });
+    });
+
+    var cuarto = avBuscarFrase(palabras, AV_CUARTOS, 'k');
+    if(cuarto) out.habitacion = cuarto.fila.n;
+
+    // Si nombro equipo, es Equipment. Si no, se busca por palabra del modulo.
+    if(out.items.length) out.modulo = 'Equipment';
+    else {
+      var m = avBuscarFrase(palabras, AV_MODULOS, 'k');
+      if(m) out.modulo = m.fila.id;
+    }
+    out.nada = !out.modulo && !out.habitacion && !out.items.length;
+    return out;
+  }
+  // Lo que se pinta. Sin numero NO se inventa 1: se dice que falta, igual que
+  // en el conteo. Un numero inventado aqui enseñaria un acierto que no hubo.
+  function avPintarPrueba(r){
+    var caja = $('#avPrueba'); if(!caja) return;
+    if(!r || r.nada){
+      caja.innerHTML = r && r.oido
+        ? '<div class="av-pfila"><span>No reconocí nada de eso.</span></div>' : '';
+      return;
+    }
+    var f = [];
+    f.push('<div class="av-pfila"><span>módulo</span><b>' + esc(r.modulo || '— no lo supe —') + '</b></div>');
+    if(r.habitacion) f.push('<div class="av-pfila"><span>habitación</span><b>' + esc(r.habitacion) + '</b></div>');
+    if(r.items.length){
+      var lista = r.items.map(function(i){
+        // Uno solo va en singular: "1 HEPA", no "1 HEPAs". Las doce filas
+        // terminan en s cuando son plurales (Ozone Machine no, y por eso se
+        // queda igual), asi que quitar la s final alcanza y no inventa nada.
+        var nom = (i.n === 1) ? i.en.replace(/s$/, '') : i.en;
+        return (i.n == null ? '¿cuántos? ' : i.n + ' ') + nom;
+      }).join(', ');
+      f.push('<div class="av-pfila"><span>items</span><b>' + esc(lista) + '</b></div>');
+    }
+    caja.innerHTML = '<div class="av-pnota">MODO PRUEBA · no se guarda nada</div>' + f.join('');
+  }
 
   // ---- EL MICROFONO Y EL LLENADO -------------------------------
   // El reconocedor de Apple trabaja POR IDIOMA: hay que decirle cual antes de
@@ -37160,6 +37278,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     <div class="av-estado" id="avEstado">Esperando</div>
     <div class="av-texto" id="avTexto"></div>
     <div class="av-ayuda" id="avAyuda">Toque la esfera para empezar a escuchar.</div>
+    <!-- MODO PRUEBA: lo que entendio, para mirarlo. No escribe en ningun lado. -->
+    <div class="av-prueba" id="avPrueba"></div>
   </div>
 </div>
 </body>
