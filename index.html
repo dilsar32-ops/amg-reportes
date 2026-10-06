@@ -7103,7 +7103,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-06-MN';
+  const APP_BUILD = '2026-10-06-MO';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12922,8 +12922,26 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         if(typeof AV.onTexto === 'function') AV.onTexto(d);
       });
       S.addListener('error', function(d){
+        // Aqui solo llegan las fallas DE VERDAD: que nadie haya hablado
+        // todavia no es una, y el relevo de tarea tampoco. Eso lo filtra el
+        // plugin, despues de que la pantalla se puso en ERROR en la prueba del
+        // 6 oct con el microfono oyendo perfectamente.
         avEstado('error', (d && d.mensaje) || 'No se pudo oír.');
         AV.nivel = 0;
+      });
+      // AVISOS: no son errores y no sacan de "escuchando". Se dicen abajo, en
+      // la linea de ayuda, para que no quede adivinando que paso.
+      S.addListener('aviso', function(d){
+        var a = (d && d.aviso) || '', idi = (d && d.idioma) || '';
+        var corto = idi === 'en-US' ? 'inglés' : idi === 'es-MX' ? 'español' : idi;
+        if(AV.estado !== 'escuchando') return;
+        if(a === 'oido_caido') avEstado('escuchando', 'Se cayó el oído en ' + corto + '. Sigo oyendo con el otro.');
+        else if(a === 'modelo_soltado') avEstado('escuchando', 'El vocabulario del oficio no cargó en ' + corto + '. Sigo oyendo normal.');
+      });
+      S.addListener('modelo', function(d){
+        if(AV.estado !== 'escuchando') return;
+        AV.modelos = (AV.modelos || []).concat([(d && d.idioma) || '']);
+        avEstado('escuchando', 'Ya cargó el vocabulario del oficio. Hable normal.');
       });
       await S.empezar({ idioma: AV.idioma, vocabulario: avVocabulario(), frases: avFrases() });
     }catch(err){
