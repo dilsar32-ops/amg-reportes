@@ -1068,6 +1068,15 @@
   }
   .inboxhead .btn{padding:6px 12px; font-size:12px;}
   .inboxnote{font-size:12.5px; color:var(--ink-soft); margin:0 0 8px;}
+  .vozpanel{margin-top:10px; padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--card-2,var(--card));}
+  .vozpanel[hidden]{display:none !important;}
+  .vozrow{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;}
+  .vozlbl{font-size:13px; color:var(--ink-soft);}
+  .vozIdioma.on{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .vozoido{margin-top:10px; padding:10px 12px; border-radius:10px; background:var(--paper,#111); font-size:15px; line-height:1.4;}
+  .vozitem{display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-bottom:1px solid var(--line); font-size:14.5px;}
+  .vozitem b{text-align:right;}
+  .vozfalta{color:var(--danger);}
   .inboxitem{
     display:flex; flex-direction:column; align-items:flex-start; gap:2px; width:100%;
     text-align:left; font:inherit; cursor:pointer; margin-bottom:6px;
@@ -2470,6 +2479,28 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         </table>
       </div>
       <button class="btn btn-outline" id="addItemBtn" style="margin-top:10px;">+ Agregar Artículo<span class="en"> / Add Item</span></button>
+
+      <!-- ASISTENTE DE VOZ. Va aqui abajo, pegado al conteo, que es donde
+           estan parados cuando acaban de contar el equipo y tienen las manos
+           ocupadas. Nada se llena sin que lo vea: primero ensena lo que
+           entendio y el toca Llenar. -->
+      <button class="btn btn-outline" id="eVozAbrir" style="margin-top:10px;">&#127908; Usar comando de voz<span class="en"> / Use voice</span></button>
+      <div id="eVozPanel" class="vozpanel" hidden>
+        <div class="vozrow">
+          <span class="vozlbl">Idioma / Language</span>
+          <span>
+            <button type="button" class="minibtn vozIdioma on" data-idioma="es-MX">Español</button>
+            <button type="button" class="minibtn vozIdioma" data-idioma="en-US">English</button>
+          </span>
+        </div>
+        <p class="hint" id="eVozAyuda">Toque el micrófono y hable de corrido. Por ejemplo:
+          <i>«Cliente Susan Taylor, dirección 2817 Dorr Avenue, hoy, segunda visita, líder Aroldo,
+          puse seis ventiladores, cuatro deshumidificadores y dos HEPAs.»</i></p>
+        <button class="btn btn-accent" type="button" id="eVozMic" style="width:100%;">&#127908; Empezar a escuchar</button>
+        <div id="eVozOido" class="vozoido" hidden></div>
+        <div id="eVozEntendido"></div>
+        <div id="eVozMsg" class="hint" style="margin-top:6px;"></div>
+      </div>
       <div class="row2" style="margin-top:16px;">
         <div class="field"><label>Visita #<span class="en"> / Visit #</span></label><input type="number" id="e-visit" placeholder="6"></div>
         <div class="field"><label>Caja OmniSense #<span class="en"> / OmniSense Box #</span></label><input type="text" id="e-omni" placeholder="Opcional / Optional"></div>
@@ -6974,7 +7005,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-05-MG';
+  const APP_BUILD = '2026-10-06-MH';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12410,6 +12441,211 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   }
 
   // ================= EQUIPMENT =================
+
+  // ================= ASISTENTE DE VOZ DEL EQUIPO =================
+  // Su pedido del 5 oct 2026: "que el asistente sepa lo que lleva la plantilla
+  // y sepa escuchar y poner todo directamente alli sin necesidad de
+  // escribirlo... puse tantos fans, puse tantos dehumidifiers... incluso el
+  // numero de visita, quien es el lider de cuadrilla... que entienda si hablan
+  // en espanol o en ingles".
+  //
+  // ---- LO QUE SE PUEDE Y LO QUE NO, dicho de frente ----
+  // SI: oir "puse seis ventiladores y cuatro deshumidificadores" y llenar las
+  //     casillas que van, en espanol o en ingles, de corrido y sin preguntar
+  //     de a una.
+  // NO: adivinar el IDIOMA solo. El reconocedor de Apple trabaja por idioma -
+  //     se le dice cual antes de empezar. Por eso hay un interruptor ES/EN en
+  //     el panel. Lo que SI se hace es aceptar las palabras de los dos idiomas
+  //     al interpretar, por si el reconocedor acierta una palabra prestada
+  //     ("fans" sale bien hasta en espanol).
+  // NO: entender cualquier frase. Esto no "comprende": busca palabras clave y
+  //     el numero que va con cada una. Por eso SIEMPRE ensena lo que entendio
+  //     para que el lo revise antes de que quede guardado.
+  //
+  // Los numeros van a mano a proposito: NaturalLanguage de Apple se probo en
+  // esta misma maquina para el escaner de planos y fallo mas de la mitad de los
+  // numeros en espanol - "un" y "una" los perdia siempre.
+  var VOZ_NUM = {
+    uno:1, una:1, un:1, dos:2, tres:3, cuatro:4, cinco:5, seis:6, siete:7,
+    ocho:8, nueve:9, diez:10, once:11, doce:12, trece:13, catorce:14,
+    quince:15, dieciseis:16, diecisiete:17, dieciocho:18, diecinueve:19,
+    veinte:20, veintiuno:21, veintidos:22, veintitres:23, veinticuatro:24,
+    veinticinco:25, treinta:30, cuarenta:40, cincuenta:50,
+    a:1, an:1, one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8,
+    nine:9, ten:10, eleven:11, twelve:12, thirteen:13, fourteen:14, fifteen:15,
+    sixteen:16, seventeen:17, eighteen:18, nineteen:19, twenty:20,
+    thirty:30, forty:40, fifty:50
+  };
+  // Acentos fuera para comparar: el reconocedor a veces los pone y a veces no,
+  // y "dieciseis" no puede fallar por una tilde.
+  function vozLlano(s){
+    return String(s == null ? '' : s).toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9#\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  // Las MISMAS filas que trae la plantilla (DEFAULT_EQUIPMENT), amarradas por
+  // su nombre en ingles, que es lo que lleva cada fila en dataset.en.
+  // Primero las frases largas: "zip wall pole" tiene que ganarle a "pole", y
+  // "bote de basura" a "bote".
+  var VOZ_EQUIPO = [
+    { en:'Dehumidifier Drip Pans', k:['bandeja de goteo','bandejas de goteo','drip pan','drip pans','bandeja','bandejas'] },
+    { en:'Zip Wall Poles', k:['poste de pared','postes de pared','zip wall pole','zip wall poles','zipwall','poste','postes'] },
+    { en:'Ozone Machine',  k:['maquina de ozono','maquinas de ozono','ozone machine','ozone','ozono'] },
+    { en:'Trash Cans',     k:['bote de basura','botes de basura','trash can','trash cans','basurero','basureros'] },
+    { en:'Air Ducts',      k:['ducto de aire','ductos de aire','air duct','air ducts','ducto','ductos','duct','ducts'] },
+    { en:'Dry Mats',       k:['tapete seco','tapetes secos','dry mat','dry mats','tapete','tapetes'] },
+    { en:'Dehumidifiers',  k:['deshumidificador','deshumidificadores','dehumidifier','dehumidifiers','dehumidificador','dehu','dehus'] },
+    { en:'HEPAs',          k:['filtro hepa','filtros hepa','air scrubber','air scrubbers','hepa','hepas','scrubber','scrubbers'] },
+    { en:'Generators',     k:['generador','generadores','generator','generators'] },
+    { en:'Heaters',        k:['calentador','calentadores','heater','heaters'] },
+    { en:'Zippers',        k:['cierre de acceso','cierres de acceso','zipper door','zipper doors','zipper','zippers','cierre','cierres'] },
+    { en:'Fans',           k:['extractor de aire','extractores de aire','air mover','air movers','ventilador','ventiladores','extractor','extractores','fan','fans'] }
+  ];
+  // Puso / quito. Si no lo dice, se asume que PUSO: es lo normal y ademas el
+  // panel ensena en que columna cayo, asi que un error se ve y se corrige.
+  var VOZ_PUSO   = ['puse','pusimos','puso','pusieron','instale','instalamos','instalo','instalaron',
+                    'deje','dejamos','dejo','dejaron','coloque','colocamos','meti','metimos',
+                    'put','installed','install','set','placed','left','dropped','added'];
+  var VOZ_QUITO  = ['quite','quitamos','quito','quitaron','saque','sacamos','saco','sacaron',
+                    'recogi','recogimos','recogio','recogieron','levante','levantamos','retire','retiramos',
+                    'removed','remove','picked','pick','pulled','took','collected'];
+  // Las casillas de arriba. El valor es lo que viene DESPUES de la palabra
+  // clave y hasta la siguiente cosa que el asistente reconozca.
+  var VOZ_CAMPOS = [
+    { id:'e-clientname', k:['cliente','client','customer'] },
+    { id:'e-address',    k:['direccion','domicilio','address'] },
+    { id:'e-cause',      k:['causa de perdida','causa','cause of loss','cause'] },
+    { id:'e-leader',     k:['lider de cuadrilla','lider','crew leader','leader'] },
+    { id:'e-pm',         k:['project manager','manager del proyecto','pm'] },
+    { id:'e-crew',       k:['cuadrilla','crew'] },
+    { id:'e-omni',       k:['omnisense','omni sense','omni'] }
+  ];
+  var VOZ_VISITA = ['visita','visit'];
+  var VOZ_ORDINAL = { primera:1, primer:1, segunda:2, segundo:2, tercera:3, tercer:3,
+                      cuarta:4, cuarto:4, quinta:5, quinto:5, sexta:6, sexto:6,
+                      first:1, second:2, third:3, fourth:4, fifth:5, sixth:6 };
+
+  // Encuentra todas las palabras clave y DONDE estan. Lo que hay entre una y
+  // la siguiente es el valor de la primera: asi "cliente susan taylor
+  // direccion 2817 dorr avenue" se parte solo, sin pedirle que haga pausas.
+  function vozAnclas(palabras){
+    var anclas = [];
+    function marcar(tipo, dato, i, largo){ anclas.push({ tipo:tipo, dato:dato, i:i, fin:i + largo }); }
+    for(var i = 0; i < palabras.length; i++){
+      var hecho = false;
+      // Frases de hasta 3 palabras, de la mas larga a la mas corta.
+      for(var n = 3; n >= 1 && !hecho; n--){
+        var frase = palabras.slice(i, i + n).join(' ');
+        if(frase.length < 2) continue;
+        for(var e = 0; e < VOZ_EQUIPO.length && !hecho; e++){
+          if(VOZ_EQUIPO[e].k.indexOf(frase) > -1){ marcar('equipo', VOZ_EQUIPO[e].en, i, n); hecho = true; }
+        }
+        if(hecho) break;
+        for(var c = 0; c < VOZ_CAMPOS.length && !hecho; c++){
+          if(VOZ_CAMPOS[c].k.indexOf(frase) > -1){ marcar('campo', VOZ_CAMPOS[c].id, i, n); hecho = true; }
+        }
+        if(hecho) break;
+        if(VOZ_VISITA.indexOf(frase) > -1){ marcar('visita', null, i, n); hecho = true; }
+      }
+      if(hecho){ i = anclas[anclas.length - 1].fin - 1; continue; }
+      if(VOZ_PUSO.indexOf(palabras[i]) > -1) marcar('puso', null, i, 1);
+      else if(VOZ_QUITO.indexOf(palabras[i]) > -1) marcar('quito', null, i, 1);
+      else if(/^(hoy|today)$/.test(palabras[i])) marcar('hoy', null, i, 1);
+      else if(/^(ayer|yesterday)$/.test(palabras[i])) marcar('ayer', null, i, 1);
+    }
+    return anclas.sort(function(a,b){ return a.i - b.i; });
+  }
+  function vozNumeroAntes(palabras, i){
+    for(var j = i - 1; j >= 0 && j >= i - 3; j--){
+      var p = palabras[j];
+      if(/^\d+$/.test(p)) return parseInt(p, 10);
+      if(VOZ_NUM[p] != null) return VOZ_NUM[p];
+      // "seis de los ventiladores": se deja pasar una palabra de relleno.
+      if(['de','del','los','las','unos','unas','the','of'].indexOf(p) > -1) continue;
+      break;
+    }
+    return null;
+  }
+
+  // DE LO QUE DIJO, A LO QUE SE VA A LLENAR.
+  // Devuelve SIEMPRE una lista de lo que entendio, con la casilla y el valor,
+  // para que el panel lo ensene antes de tocar el formulario. Nada se llena
+  // sin que el lo vea: esto no entiende, reconoce - y reconocer se equivoca.
+  function vozEntender(texto, hoyISO){
+    var crudo = String(texto == null ? '' : texto);
+    var llano = vozLlano(crudo);
+    var palabras = llano ? llano.split(' ') : [];
+    var palabrasCrudas = crudo.trim().replace(/\s+/g, ' ').split(' ');
+    var anclas = vozAnclas(palabras);
+    var out = { equipo: [], campos: [], visita: null, fecha: null, nada: true };
+    if(!anclas.length) return out;
+
+    // La accion vale desde que se dice hasta que se diga otra: "puse seis
+    // ventiladores y cuatro deshumidificadores" son los dos puestos.
+    var accion = 'puso';
+    anclas.forEach(function(a, idx){
+      var sig = anclas[idx + 1];
+      if(a.tipo === 'puso'){ accion = 'puso'; return; }
+      if(a.tipo === 'quito'){ accion = 'quito'; return; }
+      if(a.tipo === 'hoy'){ out.fecha = hoyISO; return; }
+      if(a.tipo === 'ayer'){
+        var d = new Date(hoyISO + 'T12:00:00');
+        d.setDate(d.getDate() - 1);
+        out.fecha = d.toISOString().slice(0, 10);
+        return;
+      }
+      if(a.tipo === 'equipo'){
+        var n = vozNumeroAntes(palabras, a.i);
+        // SIN NUMERO NO SE INVENTA UNO. "necesito ventiladores" no es "1
+        // ventilador": se ensena como oido pero sin cantidad, y el la pone.
+        out.equipo.push({ en: a.dato, n: n, accion: accion });
+        return;
+      }
+      if(a.tipo === 'visita'){
+        var v = vozNumeroAntes(palabras, a.i);
+        if(v == null){
+          // "visita dos" o "segunda visita"
+          var des = palabras[a.fin];
+          if(des != null && (/^\d+$/.test(des) ? (v = parseInt(des,10)) : (VOZ_NUM[des] != null && (v = VOZ_NUM[des])))){ /* tomado */ }
+          var antes = palabras[a.i - 1];
+          if(v == null && antes != null && VOZ_ORDINAL[antes] != null) v = VOZ_ORDINAL[antes];
+          if(v == null && des != null && VOZ_ORDINAL[des] != null) v = VOZ_ORDINAL[des];
+        }
+        if(v != null) out.visita = v;
+        return;
+      }
+      if(a.tipo === 'campo'){
+        // El valor son las palabras CRUDAS (con sus mayusculas y acentos) que
+        // van de aqui a la siguiente cosa reconocida.
+        var desde = a.fin, hasta = sig ? sig.i : palabras.length;
+        var val = palabrasCrudas.slice(desde, hasta).join(' ')
+          .replace(/^[\s,.;:–-]+|[\s,.;:–-]+$/g, '').trim();
+        if(val) out.campos.push({ id: a.dato, valor: val });
+        return;
+      }
+    });
+    out.nada = !out.equipo.length && !out.campos.length && out.visita == null && !out.fecha;
+    return out;
+  }
+
+  // Lo entendido, en palabras, para ensenarselo ANTES de llenar nada.
+  function vozResumen(r){
+    var l = [];
+    r.campos.forEach(function(c){
+      var et = ({ 'e-clientname':'Cliente', 'e-address':'Dirección', 'e-cause':'Causa de pérdida',
+                  'e-leader':'Líder', 'e-pm':'Project manager', 'e-crew':'Cuadrilla',
+                  'e-omni':'OmniSense' })[c.id] || c.id;
+      l.push(et + ': ' + c.valor);
+    });
+    if(r.fecha) l.push('Fecha: ' + r.fecha);
+    if(r.visita != null) l.push('Visita #' + r.visita);
+    r.equipo.forEach(function(e){
+      l.push((e.accion === 'quito' ? 'Quitó ' : 'Puso ') +
+             (e.n == null ? '(falta decir cuántos) ' : e.n + ' ') + e.en);
+    });
+    return l;
+  }
+
   const DEFAULT_EQUIPMENT = [
     {es:'Fans / Ventiladores', en:'Fans'},
     {es:'Dehumidifiers / Deshumidificadores', en:'Dehumidifiers'},
@@ -12453,7 +12689,132 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     equipmentBody.appendChild(tr);
   }
   equipmentBody.addEventListener('click', (e) => { if(e.target.classList.contains('remove-eq')) e.target.closest('tr').remove(); });
+
+  // ---- EL MICROFONO Y EL LLENADO -------------------------------
+  // El reconocedor de Apple trabaja POR IDIOMA: hay que decirle cual antes de
+  // empezar, no lo adivina. Por eso el interruptor. Al interpretar si se
+  // aceptan las palabras de los dos idiomas, por si suelta una prestada.
+  var vozIdioma = 'es-MX', vozEscuchando = false, vozUltimo = null, vozTextoOido = '';
+  function vozPlugin(){
+    return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SpeechRecognition;
+  }
+  function vozMsg(t, malo){
+    var e = $('#eVozMsg'); if(!e) return;
+    e.textContent = t || '';
+    e.style.color = malo ? 'var(--danger)' : 'var(--ink-soft)';
+  }
+  function vozPintarEntendido(r){
+    var caja = $('#eVozEntendido'); if(!caja) return;
+    if(!r || r.nada){ caja.innerHTML = ''; return; }
+    var filas = vozResumen(r).map(function(l){
+      var falta = /falta decir cu/.test(l);
+      return '<div class="vozitem' + (falta ? ' vozfalta' : '') + '"><span>' + esc(l) + '</span></div>';
+    }).join('');
+    // LO QUE FALTA SE DICE. El tenia razon en pedir que preguntara: si no se
+    // nombra lo que falta, se manda una hoja a medias sin que nadie lo note.
+    var faltan = [];
+    if(!$('#e-clientname').value.trim() && !r.campos.some(function(c){ return c.id === 'e-clientname'; })) faltan.push('el cliente');
+    if(!$('#e-address').value.trim() && !r.campos.some(function(c){ return c.id === 'e-address'; })) faltan.push('la dirección');
+    if(!$('#e-visit').value.trim() && r.visita == null) faltan.push('el número de visita');
+    caja.innerHTML = '<div style="margin-top:10px; font-size:13px; color:var(--ink-soft);">Esto entendí:</div>' + filas
+      + '<button class="btn btn-accent" type="button" id="eVozLlenar" style="width:100%; margin-top:10px;">Llenar el formulario</button>'
+      + (faltan.length ? '<p class="hint" style="margin-top:6px;">Todavía falta ' + esc(faltan.join(', ')) + '. Puede decirlo y volver a escuchar.</p>' : '');
+  }
+  async function vozEmpezar(){
+    var S = vozPlugin();
+    if(!isNative() || !S){ vozMsg('El comando de voz solo funciona en la app del teléfono.', true); return; }
+    if(vozEscuchando){ try{ await S.stop(); }catch(e){} vozEscuchando = false; $('#eVozMic').textContent = '🎤 Empezar a escuchar'; return; }
+    try{
+      var permiso = await S.checkPermissions();
+      if(!permiso || permiso.speechRecognition !== 'granted'){
+        var pedido = await S.requestPermissions();
+        if(!pedido || pedido.speechRecognition !== 'granted'){
+          vozMsg('El teléfono no dio permiso para el micrófono. Ajustes → Field Reports → Micrófono y Reconocimiento de voz.', true);
+          return;
+        }
+      }
+      vozTextoOido = ''; vozUltimo = null;
+      $('#eVozOido').hidden = false; $('#eVozOido').textContent = 'Escuchando…';
+      vozPintarEntendido(null); vozMsg('');
+      vozEscuchando = true; $('#eVozMic').textContent = '⏹ Ya terminé';
+      // partialResults deja ver lo que va oyendo: si se equivoco, lo ve en el
+      // momento y no hasta el final.
+      S.removeAllListeners && S.removeAllListeners();
+      S.addListener('partialResults', function(d){
+        var t = (d && d.matches && d.matches[0]) || '';
+        if(!t) return;
+        vozTextoOido = t;
+        $('#eVozOido').textContent = t;
+        vozUltimo = vozEntender(t, todayStr());
+        vozPintarEntendido(vozUltimo);
+      });
+      await S.start({ language: vozIdioma, maxResults: 1, partialResults: true, popup: false });
+      // start() regresa cuando termina de escuchar.
+      vozEscuchando = false; $('#eVozMic').textContent = '🎤 Empezar a escuchar';
+      if(!vozTextoOido){ $('#eVozOido').textContent = 'No se oyó nada. Acérquese e inténtelo otra vez.'; }
+    }catch(err){
+      vozEscuchando = false; $('#eVozMic').textContent = '🎤 Empezar a escuchar';
+      vozMsg('No se pudo escuchar: ' + ((err && err.message) || err), true);
+    }
+  }
+  // LLENAR. Solo se toca lo que el asistente entendio, y SOLO despues de que
+  // el toco el boton: nunca se escribe en el formulario mientras habla.
+  function vozLlenar(r){
+    if(!r || r.nada) return { campos:0, equipo:0, sinNumero:[] };
+    var n = { campos:0, equipo:0, sinNumero:[] };
+    r.campos.forEach(function(c){
+      var e = $('#' + c.id);
+      if(e){ e.value = c.valor; e.dispatchEvent(new Event('input', {bubbles:true})); n.campos++; }
+    });
+    if(r.fecha && $('#e-date')){ $('#e-date').value = r.fecha; n.campos++; }
+    if(r.visita != null && $('#e-visit')){ $('#e-visit').value = String(r.visita); n.campos++; }
+    r.equipo.forEach(function(it){
+      // Sin cantidad NO se escribe nada: se dice cual falta y el la pone.
+      if(it.n == null){ n.sinNumero.push(it.en); return; }
+      var tr = $$('tr', equipmentBody).find(function(x){ return x.dataset.en === it.en; });
+      if(!tr) return;
+      var campo = $(it.accion === 'quito' ? '.eq-removed' : '.eq-install', tr);
+      if(!campo) return;
+      campo.value = String(it.n);
+      campo.dispatchEvent(new Event('input', {bubbles:true}));
+      n.equipo++;
+    });
+    return n;
+  }
   $('#addItemBtn').addEventListener('click', () => addEquipmentRow());
+
+  // Delegado en el documento: el panel vive dentro de una tarjeta de paso que
+  // se esconde y se ensena, y los botones de adentro nacen con el resumen.
+  document.addEventListener('click', (e) => {
+    const abrir = e.target.closest('#eVozAbrir');
+    if(abrir){
+      const p = $('#eVozPanel');
+      p.hidden = !p.hidden;
+      abrir.textContent = p.hidden ? '🎤 Usar comando de voz' : '✕ Cerrar el comando de voz';
+      if(!p.hidden) p.scrollIntoView({ block:'nearest' });
+      return;
+    }
+    const idio = e.target.closest('.vozIdioma');
+    if(idio){
+      vozIdioma = idio.dataset.idioma;
+      $$('.vozIdioma').forEach(b2 => b2.classList.toggle('on', b2 === idio));
+      // El ejemplo cambia de idioma con el boton: si queda en espanol y el
+      // habla ingles, la pantalla le esta diciendo lo que no es.
+      const ay = $('#eVozAyuda');
+      if(ay) ay.innerHTML = vozIdioma === 'en-US'
+        ? 'Tap the mic and speak normally. For example: <i>«Client Susan Taylor, address 2817 Dorr Avenue, today, second visit, leader Aroldo, I put six air movers, four dehumidifiers and two air scrubbers.»</i>'
+        : 'Toque el micrófono y hable de corrido. Por ejemplo: <i>«Cliente Susan Taylor, dirección 2817 Dorr Avenue, hoy, segunda visita, líder Aroldo, puse seis ventiladores, cuatro deshumidificadores y dos HEPAs.»</i>';
+      return;
+    }
+    if(e.target.closest('#eVozMic')){ vozEmpezar(); return; }
+    if(e.target.closest('#eVozLlenar')){
+      const n = vozLlenar(vozUltimo);
+      let t = 'Listo: ' + n.campos + ' dato(s) y ' + n.equipo + ' artículo(s) puestos en el formulario.';
+      if(n.sinNumero.length) t += ' Falta la cantidad de: ' + n.sinNumero.join(', ') + ' — escríbala arriba.';
+      vozMsg(t, !!n.sinNumero.length);
+      return;
+    }
+  });
   DEFAULT_EQUIPMENT.forEach(it => addEquipmentRow(it.es, it.en));
 
   // signature (equipment tab)
