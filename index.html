@@ -1597,6 +1597,27 @@ input:focus, textarea:focus, select:focus{
   border-color:var(--azul-texto); box-shadow:0 0 0 3px rgba(106,181,255,.22);
   background:var(--surface-2);
 }
+
+/* "OTRO" SE ESCRIBE EN EL MISMO RENGLON (7 oct 2026).
+   La primera version puso la casilla en un renglon aparte, mas abajo. El lo
+   probo dos veces y las dos dijo "no me deja escribir": nunca la vio. Ahora la
+   lista se quita y en SU lugar queda la casilla, con el boton que regresa a las
+   opciones al lado.
+   La regla va en su PROPIA linea: una `display:flex` metida dentro de la lista
+   grande de selectores [hidden] le quita el display:none a todo lo que va antes
+   (eso paso el 6 de septiembre y dejo el visor de recibos abierto y vacio). */
+.otrofila{display:flex; align-items:stretch; gap:8px;}
+.otrofila[hidden]{display:none !important;}
+#g-what[hidden]{display:none !important;}
+.otrofila input{flex:1 1 auto; min-width:0;}
+.otrovolver{
+  flex:0 0 auto; width:52px; min-height:48px;
+  display:flex; align-items:center; justify-content:center;
+  padding:0; border:1px solid var(--line); border-radius:10px;
+  background:var(--surface-2); color:var(--text);
+  font-size:19px; line-height:1; cursor:pointer;
+}
+.otrovolver:active{background:var(--surface-hover);}
 /* La palomita: el blanco general de arriba le metia acolchado. Aqui se
    devuelve a cuadrito y se hace grande, con el renglon completo tocable. */
 input[type=checkbox], input[type=radio]{
@@ -4296,21 +4317,30 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     <section class="card amgcard" id="finGastoCard" data-drafttab="finanzas">
       <h2>Gasto</h2>
       <div class="row2">
-        <div class="field"><label>Cuánto $</label><input type="number" id="g-amount" step="0.01" inputmode="decimal" placeholder="0.00"></div>
-        <div class="field"><label>Qué fue</label><select id="g-what">
+        <div class="field"><label>Cuánto se gastó $</label><input type="number" id="g-amount" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+        <!-- "Qué fue" era una frase muy chica y nadie entendia que iba en esa
+             casilla. Su palabra: "deberia decir en que se gasto". -->
+        <div class="field"><label>¿En qué se gastó?</label><select id="g-what">
           <option value="gasolina">Gasolina</option><option value="materiales">Material de mudanza</option><option value="cajas">Cajas</option>
-          <option value="peaje">Peaje</option><option value="comida">Comida</option><option value="basura">Basura (botadero)</option><option value="seguro">Seguro</option><option value="storage">Storage</option><option value="otro">Otro</option></select></div>
+          <option value="peaje">Peaje</option><option value="comida">Comida</option><option value="basura">Basura (botadero)</option><option value="seguro">Seguro</option><option value="storage">Storage</option><option value="otro">Otro</option></select>
+        <!-- Al escoger "Otro" hay que poder escribir QUE fue. Antes no se podia,
+             y un gasto que solo dice "Otro" no se puede revisar despues - y ese
+             dinero entra al cierre 50/50.
+             Y la primera version lo puso en un renglon APARTE, mas abajo: el lo
+             probo dos veces y no lo vio ("no me deja escribir"). Por eso ahora
+             la casilla ocupa EL MISMO renglon - la lista se quita y en su lugar
+             se escribe, ahi mismo, con el teclado abierto. El boton de la lista
+             regresa a las opciones si se equivoco. -->
+        <div class="otrofila" id="gOtroField" hidden>
+          <input type="text" id="g-otro" placeholder="Escriba en qué se gastó" autocapitalize="sentences" autocomplete="off">
+          <button type="button" class="otrovolver" id="gOtroBack" title="Volver a la lista" aria-label="Volver a la lista">&#9776;</button>
+        </div></div>
       </div>
-      <!-- Al escoger "Otro" hay que poder escribir QUE fue. Antes no se podia,
-           y un gasto que solo dice "Otro" no se puede revisar despues - y ese
-           dinero entra al cierre 50/50. -->
-      <div class="field" id="gOtroField" hidden><label>¿Qué fue?</label>
-        <input type="text" id="g-otro" placeholder="Ej. estacionamiento, grúa, candado" autocapitalize="sentences"></div>
-      <div class="field"><label>¿Quién lo pagó?</label><select id="g-who"></select></div>
+      <div class="field"><label>¿Quién puso el dinero?</label><select id="g-who"></select></div>
       <div class="field" id="gWhoOtherField" hidden><label>Nombre</label><input type="text" id="g-who-other" placeholder="Nombre de quien pagó" autocapitalize="words" autocomplete="off"></div>
       <div class="row2">
         <div class="field"><label>Día</label><input type="date" id="g-date"></div>
-        <div class="field"><label>Cliente <span class="hint">opcional</span></label><select id="g-client"><option value="">—</option><option value="Otro">Otro</option></select></div>
+        <div class="field"><label>¿De qué cliente fue? <span class="hint">opcional</span></label><select id="g-client"><option value="">—</option><option value="Otro">Otro</option></select></div>
       </div>
       <div class="field" id="gClientOtherField" hidden><label>¿Qué cliente?</label><input type="text" id="g-client-other" placeholder="Nombre del cliente" autocomplete="off"></div>
       <div class="field"><label>Nota <span class="hint">opcional</span></label><input type="text" id="g-note" placeholder="Ej. Shell, cajas para Robert" autocomplete="off"></div>
@@ -5333,16 +5363,41 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     fpImportLeer(f.files[0]);
     f.value = '';                      // para poder traer la MISMA captura otra vez
   });
+  // "¿En qué se gastó?" tiene DOS caras en el mismo renglon: la lista, o la
+  // casilla para escribirlo. Nunca las dos. Declaracion de funcion a proposito:
+  // la llaman el guardado y el limpiado, que estan mas abajo (y ya van cuatro
+  // caidas de arranque este mes por usar una const antes de definirla).
+  function gOtroModo(escribiendo, enfocar){
+    const sel = $('#g-what'), fila = $('#gOtroField');
+    if(!sel || !fila) return;
+    sel.hidden  = !!escribiendo;
+    fila.hidden = !escribiendo;
+    if(escribiendo && enfocar){
+      const caja = $('#g-otro');
+      if(caja) setTimeout(()=>{ caja.focus(); }, 0);   // el teclado se abre solo
+    }
+  }
   document.addEventListener('change', e => {
     if(e.target && e.target.id === 'g-what'){
       const w = $('#g-what'), who = $('#g-who');
-      const of = $('#gOtroField'); if(of) of.hidden = w.value !== 'otro';
+      gOtroModo(w.value === 'otro', true);
       if(w && who && !who.dataset.touched && (w.value === 'seguro' || w.value === 'storage')){
         if([...who.options].some(o => o.value === 'e')) who.value = 'e';
         const wrap = $('#gWhoOtherField'); if(wrap) wrap.hidden = true;
       }
     }
     if(e.target && e.target.id === 'g-who') e.target.dataset.touched = '1';
+  });
+  // El boton de la lista: se equivoco, quiere volver a las opciones. Se borra lo
+  // escrito y la lista vuelve a donde arranca la tarjeta (Gasolina), a la vista,
+  // para que escoja de nuevo - no se le deja un valor escondido.
+  document.addEventListener('click', e => {
+    if(!e.target.closest || !e.target.closest('#gOtroBack')) return;
+    const sel = $('#g-what'), caja = $('#g-otro');
+    if(caja) caja.value = '';
+    if(sel) sel.value = 'gasolina';
+    gOtroModo(false, false);
+    if(sel) sel.focus();
   });
   document.addEventListener('change', e => { const sel = e.target.closest('.l-ex-who'); if(!sel) return; const wrap = sel.closest('.l-ex-row') && sel.closest('.l-ex-row').querySelector('.l-ex-other-wrap'); if(wrap) wrap.hidden = sel.value !== 'x'; });
   const EX_LABEL = { peaje:'Peaje', comida:'Comida', materiales:'Materiales comprados', cajas:'Cajas', otro:'Otro' };
@@ -7113,7 +7168,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-07-NC';
+  const APP_BUILD = '2026-10-07-ND';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -7134,12 +7189,29 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // El 12 de septiembre subi APP_BUILD a FA y deje version.txt en EZ; el
   // archivo va dentro del paquete de la app, asi que los dos telefonos
   // recien instalados avisaban de una "version nueva" que era la vieja.
+  // Compara dos sellos tipo 2026-10-07-NC. Igual que las columnas de una hoja
+  // de cálculo: primero la fecha, luego el LARGO de la letra, luego la letra.
+  // Si alguno no tiene forma de sello devuelve true, para que un formato nuevo
+  // no deje a toda la flota sin avisos en silencio.
+  function selloPartes(v){
+    const p = String(v || '').split('-');
+    if(p.length < 3 || !/^\d{4}$/.test(p[0]) || !/^\d{2}$/.test(p[1]) || !/^\d{2}$/.test(p[2])) return null;
+    return { fecha: p[0] + '-' + p[1] + '-' + p[2], letra: p.slice(3).join('-') };
+  }
+  function selloMasNuevo(a, b){
+    const A = selloPartes(a), B = selloPartes(b);
+    if(!A || !B) return true;
+    if(A.fecha !== B.fecha) return A.fecha > B.fecha;
+    if(A.letra.length !== B.letra.length) return A.letra.length > B.letra.length;
+    return A.letra > B.letra;
+  }
+
   async function checkForNewVersion(){
     try{
       const res = await fetch('version.txt?cb=' + Date.now(), { cache: 'no-store' });
       if(!res.ok) return;
       const latest = (await res.text()).trim();
-      if(!latest || latest <= APP_BUILD) return;      // solo si es mas nueva, no solo distinta
+      if(!latest || !selloMasNuevo(latest, APP_BUILD)) return;   // solo si es mas nueva, no solo distinta
       let bar = document.getElementById('newVersionBar');
       if(!bar){
         bar = document.createElement('div'); bar.id = 'newVersionBar';
@@ -34540,9 +34612,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const queFue = $('#g-what').value || 'otro';
     const otroTxt = (($('#g-otro') && $('#g-otro').value) || '').trim();
     if(queFue === 'otro' && !otroTxt){
-      msg.textContent = 'Escriba qué fue el gasto.'; msg.style.color = 'var(--danger)';
-      const of = $('#gOtroField'); if(of) of.hidden = false;
-      if($('#g-otro')) $('#g-otro').focus();
+      msg.textContent = 'Escriba en qué se gastó.'; msg.style.color = 'var(--danger)';
+      gOtroModo(true, true);
       return;
     }
     const notaLibre = ($('#g-note').value || '').trim();
@@ -35033,7 +35104,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(id === 'finGastoCard' && $('#g-what')){
       $('#g-what').value = 'gasolina';
       if($('#g-otro')) $('#g-otro').value = '';
-      if($('#gOtroField')) $('#gOtroField').hidden = true;
+      gOtroModo(false, false);
     }
     if(typeof finPhoto === 'object' && finPhoto){ finPhoto[pre] = null; if(typeof paintPhoto === 'function') paintPhoto(pre); }
   }
@@ -35691,9 +35762,12 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       // SOLO SI ES MAS NUEVA. Antes bastaba con que fuera DISTINTA, en
       // cualquier dirección: con el teléfono en FA y el servidor en EZ, le
       // ofrecía "actualizar" a una versión más vieja, y el aviso volvía al
-      // recargar porque nada cambiaba. Los sellos son 2026-09-12-FA, así que
-      // en texto se ordenan igual que en el tiempo.
-      if(!v || v <= APP_BUILD) return;
+      // recargar porque nada cambiaba.
+      // Y comparar los sellos como TEXTO tampoco alcanza (7 oct 2026): la fecha
+      // sí se ordena sola, pero la letra no — después de la Z viene la AA, y en
+      // orden alfabético "AA" va ANTES que "Z". El 30 de agosto hubo Z, AA y AB
+      // el mismo día, así que un teléfono en Z nunca se habría enterado de AA.
+      if(!v || !selloMasNuevo(v, APP_BUILD)) return;
       let b = document.getElementById('webUpdateBar');
       if(!b){
         b = document.createElement('div'); b.id = 'webUpdateBar';
@@ -38608,6 +38682,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // La casilla de "Otro" nace escondida: si no se abre, lo que el lider
     // escribio vuelve pero nadie lo ve.
     setTimeout(() => { $$('.s-extra-first, .s-extra-row').forEach(syncExtraOther); }, 0);
+    // Lo mismo en el gasto: un borrador que quedo en "Otro" tiene que volver
+    // con la casilla a la vista, o lo escrito regresa y nadie lo ve.
+    setTimeout(() => { if($('#g-what')) gOtroModo($('#g-what').value === 'otro', false); }, 0);
     setTimeout(() => {
       // La gasolina del turno tambien: si no se repinta, el pago se le anota a quien tiene el telefono
       // en la mano en vez de a quien la puso.
