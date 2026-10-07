@@ -4299,8 +4299,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         <div class="field"><label>Cuánto $</label><input type="number" id="g-amount" step="0.01" inputmode="decimal" placeholder="0.00"></div>
         <div class="field"><label>Qué fue</label><select id="g-what">
           <option value="gasolina">Gasolina</option><option value="materiales">Material de mudanza</option><option value="cajas">Cajas</option>
-          <option value="peaje">Peaje</option><option value="comida">Comida</option><option value="seguro">Seguro</option><option value="storage">Storage</option><option value="otro">Otro</option></select></div>
+          <option value="peaje">Peaje</option><option value="comida">Comida</option><option value="basura">Basura (botadero)</option><option value="seguro">Seguro</option><option value="storage">Storage</option><option value="otro">Otro</option></select></div>
       </div>
+      <!-- Al escoger "Otro" hay que poder escribir QUE fue. Antes no se podia,
+           y un gasto que solo dice "Otro" no se puede revisar despues - y ese
+           dinero entra al cierre 50/50. -->
+      <div class="field" id="gOtroField" hidden><label>¿Qué fue?</label>
+        <input type="text" id="g-otro" placeholder="Ej. estacionamiento, grúa, candado" autocapitalize="sentences"></div>
       <div class="field"><label>¿Quién lo pagó?</label><select id="g-who"></select></div>
       <div class="field" id="gWhoOtherField" hidden><label>Nombre</label><input type="text" id="g-who-other" placeholder="Nombre de quien pagó" autocapitalize="words" autocomplete="off"></div>
       <div class="row2">
@@ -5331,6 +5336,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   document.addEventListener('change', e => {
     if(e.target && e.target.id === 'g-what'){
       const w = $('#g-what'), who = $('#g-who');
+      const of = $('#gOtroField'); if(of) of.hidden = w.value !== 'otro';
       if(w && who && !who.dataset.touched && (w.value === 'seguro' || w.value === 'storage')){
         if([...who.options].some(o => o.value === 'e')) who.value = 'e';
         const wrap = $('#gWhoOtherField'); if(wrap) wrap.hidden = true;
@@ -7107,7 +7113,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-07-NB';
+  const APP_BUILD = '2026-10-07-NC';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -34335,7 +34341,12 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // pagos de clientes (con quien tiene ese dinero). Nada de esto se suma a
   // LE FALTA ni a TOTAL A PAGAR: un gasto devuelto se marca, nunca se mete
   // como fila de sueldo, asi nada se paga dos veces.
-  const FIN_WHAT = { gasolina:'Gasolina', materiales:'Material de mudanza', cajas:'Cajas', peaje:'Peaje', comida:'Comida', seguro:'Seguro', storage:'Storage', otro:'Otro' };
+  const FIN_WHAT = { gasolina:'Gasolina', materiales:'Material de mudanza', cajas:'Cajas', peaje:'Peaje', comida:'Comida', basura:'Basura (botadero)', seguro:'Seguro', storage:'Storage', otro:'Otro' };
+  // QUE FUE, para enseñarlo. Un "Otro" a secas no le dice nada a nadie: si la
+  // cuadrilla escribio que fue, va pegado. Las listas y el PDF usan esto, no
+  // FIN_WHAT directo, porque la nota no se enseñaba en ningun lado.
+  const finQue = r => (FIN_WHAT[r.what] || r.what) +
+    (r.what === 'otro' && r.note ? ' · ' + String(r.note).split(' — ')[0] : '');
   const FIN_METHOD = { efectivo:'Efectivo', zelle:'Zelle', cheque:'Cheque', tarjeta:'Tarjeta', otro:'Otro' };
   const FIN_FIXED = ['seguro','storage'];
   const finMoney = n => '$' + (Math.round((+n||0)*100)/100).toFixed(2);
@@ -34524,9 +34535,21 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const who = whoFromSelect($('#g-who'), $('#g-who-other'));
     if(!who){ msg.textContent = 'Escoja quién lo pagó.'; msg.style.color = 'var(--danger)'; return; }
     if(!cloudOn() || !signedIn()){ msg.textContent = 'Sin internet no se puede guardar el gasto. Intente cuando haya señal.'; msg.style.color = 'var(--danger)'; return; }
+    // "Otro" sin decir que fue no se guarda: ese gasto entra al cierre 50/50
+    // y despues nadie puede revisarlo.
+    const queFue = $('#g-what').value || 'otro';
+    const otroTxt = (($('#g-otro') && $('#g-otro').value) || '').trim();
+    if(queFue === 'otro' && !otroTxt){
+      msg.textContent = 'Escriba qué fue el gasto.'; msg.style.color = 'var(--danger)';
+      const of = $('#gOtroField'); if(of) of.hidden = false;
+      if($('#g-otro')) $('#g-otro').focus();
+      return;
+    }
+    const notaLibre = ($('#g-note').value || '').trim();
     const id = finUuid();
     const row = { id, company_id: SES.company_id, work_kind:'mudanza', spent_on: $('#g-date').value || localToday(), amount,
-      what: $('#g-what').value || 'otro', note: ($('#g-note').value || '').trim() || null,
+      what: queFue,
+      note: (queFue === 'otro' ? [otroTxt, notaLibre].filter(Boolean).join(' — ') : notaLibre) || null,
       paid_by_kind: who.kind, paid_by_id: who.id, paid_by_name: who.name,
       client: finClientFrom($('#g-client'), $('#g-client-other')) || null, created_by: SES.user_id };
     const btn = $('#g-save'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Guardando…';
@@ -34860,7 +34883,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
              : r.paid_by_kind === 'e' ? '<span class="matchstatus">Lo pagó la empresa</span>'
              : '<span class="matchstatus partial">Pendiente de devolver</span>';
     const link = r.shift_no ? ' · turno ' + r.shift_no : '';
-    return '<div class="entryrow" data-gid="' + esc(r.id) + '"><span><span class="who">' + esc(FIN_WHAT[r.what] || r.what) + (r.client ? ' · ' + esc(r.client) : '') + '</span>'
+    return '<div class="entryrow" data-gid="' + esc(r.id) + '"><span><span class="who">' + esc(finQue(r)) + (r.client ? ' · ' + esc(r.client) : '') + '</span>'
       + '<br><span class="when">' + esc(finDate(r.spent_on)) + ' · lo puso ' + esc(whoLabel(r.paid_by_kind, r.paid_by_name)) + link + (r.note ? ' · ' + esc(r.note) : '') + '</span><br>' + st + '</span>'
       + '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;"><span class="hrs">' + finMoney(r.amount) + '</span>'
       + (r.receipt_path ? '<button type="button" class="minibtn finFoto" data-path="' + esc(r.receipt_path) + '">📷 Recibo</button>' : '')
@@ -35007,7 +35030,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const wsel = $('#' + pre + '-who'); if(wsel){ wsel.value = ''; delete wsel.dataset.touched; paintWhoSelect(wsel, ''); }
     const csel = $('#' + pre + '-client'); if(csel) csel.value = '';
     [pre + 'WhoOtherField', pre + 'ClientOtherField'].forEach(x => { const f = $('#' + x); if(f) f.hidden = true; });
-    if(id === 'finGastoCard' && $('#g-what')) $('#g-what').value = 'gasolina';
+    if(id === 'finGastoCard' && $('#g-what')){
+      $('#g-what').value = 'gasolina';
+      if($('#g-otro')) $('#g-otro').value = '';
+      if($('#gOtroField')) $('#gOtroField').hidden = true;
+    }
     if(typeof finPhoto === 'object' && finPhoto){ finPhoto[pre] = null; if(typeof paintPhoto === 'function') paintPhoto(pre); }
   }
   function finCardHome(id){
@@ -35126,7 +35153,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const paidLines = c.payments.length ? c.payments.map(r => line('&nbsp;&nbsp;' + esc(finDate(r.paid_on)) + ' · ' + esc(FIN_METHOD[r.method] || r.method) + (r.invoice_number ? ' · Factura #' + esc(r.invoice_number) : '') + (r.kind === 'ajuste' ? ' · ajuste' : '') + ' · lo tiene ' + esc(r.delivered_at ? a.meName : whoLabel(r.received_by_kind, r.received_by_name)), finMoney(r.amount))).join('') : line('&nbsp;&nbsp;<span style="color:var(--danger);">Todavía no ha pagado</span>', '');
     const clockNote = pp => pp.clock === undefined ? '' : (Math.abs(pp.clockDiff) <= 0.26 ? ' · <span style="color:var(--ok, #2e9e5b);">reloj ✓</span>' : (pp.clock === 0 ? ' · <span style="color:var(--danger);">⚠ no marcó reloj esos días</span>' : ' · <span style="color:var(--danger);">⚠ reloj ' + (Math.round(pp.clock*100)/100).toFixed(2) + ' h</span>'));
     const peopleLines = [...c.people.values()].sort((x, y) => y.amount - x.amount).map(pp => line('&nbsp;&nbsp;' + esc(pp.name) + ' · ' + pp.days.size + ' día' + (pp.days.size===1?'':'s') + ' · ' + (Math.round(pp.hours*100)/100).toFixed(2) + ' h' + (pp.rate === null ? ' · <span style="color:var(--danger);">sin tarifa AMG</span>' : ' × ' + finMoney(pp.rate)) + clockNote(pp), pp.rate === null ? '—' : finMoney(pp.amount))).join('');
-    const expLines = c.expenses.map(r => line('&nbsp;&nbsp;' + esc(finDate(r.spent_on)) + ' · ' + esc(FIN_WHAT[r.what] || r.what) + ' · lo puso ' + esc(whoLabel(r.paid_by_kind, r.paid_by_name)) + (r.reimbursed_at ? ' ✓' : ''), finMoney(r.amount))).join('');
+    const expLines = c.expenses.map(r => line('&nbsp;&nbsp;' + esc(finDate(r.spent_on)) + ' · ' + esc(finQue(r)) + ' · lo puso ' + esc(whoLabel(r.paid_by_kind, r.paid_by_name)) + (r.reimbursed_at ? ' ✓' : ''), finMoney(r.amount))).join('');
     return '<div class="paysum" style="margin-top:10px;"><div class="grand" style="border-top:0;"><span>CUENTA DE ESTA MUDANZA</span><span></span></div>'
       + line('<b>Pagó el cliente</b>', '<b>' + finMoney(c.paid) + '</b>') + paidLines
       + line('− Trabajadores (horas del reporte × tarifa AMG)', '− ' + finMoney(c.labor)) + peopleLines
@@ -35279,7 +35306,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // `invoice` viaja dentro del cierre: si no, cada cierre que se guarda pierde
     // para siempre de qué factura fue ese dinero (18 sep 2026).
     const payLines = pays.map(r => ({ date: r.paid_on, method: FIN_METHOD[r.method] || r.method, by: whoLabel(r.received_by_kind, r.received_by_name), amount: +r.amount||0, delivered: !!r.delivered_at, invoice: r.invoice_number || null }));
-    const expLines = exps.map(r => ({ date: r.spent_on, what: FIN_WHAT[r.what] || r.what, by: whoLabel(r.paid_by_kind, r.paid_by_name), amount: +r.amount||0, fixed: FIN_FIXED.includes(r.what) }));
+    const expLines = exps.map(r => ({ date: r.spent_on, what: finQue(r), by: whoLabel(r.paid_by_kind, r.paid_by_name), amount: +r.amount||0, fixed: FIN_FIXED.includes(r.what) }));
     lastCierre = { from, to, client, notes, cobrado, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner };
     out.innerHTML = cierreHtml(lastCierre);
     const pb = $('#finCPdf'); if(pb) pb.hidden = false;
@@ -35529,7 +35556,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     [...c.people.values()].sort((x, z) => z.amount - x.amount).forEach(pp => row('   ' + pp.name + ' · ' + pp.days.size + ' day(s) · ' + (Math.round(pp.hours*100)/100).toFixed(2) + ' h' + (pp.rate === null ? ' · NO AMG RATE' : ' x ' + finMoney(pp.rate)) + (pp.clock === undefined ? '' : (Math.abs(pp.clockDiff) <= 0.26 ? ' · clock OK' : (pp.clock === 0 ? ' · NO CLOCK HOURS those days' : ' · CLOCK ' + (Math.round(pp.clock*100)/100).toFixed(2) + ' h (differs)'))), pp.rate === null ? '—' : finMoney(pp.amount)));
     if(c.laborNoRate > 0) row('   hours without AMG rate (not subtracted)', (Math.round(c.laborNoRate*100)/100).toFixed(2) + ' h');
     y += 6; row('EXPENSES FOR THIS MOVE / GASTOS', '-' + finMoney(c.gastos), true);
-    c.expenses.forEach(r => row('   ' + r.spent_on + ' · ' + (FIN_WHAT[r.what] || r.what) + ' · paid by ' + whoLabel(r.paid_by_kind, r.paid_by_name) + (r.reimbursed_at ? ' (reimbursed)' : ''), finMoney(r.amount)));
+    c.expenses.forEach(r => row('   ' + r.spent_on + ' · ' + finQue(r) + ' · paid by ' + whoLabel(r.paid_by_kind, r.paid_by_name) + (r.reimbursed_at ? ' (reimbursed)' : ''), finMoney(r.amount)));
     y += 4; pdf.setLineWidth(0.7); pdf.line(L, y, 548, y); y += 14;
     row('REMAINDER / QUEDA', finMoney(a.queda), true);
     row('   Half ' + a.meName, finMoney(a.mitad)); row('   Half ' + (a.partner ? a.partner.name : 'partner'), finMoney(a.mitad)); y += 6;
