@@ -1606,6 +1606,26 @@ input:focus, textarea:focus, select:focus{
    La regla va en su PROPIA linea: una `display:flex` metida dentro de la lista
    grande de selectores [hidden] le quita el display:none a todo lo que va antes
    (eso paso el 6 de septiembre y dejo el visor de recibos abierto y vacio). */
+/* LABOR LOGS ENVIADOS (7 oct 2026): lo que ya mandaron, y el que el manager
+   les devolvio para que lo arreglen. Reglas en su propia linea: una display
+   metida dentro de la lista grande de selectores [hidden] le quita el
+   display:none a todo lo que va antes. */
+.sentrow{border:1px solid var(--line); border-radius:10px; padding:10px 11px; margin-bottom:8px; background:var(--surface-2);}
+.sentrow.pide{border-color:var(--pick); background:rgba(224,168,46,.09);}
+.sentrow .t{font-size:16px; font-weight:700; color:#fff;}
+.sentrow .s{font-size:13px; line-height:1.45; color:var(--ink-soft); margin-top:3px;}
+.sentrow .pedido{font-size:14px; line-height:1.45; font-weight:600; color:var(--pick); margin-top:7px;}
+.sentrow .chip{display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase; padding:3px 7px; border-radius:5px; margin-left:6px; vertical-align:1px;}
+.sentrow .chip.ok{background:rgba(74,222,128,.18); color:var(--green);}
+.sentrow .chip.pide{background:rgba(224,168,46,.2); color:var(--pick);}
+.fixbanner{display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  margin:0 0 12px; padding:11px 13px; border-radius:10px;
+  background:rgba(224,168,46,.14); border:1px solid var(--pick);
+  color:var(--pick); font-size:14px; line-height:1.4; font-weight:600;}
+.fixbanner[hidden]{display:none !important;}
+.fixbanner .minibtn{border-color:var(--pick); color:var(--pick); flex:0 0 auto;}
+#sentLogsCard[hidden]{display:none !important;}
 .otrofila{display:flex; align-items:stretch; gap:8px;}
 .otrofila[hidden]{display:none !important;}
 #g-what[hidden]{display:none !important;}
@@ -2401,6 +2421,12 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
 
   <!-- ===================== TAB 1: LABOR LOG ===================== -->
   <section class="tab-panel" data-tab="labor">
+    <!-- Mientras corrige uno devuelto. Va FUERA de las tarjetas de paso para
+         que se vea en los cuatro pasos y no se le olvide en cual esta. -->
+    <div class="fixbanner" id="fixingBanner" hidden>
+      <span id="fixingText"></span>
+      <button type="button" class="minibtn" id="fixingCancel">Dejar de corregir</button>
+    </div>
     <!-- Solo se ve cuando la pantalla Labor esta en modo AMG (laborMode). -->
     <!-- LA BANDA VERDE SE FUE (18 sep 2026, marcada en rojo: "elimina lo que
          esta en rojo"). Es la tercera banda que quita hoy. El encabezado ya dice
@@ -2467,6 +2493,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
              la pregunta que ya rechazo una vez. -->
         <button class="btn btn-outline" type="button" id="convEdit" style="width:100%; margin-top:6px;" hidden>&#9999;&#65039; Cambiar los turnos<span class="en"> / Edit shifts</span></button>
         <button class="btn btn-outline" type="button" id="convSave" style="width:100%; margin-top:6px;" hidden>Guardar cambios</button>
+        <!-- Devolverselo a quien lo mando para que lo arregle el mismo (7 oct 2026). -->
+        <button class="btn btn-outline" type="button" id="convReturn" style="width:100%; margin-top:6px; border-color:var(--pick); color:var(--pick);" hidden>&#8617; Mand&aacute;rselo a corregir</button>
+        <p class="hint" id="convReturnHint" hidden style="margin:4px 0 0;"></p>
         <button class="btn btn-amg" type="button" id="convInvoice" style="width:100%; margin-top:6px;" hidden>&#129534; Hacer invoice de este cliente</button>
         <p class="hint" id="convInvoiceHint" hidden style="margin:4px 0 0;"></p>
         <button class="btn btn-outline" type="button" id="convArchive" style="width:100%; margin-top:6px;" hidden>Archivar</button>
@@ -2496,6 +2525,17 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       </div>
       <div class="field" id="lClientOtherField" hidden><label>¿Qué cliente?</label><input type="text" id="l-client-other" placeholder="Nombre del cliente" autocomplete="off"></div>
       <div class="field"><label>Líder de Cuadrilla<span class="en"> / Crew Leader</span></label><input type="text" id="l-leader" placeholder="Nombre"></div>
+    </section>
+
+    <!-- LOS QUE YA MANDO, debajo de la primera tarjeta (su pedido, con foto y un
+         cuadro rojo marcando el lugar). Sirve para dos cosas: ver que de verdad
+         llego, y arreglar el que el manager le haya devuelto.
+         Es otra tarjeta del MISMO paso 1, no un paso nuevo: asi no le cambia la
+         cuenta de pasos a nadie. -->
+    <section class="card" data-step="job" id="sentLogsCard" hidden>
+      <h2 id="sentLogsTitle">Labor logs enviados<span class="en"> / Sent</span></h2>
+      <p class="clockhint" id="sentLogsHint">Los de los últimos 3 días. Después se quitan de este teléfono; el manager los guarda siempre.</p>
+      <div id="sentLogsList"></div>
     </section>
 
     <section class="card" data-step="shifts">
@@ -5183,6 +5223,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       laborModePainted = laborMode;
     }
     panel.classList.toggle('amgmode', mg);
+    // Los que ya mando (y el que le devolvieron) se piden al abrir la pantalla
+    // y cada vez que cambia de empresa: la lista es de ESTA empresa.
+    if(typeof loadSentLogs === 'function') loadSentLogs();
+    if(typeof paintFixingBanner === 'function') paintFixingBanner();
     // La banda verde de esta pantalla se quito el 18 sep 2026.
     const t = $('#mgrPanelTitle'); if(t) t.textContent = mg ? 'Reportes de mudanza' : 'Labor logs';
     const f = $('#laborFillBtn'); if(f) f.textContent = mg ? 'Llenar un reporte de mudanza' : 'Llenar un labor log';
@@ -7169,7 +7213,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-07-NE';
+  const APP_BUILD = '2026-10-07-NF';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12121,9 +12165,37 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     }catch(e){ alert(e.message || 'No se pudo leer el código.'); }
   });
 
+  // La fila abierta en la bandeja, si la hay.
+  function openLogRow(){
+    if(openLogId === null) return null;
+    return (inboxRows || []).find(r => String(r.id) === String(openLogId))
+        || (archivedRows || []).find(r => String(r.id) === String(openLogId)) || null;
+  }
+  // "Mandarselo a corregir": solo tiene sentido con un reporte recibido abierto.
+  function paintReturnBtn(){
+    const b = $('#convReturn'), h = $('#convReturnHint');
+    if(!b) return;
+    const row = openLogRow();
+    const puede = isManager() && openLogId !== null && row && !row.archived_at && RETURN_READY;
+    b.hidden = !puede;
+    if(h) h.hidden = !puede;
+    if(!puede) return;
+    if(row.returned_at){
+      b.textContent = '\u21a9 Quitar el pedido de corregir';
+      if(h) h.textContent = 'Se lo mandó a corregir' + (row.return_note ? ': "' + row.return_note + '"' : '') + '. Él lo ve en su teléfono, en Labor logs enviados.';
+    }else{
+      b.textContent = '\u21a9 Mandárselo a corregir';
+      if(h) h.textContent = row.edited_at
+        ? 'Ya lo corrigió una vez. Si todavía le falta algo, se lo puede mandar otra vez.'
+        : 'Se lo manda a quien lo envió para que lo arregle él mismo y lo vuelva a mandar.';
+    }
+  }
+  let RETURN_READY = true;        // se apaga solo si falta correr el SQL
+
   function showConversion(){
     const rows = $('#convRows');
     const mg = formKind() === 'mudanza';
+    paintReturnBtn();
     // Un reporte recibido tiene dos caminos: archivarlo, o hacerle el invoice al cliente.
     const ib = $('#convInvoice'), ih = $('#convInvoiceHint');
     const canInv = mg && isManager() && openLogId !== null;
@@ -12648,13 +12720,176 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     return wrap;
   }
 
+  // ======================= LABOR LOGS ENVIADOS =======================
+  //
+  // Su pedido del 7 de octubre: "a Samuel se le olvido poner algo, necesito
+  // enviarselo y que lo vuelva a editar... ellos lo pueden tener por un maximo
+  // de tres dias".
+  //
+  // Los 3 dias son un filtro de PANTALLA, no un borrado. La fila se queda en la
+  // base para siempre: ahi estan las horas que se pagan y el dinero que se
+  // cobra. Lo unico que caduca es lo que se ve en el telefono de ellos.
+  //
+  // Para LEER los suyos no hizo falta ningun permiso nuevo: la politica
+  // "read own logs" ya deja a cada quien ver lo que el mismo mando.
+  const SENT_DAYS = 3;
+  let fixingLogId = null;        // el reporte devuelto que se esta corrigiendo
+  let SENT_ROWS   = [];          // [] = no hay; null = no se pudo leer (sin señal)
+  let SENT_READY  = true;        // se apaga solo si falta correr el SQL
+
+  // Solo para quien LLENA el formulario. El manager tiene su bandeja.
+  function sentLogsVisible(){
+    return signedIn() && cloudOn() && !(typeof laborIsManagerView === 'function' && laborIsManagerView());
+  }
+
+  function sentWhen(iso){
+    if(!iso) return '';
+    const t = new Date(iso); if(isNaN(t)) return '';
+    const dias = Math.floor((Date.now() - t.getTime()) / 86400000);
+    const hora = fmtTime12(String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0')) || '';
+    if(dias <= 0) return 'mandado hoy' + (hora ? ' a las ' + hora : '');
+    if(dias === 1) return 'mandado ayer' + (hora ? ' a las ' + hora : '');
+    return 'mandado hace ' + dias + ' días';
+  }
+
+  async function loadSentLogs(){
+    const card = $('#sentLogsCard'); if(!card) return;
+    if(!sentLogsVisible() || !SENT_READY || !SES || !SES.user_id){ card.hidden = true; return; }
+    const desde = new Date(Date.now() - SENT_DAYS * 86400000).toISOString();
+    try{
+      const res = await authFetch('/rest/v1/labor_logs?select=id,log_date,crew_leader,created_at,payload,work_kind,archived_at,returned_at,return_note,edited_at'
+        + '&created_by=eq.' + encodeURIComponent(SES.user_id)
+        + '&work_kind=eq.'  + encodeURIComponent(formKind())
+        + '&created_at=gte.' + encodeURIComponent(desde)
+        + '&order=created_at.desc&limit=20', { headers: cloudHeaders() });
+      // 400 = las columnas todavia no existen (falta el SQL). Se apaga sola y la
+      // pantalla se porta como antes, sin avisos raros.
+      if(res.status === 400){ SENT_READY = false; SENT_ROWS = []; card.hidden = true; return; }
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      SENT_ROWS = await res.json();
+    }catch(e){
+      SENT_ROWS = null;          // sin señal NO se inventa nada: la tarjeta se esconde
+    }
+    renderSentLogs();
+  }
+
+  function renderSentLogs(){
+    const card = $('#sentLogsCard'), box = $('#sentLogsList'), hint = $('#sentLogsHint');
+    if(!card || !box) return;
+    if(!sentLogsVisible() || !SENT_READY || SENT_ROWS === null){ card.hidden = true; return; }
+    const rows = (SENT_ROWS || []).filter(r => !r.archived_at);
+    if(!rows.length){ card.hidden = true; return; }
+    // Los devueltos primero: son los que hay que hacer.
+    rows.sort((a, b) => (b.returned_at ? 1 : 0) - (a.returned_at ? 1 : 0)
+                     || String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    card.hidden = false;
+    box.innerHTML = rows.map(r => {
+      const turnos = (r.payload && r.payload.s ? r.payload.s.length : 0);
+      const pide = !!r.returned_at;
+      return '<div class="sentrow' + (pide ? ' pide' : '') + '">'
+        + '<div class="t">' + esc(r.log_date || '') + ' '
+        + (pide ? '<span class="chip pide">Le piden corregirlo</span>'
+                : (r.edited_at ? '<span class="chip ok">Corregido y mandado</span>' : '<span class="chip ok">Ya le llegó</span>')) + '</div>'
+        + '<div class="s">' + turnos + ' turno(s) · ' + esc(sentWhen(r.created_at)) + '</div>'
+        + (pide ? '<div class="pedido">' + esc(r.return_note || 'El manager no escribió qué le falta. Pregúntele.') + '</div>'
+                  + '<button type="button" class="btn btn-ink btn-block sentFix" data-id="' + esc(r.id) + '" style="margin-top:9px;">Corregir y volver a mandar</button>'
+                : '')
+        + '</div>';
+    }).join('');
+    const n = rows.filter(r => r.returned_at).length;
+    if(hint) hint.textContent = n
+      ? (n === 1 ? 'El manager le devolvió 1 reporte para que lo arregle.' : 'El manager le devolvió ' + n + ' reportes para que los arregle.')
+      : 'Los de los últimos ' + SENT_DAYS + ' días. Después se quitan de este teléfono; el manager los guarda siempre.';
+  }
+
+  // El aviso de arriba mientras esta corrigiendo uno. Vive FUERA de las
+  // tarjetas de paso, para que se vea en los cuatro pasos.
+  function paintFixingBanner(){
+    const b = $('#fixingBanner'); if(!b) return;
+    b.hidden = !fixingLogId;
+    const t = $('#fixingText');
+    if(t && fixingLogId){
+      const r = (SENT_ROWS || []).find(x => String(x.id) === String(fixingLogId));
+      t.textContent = 'Está corrigiendo el reporte del ' + ((r && r.log_date) || '') + '. Al terminar, toque Mandar: se actualiza ese mismo, no se crea otro.';
+    }
+    const env = $('#sendMgrBtn2');
+    if(env) env.textContent = fixingLogId ? 'Mandar corregido' : 'Enviar al manager';
+  }
+
+  async function startFixingLog(id){
+    const r = (SENT_ROWS || []).find(x => String(x.id) === String(id));
+    if(!r) return;
+    if(!r.returned_at) return alert('Ese reporte no está devuelto para corregir.\n\nSolo se puede cambiar el que el manager le haya mandado de vuelta.');
+    if(!fixingLogId && formHasContent() && !confirm('Hay un reporte a medio llenar en la pantalla. Abrir el que le devolvieron lo quita (lo que tenía escrito se pierde).\n\n¿Seguir?')) return;
+    fixingLogId = String(r.id);
+    loadPayload(r.payload, r.work_kind);
+    goStep('labor', 0);
+    paintFixingBanner();
+    alert('Se abrió el reporte del ' + (r.log_date || '') + '.\n\nLo que le piden:\n"' + (r.return_note || '(no escribieron nada)') + '"\n\nArréglelo y toque Mandar al final.');
+  }
+
+  function cancelFixing(){
+    if(!fixingLogId) return;
+    if(!confirm('¿Dejar de corregir ese reporte? La pantalla se limpia y el reporte se queda como lo tiene el manager.')) return;
+    fixingLogId = null;
+    paintFixingBanner();
+    try{ limpiarPestana('labor'); }catch(e){}
+    loadSentLogs();
+  }
+
+  // Volver a mandarlo corregido: se actualiza EL MISMO reporte, no se crea otro.
+  // Dos reportes del mismo dia es exactamente como se le cobro dos veces a Susan
+  // en septiembre.
+  async function resendFixedLog(){
+    const id = fixingLogId; if(!id) return;
+    if(!cloudOn() || !navigator.onLine){
+      return alert('Sin internet no se puede mandar la corrección. Inténtelo cuando haya señal.\n\nNo se guarda en la cola a propósito: el reporte ya está en la oficina y hay que actualizar ESE, no mandar otro.');
+    }
+    showOverlay('Mandando la corrección…');
+    let err = null;
+    try{
+      const res = await authFetch('/rest/v1/rpc/fix_my_labor_log', {
+        method: 'POST', headers: cloudHeaders(),
+        body: JSON.stringify({
+          p_id: id,
+          p_payload: buildPayload(),
+          p_log_date: ($('#l-date').value || null),
+          p_leader: ($('#l-leader').value || '').trim()
+        })
+      });
+      if(res.status === 404) throw new Error('Esta parte todavía no está instalada en el servidor: falta correr supabase-devolver-labor-log.sql. Mándele este mensaje a quien le ayuda con la app.');
+      if(!res.ok){
+        let m = '';
+        try{ const j = await res.json(); m = j.message || j.hint || ''; }catch(e){}
+        throw new Error(m || ('HTTP ' + res.status));
+      }
+    }catch(e){ err = (e && e.message) || String(e); }
+    hideOverlay();
+    if(err) return alert('No se pudo mandar la corrección.\n\n' + err);
+    fixingLogId = null;
+    paintFixingBanner();
+    avisoEnviado('El manager lo ve otra vez, marcado como corregido.',
+      { titulo: 'Corrección enviada<span class="en"> / Correction sent</span>' });
+    loadSentLogs();
+  }
+
+  document.addEventListener('click', e => {
+    const f = e.target.closest && e.target.closest('.sentFix');
+    if(f){ startFixingLog(f.dataset.id); return; }
+    if(e.target.closest && e.target.closest('#fixingCancel')){ cancelFixing(); return; }
+  });
+
   function resetLabor(){
+    // Y tampoco sigue siendo la correccion de uno devuelto: si se quedara
+    // puesto, el formulario en blanco pisaria el reporte del muchacho.
+    fixingLogId = null;
+    if(typeof paintFixingBanner === 'function') paintFixingBanner();
     // A blank form is not a received log: it must be priced at today's rate,
     // and it must not still be pointing at the crew's report in the inbox -
     // "Guardar cambios" would otherwise overwrite their day with an empty one.
     lockedRate = null;
     openLogId = null;
-    ['#convResult','#convSave','#convArchive','#convUnarchive','#convDelete']
+    ['#convResult','#convSave','#convArchive','#convUnarchive','#convDelete','#convReturn','#convReturnHint']
       .forEach(sel => { const el = $(sel); if(el) el.hidden = true; });
     // Clearing the form takes them back to the first screen too - the
     // alternative is an empty form opened on step 4 of 5.
@@ -32564,13 +32799,71 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(!cloudOn() || !isManager()) return [];
     kind = kind || laborMode;                       // cada lista es de UNA empresa
     const filter = archived ? 'archived_at=not.is.null' : 'archived_at=is.null';
-    const res = await authFetch(
-      '/rest/v1/labor_logs?select=id,created_at,crew_leader,log_date,payload,seen,archived_at,work_kind,client_id&work_kind=eq.' + encodeURIComponent(kind) + '&'
+    // Las columnas de "devuelto para corregir" van aparte: si el SQL todavia no
+    // se ha corrido, PostgREST contesta 400 y se vuelve a pedir SIN ellas, para
+    // que la bandeja nunca se quede vacia por una migracion que falta.
+    const base = 'id,created_at,crew_leader,log_date,payload,seen,archived_at,work_kind,client_id';
+    const extra = ',returned_at,returned_by,return_note,edited_at,edit_count';
+    const pedir = cols => authFetch(
+      '/rest/v1/labor_logs?select=' + cols + '&work_kind=eq.' + encodeURIComponent(kind) + '&'
       + filter + '&order=created_at.desc&limit=100',
       { headers: cloudHeaders() });
+    let res = await pedir(base + (RETURN_READY ? extra : ''));
+    if(res.status === 400 && RETURN_READY){ RETURN_READY = false; res = await pedir(base); }
     if(!res.ok) throw new Error('HTTP ' + res.status);
     return res.json();
   }
+
+  // ---- Mandarselo a corregir / quitar el pedido ----
+  async function returnLogTap(){
+    const row = openLogRow();
+    if(!row) return;
+    if(row.returned_at){
+      if(!confirm('Ya se lo mandó a corregir' + (row.return_note ? ' ("' + row.return_note + '")' : '') + '.\n\n¿Quitar el pedido? Después de esto él ya no lo va a poder cambiar.')) return;
+      return patchReturn(row, { returned_at: null, returned_by: null, return_note: null },
+                         'Listo. Ya no se lo está pidiendo.');
+    }
+    const quien = row.crew_leader || 'quien lo mandó';
+    const nota = prompt('¿Qué le falta o qué tiene que arreglar?\n\n' + quien + ' lo va a leer tal cual en su teléfono.', '');
+    if(nota === null) return;
+    if(!String(nota).trim()) return alert('Escriba qué le falta. Si no, él no va a saber qué arreglar.');
+    return patchReturn(row, {
+      returned_at: new Date().toISOString(),
+      returned_by: (SES && SES.user_id) || null,
+      return_note: String(nota).trim()
+    }, 'Se lo mandó a ' + quien + '. Lo va a ver en su teléfono, en Labor logs enviados.');
+  }
+
+  async function patchReturn(row, campos, okMsg){
+    if(!cloudOn() || !navigator.onLine) return alert('Sin internet. Inténtelo cuando haya señal.');
+    showOverlay('Mandando…');
+    let err = null;
+    try{
+      const res = await authFetch('/rest/v1/labor_logs?id=eq.' + encodeURIComponent(row.id), {
+        method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
+        body: JSON.stringify(campos)
+      });
+      if(!res.ok){
+        let m = '';
+        try{ const j = await res.json(); m = j.message || j.hint || ''; }catch(e){}
+        // El guardia de la base: un reporte que ya esta en un invoice no se
+        // devuelve, porque cambiaria lo que YA se le cobro al cliente.
+        if(/invoice/i.test(m)) throw new Error('Ese reporte ya está en un invoice.\n\nSi lo corrigen, cambiaría lo que ya se le cobró al cliente. Borre primero ese invoice en AMG Moving → Invoices y vuelva a intentar.');
+        if(res.status === 400) throw new Error('Esta parte todavía no está instalada en el servidor: falta correr supabase-devolver-labor-log.sql.');
+        throw new Error(m || ('HTTP ' + res.status));
+      }
+      const saved = (await res.json())[0];
+      // Se escribe lo que CONTESTO el servidor, no lo que se mando: asi la
+      // pantalla no promete algo que no se guardo.
+      if(saved) Object.assign(row, saved);
+    }catch(e){ err = (e && e.message) || String(e); }
+    hideOverlay();
+    if(err) return alert('No se pudo.\n\n' + err);
+    paintReturnBtn();
+    renderInbox();
+    alert(okMsg);
+  }
+  if($('#convReturn')) $('#convReturn').addEventListener('click', returnLogTap);
   async function markSeen(id){
     try{
       await authFetch('/rest/v1/labor_logs?id=eq.' + encodeURIComponent(id), {
@@ -32631,6 +32924,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       <button type="button" class="inboxitem${r.seen?'':' unread'}" data-id="${r.id}">
         <span class="who">${esc(r.crew_leader || (r.work_kind === 'mudanza' ? 'Manager' : 'Crew'))}${r.work_kind === 'mudanza' ? ' <span class="kindtag amg">AMG</span>' : ''}</span>
         <span class="when">${esc(r.log_date||'')} · ${(r.payload&&r.payload.s?r.payload.s.length:0)} turno(s)</span>
+        ${r.returned_at ? '<span class="when" style="color:var(--pick);font-weight:700;">\u21a9 Se lo mandó a corregir</span>'
+          : (r.edited_at ? '<span class="when" style="color:var(--green);font-weight:700;">\u2713 Corregido por ' + esc(r.crew_leader || 'quien lo mandó') + '</span>' : '')}
       </button>`).join('');
     colocarPanel();
   }
@@ -33046,11 +33341,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
 
   async function sendToManager(){
     // Entrada = salida no es un turno: un telefono viejo lo cobraria como 24 h.
+    // (va antes de todo, tambien cuando se esta corrigiendo uno devuelto)
     const sameHour = $$('.shift-card', shiftsContainer).find(c => { const f = $('.s-from', c).value, o = $('.s-to', c).value; return f && o && hoursBetween(f, o) === 0; });
     if(sameHour) return alert('Un turno tiene la hora de entrada igual a la de salida. Corríjalo antes de mandar.');
     // Las horas que se quedarían sin cobrar: se avisan ANTES de mandar, con la
     // cifra, y se le deja volver a los Turnos a corregirlas (17 sep 2026).
     if(!(await laborAvisarHuecos())) return;
+    // CORRIGIENDO UNO DEVUELTO: se actualiza EL MISMO reporte, no se manda otro.
+    // Dos reportes del mismo dia es como se le cobro dos veces a Susan.
+    if(fixingLogId) return resendFixedLog();
     // Una mudanza SIN CLIENTE no se puede cobrar: el invoice busca los reportes
     // por cliente, y uno con el nombre en blanco no aparece bajo ninguno. Queda
     // huerfano para siempre, con horas y nomina reales. Esta reja NO mira el
