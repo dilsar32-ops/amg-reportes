@@ -7233,7 +7233,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-07-NJ';
+  const APP_BUILD = '2026-10-07-NK';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -7908,7 +7908,12 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // FROM / TO / Total due, tabla DESCRIPTION - QUANTITY - UNIT PRICE ($) - AMOUNT ($), Total (USD).
   // Sin due date ni descuento (su decision). "Labor service" sale del reporte de mudanza: cantidad = horas,
   // precio unitario = trabajadores x $/hora del cliente (2 x $50 = $100).
-  const INV_DEFAULTS = { from_name:'AMG-solution & services LLC', from_addr1:'2300 pinmit dr , 117', from_addr2:'falls church VA 22043', from_addr3:'United States', from_email:'Info@amgmoving.com', next_number:4005 };
+  // LA DIRECCION DE AMG, CORREGIDA POR EL 7 OCT 2026: 7962 Arden Ct, Dunn
+  // Loring, VA 22027. La que estaba aqui (7902 Arden Ct / falls church) tenia
+  // DOS errores, y esto no es decoracion: si no se puede leer la fila de
+  // amg_invoice_settings (sin señal, o un 400), el invoice se imprime con
+  // ESTOS valores y la direccion equivocada le llega al cliente.
+  const INV_DEFAULTS = { from_name:'AMG-solution & services LLC', from_addr1:'7962 Arden Ct', from_addr2:'Dunn Loring, VA 22027', from_addr3:'United States', from_email:'Info@amgmoving.com', next_number:4005 };
   let INV_SETTINGS = Object.assign({}, INV_DEFAULTS), INV_SETTINGS_OK = false, INVOICES = [], INV_LOGS = [], INV_LOGS_KEY = '';
   // `off` = las lineas que el manager decidio NO cobrarle al cliente (7 oct
   // 2026). Su caso: media hora de dos muchachos cargando el camion antes de
@@ -8121,6 +8126,73 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(!parts.length) return '';
     return (parts.length > 1 ? 'From → To: ' : 'Address: ') + parts.join(' → ');
   }
+  // QUE SE HIZO, EN CORTO (pedido de Amilcar, 7 oct 2026): en vez de "(Time worked
+  // by the team)", el invoice dice en pocas palabras que se hizo en esas horas,
+  // sacado de la casilla "Trabajo / Work" del turno (sh.k). No se copia todo lo
+  // que escribio el lider: solo frases cortas en ingles ("Loading, moving items").
+  // El orden de la lista importa: "desempacar" antes que "empacar", "descargar"
+  // antes que "cargar", y los [^s]/[^n] evitan que "unpack" cuente como "pack".
+  function invTrabajoCorto(texto){
+    const INV_TRABAJOS = [
+      [/desempac|unpack/i, 'Unpacking'],
+      [/(^|[^s])empac|(^|[^s])empaque|(^|[^n])pack|embal|envolv|wrapp/i, 'Packing'],
+      [/descarg|unload/i, 'Unloading'],
+      [/(^|[^s])carg|(^|[^n])load/i, 'Loading'],
+      [/desarm|disassembl|desmont/i, 'Furniture disassembly'],
+      [/(^|[^s])armad|(^|[^s])armar|(^|[^s])assembl|instal/i, 'Assembly / installation'],
+      [/\bmov(e|ed|ing|er|i|ió|io|imos|ieron)?\b|mudanz|traslad/i, 'Moving items'],
+      [/basur|dump|landfill|trash|desech|recicl|recycl|escombro|debris/i, 'Dump run / trash removal'],
+      [/limpi|clean/i, 'Cleaning'],
+      [/bodega|warehouse|\bstor(e|ed|ing|age)\b|almac|guard(ar|amos|aron)/i, 'Storage / warehouse'],
+      [/entreg|deliver/i, 'Delivery'],
+      [/recog|pick ?up/i, 'Pick up'],
+      [/demol/i, 'Demolition'],
+      [/pint|paint/i, 'Painting']
+    ];
+    const t = String(texto || '').replace(/\s+/g, ' ').trim();
+    if(!t) return [];
+    const hits = INV_TRABAJOS.filter(([re]) => re.test(t)).map(([, frase]) => frase);
+    if(hits.length) return hits;
+    // Nada conocido: la primera frase de lo que escribio, corta (max ~60 letras, sin partir palabras).
+    let f = t.split(/[.;\n]/)[0].trim();
+    if(f.length > 60) f = f.slice(0, 60).replace(/\s+\S*$/, '') + '…';
+    return f ? [f] : [];
+  }
+  // La descripcion de una linea de Labor service (una sola funcion, para que la
+  // linea de un turno y la de varios turnos unidos digan lo mismo).
+  function invLaborDesc(people, hours, horario, date, trabajos, lugares){
+    const w = (trabajos || []).map((x, i) => i ? x.charAt(0).toLowerCase() + x.slice(1) : x).join(', ');
+    return 'Labor service\n' + people + ' worker' + (people===1?'':'s') + '\n' + invQty(hours) + ' hours total'
+      + (horario ? '\n' + horario : '')
+      + '\nDate: ' + date
+      + (w ? '\nWork: ' + w : '')
+      + (lugares || []).filter(Boolean).map(x => '\n' + x).join('');
+  }
+  // TURNOS SEGUIDOS EN UNA SOLA LINEA (7 oct 2026): "si trabajan de 10 a 1 y de 1 a
+  // 5, que salga de 10 a 5". Solo se unen dos lineas de Labor service si son del
+  // MISMO reporte, con la MISMA gente y el MISMO precio, y la segunda empieza
+  // justo cuando acaba la primera (sin hueco). Una linea que el manager edito a
+  // mano no se toca. Se hace al armar el invoice (vista previa, PDF y lo que se
+  // guarda), NO en la lista de lineas: ahi cada turno sigue suelto para poder
+  // darle "No cobrar" a uno solo (p.ej. la media hora cargando el camion).
+  function invUnirTurnos(lines){
+    const out = [];
+    (lines || []).forEach(l => {
+      const prev = out[out.length - 1];
+      const a = prev && prev._m, b = l && l._m;
+      if(a && b && !prev.edit && !l.edit && String(prev.src) === String(l.src) && a.people === b.people
+         && prev.u === l.u && a.date === b.date && a.o && a.o === b.f){
+        const m = { people: a.people, date: a.date, f: a.f, o: b.o,
+          trabajos: [...new Set([...(a.trabajos || []), ...(b.trabajos || [])])],
+          lugares: [...new Set([...(a.lugares || []), ...(b.lugares || [])])] };
+        const q = Math.round((prev.q + l.q) * 100) / 100;
+        const horario = (fmtTime12(m.f) && fmtTime12(m.o)) ? fmtTime12(m.f) + ' - ' + fmtTime12(m.o) : '';
+        out[out.length - 1] = Object.assign({}, prev, { q, a: Math.round(q * prev.u * 100) / 100,
+          d: invLaborDesc(m.people, q, horario, m.date, m.trabajos, m.lugares), _m: m });
+      } else out.push(l);
+    });
+    return out;
+  }
   // Las lineas que salen de UN reporte de mudanza, con el precio congelado del reporte (o el del cliente hoy si no trae).
   function invLinesFromLog(log, client){
     const p = (log && log.payload) || {}; const r = p.r || null; const out = []; out.unpriced = []; out.gratis = [];
@@ -8147,11 +8219,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         // y le tiene que dar. (Antes salia de los minutos exactos y la linea no cuadraba por centavos.)
         const place = invPlaceOfShift(sh);
         const horario = (fmtTime12(sh.f) && fmtTime12(sh.o)) ? fmtTime12(sh.f) + ' - ' + fmtTime12(sh.o) : '';
-        out.push({ d:'Labor service\n' + people + ' worker' + (people===1?'':'s') + '\n' + invQty(hours) + ' hours total'
-                     + (horario ? '\n' + horario : '')
-                     + '\n(Time worked by the team) ' + date + (place ? '\n' + place : ''),
+        const trabajos = invTrabajoCorto(sh.k);
+        out.push({ d: invLaborDesc(people, hours, horario, date, trabajos, [place]),
                    q:hours, u:unit, a:Math.round(hours * unit * 100)/100, src:String(log.id),
-                   k:K('h' + (sh.f||'') + '-' + (sh.o||'') + '-' + people) });
+                   k:K('h' + (sh.f||'') + '-' + (sh.o||'') + '-' + people),
+                   _m:{ people, date, f: sh.f || '', o: sh.o || '', trabajos, lugares: [place] } });
       });
     }
     (p.s || []).forEach(sh => extraItemsOfShift(sh).forEach(it => {
@@ -8405,7 +8477,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const c = invClient();
     // Lo que el manager decidio NO cobrar no viaja: ni al PDF del cliente, ni
     // al total, ni a lo que se guarda.
-    const cobrables = INV.lines.filter(l => !l.off).map(l => { const x = Object.assign({}, l); delete x.off; delete x.k; return x; });
+    const cobrables = invUnirTurnos(INV.lines.filter(l => !l.off)).map(l => { const x = Object.assign({}, l); delete x.off; delete x.k; delete x._m; return x; });
     // Un reporte marcado que no produjo ninguna linea (sin precio) NO se marca como facturado: si se
     // guardara en log_ids, desapareceria de la lista y ya nunca se podria cobrar.
     return { number: +($('#inv-number').value || invNextNumber()), issue_date: $('#inv-date').value || localToday(),
