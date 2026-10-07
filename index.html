@@ -4394,7 +4394,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
              casilla. Su palabra: "deberia decir en que se gasto". -->
         <div class="field"><label>¿En qué se gastó?</label><select id="g-what">
           <option value="gasolina">Gasolina</option><option value="materiales">Material de mudanza</option><option value="cajas">Cajas</option>
-          <option value="peaje">Peaje</option><option value="comida">Comida</option><option value="basura">Basura (botadero)</option><option value="seguro">Seguro</option><option value="storage">Storage</option><option value="otro">Otro</option></select>
+          <option value="peaje">Peaje</option><option value="comida">Comida</option><option value="basura">Basura (botadero)</option><option value="donacion">Donación (Goodwill, etc.)</option><option value="seguro">Seguro</option><option value="storage">Storage</option><option value="otro">Otro</option></select>
         <!-- Al escoger "Otro" hay que poder escribir QUE fue. Antes no se podia,
              y un gasto que solo dice "Otro" no se puede revisar despues - y ese
              dinero entra al cierre 50/50.
@@ -7259,7 +7259,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-07-NN';
+  const APP_BUILD = '2026-10-07-NO';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -8167,7 +8167,15 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       [/desarm|disassembl|desmont/i, 'Furniture disassembly'],
       [/(^|[^s])armad|(^|[^s])armar|(^|[^s])assembl|instal/i, 'Assembly / installation'],
       [/\bmov(e|ed|ing|er|i|ió|io|imos|ieron)?\b|mudanz|traslad/i, 'Moving items'],
-      [/basur|dump|landfill|trash|desech|recicl|recycl|escombro|debris/i, 'Dump run / trash removal'],
+      // DONACION Y RECICLAJE VAN APARTE DEL BOTADERO (7 oct 2026, caso Susan).
+      // Antes los tres caian en "Dump run / trash removal", asi que un viaje a
+      // Goodwill salia impreso como basura. No es lo mismo para el cliente - y
+      // no es cierto. OJO: esto describe EL VIAJE que hizo la cuadrilla; no es
+      // un recibo de donacion ni le pone valor a las cosas. El recibo para el
+      // deducible lo da Goodwill, al dueño de las cosas, no AMG.
+      [/donaci|donat|goodwill|salvation army|habitat|caridad|charit/i, 'Donation drop-off'],
+      [/recicl|recycl/i, 'Recycling drop-off'],
+      [/basur|dump|landfill|trash|desech|escombro|debris/i, 'Dump run / trash removal'],
       [/limpi|clean/i, 'Cleaning'],
       [/bodega|warehouse|\bstor(e|ed|ing|age)\b|almac|guard(ar|amos|aron)/i, 'Storage / warehouse'],
       [/entreg|deliver/i, 'Delivery'],
@@ -35032,7 +35040,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // pagos de clientes (con quien tiene ese dinero). Nada de esto se suma a
   // LE FALTA ni a TOTAL A PAGAR: un gasto devuelto se marca, nunca se mete
   // como fila de sueldo, asi nada se paga dos veces.
-  const FIN_WHAT = { gasolina:'Gasolina', materiales:'Material de mudanza', cajas:'Cajas', peaje:'Peaje', comida:'Comida', basura:'Basura (botadero)', seguro:'Seguro', storage:'Storage', otro:'Otro' };
+  const FIN_WHAT = { gasolina:'Gasolina', materiales:'Material de mudanza', cajas:'Cajas', peaje:'Peaje', comida:'Comida', basura:'Basura (botadero)', donacion:'Donación (Goodwill, etc.)', seguro:'Seguro', storage:'Storage', otro:'Otro' };
   // QUE FUE, para enseñarlo. Un "Otro" a secas no le dice nada a nadie: si la
   // cuadrilla escribio que fue, va pegado. Las listas y el PDF usan esto, no
   // FIN_WHAT directo, porque la nota no se enseñaba en ningun lado.
@@ -35260,7 +35268,18 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       loadFinMine();
       // Si lo anoto el manager desde su propia pantalla, su lista de gastos se refresca ahi mismo.
       if($('#finGastoCard') && $('#finMGastoSlot') && $('#finGastoCard').parentNode === $('#finMGastoSlot') && typeof loadFinAll === 'function') loadFinAll();
-    }catch(e){ msg.textContent = 'No se pudo guardar. ' + ((e && e.message) || 'Revise su internet.'); msg.style.color = 'var(--danger)'; }
+    }catch(e){
+      // Un "HTTP 400" a secas se lee como falla de internet y el gasto se
+      // pierde sin que nadie se entere. La reja del servidor (CHECK) solo
+      // conoce una lista fija de palabras: si falta la nueva, hay que decirlo.
+      const m = (e && e.message) || '';
+      msg.textContent = /HTTP 400/.test(m)
+        ? 'El servidor todavía no acepta el tipo de gasto "' + (FIN_WHAT[row.what] || row.what)
+          + '". Falta instalar esa parte: hay que correr supabase-gasto-donacion.sql. '
+          + 'Mientras tanto anótelo como "Otro" y escriba en la nota qué fue.'
+        : 'No se pudo guardar. ' + (m || 'Revise su internet.');
+      msg.style.color = 'var(--danger)';
+    }
     btn.disabled = false; btn.textContent = old;
   }
   // ============ QUÉ FACTURA PAGÓ EL CLIENTE (17 sep 2026) ============
