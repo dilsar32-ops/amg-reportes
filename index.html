@@ -7213,7 +7213,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-07-NG';
+  const APP_BUILD = '2026-10-07-NH';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12176,10 +12176,21 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const b = $('#convReturn'), h = $('#convReturnHint');
     if(!b) return;
     const row = openLogRow();
-    const puede = isManager() && openLogId !== null && row && !row.archived_at && RETURN_READY;
+    // UN BOTON QUE NO ESTA NO SE PUEDE ENTENDER (7 oct 2026, su foto). La
+    // primera version lo escondia en los reportes ARCHIVADOS, asi que el abria
+    // uno y simplemente no habia opcion de mandarlo a corregir, sin decir por
+    // que. Ahora sale siempre y, si esta archivado, la app ofrece sacarlo del
+    // archivo primero - que es lo que de verdad hace falta, porque en el
+    // telefono de ellos los archivados tampoco se listan.
+    const puede = isManager() && openLogId !== null && row && RETURN_READY;
     b.hidden = !puede;
     if(h) h.hidden = !puede;
     if(!puede) return;
+    if(row.archived_at && !row.returned_at){
+      b.textContent = '\u21a9 Mandárselo a corregir';
+      if(h) h.textContent = 'Está archivado. Para mandárselo hay que sacarlo del archivo; la app se lo pregunta.';
+      return;
+    }
     if(row.returned_at){
       b.textContent = '\u21a9 Quitar el pedido de corregir';
       if(h) h.textContent = 'Se lo mandó a corregir' + (row.return_note ? ': "' + row.return_note + '"' : '') + '. Él lo ve en su teléfono, en Labor logs enviados.';
@@ -32826,6 +32837,16 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   async function returnLogTap(){
     const row = openLogRow();
     if(!row) return;
+    // Archivado = ya lo dio por cerrado. En el telefono de ellos los archivados
+    // no se listan, asi que devolverlo sin sacarlo del archivo seria pedir algo
+    // que nunca les va a llegar.
+    if(row.archived_at && !row.returned_at){
+      if(!confirm('Este reporte está archivado.\n\nPara que él lo pueda corregir hay que sacarlo del archivo. ¿Sacarlo y mandárselo?')) return;
+      const ok = await patchReturn(row, { archived_at: null }, null);
+      if(ok === false) return;
+      // Se refresca la lista para que deje de estar en Archivados.
+      if(typeof refreshInbox === 'function') refreshInbox();
+    }
     if(row.returned_at){
       if(!confirm('Ya se lo mandó a corregir' + (row.return_note ? ' ("' + row.return_note + '")' : '') + '.\n\n¿Quitar el pedido? Después de esto él ya no lo va a poder cambiar.')) return;
       return patchReturn(row, { returned_at: null, returned_by: null, return_note: null },
@@ -32842,8 +32863,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     }, 'Se lo mandó a ' + quien + '. Lo va a ver en su teléfono, en Labor logs enviados.');
   }
 
+  // Devuelve false si no se pudo, para que quien la llama no siga adelante.
   async function patchReturn(row, campos, okMsg){
-    if(!cloudOn() || !navigator.onLine) return alert('Sin internet. Inténtelo cuando haya señal.');
+    if(!cloudOn() || !navigator.onLine){ alert('Sin internet. Inténtelo cuando haya señal.'); return false; }
     showOverlay('Mandando…');
     let err = null;
     try{
@@ -32866,10 +32888,11 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       if(saved) Object.assign(row, saved);
     }catch(e){ err = (e && e.message) || String(e); }
     hideOverlay();
-    if(err) return alert('No se pudo.\n\n' + err);
+    if(err){ alert('No se pudo.\n\n' + err); return false; }
     paintReturnBtn();
     renderInbox();
-    alert(okMsg);
+    if(okMsg) alert(okMsg);
+    return true;
   }
   if($('#convReturn')) $('#convReturn').addEventListener('click', returnLogTap);
   async function markSeen(id){
