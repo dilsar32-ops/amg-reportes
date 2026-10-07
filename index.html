@@ -7213,7 +7213,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-07-NH';
+  const APP_BUILD = '2026-10-07-NI';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12796,6 +12796,14 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const card = $('#sentLogsCard'), box = $('#sentLogsList'), hint = $('#sentLogsHint');
     if(!card || !box) return;
     if(!sentLogsVisible() || !SENT_READY || SENT_ROWS === null){ card.hidden = true; return; }
+    // Mientras corrige uno, la lista estorba: ya esta adentro del reporte, y
+    // seguir viendo "le piden corregirlo" hace creer que no paso nada. Que
+    // desaparezca ES la señal de que si se abrio.
+    if(fixingLogId){ card.hidden = true; return; }
+    // Y solo en el PASO 1. La carga es asincrona: si contesta cuando el ya paso
+    // a Turnos, sin esto la tarjeta se colaba encima del paso 2.
+    const otraDelPaso1 = document.querySelector('.tab-panel[data-tab="labor"] > .card[data-step="job"]:not(#sentLogsCard)');
+    if(otraDelPaso1 && otraDelPaso1.hidden){ card.hidden = true; return; }
     const rows = (SENT_ROWS || []).filter(r => !r.archived_at);
     if(!rows.length){ card.hidden = true; return; }
     // Los devueltos primero: son los que hay que hacer.
@@ -12844,7 +12852,16 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     loadPayload(r.payload, r.work_kind);
     goStep('labor', 0);
     paintFixingBanner();
-    alert('Se abrió el reporte del ' + (r.log_date || '') + '.\n\nLo que le piden:\n"' + (r.return_note || '(no escribieron nada)') + '"\n\nArréglelo y toque Mandar al final.');
+    renderSentLogs();            // la lista se quita: ya esta adentro del reporte
+    // SUBIR A LO DE ARRIBA. Su reporte del 7 de octubre: "abre tres, cuatro
+    // veces, pero no abre nada". Y era cierto desde donde el estaba parado: la
+    // lista de enviados vive ABAJO del paso 1, y abrir el reporte lo dejaba en
+    // el MISMO paso 1, con el formulario ya lleno pero arriba, fuera de la
+    // pantalla. Se llenaba de verdad y no se veia nada moverse.
+    try{ window.scrollTo(0, 0); }catch(e){}
+    const pan = document.querySelector('.tab-panel[data-tab="labor"]');
+    if(pan && pan.scrollIntoView) pan.scrollIntoView({ block:'start' });
+    alert('Se abrió el reporte del ' + (r.log_date || '') + '.\n\nLo que le piden:\n"' + (r.return_note || '(no escribieron nada)') + '"\n\nAbajo están sus turnos. Arréglelo y toque Mandar al final.');
   }
 
   function cancelFixing(){
@@ -12853,6 +12870,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     fixingLogId = null;
     paintFixingBanner();
     try{ limpiarPestana('labor'); }catch(e){}
+    goStep('labor', 0);
     loadSentLogs();
   }
 
