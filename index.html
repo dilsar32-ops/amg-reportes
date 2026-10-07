@@ -1646,6 +1646,16 @@ input:focus, textarea:focus, select:focus{
 .fixbanner[hidden]{display:none !important;}
 .fixbanner .minibtn{border-color:var(--pick); color:var(--pick); flex:0 0 auto;}
 #sentLogsCard[hidden]{display:none !important;}
+/* CERRAR SESION, APARTADO (7 oct 2026). Iba pegado a "Cambiar de empresa",
+   del mismo ancho y del mismo color: el dedo se equivocaba de renglon. Ahora
+   va mas abajo, mas angosto, mas chico y centrado - se ve que es otra cosa.
+   La raya de arriba es la que de verdad separa las dos ideas. */
+.btn.btn-salir{
+  display:block; width:auto !important; min-width:0; margin:22px auto 0;
+  padding:18px 22px 11px; font-size:14px;
+  background:transparent; color:var(--ink-soft);
+  border:none; border-top:1px solid var(--line); border-radius:0;
+}
 .otrofila{display:flex; align-items:stretch; gap:8px;}
 .otrofila[hidden]{display:none !important;}
 #g-what[hidden]{display:none !important;}
@@ -2436,7 +2446,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     <button type="button" class="btn btn-outline" id="avAbrir" style="width:100%; margin-top:16px;">
       Asistente de voz<span class="en"> / Voice assistant</span></button>
     <button type="button" class="btn btn-ghost" id="menuSwitchSide" style="width:100%; margin-top:16px; color:var(--ink-soft);">Cambiar de empresa</button>
-    <button type="button" class="btn btn-ghost" id="menuSignOut" style="width:100%; margin-top:6px; color:var(--ink-soft);">Cerrar sesión</button>
+    <!-- SEPARADO A PROPOSITO: pegado y del mismo tamano, el dedo se equivocaba
+         de renglon y cerraba sesion queriendo cambiar de empresa. -->
+    <button type="button" class="btn btn-ghost btn-salir" id="menuSignOut">Cerrar sesión</button>
   </section>
 
   <!-- ===================== TAB 1: LABOR LOG ===================== -->
@@ -4141,7 +4153,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
            restauracion detras. Lo que el menu tenia abajo vive aqui. -->
       <div id="mgrHomeBtns" hidden style="margin-top:16px;">
         <button type="button" class="btn btn-ghost" id="mgrSwitchSide" style="width:100%; color:var(--ink-soft);">Cambiar de empresa</button>
-        <button type="button" class="btn btn-ghost" id="mgrSignOut" style="width:100%; margin-top:6px; color:var(--ink-soft);">Cerrar sesión</button>
+        <button type="button" class="btn btn-ghost btn-salir" id="mgrSignOut">Cerrar sesión</button>
       </div>
     </section>
   </section>
@@ -7247,7 +7259,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-07-NM';
+  const APP_BUILD = '2026-10-07-NN';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -30049,9 +30061,43 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // (a shared device, a different crew member borrowing it) starts
   // completely clean instead of risking leftover data in some JS variable
   // this file forgot to reset.
+  // DOS AUTORIZACIONES PARA CERRAR SESION (7 oct 2026, su pedido).
+  //
+  // "A veces por cambiar de empresa le pueden puchar cerrar sesión y cierra."
+  // Los dos botones estan pegados, se ven iguales y son del mismo ancho: el
+  // dedo se equivoca de renglon. Y equivocarse sale caro - quedan afuera, en
+  // el trabajo, y hay que acordarse del codigo para volver a entrar.
+  //
+  // El primer aviso dice QUE HACE FALTA para volver (no es lo mismo un crew
+  // que un temporal), y el segundo es corto: la mano que se equivoco de
+  // renglon no se equivoca dos veces seguidas diciendo que si.
+  //
+  // Cambiar de empresa NO pregunta nada: eso no cuesta nada y se hace a diario.
+  //
+  // loadCasualSes / isManager / signedIn viven mas abajo en el archivo, pero
+  // esto solo corre cuando alguien TOCA el boton: el script entero ya se leyo.
+  // 'soloTemporal' lo manda el boton de la pagina del trabajador, que sabe
+  // quien esta ahi; los demas lo deducen de la sesion que de verdad hay (y el
+  // de la puerta borra las dos, asi que nombra las dos si las dos existen).
+  function queHaceFaltaParaVolver(soloTemporal){
+    const TEMP = 'el código de trabajadores, su nombre y su PIN';
+    if(soloTemporal) return TEMP;
+    const faltan = [];
+    if(signedIn()) faltan.push(isManager() ? 'su correo y su contraseña' : 'su código personal');
+    if(loadCasualSes()) faltan.push(TEMP);
+    return faltan.length ? faltan.join(', y ') : 'su código';
+  }
+  function autorizarCierre(soloTemporal){
+    const falta = queHaceFaltaParaVolver(soloTemporal);
+    if(!confirm('¿CERRAR SESIÓN?\n\nNo es lo mismo que "Cambiar de empresa".\n\n'
+      + 'Si cierra sesión, para volver a entrar va a necesitar ' + falta + '.\n\n'
+      + 'Si solo quería cambiar de empresa, toque Cancelar y use el botón de arriba.')) return false;
+    return confirm('Última pregunta: ¿seguro que quiere cerrar sesión en este teléfono?');
+  }
+
   async function signOutEverywhere(){
+    if(!autorizarCierre()) return;
     clearSkipSteps();
-    if(!confirm('¿Cerrar sesión? Va a tener que entrar de nuevo con su código, correo o PIN.')) return;
     try{
       if(SES && SES.access_token){
         await authFetch('/auth/v1/logout', { method:'POST', headers: cloudHeaders() });
@@ -34251,7 +34297,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     $$('[data-door="manager"]').forEach(el => { el.hidden = signedIn() && !isManager(); });   // una cuenta de crew no se vuelve manager sin cerrar sesion
   }
   $('#doorSignOut').addEventListener('click', async ()=>{
-    if(!confirm('¿Cerrar sesión en este teléfono? Va a tener que entrar de nuevo con su código, correo o PIN.')) return;
+    if(!autorizarCierre()) return;
     clearSkipSteps();
     try{ if(SES && SES.access_token) await authFetch('/auth/v1/logout', { method:'POST', headers: cloudHeaders() }); }catch(e){}
     try{ localStorage.removeItem('ses'); }catch(e){} clearCasualSes(); location.reload();
@@ -34972,8 +35018,8 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   });
 
   $('#casualLogout').addEventListener('click', ()=>{
+    if(!autorizarCierre(true)) return;
     clearSkipSteps();
-    if(!confirm('¿Salir? Va a tener que escribir el código, su nombre y su PIN otra vez.')) return;
     clearCasualSes();
     location.reload();
   });
