@@ -4474,6 +4474,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         <p class="hint" id="invLogsSum" style="margin:0 0 6px;"></p>
         <div id="invLogs"><p class="clockhint">Escoja un cliente.</p></div>
                 <div id="invLines"></div>
+        <p class="clockhint" id="invOffNote" hidden style="margin:8px 0 0;color:var(--pick);"></p>
         <div id="invAddBox" style="margin-top:10px; border-top:1px solid var(--line); padding-top:10px;">
           <p class="clockhint" style="margin:0 0 6px;">Agregar una l&iacute;nea que no venga de un reporte (renta de cami&oacute;n, un cobro aparte).</p>
           <div class="field"><label>Descripci&oacute;n</label><input type="text" id="inv-ldesc" autocomplete="off" placeholder="Truck rental"></div>
@@ -7168,7 +7169,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-07-ND';
+  const APP_BUILD = '2026-10-07-NE';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -7845,7 +7846,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // precio unitario = trabajadores x $/hora del cliente (2 x $50 = $100).
   const INV_DEFAULTS = { from_name:'AMG-solution & services LLC', from_addr1:'2300 pinmit dr , 117', from_addr2:'falls church VA 22043', from_addr3:'United States', from_email:'Info@amgmoving.com', next_number:4005 };
   let INV_SETTINGS = Object.assign({}, INV_DEFAULTS), INV_SETTINGS_OK = false, INVOICES = [], INV_LOGS = [], INV_LOGS_KEY = '';
-  let INV = { lines: [], logIds: [] }, INV_LOADED_OK = false;
+  // `off` = las lineas que el manager decidio NO cobrarle al cliente (7 oct
+  // 2026). Su caso: media hora de dos muchachos cargando el camion antes de
+  // salir - esa mano de obra se les paga, pero no se le cobra al cliente.
+  // Antes solo se podia quitar el REPORTE entero. Se guardan las LLAVES de las
+  // lineas, no sus posiciones, porque la lista se vuelve a armar de cero cada
+  // vez que se marca o desmarca un reporte.
+  let INV = { lines: [], logIds: [], off: [] }, INV_LOADED_OK = false;
   let AMG_MATERIALS = [];
   // Quien esta abierto para cambiarle el precio: 'c:<id>' un cliente, 'm:<id>' un material.
   const AMG_EDIT = new Set();
@@ -7915,7 +7922,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     if(!c){ if(msg) msg.textContent = 'Ese reporte no tiene un cliente guardado en la lista. Escoja el cliente a mano.'; return; }
     if(![...sel.options].some(o => o.value === String(c.id))){ if(msg) msg.textContent = 'No se pudo escoger a ' + c.name + ' solo. Escójalo en la lista.'; return; }
     sel.value = String(c.id);
-    INV = { lines: [], logIds: [] };
+    INV = { lines: [], logIds: [], off: [] };
     const done = invInvoicedLogIds();
     if(done.has(pre.logId)){ if(msg) msg.textContent = 'Ese reporte ya está en un invoice; se abrió el cliente sin marcarlo.'; }
     else if(INV_LOGS.some(l => String(l.id) === pre.logId)) INV.logIds = [pre.logId];
@@ -8053,12 +8060,20 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // Las lineas que salen de UN reporte de mudanza, con el precio congelado del reporte (o el del cliente hoy si no trae).
   function invLinesFromLog(log, client){
     const p = (log && log.payload) || {}; const r = p.r || null; const out = []; out.unpriced = []; out.gratis = [];
+    // LA LLAVE DE CADA LINEA. Lleva la posicion Y una huella de lo que dice,
+    // para que "no cobrar" se quede pegado a la linea correcta aunque la lista
+    // se vuelva a armar. Si el reporte cambiara, la huella cambia y la linea
+    // vuelve a cobrarse sola: entre equivocarse hacia "se cobra" y hacia "no se
+    // cobra", la unica direccion segura es que REAPAREZCA, nunca que se borre
+    // de una factura sin que nadie se entere.
+    let nk = 0;
+    const K = h => String(log.id) + '#' + (nk++) + '#' + h;
     const cfg = (r && r.d != null) ? { rateDay:+r.d, fixed:(+r.f > 0 ? +r.f : 0) } : (mgClientPrice(client ? client.name : p.t) || null);
     const date = invDate(log.log_date || p.d || '');
     if(!cfg) return out;                                              // sin precio: no se factura nada (nunca $0 escondido)
     if(cfg.fixed > 0){
       const places = [...new Set((p.s || []).map(invPlaceOfShift).filter(Boolean))];
-      out.push({ d:'Moving service - flat rate\n' + date + places.map(x => '\n' + x).join(''), q:1, u:+cfg.fixed, a:+cfg.fixed, src:String(log.id) });
+      out.push({ d:'Moving service - flat rate\n' + date + places.map(x => '\n' + x).join(''), q:1, u:+cfg.fixed, a:+cfg.fixed, src:String(log.id), k:K('flat') });
     } else {
       (p.s || []).forEach(sh => {
         const people = countPeople(sh.n || ''); const mins = hoursBetween(sh.f, sh.o); if(!people || mins === null || mins <= 0) return;
@@ -8071,13 +8086,14 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
         out.push({ d:'Labor service\n' + people + ' worker' + (people===1?'':'s') + '\n' + invQty(hours) + ' hours total'
                      + (horario ? '\n' + horario : '')
                      + '\n(Time worked by the team) ' + date + (place ? '\n' + place : ''),
-                   q:hours, u:unit, a:Math.round(hours * unit * 100)/100, src:String(log.id) });
+                   q:hours, u:unit, a:Math.round(hours * unit * 100)/100, src:String(log.id),
+                   k:K('h' + (sh.f||'') + '-' + (sh.o||'') + '-' + people) });
       });
     }
     (p.s || []).forEach(sh => extraItemsOfShift(sh).forEach(it => {
       const x = parseFloat(it.x);
       if(Number.isFinite(x) && x !== 0){
-        out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + extraLabel(it) + ' ' + date, q:1, u:x, a:x, src:String(log.id) });
+        out.push({ d:(x < 0 ? 'Discount: ' : 'Extra: ') + extraLabel(it) + ' ' + date, q:1, u:x, a:x, src:String(log.id), k:K('x' + extraLabel(it) + ':' + x) });
       } else if(it.e || (it.eo || '').trim()){
         out.unpriced.push(extraLabel(it) + ' (extra sin monto)');
       }
@@ -8102,7 +8118,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       // Lo atrapo la prueba, no la vista. Por eso el nulo se saca primero.
       const pu = (mm && mm.unit_price != null) ? +mm.unit_price : null;
       if(pu !== null && pu > 0){
-        out.push({ d: mm.name + ' ' + date, q, u:pu, a: Math.round(q * pu * 100)/100, src:String(log.id) });
+        out.push({ d: mm.name + ' ' + date, q, u:pu, a: Math.round(q * pu * 100)/100, src:String(log.id), k:K('m' + mm.name + ':' + q) });
       } else if(mm && (pu === 0 || mm.active === false)){
         out.gratis.push((mm.name || m.n) + ' (' + q + ')');
       } else {
@@ -8111,7 +8127,10 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     });
     return out;
   }
-  const invTotalOf = lines => Math.round(lines.reduce((s, l) => s + (+l.a||0), 0) * 100) / 100;
+  // El total NUNCA cuenta lo que se decidio no cobrar.
+  const invTotalOf = lines => Math.round(lines.reduce((s, l) => s + (l.off ? 0 : (+l.a||0)), 0) * 100) / 100;
+  const invIsOff = k => !!k && (INV.off || []).indexOf(k) >= 0;
+  const invMarkOff = lines => { (lines || []).forEach(l => { l.off = invIsOff(l.k); }); return lines; };
   // Dos reportes del mismo cliente, el mismo dia y con los MISMOS
   // horarios son la misma mudanza mandada dos veces. Paso de verdad
   // (Susan, 26 sep 2026: la cuadrilla la remando 41 minutos despues
@@ -8184,7 +8203,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const repes = invRepetidos(all);          // contra TODOS, no solo los sin facturar
     const cut = logs.length > 60 ? '<p class="clockhint">Mostrando los 60 reportes más recientes sin facturar de ' + logs.length + '.</p>' : '';
     box.innerHTML = cut + logs.slice(0, 60).map(l => {
-      const lines = invLinesFromLog(l, c); const amt = invTotalOf(lines); const was = done.has(String(l.id)); const on = INV.logIds.includes(String(l.id));
+      const lines = invMarkOff(invLinesFromLog(l, c)); const amt = invTotalOf(lines); const was = done.has(String(l.id)); const on = INV.logIds.includes(String(l.id));
       const yaCobrada = invYaCobrada(l);
       const p = l.payload || {}; const names = ((p.s||[])[0]||{}).n || '';
       // La direccion se ve ANTES de marcar. El aviso rojo sale de las LINEAS que se van a cobrar, no del
@@ -8214,6 +8233,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     const c = invClient(); const manual = INV.lines.filter(l => !l.src);
     INV.unpriced = [];
     const fromLogs = INV.logIds.flatMap(id => { const l = INV_LOGS.find(x => String(x.id) === id); if(!l) return []; const ls = invLinesFromLog(l, c); (ls.unpriced || []).forEach(u => INV.unpriced.push(u)); return ls; });
+    invMarkOff(fromLogs);
     INV.lines = fromLogs.concat(manual); invRender();
   }
   if($('#invLogs')) $('#invLogs').addEventListener('change', (e) => {
@@ -8240,7 +8260,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     $$('#invLogs .invLogChk').forEach(chk => chk.checked = false);
     INV.logIds = []; invRebuildLogLines(); invPaintLogs(); invRender();
   });
-  if($('#inv-client')) $('#inv-client').addEventListener('change', ()=>{ INV = { lines: INV.lines.filter(l => !l.src), logIds: [] }; invPaintLogs(); invRender(); });
+  if($('#inv-client')) $('#inv-client').addEventListener('change', ()=>{ INV = { lines: INV.lines.filter(l => !l.src), logIds: [], off: [] }; invPaintLogs(); invRender(); });
   if($('#invAddLine')) $('#invAddLine').addEventListener('click', ()=>{
     const d = ($('#inv-ldesc').value || '').trim(); const q = +$('#inv-lqty').value; const u = +$('#inv-lunit').value;
     if(!d){ $('#invMsg').textContent = 'Escriba la descripción de la línea.'; return; }
@@ -8251,19 +8271,44 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   });
   function invRender(){
     const box = $('#invLines'); if(!box) return;
-    box.innerHTML = INV.lines.length ? INV.lines.map((l, i) => '<div class="entryrow"><span style="flex:1;"><span class="who" style="white-space:pre-line;">' + esc(l.d) + '</span><br><span class="when">' + invQty(l.q) + ' × $' + invMoney(l.u)
+    // UNA LINEA QUE NO SE COBRA NO SE ESCONDE: se queda tachada y gris, y dice
+    // por que. Si desapareciera, el total bajaria sin explicacion y no habria
+    // como regresarla.
+    const tach = 'text-decoration:line-through;opacity:.45;';
+    box.innerHTML = INV.lines.length ? INV.lines.map((l, i) => '<div class="entryrow"><span style="flex:1;"><span class="who" style="white-space:pre-line;' + (l.off ? tach : '') + '">' + esc(l.d) + '</span><br><span class="when"' + (l.off ? ' style="' + tach + '"' : '') + '>' + invQty(l.q) + ' × $' + invMoney(l.u)
         + (l.src ? ' · del reporte' : '')
         + (l.edit ? ' · <span style="color:var(--warn,#d98c00);">cambiado a mano</span>' : '')
-        + '</span></span><span style="display:flex;gap:6px;align-items:center;"><span class="hrs">$' + invMoney(l.a) + '</span>'
-        + '<button type="button" class="minibtn invEditLine" data-i="' + i + '" title="Cambiar">&#9998;</button>'
-        + (l.src ? '' : '<button type="button" class="minibtn invDelLine" data-i="' + i + '" title="Quitar">✕</button>') + '</span></div>').join('')
+        + '</span>'
+        + (l.off ? '<br><span class="when" style="color:var(--pick);font-weight:700;">NO SE COBRA · no va en el invoice</span>' : '')
+        + '</span><span style="display:flex;gap:6px;align-items:center;"><span class="hrs"' + (l.off ? ' style="' + tach + '"' : '') + '>$' + invMoney(l.a) + '</span>'
+        + (l.off ? '' : '<button type="button" class="minibtn invEditLine" data-i="' + i + '" title="Cambiar">&#9998;</button>')
+        + (l.src
+            ? '<button type="button" class="minibtn invOffLine" data-i="' + i + '" style="white-space:nowrap;border-color:var(--' + (l.off ? 'green' : 'pick') + ');color:var(--' + (l.off ? 'green' : 'pick') + ');">' + (l.off ? 'Sí cobrar' : 'No cobrar') + '</button>'
+            : '<button type="button" class="minibtn invDelLine" data-i="' + i + '" title="Quitar">✕</button>') + '</span></div>').join('')
       : '<p class="clockhint">Todavía no hay líneas. Marque arriba los reportes de mudanza que va a cobrar: de ahí salen las horas y los materiales.</p>';
+    const nOff = INV.lines.filter(l => l.off).length;
+    const avi = $('#invOffNote');
+    if(avi){
+      avi.hidden = !nOff;
+      avi.textContent = nOff ? nOff + ' línea(s) no se le cobran al cliente y no salen en el PDF. Las horas de los muchachos no cambian: eso se les paga igual.' : '';
+    }
     $('#invTotal').textContent = '$' + invMoney(invTotalOf(INV.lines));
     const pw = $('#invPreviewWrap'); if(pw && !pw.hidden) invPreview();
   }
   if($('#invLines')) $('#invLines').addEventListener('click', (e) => {
     const ed = e.target.closest('.invEditLine');
     if(ed){ invEditarLinea(+ed.dataset.i); return; }
+    // No cobrar / Si cobrar. Se guarda la LLAVE, no la posicion: la lista se
+    // arma de cero cada vez que se marca o desmarca un reporte.
+    const off = e.target.closest('.invOffLine');
+    if(off){
+      const l = INV.lines[+off.dataset.i]; if(!l || !l.k) return;
+      INV.off = (INV.off || []).filter(k => k !== l.k);
+      if(!l.off) INV.off.push(l.k);
+      l.off = !l.off;
+      invRender(); invPaintLogs();
+      return;
+    }
     const b = e.target.closest('.invDelLine'); if(!b) return;
     const l = INV.lines[+b.dataset.i]; if(!l) return;
     if(l.src){ INV.logIds = INV.logIds.filter(x => x !== l.src); const chk = $('#invLogs .invLogChk[data-id="' + l.src + '"]'); if(chk) chk.checked = false; invRebuildLogLines(); return; }
@@ -8294,11 +8339,17 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // El invoice como objeto (lo que se guarda y lo que se dibuja).
   function invCurrent(){
     const c = invClient();
+    // Lo que el manager decidio NO cobrar no viaja: ni al PDF del cliente, ni
+    // al total, ni a lo que se guarda.
+    const cobrables = INV.lines.filter(l => !l.off).map(l => { const x = Object.assign({}, l); delete x.off; delete x.k; return x; });
     // Un reporte marcado que no produjo ninguna linea (sin precio) NO se marca como facturado: si se
     // guardara en log_ids, desapareceria de la lista y ya nunca se podria cobrar.
     return { number: +($('#inv-number').value || invNextNumber()), issue_date: $('#inv-date').value || localToday(),
       client_id: c ? c.id : null, client_name: c ? c.name : '', bill_to: c ? (c.bill_to || '') : '', client_address: c ? (c.address || '') : '', client_phone: c ? (c.phone || '') : '', client_email: c ? (c.email || '') : '',
-      sent_by: (SES && SES.full_name) || 'Amilcar', lines: INV.lines.slice(), total: invTotalOf(INV.lines), log_ids: INV.logIds.filter(id => INV.lines.some(l => String(l.src) === String(id))), status:'sent' };
+      sent_by: (SES && SES.full_name) || 'Amilcar', lines: cobrables, total: invTotalOf(cobrables),
+      // Un reporte al que se le quitaron TODAS las lineas no se marca como
+      // facturado: no se le cobro nada, asi que tiene que seguir disponible.
+      log_ids: INV.logIds.filter(id => cobrables.some(l => String(l.src) === String(id))), status:'sent' };
   }
   // ---- El dibujo (mismo HTML para la vista previa y para el PDF) ----
   function invHtml(inv, kind){
@@ -8369,7 +8420,12 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   async function invSave(){
     const inv = invCurrent(); const msg = $('#invMsg');
     if(!inv.client_name){ msg.textContent = 'Escoja el cliente.'; return; }
-    if(!inv.lines.length){ msg.textContent = 'El invoice no tiene líneas: marque arriba un reporte de mudanza. Si el reporte marcado dice "sin precio", póngale el precio al cliente en AMG Moving → Clientes y vuelva a entrar.'; return; }
+    if(!inv.lines.length){
+      msg.textContent = INV.lines.length
+        ? 'Le quitó TODAS las líneas: no queda nada que cobrarle al cliente. Toque "Sí cobrar" en la que sí se le cobra.'
+        : 'El invoice no tiene líneas: marque arriba un reporte de mudanza. Si el reporte marcado dice "sin precio", póngale el precio al cliente en AMG Moving → Clientes y vuelva a entrar.';
+      return;
+    }
     if(!(inv.number > 0)){ msg.textContent = 'Ponga el número del invoice.'; return; }
     // La reja que de verdad cuida el bolsillo del cliente: dos reportes
     // marcados con el mismo dia y las mismas horas son la misma mudanza
@@ -8415,7 +8471,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       // el proximo numero
       try{ await authFetch('/rest/v1/amg_invoice_settings', { method:'POST', headers: Object.assign(cloudHeaders(), {'Prefer':'resolution=merge-duplicates,return=minimal'}), body: JSON.stringify(Object.assign({}, INV_SETTINGS_OK ? { company_id: SES.company_id } : { company_id: SES.company_id }, { next_number: inv.number + 1, updated_at: new Date().toISOString() })) }); }catch(e){}
       await Promise.all([invLoadInvoices(), invLoadSettings()]);
-      INV = { lines: [], logIds: [] }; $('#inv-number').value = invNextNumber(); $('#invPreviewWrap').hidden = true; $('#invPreviewWrap').innerHTML = '';
+      INV = { lines: [], logIds: [], off: [] }; $('#inv-number').value = invNextNumber(); $('#invPreviewWrap').hidden = true; $('#invPreviewWrap').innerHTML = '';
       invPaintLogs(); invRender();
       msg.textContent = 'Invoice #' + saved.number + ' guardado ✓ ($' + invMoney(saved.total) + '). Está en "Invoices guardados" para mandarlo o marcarlo pagado.';
       if(confirm('Invoice #' + saved.number + ' guardado.\n\n¿Mandarlo ahora al cliente (PDF por Mensajes, Mail o WhatsApp)?')) invShare(saved, 'invoice');
