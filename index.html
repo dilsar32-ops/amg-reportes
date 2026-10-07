@@ -7233,7 +7233,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-07-NK';
+  const APP_BUILD = '2026-10-07-NL';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -8543,12 +8543,61 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     } finally { if(document.body.contains(node)) document.body.removeChild(node); }
   }
   const invFileName = (inv, kind) => 'AMG_' + (kind === 'receipt' ? 'Receipt' : 'Invoice') + '_' + inv.number + '_' + String(inv.client_name||'').replace(/[^A-Za-z0-9]+/g, '_') + '.pdf';
+  // EL MENSAJE QUE LE LLEGA AL CLIENTE (7 oct 2026).
+  //
+  // Su foto de la conversacion con Susan: el texto decia
+  // "Invoice #4008 - AMG Moving - $790.00. Thank you!" y el lo vio seco.
+  // "Deberia llevar un mejor mensaje, mas polite."
+  //
+  // Va en INGLES porque el invoice y los clientes de mudanza lo son, se saluda
+  // por el nombre de la PERSONA (name, no bill_to: ahi vive el nombre de la
+  // empresa, "Boxwood living", y a nadie se le saluda asi), y cierra con el
+  // correo de AMG para que tengan donde contestar.
+  function invMensaje(inv, kind){
+    const quien = String((inv && inv.client_name) || '').trim();
+    const hola  = quien ? 'Hi ' + quien + ',' : 'Hello,';
+    const monto = '$' + invMoney(inv.total);
+    const correo = (INV_SETTINGS && INV_SETTINGS.from_email) || 'Info@amgmoving.com';
+    if(kind === 'receipt'){
+      return hola + '\n\n'
+        + 'Thank you — we have received your payment of ' + monto + '. '
+        + 'Your receipt for invoice #' + inv.number + ' is attached.\n\n'
+        + 'It was a pleasure working with you, and we appreciate your business.\n\n'
+        + 'AMG Moving\n' + correo;
+    }
+    return hola + '\n\n'
+      + 'Thank you for choosing AMG Moving. Your invoice #' + inv.number + ' is attached, '
+      + 'for a total of ' + monto + '.\n\n'
+      + 'If you have any questions about it, just reply to this message and we will be glad to help. '
+      + 'We appreciate your business.\n\n'
+      + 'AMG Moving\n' + correo;
+  }
+
   async function invShare(inv, kind){
     showOverlay('Generando PDF…');
+    let listo = false;
     try{
       const blob = await invPdfBlob(inv, kind); const name = invFileName(inv, kind);
-      const text = (kind === 'receipt' ? 'Receipt' : 'Invoice') + ' #' + inv.number + ' - AMG Moving - $' + invMoney(inv.total) + (kind === 'receipt' ? ' (paid)' : '') + '. Thank you!';
-      if(isNative()) await saveAndShareNative(blob, name, text);
+      const text = invMensaje(inv, kind);
+      if(isNative()){
+        // DIRECTO AL CLIENTE si tenemos su telefono: Mensajes se abre con el
+        // numero puesto, el texto escrito y el PDF adjunto. El ultimo toque
+        // (Enviar) es suyo, siempre: a un cliente no se le manda nada solo.
+        const tel = String((inv && inv.client_phone) || '').replace(/[^\d+]/g, '');
+        const M = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Mensaje;
+        if(tel && M && M.enviar){
+          const uri = await saveToCache(blob, name);
+          let r = null;
+          try{ r = await M.enviar({ telefono: tel, texto: text, archivo: uri, nombre: name }); }
+          catch(e){ r = null; }
+          const est = r && r.estado;
+          if(est === 'enviado' || est === 'cancelado'){ listo = true; }
+          // 'no-disponible' / 'sin-numero' / 'sin-adjunto' / 'fallo' / sin
+          // respuesta: NO se queda callado, se cae a la hoja de compartir de
+          // siempre, que si funciona en cualquier telefono.
+        }
+        if(!listo) await saveAndShareNative(blob, name, text);
+      }
       else { const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); }
     }catch(e){ if(!/cancel/i.test(String((e && e.message) || e))) alert('No se pudo hacer el PDF.\n\n' + ((e && e.message) || e)); }
     hideOverlay();
@@ -29914,6 +29963,16 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       reader.readAsDataURL(blob);
     });
   }
+  // Guarda el archivo en la carpeta temporal del telefono y devuelve su ruta.
+  // Se saco de saveAndShareNative para que el plugin de Mensajes pueda leer el
+  // MISMO archivo en vez de mandar el PDF entero por el puente.
+  async function saveToCache(blob, filename){
+    const Filesystem = window.Capacitor.Plugins.Filesystem;
+    const base64 = await blobToBase64(blob);
+    const result = await Filesystem.writeFile({ path: filename, data: base64, directory: 'CACHE' });
+    return result.uri;
+  }
+
   async function saveAndShareNative(blob, filename, text){
     const Filesystem = window.Capacitor.Plugins.Filesystem;
     const Share = window.Capacitor.Plugins.Share;
