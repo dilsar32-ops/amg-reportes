@@ -2432,6 +2432,29 @@ body.fija main{
    icono quede a la altura de la letra y no colgando de la linea base. */
 .menubtn b{ display:flex; align-items:center; gap:8px; }
 .menubtn b .ico{ width:1.05em; height:1.05em; opacity:.85; }
+
+/* Las tarjetas de Codigos (8 oct 2026, opcion A que el escogio). Van al final
+   de la hoja por la misma razon de siempre: una clase nueva a media hoja la
+   pisa una definicion posterior. */
+.codecard{background:var(--surface-2); border:1px solid var(--line); border-radius:14px;
+          padding:13px 14px; margin-top:10px;}
+.codecard .who{font:600 14.5px/1.25 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+               display:flex; align-items:center; gap:8px; margin:0 0 2px;}
+.codecard .para{font-size:12.5px; color:var(--muted); margin:0 0 10px; line-height:1.35;}
+.codeval{font:700 26px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.14em;
+         background:var(--surface); border:1px dashed var(--line); border-radius:10px;
+         padding:13px 10px; text-align:center; margin-bottom:9px;
+         /* el codigo se escoge con el dedo si alguien prefiere copiarlo a mano */
+         -webkit-user-select:all; user-select:all;}
+/* Un codigo que todavia no existe no se puede compartir: se ve apagado y sus
+   botones no responden (ver pintarCodigos). */
+.codeval.sincodigo{font-size:14px; letter-spacing:0; color:var(--muted); font-weight:600;
+                   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+                   -webkit-user-select:auto; user-select:auto;}
+.coderow{display:flex; gap:8px;}
+.coderow .minibtn{flex:1 1 0; justify-content:center;}
+.codecard .chg{margin-top:9px; text-align:right;}
+.codecard .chg .minibtn{font-size:12.5px;}
 </style>
 </head>
 <body>
@@ -3540,14 +3563,47 @@ body.fija main{
   <!-- ===================== TAB: CÓDIGOS =====================
        Su propia ventana. Antes era un cajon que se abria DEBAJO de toda la
        bandeja de labor logs: se tocaba la pastilla y no aparecia nada. -->
+  <!-- CODIGOS (8 oct 2026, con foto: "aca el diseno esta mal"). Eran cuatro
+       botones apilados y cada uno abria un alert() con el codigo metido en un
+       parrafo: no se podia copiar ni compartir, y habia que cerrar la alerta
+       para ver el siguiente. Escogio la opcion A del preview: el codigo A LA
+       VISTA, con Copiar y Compartir en cada tarjeta. -->
   <section class="tab-panel" data-tab="mgrcodes">
     <section class="card">
       <h2>Códigos</h2>
       <p class="clockhint" style="margin-top:0;">Los códigos con los que entra cada quien. No los comparta fuera del equipo.</p>
-      <button class="btn btn-outline" type="button" id="mgrPin">Ver código del equipo</button>
-      <button class="btn btn-outline" type="button" id="mgrWorkerCode">Ver código de trabajadores</button>
-      <button class="btn btn-outline" type="button" id="mgrAmgCode">Ver código de AMG Moving</button>
-      <button class="btn btn-ghost" type="button" id="mgrAmgCodeChange">Cambiar el código de AMG</button>
+
+      <div class="codecard" data-code="crew">
+        <p class="who"><svg class="ico"><use href="#i-users"/></svg>Código del equipo</p>
+        <p class="para">Para el crew. Con este entran a toda la app de Restoration Doctor.</p>
+        <div class="codeval" id="codeCrew">&mdash;</div>
+        <div class="coderow">
+          <button type="button" class="minibtn" data-copiar="crew"><svg class="ico"><use href="#i-file"/></svg>Copiar</button>
+          <button type="button" class="minibtn" data-compartir="crew"><svg class="ico"><use href="#i-user"/></svg>Compartir</button>
+        </div>
+      </div>
+
+      <div class="codecard" data-code="worker">
+        <p class="who"><svg class="ico"><use href="#i-id"/></svg>Código de trabajadores</p>
+        <p class="para">Para los temporales. Solo abre la pantalla &quot;Trabajador&quot;, nunca el crew completo.</p>
+        <div class="codeval" id="codeWorker">&mdash;</div>
+        <div class="coderow">
+          <button type="button" class="minibtn" data-copiar="worker"><svg class="ico"><use href="#i-file"/></svg>Copiar</button>
+          <button type="button" class="minibtn" data-compartir="worker"><svg class="ico"><use href="#i-user"/></svg>Compartir</button>
+        </div>
+      </div>
+
+      <div class="codecard" data-code="amg">
+        <p class="who"><svg class="ico"><use href="#i-truck"/></svg>Código de AMG Moving</p>
+        <p class="para">Para los que van a mudanza. Abre la puerta AMG Moving, nunca Restoration Doctor.</p>
+        <div class="codeval" id="codeAmg">&mdash;</div>
+        <div class="coderow">
+          <button type="button" class="minibtn" data-copiar="amg"><svg class="ico"><use href="#i-file"/></svg>Copiar</button>
+          <button type="button" class="minibtn" data-compartir="amg"><svg class="ico"><use href="#i-user"/></svg>Compartir</button>
+        </div>
+        <div class="chg"><button type="button" class="minibtn" id="mgrAmgCodeChange"><svg class="ico"><use href="#i-refresh"/></svg>Cambiar este código</button></div>
+      </div>
+
     </section>
   </section>
 
@@ -6633,6 +6689,9 @@ body.fija main{
     // Y el rotulo del boton de abajo dice a donde regresa, que tambien cambia.
     if(typeof pintarSalidas === 'function') pintarSalidas();
     requestAnimationFrame(() => sigPads.forEach(p => { try{ p.ensureSize(); }catch(e){} }));
+    // Los codigos se leen de SES, que cambia al entrar y al cambiarlos: se
+    // repintan cada vez que se abre la pantalla, no una sola vez al cargar.
+    if(tab === 'mgrcodes' && typeof pintarCodigos === 'function') pintarCodigos();
     if(tab === 'visitas' && typeof visPintar === 'function') visPintar();
     if(tab === 'clientes' && typeof clientesPintar === 'function') clientesPintar();
     if(tab === 'floorplan'){
@@ -7724,7 +7783,7 @@ body.fija main{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-08-Q';
+  const APP_BUILD = '2026-10-08-R';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -8363,9 +8422,9 @@ body.fija main{
   function paintAmgCode(){
     if($('#amgCodeShow')) $('#amgCodeShow').textContent = (SES && SES.amg_worker_join_code) || '------';
     if($('#amgRestCodeEcho')) $('#amgRestCodeEcho').textContent = (SES && SES.worker_join_code) || '—';
-  }
-  function showAmgCode(code){
-    alert('Código de AMG Moving: ' + (code || '—') + '\n\nMándeselo solo a los que van a mudanza. Con este código se entra por la puerta "AMG Moving": los ocasionales lo escriben en "Trabajador" y los del crew lo escriben una sola vez. Nunca sirve para entrar a Restoration Doctor.');
+    // Y la pantalla de Codigos, que ensena el mismo dato: si no, cambiar el
+    // codigo de AMG dejaba el viejo escrito ahi hasta recargar la app.
+    if(typeof pintarCodigos === 'function') pintarCodigos();
   }
   async function changeAmgCode(){
     if(!isManager()) return;
@@ -8380,7 +8439,6 @@ body.fija main{
       alert('Listo. El código nuevo de AMG Moving es: ' + code + '\n\nMándeselo a los que van a mudanza.');
     }catch(e){ alert((e && e.message) || 'No se pudo cambiar. Esta parte todavía no está instalada en el servidor: falta correr supabase-amg-door.sql. Mándele este mensaje a quien le ayuda con la app.'); }
   }
-  if($('#mgrAmgCode')) $('#mgrAmgCode').addEventListener('click', ()=>{ if(SES) showAmgCode(SES.amg_worker_join_code); });
   if($('#mgrAmgCodeChange')) $('#mgrAmgCodeChange').addEventListener('click', changeAmgCode);
   if($('#amgCodeChange')) $('#amgCodeChange').addEventListener('click', changeAmgCode);
   // AMG prendida pero sin precio al cliente: se dice en rojo arriba de las
@@ -13305,21 +13363,85 @@ body.fija main{
     const el = $('#convResult'); if(el) el.scrollIntoView({ block:'start' });
   }
 
-  $('#mgrPin').addEventListener('click', ()=>{
-    if(!SES) return;
-    alert('Código del equipo: ' + (SES.join_code || '—')
-        + '\n\nMándeselo a su crew para que entren.');
-  });
-
-  // A separate code on purpose - the team code above gets someone the full
-  // app (Reloj, Labor, prices for a manager). This one only ever works on
-  // the "Trabajador" screen, so handing it to an occasional worker can't
-  // accidentally also let him join as full crew.
-  $('#mgrWorkerCode').addEventListener('click', ()=>{
-    if(!SES) return;
-    alert('Código de trabajadores: ' + (SES.worker_join_code || '—')
-        + '\n\nMándeselo solo a los trabajadores ocasionales - con este código entran en "Trabajador", nunca como crew completo.');
-  });
+  // ============ CODIGOS: EL CODIGO A LA VISTA ============
+  //
+  // 8 oct 2026, con foto de la pantalla: "aca el diseno esta mal". Eran cuatro
+  // botones y tres alert(). Un alert no se puede copiar, no se puede compartir
+  // y tapa la pantalla; y el codigo iba enterrado en medio de un parrafo.
+  // Escogio la opcion A del preview: cada codigo en su tarjeta, a la vista,
+  // con Copiar y Compartir.
+  //
+  // Son TRES codigos distintos a proposito, y cada uno abre una puerta
+  // distinta: el del equipo da la app completa de restauracion, el de
+  // trabajadores SOLO la pantalla "Trabajador", y el de AMG solo la puerta de
+  // mudanza. Por eso cada mensaje dice para que sirve el suyo: lo que se
+  // comparte es el codigo Y la instruccion de por donde entrar.
+  const CODIGOS = {
+    crew:   { campo:'join_code',            ver:'#codeCrew',
+              nombre:'Código del equipo',
+              msg:c => 'Código del equipo: ' + c + '\n\nEntre a la app y escríbalo donde dice el código del equipo.' },
+    worker: { campo:'worker_join_code',     ver:'#codeWorker',
+              nombre:'Código de trabajadores',
+              msg:c => 'Código de trabajadores: ' + c + '\n\nEntre en "Trabajador" y escriba este código con su nombre y su PIN.' },
+    amg:    { campo:'amg_worker_join_code', ver:'#codeAmg',
+              nombre:'Código de AMG Moving',
+              msg:c => 'Código de AMG Moving: ' + c + '\n\nEntre por la puerta "AMG Moving" y escriba este código. No sirve para Restoration Doctor.' }
+  };
+  function codigoDe(k){
+    const d = CODIGOS[k];
+    const v = (SES && d && SES[d.campo]) || '';
+    return String(v).trim();
+  }
+  function pintarCodigos(){
+    Object.keys(CODIGOS).forEach(k => {
+      const el = $(CODIGOS[k].ver); if(!el) return;
+      const c = codigoDe(k);
+      // Un codigo que no existe se dice, no se finge con rayitas: con AMG
+      // apagada o sin correr supabase-amg-door.sql, ese campo viene vacio.
+      el.textContent = c || 'Todavía no hay código';
+      el.classList.toggle('sincodigo', !c);
+      const card = el.closest('.codecard');
+      if(card) $$('.minibtn[data-copiar], .minibtn[data-compartir]', card)
+        .forEach(b => { b.disabled = !c; b.style.opacity = c ? '' : '.45'; });
+    });
+  }
+  // El mismo boton dice si de verdad se copio. Antes de esto no habia ninguna
+  // senal: se tocaba y no pasaba nada visible.
+  function avisoEnBoton(btn, txt){
+    if(!btn || btn.dataset.ocupado) return;
+    const antes = btn.innerHTML;
+    btn.dataset.ocupado = '1';
+    btn.textContent = txt;
+    setTimeout(()=>{ btn.innerHTML = antes; delete btn.dataset.ocupado; }, 1600);
+  }
+  async function copiarCodigo(k, btn){
+    const c = codigoDe(k); if(!c) return;
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(c);
+      else throw new Error('sin portapapeles');
+      avisoEnBoton(btn, '✓ Copiado');
+    }catch(e){
+      // Sin portapapeles (pasa en algunos navegadores viejos) no se miente:
+      // se le ensena el codigo para que lo copie a mano.
+      avisoEnBoton(btn, 'No se pudo');
+      alert(CODIGOS[k].nombre + ': ' + c + '\n\nNo se pudo copiar solo. Cópielo de aquí.');
+    }
+  }
+  async function compartirCodigo(k, btn){
+    const c = codigoDe(k); if(!c) return;
+    const txt = CODIGOS[k].msg(c);
+    if(navigator.share){
+      try{ await navigator.share({ text: txt }); return; }
+      catch(e){ return; }   // si cancela el menu de iOS no es un error
+    }
+    // En la web no hay menu de compartir: se copia el mensaje entero.
+    try{
+      await navigator.clipboard.writeText(txt);
+      avisoEnBoton(btn, '✓ Copiado');
+    }catch(e){ alert(txt); }
+  }
+  $$('[data-copiar]').forEach(b => b.addEventListener('click', ()=> copiarCodigo(b.dataset.copiar, b)));
+  $$('[data-compartir]').forEach(b => b.addEventListener('click', ()=> compartirCodigo(b.dataset.compartir, b)));
 
   function buildLaborPrintout(){
     const mg = formKind() === 'mudanza';
