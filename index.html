@@ -2367,6 +2367,10 @@ body.fija main{
   padding-bottom:84px;
 }
 #barraFija[hidden]{display:none !important;}
+/* Las cuatro pastillas de Horas se acomodan en dos renglones en vez de irse
+   de lado: medido a 375px piden 540 y solo hay 347, asi que "Pagos por
+   confirmar" quedaba fuera de la pantalla sin ninguna senal. */
+#mgrHoursTools .mgrtools{flex-wrap:wrap; overflow:visible;}
 /* Si lo que se presto quedara escondido, que no se vea una franja vacia con
    su rayita. (Si el telefono no entiende :has, lo unico que pasa es que la
    franja se ve: inofensivo.) */
@@ -4071,8 +4075,14 @@ body.fija main{
         <button type="button" class="minibtn on" id="mgrHoursSegCrew">&#128101; Crew</button>
         <button type="button" class="minibtn" id="mgrHoursSegWorkers">&#127380; Trabajadores</button>
         <button type="button" class="minibtn" id="mgrHoursSegCasual">&#128339; Temporales</button>
+        <!-- La cuarta (8 oct 2026, marcada en azul). Cambia la caja de abajo
+             en su sitio, igual que las otras tres: la tarjeta de "Pagos por
+             confirmar" se PRESTA aqui y se devuelve al salir, para que las
+             cuatro pastillas sigan a la vista. -->
+        <button type="button" class="minibtn" id="mgrHoursSegPay">&#128179; Pagos por confirmar</button>
       </div>
     </div>
+    <div id="pagosSlot" class="mgr-only"></div>
     <section class="card mgr-only" id="teamCard">
       <h2><span class="num">3</span>Todo el equipo</h2>
       <div class="inboxhead" style="margin-bottom:2px;">
@@ -4412,30 +4422,6 @@ body.fija main{
         <button type="button" class="menubtn" data-go-tab="visitas" data-back="mgrrest">
           <b>&#128197; Visitas y Clientes<span class="en"> / Visits &amp; Clients</span></b>
           <small>Cada cliente, visita por visita: equipo, lecturas, comunicaci&oacute;n y materiales</small></button>
-      </div>
-    </section>
-  </section>
-
-  <!-- ===================== CARPETA: PAGOS =====================
-       Su pedido, textual: "en la parte de pagos tiene que estar el crew, los
-       trabajadores y trabajadores temporales". Las tres eran pastillas
-       escondidas dentro de Horas; aqui son la puerta. -->
-  <section class="tab-panel" data-tab="mgrpagos" id="mgrPagosPanel">
-    <section class="card">
-      <h2>Pagos</h2>
-      <div class="menugrid" style="margin-top:8px;">
-        <button type="button" class="menubtn" id="mgrGoHours">
-          <b>&#128101; Crew</b>
-          <small id="mgrHoursHint">Horas y pagos de los l&iacute;deres</small></button>
-        <button type="button" class="menubtn" id="mgrGoWorkers">
-          <b>&#127380; Trabajadores</b>
-          <small>Los que ya tienen c&oacute;digo para entrar</small></button>
-        <button type="button" class="menubtn" id="mgrGoCasual">
-          <b>&#128339; Trabajadores temporales</b>
-          <small>Los que se agregan a mano, sin c&oacute;digo</small></button>
-        <button type="button" class="menubtn" id="mgrGoPay">
-          <b>&#128179; Pagos por confirmar</b>
-          <small id="mgrPayHint">Lo que falta que contesten</small></button>
       </div>
     </section>
   </section>
@@ -5141,7 +5127,7 @@ body.fija main{
     floorplan:'Plano / Floor Plan', planomed:'Plano y Medidas',
     medguardadas:'Medidas Guardadas', clientes:'Clientes', visitas:'Visitas / Visits',
     manual:'Manual', manager:'Manager',
-    mgrrest:'Restoration Doctor', mgrpagos:'Pagos', mgrmore:'Precios, pagos y equipo', finanzas:'Gastos', amgclientes:'Clientes de AMG', amgcal:'Calendario',
+    mgrrest:'Restoration Doctor', mgrmore:'Precios, pagos y equipo', finanzas:'Gastos', amgclientes:'Clientes de AMG', amgcal:'Calendario',
     fpscans:'Planos Guardados', mgrcodes:'Códigos', mgrplanos:'Planos y medidas',
     'floorplan-view':'Floor Plan', 'floorplan-moisture':'Moisture Map'
   };
@@ -5167,7 +5153,7 @@ body.fija main{
   // what the crew sees, which is what those screens are for.
   function inMgrContext(name){
     if(!isManager()) return false;
-    const CARPETAS = ['manager','mgrrest','mgrpagos','mgrmore','amgmoving'];
+    const CARPETAS = ['manager','mgrrest','mgrmore','amgmoving'];
     if(CARPETAS.includes(name)) return true;
     if(navStack.some(t => CARPETAS.includes(t))) return true;
     return inMgrContextLegacy(name);
@@ -5242,6 +5228,23 @@ body.fija main{
   // Por ahora solo las pastillas de Crew / Trabajadores / Temporales, que es
   // donde la lista es larga y se perdia el cambiador. Si hace falta en otra
   // pantalla, se agrega aqui y nada mas.
+  // PRESTAR UNA TARJETA A OTRA PANTALLA. Mismo trato que la barra fija y que
+  // las tarjetas de Finanzas: no se duplica nada, se MUEVE y se devuelve.
+  const CASAS = new Map();
+  function devolverTarjeta(el){
+    const casa = CASAS.get(el);
+    if(!casa) return;
+    casa.padre.insertBefore(el, (casa.siguiente && casa.siguiente.parentNode === casa.padre) ? casa.siguiente : null);
+    el.hidden = true;
+    CASAS.delete(el);
+  }
+  function prestarTarjeta(el, slot){
+    if(!el || !slot) return;
+    if(!CASAS.has(el)) CASAS.set(el, { padre: el.parentNode, siguiente: el.nextElementSibling });
+    slot.appendChild(el);
+    el.hidden = false;
+  }
+
   function sincronizarBarraFija(name){
     const tools = $('#mgrHoursTools');
     const toca = name === 'reloj' && tools && document.body.classList.contains('mgr');
@@ -6048,7 +6051,7 @@ body.fija main{
   const CARPETAS_SIN_PASOS = ['reloj', 'visitas', 'clientes', 'planomed', 'finanzas',
                               'amgmoving', 'amgclientes', 'amgcal', 'manual',
                               'manager', 'mgrmore', 'mgrcodes', 'mgrplanos',
-                              'mgrrest', 'mgrpagos',
+                              'mgrrest',
                               'fpscans', 'medguardadas'];
   function buildSalidas(){
     CARPETAS_SIN_PASOS.forEach(tab => {
@@ -6329,7 +6332,12 @@ body.fija main{
     // Callers do showTab(x) THEN pushBack('manager'), so the stack only says
     // "he came from the manager section" after the tab already switched.
     const cur = document.querySelector('.tab-panel.active');
-    if(cur) syncMgrContext(cur.dataset.tab);
+    if(cur){
+      syncMgrContext(cur.dataset.tab);
+      // Y la barra fija OTRA VEZ: showTab la decidio cuando la pila todavia
+      // no decia de donde venia, asi que body.mgr podia estar apagado.
+      if(typeof sincronizarBarraFija === 'function') sincronizarBarraFija(cur.dataset.tab);
+    }
     updateNavButtons();
   }
   function updateNavButtons(){
@@ -7518,7 +7526,7 @@ body.fija main{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-08-K';
+  const APP_BUILD = '2026-10-08-L';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -7666,8 +7674,24 @@ body.fija main{
     const team   = $('#teamCard'),        person = $('#personCard');
     const cTeam  = $('#casualTeamCard'),  cPerson = $('#casualPersonCard');
     if(!team || !cTeam) return;
-    const crew = mgrHoursView === 'crew';
-    if(crew){
+    // "Pagos por confirmar" no es una lista de gente: se presta su tarjeta y
+    // se esconden las otras cuatro.
+    const pagos = mgrHoursView === 'porconfirmar';
+    const tarjetaPagos = $('#mgrMorePay'), slot = $('#pagosSlot');
+    if(pagos){
+      [team, person, cTeam, cPerson].forEach(c => { if(c) c.hidden = true; });
+      if(tarjetaPagos && slot){
+        prestarTarjeta(tarjetaPagos, slot);
+        // Ese boton lleva a esta misma pantalla: aqui no tiene a donde ir.
+        const ir = $('#mgrGoPayments'); if(ir) ir.hidden = true;
+      }
+    } else if(tarjetaPagos && CASAS.has(tarjetaPagos)){
+      devolverTarjeta(tarjetaPagos);
+      const ir = $('#mgrGoPayments'); if(ir) ir.hidden = false;
+    }
+    const crew = !pagos && mgrHoursView === 'crew';
+    if(pagos){ /* ya se escondieron arriba */ }
+    else if(crew){
       if(cTeam)   cTeam.hidden = true;
       if(cPerson) cPerson.hidden = true;
       // Coming back with nobody drilled into means the list, not a blank gap.
@@ -7688,9 +7712,11 @@ body.fija main{
     // Gente nueva siempre entra por Temporales: nace sin codigo.
     if(addBox) addBox.hidden = conCodigo;
     const a = $('#mgrHoursSegCrew'), b = $('#mgrHoursSegWorkers'), c = $('#mgrHoursSegCasual');
+    const d = $('#mgrHoursSegPay');
     if(a) a.classList.toggle('on', crew);
     if(b) b.classList.toggle('on', mgrHoursView === 'trabajadores');
     if(c) c.classList.toggle('on', mgrHoursView === 'temporales');
+    if(d) d.classList.toggle('on', pagos);
   }
   function setMgrHoursView(v){
     // Cambiar de lista con una ficha abierta dejaba en pantalla a la persona
@@ -7700,7 +7726,8 @@ body.fija main{
     // 'casual' es el nombre viejo de esta vista: sigue valiendo y cae en Temporales.
     mgrHoursView = (v === 'casual') ? 'temporales' : v;
     applyMgrHoursView();
-    if(mgrHoursView === 'crew'){ if(typeof loadTeamEntries === 'function') loadTeamEntries(); }
+    if(mgrHoursView === 'porconfirmar'){ if(typeof loadPaymentAlerts === 'function') loadPaymentAlerts(); }
+    else if(mgrHoursView === 'crew'){ if(typeof loadTeamEntries === 'function') loadTeamEntries(); }
     else { if(typeof loadCasualTeam === 'function') loadCasualTeam(); }
     const anchor = $('#mgrHoursTools');
     if(anchor) anchor.scrollIntoView({block:'start'});
@@ -7708,6 +7735,7 @@ body.fija main{
   if($('#mgrHoursSegCrew'))    $('#mgrHoursSegCrew').addEventListener('click',    ()=> setMgrHoursView('crew'));
   if($('#mgrHoursSegWorkers')) $('#mgrHoursSegWorkers').addEventListener('click', ()=> setMgrHoursView('trabajadores'));
   if($('#mgrHoursSegCasual'))  $('#mgrHoursSegCasual').addEventListener('click',  ()=> setMgrHoursView('temporales'));
+  if($('#mgrHoursSegPay'))     $('#mgrHoursSegPay').addEventListener('click',     ()=> setMgrHoursView('porconfirmar'));
 
   // El buscador es lo unico que se despliega aqui, y se abre pegado a su
   // pastilla. Precios y Codigos son ventanas propias: un cajon que se abria
@@ -11169,7 +11197,7 @@ body.fija main{
   // puerta. Las tres llegan a la MISMA pantalla con su vista ya escogida, por
   // una sola funcion - antes esto estaba copiado en dos botones distintos.
   function abrirPagos(vista, volverA){
-    showTab('reloj'); pushBack(volverA || 'mgrpagos');
+    showTab('reloj'); pushBack(volverA || 'manager');
     const pc = $('#personCard'); if(pc) pc.hidden = true;   // y cierra la ficha que quedara abierta
     mgrHoursView = vista;
     applyMgrHoursView();
@@ -11179,9 +11207,9 @@ body.fija main{
       if(c) c.scrollIntoView({block:'start'});
     }, 250);
   }
-  if($('#mgrGoHours'))   $('#mgrGoHours').addEventListener('click',   ()=> abrirPagos('crew'));
-  if($('#mgrGoWorkers')) $('#mgrGoWorkers').addEventListener('click', ()=> abrirPagos('trabajadores'));
-  if($('#mgrGoCasual'))  $('#mgrGoCasual').addEventListener('click',  ()=> abrirPagos('temporales'));
+  // (Los azulejos Crew / Trabajadores / Temporales se fueron: ahora son las
+  // pastillas de arriba de la propia pantalla. abrirPagos se queda porque la
+  // usan el azulejo del hub y el boton "Abrir horas y pagos".)
   $('#mgrGoLogs').addEventListener('click', ()=>{
     // El hub abre la lista de RESTAURACION. Un borrador AMG sin mandar queda
     // escondido (el inbox tapa las cards), NO se borra.
@@ -11209,7 +11237,6 @@ body.fija main{
     mgrMoreShow(seccion);
   }
   if($('#mgrGoRates'))    $('#mgrGoRates').addEventListener('click',    ()=> abrirMgrMore('rates', 'mgrrest'));
-  if($('#mgrGoPay'))      $('#mgrGoPay').addEventListener('click',      ()=> abrirMgrMore('pay',   'mgrpagos'));
   if($('#mgrGoCrewList')) $('#mgrGoCrewList').addEventListener('click', ()=> abrirMgrMore('crew',  'mgrrest'));
   if($('#mgrGoCodes'))    $('#mgrGoCodes').addEventListener('click',    ()=>{ showTab('mgrcodes'); pushBack('mgrrest'); });
   // Straight to the app check from the Manager menu - he uses this every
@@ -30395,7 +30422,9 @@ body.fija main{
   // LAS TRES CARPETAS DEL MANAGER (8 oct 2026). Cada una abre su indice de
   // azulejos; Atras regresa al hub.
   if($('#mgrGoRest'))  $('#mgrGoRest').addEventListener('click',  ()=>{ showTab('mgrrest');  pushBack('manager'); });
-  if($('#mgrGoPagos')) $('#mgrGoPagos').addEventListener('click', ()=>{ showTab('mgrpagos'); pushBack('manager'); });
+  // Pagos no es una carpeta de azulejos: entra DERECHO a la pantalla
+  // (8 oct 2026, pedido suyo). Las cuatro pastillas de arriba son el indice.
+  if($('#mgrGoPagos')) $('#mgrGoPagos').addEventListener('click', ()=> abrirPagos('crew', 'manager'));
   if($('#mgrGoAmg'))   $('#mgrGoAmg').addEventListener('click',   ()=>{
     showTab('amgmoving'); pushBack('manager');
     if(typeof amgShow === 'function') amgShow(null);   // el indice de AMG, no la ultima seccion abierta
