@@ -4151,7 +4151,6 @@ body.fija main{
     <section class="card mgr-only" id="personCard" hidden>
       <div class="inboxhead" style="margin-bottom:2px;">
         <h2 style="margin:0;" id="personName">&nbsp;</h2>
-        <button type="button" class="btn btn-outline" id="personBack">&#9664; Todos</button>
       </div>
       <button type="button" class="btn btn-outline" id="personSettingsToggle" style="width:100%; margin-top:8px;">Editar &middot; nombre y tarifa</button>
       <div id="personSettings" hidden>
@@ -4250,7 +4249,6 @@ body.fija main{
     <section class="card mgr-only" id="casualPersonCard" hidden>
       <div class="inboxhead" style="margin-bottom:2px;">
         <h2 style="margin:0;" id="casualPersonName">&nbsp;</h2>
-        <button type="button" class="btn btn-outline" id="casualPersonBack">&#9664; Todos</button>
       </div>
       <button type="button" class="btn btn-outline" id="casualPersonSettingsToggle" style="width:100%; margin-top:8px;">Tarifa / PIN</button>
       <div id="casualPersonSettings" hidden>
@@ -4487,7 +4485,6 @@ body.fija main{
     <section class="card" id="mpPersona" hidden>
       <div class="inboxhead" style="margin-bottom:2px;">
         <h2 style="margin:0;" id="mpPersonaNombre">&nbsp;</h2>
-        <button type="button" class="btn btn-outline" id="mpPersonaAtras">&#9664; Todos</button>
       </div>
       <div class="seg">
         <button type="button" id="mpSegPlanos" class="on">Planos</button>
@@ -6401,6 +6398,31 @@ body.fija main{
     amgmoving: {
       hay:   () => !!amgSeg,
       atras: () => { amgShow(null); }
+    },
+    // HORAS: una ficha de persona abierta es un nivel adentro (8 oct 2026).
+    // "si entro con alguien me dice Menu... tiene que ir atras, atras. Y
+    // elimina ese Todos de arriba." Ahora el boton de abajo cierra la ficha
+    // y deja la lista; el segundo toque ya sale de la pantalla.
+    reloj: {
+      hay: () => {
+        const a = document.getElementById('personCard'), b = document.getElementById('casualPersonCard');
+        return !!((a && !a.hidden) || (b && !b.hidden));
+      },
+      atras: () => {
+        const a = document.getElementById('personCard');
+        if(a && !a.hidden){ renderTeamList(); }
+        else if(typeof cerrarFichaTemporal === 'function'){ cerrarFichaTemporal(); }
+        window.scrollTo(0, 0);
+      }
+    },
+    // Planos y medidas tiene DOS niveles: un plano abierto, y antes de eso la
+    // persona. Se cierran de a uno, en ese orden.
+    mgrplanos: {
+      hay: () => !!(typeof mpAbierto !== 'undefined' && mpAbierto) || !!(typeof mpPersona !== 'undefined' && mpPersona),
+      atras: () => {
+        if(typeof mpAbierto !== 'undefined' && mpAbierto){ mpAbierto = null; mpPintarPersona(); mpMostrar('persona'); }
+        else if(typeof mpCerrarPersona === 'function'){ mpCerrarPersona(); }
+      }
     }
   };
   // El rótulo dice la verdad de dónde está parado: Atrás si hay algo que
@@ -6468,6 +6490,9 @@ body.fija main{
       // Y la barra fija OTRA VEZ: showTab la decidio cuando la pila todavia
       // no decia de donde venia, asi que body.mgr podia estar apagado.
       if(typeof sincronizarBarraFija === 'function') sincronizarBarraFija(cur.dataset.tab);
+      // Y el rotulo del boton de abajo: showTab lo pinto cuando la pila
+      // todavia estaba vacia, asi que decia "Menu" en vez del sitio real.
+      if(typeof pintarSalidas === 'function') pintarSalidas();
     }
     updateNavButtons();
   }
@@ -7657,7 +7682,7 @@ body.fija main{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-08-N';
+  const APP_BUILD = '2026-10-08-O';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -11178,7 +11203,7 @@ body.fija main{
     mpCargar();
   });
   $('#mpGenteRows').addEventListener('click', e => { const r = e.target.closest('[data-mp]'); if(r) mpAbrirPersona(r.dataset.mp); });
-  $('#mpPersonaAtras').addEventListener('click', () => { mpPersona = null; mpPintarGente(); mpMostrar('gente'); });
+  function mpCerrarPersona(){ mpPersona = null; mpPintarGente(); mpMostrar('gente'); }
   $('#mpVerAtras').addEventListener('click', () => { mpAbierto = null; mpPintarPersona(); mpMostrar('persona'); });
   $('#mpSegPlanos').addEventListener('click', () => { mpVista = 'planos'; mpPintarPersona(); });
   $('#mpSegMedidas').addEventListener('click', () => { mpVista = 'medidas'; mpPintarPersona(); });
@@ -11706,6 +11731,7 @@ body.fija main{
     casualPaidView = false;
     $('#casualTeamCard').hidden = true;
     $('#casualPersonCard').hidden = false;
+    if(typeof pintarSalidas === 'function') pintarSalidas();
     const w = casualWorkers.find(w => w.id === id);
     $('#casualPersonName').textContent = w ? w.name : '';
     $('#casualPersonRate').value = (w && w.rate != null) ? w.rate : '';
@@ -11731,11 +11757,12 @@ body.fija main{
   $('#casualPersonSettingsToggle').addEventListener('click', ()=>{
     $('#casualPersonSettings').hidden = !$('#casualPersonSettings').hidden;
   });
-  $('#casualPersonBack').addEventListener('click', ()=>{
+  function cerrarFichaTemporal(){
     $('#casualPersonCard').hidden = true; $('#casualTeamCard').hidden = false;
     loadCasualTeam();
+    if(typeof pintarSalidas === 'function') pintarSalidas();
     $('#casualTeamCard').scrollIntoView({ block:'start' });
-  });
+  }
 
   if($('#casualPersonRateMgSave')) $('#casualPersonRateMgSave').addEventListener('click', async ()=>{
     const val = parseFloat($('#casualPersonRateMg').value);
@@ -12998,7 +13025,8 @@ body.fija main{
     const row = e.target.closest('.personrow'); if(!row) return;
     openPerson(row.dataset.person);
   });
-  $('#personBack').addEventListener('click', renderTeamList);
+  // (El "Todos" de arriba se fue el 8 oct 2026: la salida vive al pie, y el
+  //  boton de abajo dice "Atras" cuando hay una ficha abierta.)
   $('#teamSegUnpaid').addEventListener('click', ()=>{
     teamPaidView = false;
     $('#teamSegUnpaid').classList.add('on'); $('#teamSegPaid').classList.remove('on');
@@ -32203,6 +32231,7 @@ body.fija main{
   function renderTeamList(){
     const box = $('#teamEntries'); if(!box) return;
     $('#personCard').hidden = true; $('#teamCard').hidden = false;
+    if(typeof pintarSalidas === 'function') pintarSalidas();   // el boton de abajo vuelve a decir a donde sale
     const list = teamPaidView ? null : teamSinPagar(teamRows, TEAM_GIVEN, TEAM_PROFILES, teamHidden());
     const owed = teamPaidView ? teamRows.filter(r => !!r.paid_at) : null;
     if(teamPaidView ? !owed.length : !list.length){
@@ -32268,6 +32297,7 @@ body.fija main{
     personKey = key; personPaidView = teamPaidView;   // open on the side you were looking at
     personOpenPayGroups.clear();
     $('#teamCard').hidden = true; $('#personCard').hidden = false;
+    if(typeof pintarSalidas === 'function') pintarSalidas();   // el boton de abajo pasa a decir "Atras"
     $('#segUnpaid').classList.toggle('on', !personPaidView);
     $('#segPaid').classList.toggle('on', personPaidView);
     $('#mergeBox').hidden = true;
