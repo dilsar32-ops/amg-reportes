@@ -2464,6 +2464,22 @@ body.fija main{
                 letter-spacing:.08em;}
 .codeedit .row2{grid-template-columns:1fr 1fr;}
 .codeedit .btn{width:auto;}
+
+/* LA SALIDA AL PIE DENTRO DEL CANDADO (8 oct 2026). Su foto: "por que en esta
+   carpeta no hay opcion para ir hacia atras?" -- la barra se le perdia al
+   deslizar hasta el final de la lista de pagos. .action-bar nace
+   position:fixed; bottom:0, y un fixed dentro de un body que TAMBIEN es fixed
+   (body.fija) es exactamente lo que ya fallo dos veces en ese telefono con
+   las pastillas. Aqui deja de ser fixed: pasa a ser el ultimo renglon de la
+   columna del candado, que no se puede perder porque lo coloca el flex.
+   Va al final de la hoja: .action-bar esta definida varias veces mas arriba. */
+body.fija #barraPie{ flex:0 0 auto; }
+body.fija #barraPie .action-bar{
+  position:static; left:auto; right:auto; bottom:auto; z-index:auto;
+}
+/* Con la barra YA en la columna, el hueco que main reservaba para un boton
+   flotante sobra y dejaba un vacio grande debajo de la ultima fila. */
+body.fija main{ padding-bottom:14px; }
 </style>
 </head>
 <body>
@@ -4183,8 +4199,23 @@ body.fija main{
         <button type="button" class="minibtn on" id="mgrHoursSegCrew"><svg class="ico"><use href="#i-users"/></svg>Crew</button>
         <button type="button" class="minibtn" id="mgrHoursSegWorkers"><svg class="ico"><use href="#i-id"/></svg>Trabajadores</button>
         <button type="button" class="minibtn" id="mgrHoursSegCasual"><svg class="ico"><use href="#i-clock"/></svg>Temporales</button>
+        <!-- 8 oct 2026: "pagos por confirmar muevelos a la seccion de pagos".
+             Estuvo aqui en la manana, se fue a Ajustes con su libreta, y al
+             verlo en los dos sitios decidio que su casa es esta. UNA sola. -->
+        <button type="button" class="minibtn" id="mgrHoursSegPay"><svg class="ico"><use href="#i-card"/></svg>Pagos por confirmar</button>
       </div>
     </div>
+
+    <section class="card" id="mgrMorePay" hidden>
+      <h2>Pagos por confirmar</h2>
+      <p class="clockhint" id="mgrPaymentsHint">Pagos esperando respuesta o rechazados</p>
+      <div id="mgrPayList"></div>
+      <div class="mgrtools" id="autoOkTools" style="margin-top:12px;">
+        <button type="button" class="minibtn" id="autoOkToggle"><svg class="ico"><use href="#i-hourglass"/></svg>Aprobar solo</button>
+      </div>
+      <p class="clockhint" id="autoOkHint"></p>
+      <button type="button" class="btn btn-ink btn-block" id="mgrGoPayments" style="margin-top:10px;">Abrir horas y pagos</button>
+    </section>
     <section class="card mgr-only" id="teamCard">
       <div class="seg">
         <button type="button" id="teamSegUnpaid" class="on">Sin pagar</button>
@@ -4467,17 +4498,6 @@ body.fija main{
       </div>
     </section>
 
-    <section class="card" id="mgrMorePay" hidden>
-      <h2>Pagos por confirmar</h2>
-      <p class="clockhint" id="mgrPaymentsHint">Pagos esperando respuesta o rechazados</p>
-      <div id="mgrPayList"></div>
-      <div class="mgrtools" id="autoOkTools" style="margin-top:12px;">
-        <button type="button" class="minibtn" id="autoOkToggle"><svg class="ico"><use href="#i-hourglass"/></svg>Aprobar solo</button>
-      </div>
-      <p class="clockhint" id="autoOkHint"></p>
-      <button type="button" class="btn btn-ink btn-block" id="mgrGoPayments" style="margin-top:10px;">Abrir horas y pagos</button>
-    </section>
-
   </section>
 
   <!-- ===================== AJUSTES (dentro de Restoration Doctor) =====
@@ -4491,9 +4511,6 @@ body.fija main{
         <button type="button" class="menubtn" id="mgrGoRates">
           <b><svg class="ico"><use href="#i-money"/></svg>Precio al cliente</b>
           <small>Lo que se le cobra por hora y el after hours</small></button>
-        <button type="button" class="menubtn" id="mgrGoPay">
-          <b><svg class="ico"><use href="#i-card"/></svg>Pagos por confirmar</b>
-          <small id="mgrPayHint">Lo que falta que contesten</small></button>
         <button type="button" class="menubtn" id="mgrGoCodes">
           <b><svg class="ico"><use href="#i-key"/></svg>C&oacute;digos</b>
           <small>Los de la empresa y el de cada quien &middot; qui&eacute;n entra al equipo</small></button>
@@ -4986,6 +5003,14 @@ body.fija main{
   </section>
 
 </main>
+<!-- La salida al pie, cuando el candado esta puesto. .action-bar nace
+     position:fixed, y en SU telefono un fixed dentro de un body que tambien
+     es fixed ya fallo: la barra desaparecia al deslizar hasta el final
+     (8 oct 2026, su foto: "por que en esta carpeta no hay opcion para ir
+     hacia atras?"). Es el mismo tropiezo que sticky y fixed dieron con las
+     pastillas. Aqui la barra deja de ser fixed y pasa a ser un renglon mas
+     de la columna del candado, que es lo unico que ha aguantado. -->
+<div id="barraPie" hidden></div>
 
 <!-- The occasional worker's entire app - hours only, nothing else. Sits
      outside <main> on purpose so it's never touched by tab-switching logic
@@ -5327,6 +5352,7 @@ body.fija main{
     barraFijaCasa = null;
     const caja = $('#barraFija'); if(caja) caja.hidden = true;
     document.body.classList.remove('fija');
+    devolverPie();
   }
   function fijarBarra(el){
     const caja = $('#barraFija');
@@ -5337,26 +5363,45 @@ body.fija main{
     caja.appendChild(el);
     caja.hidden = false;
     document.body.classList.add('fija');
+    prestarPie();
+  }
+  // LA SALIDA AL PIE, DENTRO DEL CANDADO (8 oct 2026, su foto: "por que en
+  // esta carpeta no hay opcion para ir hacia atras?"). La barra nace
+  // position:fixed, y un fixed dentro de un body que TAMBIEN es fixed se le
+  // perdia al deslizar hasta el final -- el mismo tropiezo de sticky y fixed
+  // con las pastillas, que es justo por lo que existe este candado. Prestada
+  // aqui deja de ser fixed: es un renglon mas de la columna, y no se puede ir.
+  let barraPieCasa = null;
+  function prestarPie(){
+    const caja = $('#barraPie'); if(!caja) return;
+    const panel = document.querySelector('.tab-panel.active');
+    const bar = panel && panel.querySelector(':scope > .action-bar');
+    if(!bar){ devolverPie(); return; }
+    if(barraPieCasa && barraPieCasa.el === bar) return;
+    devolverPie();
+    barraPieCasa = { el: bar, padre: bar.parentNode, siguiente: bar.nextElementSibling };
+    // pintarSalidas busca el panel con closest(): fuera de el hay que decirle
+    // de quien es, o deja de saber a donde regresa.
+    bar.dataset.deTab = panel.dataset.tab || '';
+    caja.appendChild(bar);
+    caja.hidden = false;
+  }
+  function devolverPie(){
+    if(!barraPieCasa) return;
+    const { el, padre, siguiente } = barraPieCasa;
+    delete el.dataset.deTab;
+    if(padre) padre.insertBefore(el, (siguiente && siguiente.parentNode === padre) ? siguiente : null);
+    barraPieCasa = null;
+    const caja = $('#barraPie'); if(caja) caja.hidden = true;
   }
   // Por ahora solo las pastillas de Crew / Trabajadores / Temporales, que es
   // donde la lista es larga y se perdia el cambiador. Si hace falta en otra
   // pantalla, se agrega aqui y nada mas.
-  // PRESTAR UNA TARJETA A OTRA PANTALLA. Mismo trato que la barra fija y que
-  // las tarjetas de Finanzas: no se duplica nada, se MUEVE y se devuelve.
-  const CASAS = new Map();
-  function devolverTarjeta(el){
-    const casa = CASAS.get(el);
-    if(!casa) return;
-    casa.padre.insertBefore(el, (casa.siguiente && casa.siguiente.parentNode === casa.padre) ? casa.siguiente : null);
-    el.hidden = true;
-    CASAS.delete(el);
-  }
-  function prestarTarjeta(el, slot){
-    if(!el || !slot) return;
-    if(!CASAS.has(el)) CASAS.set(el, { padre: el.parentNode, siguiente: el.nextElementSibling });
-    slot.appendChild(el);
-    el.hidden = false;
-  }
+  // (Aqui vivio prestarTarjeta/devolverTarjeta: le prestaban la tarjeta de
+  //  Pagos por confirmar a la pantalla de Horas. El 8 oct 2026 la tarjeta se
+  //  MUDO ahi de verdad -- "muevelos a la seccion de pagos" -- asi que ya no
+  //  hay nada que prestar. El mismo trato de mover-y-devolver sigue vivo en
+  //  fijarBarra/prestarPie, que es donde de verdad hace falta.)
 
   function sincronizarBarraFija(name){
     const tools = $('#mgrHoursTools');
@@ -5384,6 +5429,7 @@ body.fija main{
     const mgr = document.body.classList.contains('mgr');
     if(tab === 'reloj'){
       if(!mgr) return loadMyEntries;
+      if(mgrHoursView === 'porconfirmar') return (typeof renderMgrPayList === 'function') ? renderMgrPayList : null;
       if(mgrHoursView === 'crew') return loadTeamEntries;
       return loadCasualTeam;
     }
@@ -5392,10 +5438,7 @@ body.fija main{
     // mgrmore ensena UNA de tres secciones; halar recarga LA QUE ESTA ABIERTA.
     // Antes recargaba siempre la lista de gente, asi que halando en "Pagos por
     // confirmar" no llegaba nada nuevo y el gesto parecia muerto.
-    if(tab === 'mgrmore'){
-      if(mgrMoreSeccion === 'pay' && typeof renderMgrPayList === 'function') return renderMgrPayList;
-      return (typeof paintMgPrices === 'function') ? paintMgPrices : null;
-    }
+    if(tab === 'mgrmore') return (typeof paintMgPrices === 'function') ? paintMgPrices : null;
     // La lista de la gente se mudo aqui con sus codigos (8 oct 2026).
     if(tab === 'mgrcodes') return (typeof loadCrewList === 'function') ? loadCrewList : null;
     if(tab === 'manager') return refreshManagerHub;
@@ -6508,7 +6551,8 @@ body.fija main{
   function pintarSalidas(){
     document.querySelectorAll('.action-bar.bar-salida [data-al-menu]').forEach(b => {
       const panel = b.closest('.tab-panel');
-      const tab = panel && panel.dataset.tab;
+      // prestada al pie ya no esta dentro de su panel: lleva su tab escrito.
+      const tab = (panel && panel.dataset.tab) || b.closest('.action-bar').dataset.deTab || '';
       const n = tab && NIVELES_ADENTRO[tab];
       const dentro = !!(n && n.hay());
       const barra = b.closest('.action-bar');
@@ -6534,7 +6578,7 @@ body.fija main{
     const b = e.target.closest('.bar-salida [data-al-menu]');
     if(!b) return;
     const panel = b.closest('.tab-panel');
-    const tab = panel && panel.dataset.tab;
+    const tab = (panel && panel.dataset.tab) || b.closest('.action-bar').dataset.deTab || '';
     const n = tab && NIVELES_ADENTRO[tab];
     if(n && n.hay()){ n.atras(); pintarSalidas(); return; }
     goBack();
@@ -7766,7 +7810,7 @@ body.fija main{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-08-S';
+  const APP_BUILD = '2026-10-08-T';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -7902,9 +7946,26 @@ body.fija main{
     const team   = $('#teamCard'),        person = $('#personCard');
     const cTeam  = $('#casualTeamCard'),  cPerson = $('#casualPersonCard');
     if(!team || !cTeam) return;
-    // (La pastilla "Pagos por confirmar" vivio aqui unas horas el 8 oct 2026.
-    //  Se fue a Ajustes, con su hoja: "para que no se repita eso en otros
-    //  lugares". La tarjeta vuelve a vivir solo en su propia pantalla.)
+    // "Pagos por confirmar" vive AQUI (8 oct 2026, su ultima palabra sobre
+    // esto: "muevelos a la seccion de pagos"). Es una cuarta vista, no una
+    // tarjeta mas apilada: con las otras tres debajo la pantalla se hacia
+    // larguisima y el ya habia pedido encogerla.
+    const pagos = mgrHoursView === 'porconfirmar';
+    const cardPagos = $('#mgrMorePay');
+    if(cardPagos) cardPagos.hidden = !pagos;
+    if(pagos){
+      team.hidden = true; cTeam.hidden = true;
+      if(person) person.hidden = true;
+      if(cPerson) cPerson.hidden = true;
+      // "Abrir horas y pagos" llevaria a esta misma pantalla.
+      const ir = $('#mgrGoPayments'); if(ir) ir.hidden = true;
+      const d = $('#mgrHoursSegPay'); if(d) d.classList.add('on');
+      ['#mgrHoursSegCrew','#mgrHoursSegWorkers','#mgrHoursSegCasual']
+        .forEach(sel => { const b = $(sel); if(b) b.classList.remove('on'); });
+      return;
+    }
+    const ir = $('#mgrGoPayments'); if(ir) ir.hidden = false;
+    const dp = $('#mgrHoursSegPay'); if(dp) dp.classList.remove('on');
     const crew = mgrHoursView === 'crew';
     if(crew){
       if(cTeam)   cTeam.hidden = true;
@@ -7939,7 +8000,8 @@ body.fija main{
     // 'casual' es el nombre viejo de esta vista: sigue valiendo y cae en Temporales.
     mgrHoursView = (v === 'casual') ? 'temporales' : v;
     applyMgrHoursView();
-    if(mgrHoursView === 'crew'){ if(typeof loadTeamEntries === 'function') loadTeamEntries(); }
+    if(mgrHoursView === 'porconfirmar'){ if(typeof renderMgrPayList === 'function') renderMgrPayList(); }
+    else if(mgrHoursView === 'crew'){ if(typeof loadTeamEntries === 'function') loadTeamEntries(); }
     else { if(typeof loadCasualTeam === 'function') loadCasualTeam(); }
     const anchor = $('#mgrHoursTools');
     if(anchor) anchor.scrollIntoView({block:'start'});
@@ -7947,6 +8009,7 @@ body.fija main{
   if($('#mgrHoursSegCrew'))    $('#mgrHoursSegCrew').addEventListener('click',    ()=> setMgrHoursView('crew'));
   if($('#mgrHoursSegWorkers')) $('#mgrHoursSegWorkers').addEventListener('click', ()=> setMgrHoursView('trabajadores'));
   if($('#mgrHoursSegCasual'))  $('#mgrHoursSegCasual').addEventListener('click',  ()=> setMgrHoursView('temporales'));
+  if($('#mgrHoursSegPay'))     $('#mgrHoursSegPay').addEventListener('click',     ()=> setMgrHoursView('porconfirmar'));
 
   // El buscador es lo unico que se despliega aqui, y se abre pegado a su
   // pastilla. Precios y Codigos son ventanas propias: un cajon que se abria
@@ -10916,13 +10979,13 @@ body.fija main{
   if($('#amgSegCal')) $('#amgSegCal').addEventListener('click', ()=> amgShow('cal'));
 
   function mgrMoreShow(which){
-    const map = [['rates','#mgrMoreRates'], ['pay','#mgrMorePay']];
+    const map = [['rates','#mgrMoreRates']];
     map.forEach(([key, cardSel]) => {
       const card = $(cardSel);
       if(card) card.hidden = key !== which;
     });
     // El nombre de la pantalla sigue a la seccion abierta (ver nombreDeSeccion).
-    const NOMBRES = { rates:'Precio al cliente', pay:'Pagos por confirmar' };
+    const NOMBRES = { rates:'Precio al cliente' };
     mgrMoreNombre = NOMBRES[which] || '';
     mgrMoreSeccion = which;
     const panelAct = document.querySelector('.tab-panel.active');
@@ -10931,7 +10994,6 @@ body.fija main{
       if(typeof sincronizarBarraFija === 'function') sincronizarBarraFija('mgrmore');
     }
     pintarSalidas(); updateNavButtons();
-    if(which === 'pay'  && typeof renderMgrPayList === 'function') renderMgrPayList();
     if(which === 'rates'&& typeof paintMgPrices === 'function') paintMgPrices();
     window.scrollTo(0, 0);
   }
@@ -11448,7 +11510,6 @@ body.fija main{
   }
   if($('#mgrGoSettings')) $('#mgrGoSettings').addEventListener('click', ()=>{ showTab('mgrsettings'); pushBack('mgrrest'); });
   if($('#mgrGoRates'))    $('#mgrGoRates').addEventListener('click',    ()=> abrirMgrMore('rates', 'mgrsettings'));
-  if($('#mgrGoPay'))      $('#mgrGoPay').addEventListener('click',      ()=> abrirMgrMore('pay',   'mgrsettings'));
   if($('#mgrGoCodes'))    $('#mgrGoCodes').addEventListener('click',    ()=>{ showTab('mgrcodes'); pushBack('mgrsettings'); });
   // Straight to the app check from the Manager menu - he uses this every
   // time I send a change, so it should not be two taps deep.
