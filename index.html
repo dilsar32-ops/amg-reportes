@@ -4456,8 +4456,6 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
       <h2>Mis gastos</h2>
       <p class="clockhint">Pendiente = todavía no se le ha devuelto. Se marca desde Manager.</p>
       <div id="finMyGastos"><p class="clockhint">Nada todavía.</p></div>
-      <h2 style="margin-top:16px;">Dinero de clientes que recibí</h2>
-      <div id="finMyPagos"><p class="clockhint">Nada todavía.</p></div>
     </section>
   </section>
 
@@ -7253,7 +7251,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-08-B';
+  const APP_BUILD = '2026-10-08-C';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -35623,26 +35621,22 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   }
   const FIN_SIN_LEER = '<p class="clockhint" style="color:var(--danger);">No se pudo leer. Esto <b>no</b> quiere decir que no haya nada guardado - revise su señal y vuelva a entrar.</p>';
   const FIN_NADA = '<p class="clockhint">Nada todavía.</p>';
+  // SOLO GASTOS (8 oct 2026). Aqui tambien salia "Dinero de clientes que
+  // recibi" y Amilcar lo quito: esta pantalla es para que el lider anote lo
+  // que gasto, nada mas. El dinero de clientes vive en la pantalla del
+  // manager (AMG Moving -> Finanzas), que lo sigue leyendo completo.
   async function loadFinMine(){
-    const g = $('#finMyGastos'), p = $('#finMyPagos');
-    if(!cloudOn() || !signedIn()){
-      if(g) g.innerHTML = FIN_SIN_LEER; if(p) p.innerHTML = FIN_SIN_LEER;
-      return;
-    }
+    const g = $('#finMyGastos');
+    if(!g) return;
+    if(!cloudOn() || !signedIn()){ g.innerHTML = FIN_SIN_LEER; return; }
     try{
-      const [a, b] = await Promise.all([
-        authFetch('/rest/v1/expenses?select=*&order=spent_on.desc,created_at.desc&limit=200', { headers: cloudHeaders() }),
-        authFetch('/rest/v1/client_payments?select=*&order=paid_on.desc,created_at.desc&limit=200', { headers: cloudHeaders() })
-      ]);
-      // Un 401 o un 500 NO es "no hay nada": antes se convertian los dos en
-      // lista vacia y la pantalla decia "Nada todavia".
-      const ex = a.ok ? await a.json() : null, pa = b.ok ? await b.json() : null;
-      if(g) g.innerHTML = !ex ? FIN_SIN_LEER
+      const a = await authFetch('/rest/v1/expenses?select=*&order=spent_on.desc,created_at.desc&limit=200', { headers: cloudHeaders() });
+      // Un 401 o un 500 NO es "no hay nada": antes se convertia en lista
+      // vacia y la pantalla decia "Nada todavia".
+      const ex = a.ok ? await a.json() : null;
+      g.innerHTML = !ex ? FIN_SIN_LEER
         : (ex.length ? ex.map(r => gastoRowHtml(r, false)).join('') + '<div class="paysum" style="margin-top:8px;"><div class="line"><span>Pendiente de devolver</span><span>' + finMoney(ex.filter(r => !r.reimbursed_at && r.paid_by_kind !== 'e').reduce((s, r) => s + (+r.amount||0), 0)) + '</span></div></div>' : FIN_NADA);
-      if(p) p.innerHTML = !pa ? FIN_SIN_LEER : (pa.length ? pa.map(r => pagoRowHtml(r, false)).join('') : FIN_NADA);
-    }catch(e){
-      if(g) g.innerHTML = FIN_SIN_LEER; if(p) p.innerHTML = FIN_SIN_LEER;
-    }
+    }catch(e){ g.innerHTML = FIN_SIN_LEER; }
   }
   async function finPatch(table, id, body){
     const res = await authFetch('/rest/v1/' + table + '?id=eq.' + encodeURIComponent(id), { method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal'}), body: JSON.stringify(body) });
