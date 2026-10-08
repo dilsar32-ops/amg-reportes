@@ -2339,6 +2339,38 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
 #mgrRestPanel .card h2{border-bottom-color:var(--accent);}
 #mgrPagosPanel .card h2{border-bottom-color:var(--gris-2);}
 #amgMovingPanel .card h2{border-bottom-color:var(--amg);}
+
+/* ===== UNA BARRA QUE NO SE MUEVE (8 oct 2026) =====
+   Su pedido, con foto de Pagos -> Trabajadores: "esta area no deberia de
+   moverse cuando le hago scroll para arriba o para abajo, debe quedar fija".
+   NO se usa sticky ni fixed: los dos se probaron en 2026 y en SU telefono las
+   pastillas se pintaban encima del encabezado al arrastrar con inercia (esta
+   contado completo arriba de body.menu). Lo que si funciona, y es lo mismo
+   que hace el menu principal: el body MIDE la pantalla, el encabezado y la
+   barra se quedan quietos en el flujo, y la lista corre dentro de SU caja. */
+body.fija{
+  position:fixed; inset:0;
+  overflow:hidden;
+  display:flex; flex-direction:column;
+  padding-top:0; padding-bottom:0;
+}
+body.fija header.top{position:relative; flex:0 0 auto;}
+body.fija #barraFija{
+  flex:0 0 auto; background:var(--paper);
+  border-bottom:1px solid var(--line); padding:8px 14px 10px;
+}
+body.fija #barraFija .mgrtools{margin:0;}
+body.fija main{
+  flex:1 1 auto; min-height:0;
+  overflow-y:auto; -webkit-overflow-scrolling:touch;
+  /* el boton de abajo es position:fixed: sin esto la ultima fila queda debajo */
+  padding-bottom:84px;
+}
+#barraFija[hidden]{display:none !important;}
+/* Si lo que se presto quedara escondido, que no se vea una franja vacia con
+   su rayita. (Si el telefono no entiende :has, lo unico que pasa es que la
+   franja se ve: inofensivo.) */
+#barraFija:not(:has(> *:not([hidden]))){display:none;}
 </style>
 </head>
 <body>
@@ -2510,6 +2542,13 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
            ese aviso es de dinero. -->
       <span id="mgrState" style="font-size:12px;opacity:.75;"></span><span id="outboxState" style="font-size:12px;opacity:.75;margin-left:auto;"></span></div>
 </header>
+
+<!-- LO QUE NO SE MUEVE AL HACER SCROLL (8 oct 2026). Vive FUERA de <main>
+     a proposito: ahi no existe "arriba del encabezado", asi que la lista no
+     tiene por donde pintarse encima. Ver el comentario largo de body.menu:
+     sticky y fixed se probaron los dos y en SU telefono las pastillas le
+     pasaban por encima al arrastrar con inercia. -->
+<div id="barraFija" hidden></div>
 
 <main>
   <div class="amgbanner" id="sideBanner" hidden>
@@ -5177,6 +5216,38 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     });
   }
 
+  // LA BARRA QUE NO SE MUEVE. Presta un elemento a #barraFija (que vive FUERA
+  // de <main>) y lo devuelve a su sitio al salir. Es el mismo trato que ya se
+  // usa con las tarjetas de Finanzas: nada se duplica, se MUEVE y se regresa,
+  // asi que sigue siendo el mismo boton con la misma mano que lo atiende.
+  let barraFijaCasa = null;     // {el, padre, siguiente}
+  function soltarBarraFija(){
+    if(!barraFijaCasa) return;
+    const { el, padre, siguiente } = barraFijaCasa;
+    if(padre) padre.insertBefore(el, (siguiente && siguiente.parentNode === padre) ? siguiente : null);
+    barraFijaCasa = null;
+    const caja = $('#barraFija'); if(caja) caja.hidden = true;
+    document.body.classList.remove('fija');
+  }
+  function fijarBarra(el){
+    const caja = $('#barraFija');
+    if(!caja || !el) return;
+    if(barraFijaCasa && barraFijaCasa.el === el) return;      // ya esta puesta
+    soltarBarraFija();
+    barraFijaCasa = { el, padre: el.parentNode, siguiente: el.nextElementSibling };
+    caja.appendChild(el);
+    caja.hidden = false;
+    document.body.classList.add('fija');
+  }
+  // Por ahora solo las pastillas de Crew / Trabajadores / Temporales, que es
+  // donde la lista es larga y se perdia el cambiador. Si hace falta en otra
+  // pantalla, se agrega aqui y nada mas.
+  function sincronizarBarraFija(name){
+    const tools = $('#mgrHoursTools');
+    const toca = name === 'reloj' && tools && document.body.classList.contains('mgr');
+    if(toca) fijarBarra(tools); else soltarBarraFija();
+  }
+
   function showTab(name){
     commitPending();
     if(typeof finCardsHome === 'function') finCardsHome();        // ningun formulario prestado se queda fuera de su pantalla
@@ -5192,6 +5263,9 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
     // Before the panel is measured or its step engine runs, so nothing is
     // shown in the wrong role even for a frame.
     syncMgrContext(name);
+    // Y antes de pintar nada: la barra que no se mueve se arma o se suelta
+    // segun la pantalla, no despues de que el ojo ya la vio en su sitio viejo.
+    sincronizarBarraFija(name);
     const t = $('#secTitle'); if(t) t.innerHTML = sectionTitleHtml(name);
     ponerLiderSesion();
     window.scrollTo(0,0);
@@ -7444,7 +7518,7 @@ body.manual-mode .tab-panel[data-tab="manual"] > .action-bar.bar-salida{
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-08-I';
+  const APP_BUILD = '2026-10-08-J';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
