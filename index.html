@@ -7824,7 +7824,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-08-X';
+  const APP_BUILD = '2026-10-08-Y';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -8341,8 +8341,11 @@ body.fija main{ padding-bottom:14px; }
                     mins: minsTemp[w.id]||0, rate: mgRateTemp(w.id) };
         (r.rate !== null || r.mins > 0 ? rows : others).push(r);
       });
-      rows.sort((a,b) => a.name.localeCompare(b.name));
-      others.sort((a,b) => a.name.localeCompare(b.name));
+      // El monto se saca ANTES de ordenar y se reusa al pintar: una sola
+      // aritmetica, para que el orden y el numero no se puedan separar.
+      rows.forEach(r => { r.debe = (r.rate === null) ? null : (r.mins / 60) * (+r.rate); });
+      rows.sort(ordenPorDeuda);
+      others.sort((a,b) => a.name.localeCompare(b.name));   // estos no deben nada: por nombre, para buscarlos
       if(sel){
         sel.innerHTML = '<option value="">Escoja&hellip;</option>' + others.map(p =>
           `<option value="${p.tipo}:${esc(p.id)}">${esc(p.name)} &middot; ${esc(p.label)}</option>`).join('');
@@ -8362,7 +8365,7 @@ body.fija main{ padding-bottom:14px; }
       let totMins = 0, faltan = 0, totDinero = 0, minsSinTarifa = 0;
       box.innerHTML = rows.map(p => {
         totMins += p.mins; const sin = (p.rate === null); if(sin) faltan++;
-        const debe = sin ? null : (p.mins / 60) * (+p.rate);
+        const debe = p.debe;                                   // el mismo con el que se ordeno
         if(sin) minsSinTarifa += p.mins; else totDinero += debe;
         return `<div class="entryrow" style="flex-wrap:wrap;" data-mgkey="${p.tipo}:${esc(p.id)}" data-mgname="${esc(p.name)}">
           <span style="flex:1 1 140px; min-width:0;"><span class="who">${esc(p.name)}</span><br>
@@ -11776,6 +11779,9 @@ body.fija main{ padding-bottom:14px; }
       // Every figure here is the BALANCE, not the gross of unpaid hours. A man
       // given a $500 adelanto against $500 of work is square, and this screen
       // has to say so - showing him at $500 is how he gets paid twice.
+      // El mismo orden que las otras dos listas de dinero (ver ordenPorDeuda).
+      visible.forEach(w => { const b = casualBalanceOf(w.id); w.debe = b.unpriced ? null : b.balance; w.name = w.name || ''; });
+      visible.sort(ordenPorDeuda);
       let grand = 0, missing = 0, totalMins = 0, credit = 0, creditPeople = 0;
       const rowsHtml = visible.map(w => {
         const b = casualBalanceOf(w.id);
@@ -32494,6 +32500,32 @@ body.fija main{ padding-bottom:14px; }
   //   - sin horas pero con dinero abierto (given != 0): sale, y no se puede quitar;
   //   - ya cobro todo: sale en $0.00 con Quitar, salvo que el manager lo haya
   //     quitado DESPUES de su ultimo pago, o que este sacado del equipo.
+  // EL ORDEN DE LAS LISTAS DE DINERO (8 oct 2026).
+  //
+  //   "la app debe ordenar a los que se les debe; aun deben estar de primero,
+  //    de los mas altos a los mas bajos, y luego a los que no se les debe
+  //    nada; en ese orden debe estar"
+  //
+  // Antes iban por nombre, que no dice nada cuando lo que esta haciendo es
+  // decidir a quien le paga primero.
+  //
+  // Se ordena por EL MISMO numero que pinta el renglon. Si ordenara por otro
+  // (las horas en bruto, por ejemplo), el orden no cuadraria con lo que el
+  // lee y parecaria un error de la app.
+  //
+  // Hay un TERCER caso que es mio, no suyo: a quien no se le puede sacar el
+  // monto -- sin tarifa, o no se pudo leer su dinero -- no se le puede dar un
+  // lugar entre los montos, pero tampoco puede hundirse hasta abajo con los
+  // que ya no deben nada: es justo el que hay que arreglar. Va pegado al final
+  // de los que deben, donde se ve.
+  function ordenPorDeuda(a, b){
+    const grupo = x => (x.debe === null || x.debe === undefined) ? 1 : (x.debe > 0.004 ? 0 : 2);
+    const ga = grupo(a), gb = grupo(b);
+    if(ga !== gb) return ga - gb;
+    if(ga === 0) return b.debe - a.debe;                       // del mas alto al mas bajo
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  }
+
   function teamSinPagar(rows, given, profiles, hidden){
     const people = new Map();
     const get = (k, name) => {
@@ -32597,7 +32629,19 @@ body.fija main{ padding-bottom:14px; }
         people.get(k).rows.push(r);
       });
     }
+    // "Ya pagados" es un historial, no una cuenta por pagar: ahi no hay nada
+    // que deber, asi que se queda por nombre para poder buscar a alguien.
     const all = teamPaidView ? [...people.values()].sort((a,b)=>a.name.localeCompare(b.name)) : list;
+    if(!teamPaidView){
+      all.forEach(p => {
+        if(p.alDia){ p.debe = (p.given === null) ? null : Math.round((0 - p.given)*100)/100; return; }
+        const r = rateOf(p.key);
+        const pg = payFor(p.rows, r, mgRateCrew(p.key));
+        p._pay = pg;                                           // se reusa abajo: una sola cuenta
+        p.debe = (pg.wasPaid || r !== null) ? pg.amount : null;
+      });
+      all.sort(ordenPorDeuda);
+    }
     let grand = 0, missing = 0;
     const payTagOf = key => {
       const alerts = paymentAlerts.filter(pp => pp.user_id === key);
@@ -32610,7 +32654,7 @@ body.fija main{ padding-bottom:14px; }
       // no mezclar dos cuentas distintas en un solo numero.
       if(p.alDia) return teamAlDiaRow(p, payTagOf(p.key));
       const rate = rateOf(p.key);
-      const pay  = payFor(p.rows, rate, mgRateCrew(p.key));
+      const pay  = p._pay || payFor(p.rows, rate, mgRateCrew(p.key));
       const show = pay.wasPaid || rate !== null;      // paid rows carry their own amount
       if(!show) missing++; else grand += pay.amount;
       // Unconfirmed hours are still editable by the worker. Paying them means
