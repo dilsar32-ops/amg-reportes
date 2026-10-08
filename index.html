@@ -2,13 +2,14 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<!-- SIN viewport-fit=cover, A PROPOSITO. Se probo para que funcionaran los
-     env(safe-area-inset-*) - sin el, iOS los devuelve en cero - pero destapa
-     la franja del indicador de inicio, y ahi abajo asoma la vista NATIVA, que
-     es blanca. Comprobado pintando html de verde y body de magenta: la franja
-     siguio blanca, o sea que no venia de la pagina y no se puede tapar desde
-     el CSS. El encimado del encabezado se arregla con relleno fijo, abajo. -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<!-- viewport-fit=cover: sin esto iOS encierra la pagina dentro del area
+     segura, no deja pintar la franja del indicador de abajo ni meterse
+     bajo las esquinas redondas, y ademas env(safe-area-inset-*) vale 0
+     -- o sea que las 23 reglas que ya existen en esta hoja para los
+     margenes del telefono NO estaban haciendo nada. El fondo negro de
+     la vista nativa va en BridgeViewController.swift; sin eso asomaba
+     una franja blanca y por eso se dio marcha atras la vez pasada. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <title>Reportes de Campo / Field Reports</title>
 <link rel="manifest" href="manifest.json" id="webManifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -62,15 +63,16 @@
     border-radius:999px; padding:7px 14px; font:600 13px/1 inherit; cursor:pointer;
   }
   header.top{background:var(--ink); color:#fff; position:relative; overflow:hidden;
-    /* OJO, SIN RESOLVER: en su iPhone 17 Pro Max el boton de Menu y el titulo
-       se encimaron con el reloj y la señal (foto del 11 de septiembre). En el
-       simulador NO pasa - ahi la vista web ya arranca debajo de la barra de
-       estado - asi que no se pudo reproducir ni comprobar un arreglo. Se probo
-       viewport-fit=cover + env(safe-area-inset-top) y destapa una franja
-       blanca abajo, de la vista NATIVA, que no se puede tapar desde el CSS
-       (comprobado pintando html y body de colores: la franja siguio blanca).
-       Se dejo como estaba en vez de despachar un cambio de medidas a ciegas. */
-    padding:20px calc(18px + env(safe-area-inset-right)) 0 calc(18px + env(safe-area-inset-left));}
+    /* RESUELTO EL 8 OCT 2026. El boton de Menu y el titulo se encimaban con
+       el reloj y la señal en su iPhone 17 Pro Max (foto del 11 de septiembre).
+       El intento de entonces -- viewport-fit=cover + env(safe-area-inset-top)
+       -- era el camino correcto, pero destapaba una franja BLANCA abajo "de la
+       vista NATIVA, que no se puede tapar desde el CSS". Tenia razon: el CSS
+       no podia, porque la vista web y su scroll nacen blancos del lado de
+       Swift. Eso se arreglo en BridgeViewController.swift (negro, el mismo
+       #000 de la app) + contentInset "never" para que el margen no se cuente
+       dos veces. Ahora env() vale de verdad y este padding sirve. */
+    padding:calc(20px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) 0 calc(18px + env(safe-area-inset-left));}
   header.top::after{content:""; position:absolute; right:-40px; top:-40px; width:160px; height:160px; border:14px solid var(--accent); border-radius:50%; opacity:0.15;}
   header.top h1{font-size:24px; margin-top:4px;}
   .company-input{
@@ -518,7 +520,9 @@
      contenido, o sea fuera de pantalla justo donde se saltan las rejas. Ahora
      va fijo arriba de todo, por encima de la barra de version nueva (z:400). */
   #skipStepsBanner{position:fixed; top:0; left:0; right:0; z-index:500; margin:0;
-    padding:10px 14px; background:var(--accent); color:var(--on-accent);
+    /* calc(...+env) arriba: con viewport-fit=cover la pagina empieza DEBAJO
+       del reloj y la isla, y sin esto el aviso se les encima. */
+    padding:calc(10px + env(safe-area-inset-top)) 14px 10px; background:var(--accent); color:var(--on-accent);
     font-size:12.5px; font-weight:700; line-height:1.35; text-align:center; cursor:pointer;
     box-shadow:0 2px 8px rgba(0,0,0,.35);}
   #skipStepsBanner[hidden]{display:none !important;}
@@ -7810,7 +7814,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-08-V';
+  const APP_BUILD = '2026-10-08-W';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -7857,7 +7861,9 @@ body.fija main{ padding-bottom:14px; }
       let bar = document.getElementById('newVersionBar');
       if(!bar){
         bar = document.createElement('div'); bar.id = 'newVersionBar';
-        bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;background:#ff7a1a;color:#111;padding:10px 14px;font:600 14px/1.3 system-ui,sans-serif;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.4);';
+        bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;background:#ff7a1a;color:#111;'
+          + 'padding:calc(10px + env(safe-area-inset-top)) 14px 10px;'   // debajo del reloj y la isla
+          + 'font:600 14px/1.3 system-ui,sans-serif;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.4);';
         document.body.appendChild(bar);
       }
       bar.innerHTML = 'Hay una versi&oacute;n nueva de la app (' + latest + '). '
@@ -37148,8 +37154,11 @@ body.fija main{ padding-bottom:14px; }
       avisoAppPuesto = true;
       const b = document.createElement('div');
       b.id = 'appUpdateBar';
+      // el padding corto va PRIMERO y el de arriba DESPUES: al reves, el corto
+      // le borraba el margen del reloj (la isla le tapaba el texto).
       b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:400;background:' + color +
-        ';color:#fff;padding:10px 14px;font-weight:700;display:flex;gap:10px;align-items:center;' +
+        ';color:#fff;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top));' +
+        'font-weight:700;display:flex;gap:10px;align-items:center;' +
         'justify-content:center;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.35);';
       b.innerHTML = '<span>' + esc(texto) + '</span>';
       b.addEventListener('click', ()=>{ b.remove(); avisoAppPuesto = false; });
@@ -37185,7 +37194,9 @@ body.fija main{ padding-bottom:14px; }
       let b = document.getElementById('webUpdateBar');
       if(!b){
         b = document.createElement('div'); b.id = 'webUpdateBar';
-        b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:400;background:#1f6f5b;color:#fff;padding:10px 14px;font-weight:700;display:flex;gap:10px;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.35);';
+        b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:400;background:#1f6f5b;color:#fff;'
+          + 'padding:calc(10px + env(safe-area-inset-top)) 14px 10px;'
+          + 'font-weight:700;display:flex;gap:10px;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.35);';
         b.innerHTML = '<span>Hay una versión nueva de la app (' + esc(v) + ').</span><button type="button" style="background:#fff;color:#1f6f5b;border:0;border-radius:8px;padding:8px 12px;font-weight:800;">Actualizar</button>';
         b.querySelector('button').addEventListener('click', ()=>{ const u = new URL(location.href); u.searchParams.set('cb', String(Date.now())); location.replace(u.toString()); });
         document.body.appendChild(b);
