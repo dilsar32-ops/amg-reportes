@@ -4807,6 +4807,26 @@ body.fija main{ padding-bottom:14px; }
     <!-- Cuarta pildora: las horas de MUDANZA de todos, de planta y temporales,
          en UNA sola lista. Vive aqui y no en Reloj porque es configuracion y
          correccion de todo el equipo, no el trabajo del dia. -->
+    <!-- LA FICHA DE UNA PERSONA (8 oct 2026). Su pedido: "al pucharle a cada
+         trabajador debo poder entrar y ver su historial dia por dia, y si
+         coincide con el reporte que han mandado; el total de horas que tiene
+         en esa mudanza; cuanto se le tiene que pagar o cuanto se le debe. Y
+         poder regresar."
+         Los datos ya los traia loadMgHours para pintar la lista -- los dias,
+         los reportes, las tarifas -- y los tiraba. Aqui se guardan y se
+         ensenan; no se consulta nada nuevo ni se calcula aparte. -->
+    <section class="card amgcard" id="mgPersonCard" hidden>
+      <div class="inboxhead" style="margin-bottom:2px;">
+        <h2 style="margin:0;" id="mgPersonName">&nbsp;</h2>
+      </div>
+      <p class="clockhint" id="mgPersonSub">&nbsp;</p>
+      <div class="paysum" id="mgPersonSum"></div>
+      <p class="seclab" style="margin-top:14px;">D&iacute;a por d&iacute;a</p>
+      <div id="mgPersonDays"></div>
+      <p class="clockhint" id="mgPersonNota" hidden></p>
+      <button type="button" class="btn btn-outline" id="mgPersonBack" style="margin-top:12px;">&#9664; Volver a la lista</button>
+    </section>
+
     <section class="card amgcard" id="mgrMoreMg">
       <div class="inboxhead" style="margin-bottom:2px;">
         <h2 style="margin:0;">Los que van a mudanza</h2>
@@ -6531,8 +6551,13 @@ body.fija main{ padding-bottom:14px; }
     // cierra y devuelve el menu de azulejos; el segundo toque ya sale de AMG
     // (18 sep 2026, su regla de siempre: atras, atras, y luego el menu).
     amgmoving: {
-      hay:   () => !!amgSeg,
-      atras: () => { amgShow(null); }
+      // Y una ficha de persona abierta es un nivel MAS adentro: se cierra
+      // primero ella, luego la seccion, y hasta entonces se sale de AMG.
+      hay:   () => !!amgSeg || !!(typeof mgPersonKey !== 'undefined' && mgPersonKey),
+      atras: () => {
+        if(typeof mgPersonKey !== 'undefined' && mgPersonKey){ cerrarMgPersona(); return; }
+        amgShow(null);
+      }
     },
     // HORAS: una ficha de persona abierta es un nivel adentro (8 oct 2026).
     // "si entro con alguien me dice Menu... tiene que ir atras, atras. Y
@@ -7824,7 +7849,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-08-Y';
+  const APP_BUILD = '2026-10-08-Z';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -8222,6 +8247,110 @@ body.fija main{ padding-bottom:14px; }
   // Aqui es donde se le pone a cada hombre su tarifa de AMG - asi la app sabe
   // quienes van a mudanza y a quien se le esta poniendo esa tarifa. Se lista a
   // todos, tengan o no horas de AMG todavia. ----
+  // ============ LA FICHA DE UNA PERSONA EN AMG (8 oct 2026) ============
+  //
+  //   "al pucharle a cada trabajador debo poder entrar y ver su historial dia
+  //    por dia, y si coincide con el reporte que han mandado; el total de
+  //    horas que tiene en esa mudanza; cuanto se le tiene que pagar o cuanto
+  //    se le debe. Y poder regresar."
+  //
+  // No consulta nada nuevo: loadMgHours ya traia los dias, los reportes y las
+  // tarifas para pintar la lista, y los tiraba. Ahora los guarda en MG_FICHA.
+  // Eso no es por ahorrar una consulta: es para que la ficha y la lista no
+  // puedan ensenar dos numeros distintos de la misma persona.
+  let MG_FICHA = { reporte:{}, marco:{}, dias:{}, rows:{} };
+  let mgPersonKey = null;
+
+  function abrirMgPersona(key){
+    if(!MG_FICHA.rows[key]) return;
+    mgPersonKey = key;
+    pintarMgPersona();
+    const card = $('#mgPersonCard'), lista = $('#mgrMoreMg');
+    if(card) card.hidden = false;
+    if(lista) lista.hidden = true;
+    if(typeof pintarSalidas === 'function') pintarSalidas();   // el boton de abajo pasa a decir "Atras"
+    window.scrollTo(0, 0);
+  }
+  function cerrarMgPersona(){
+    mgPersonKey = null;
+    const card = $('#mgPersonCard'), lista = $('#mgrMoreMg');
+    if(card) card.hidden = true;
+    if(lista) lista.hidden = false;
+    if(typeof pintarSalidas === 'function') pintarSalidas();
+    window.scrollTo(0, 0);
+  }
+  function pintarMgPersona(){
+    const p = MG_FICHA.rows[mgPersonKey]; if(!p) return;
+    const nom = $('#mgPersonName'), sub = $('#mgPersonSub'),
+          sum = $('#mgPersonSum'), box = $('#mgPersonDays'), nota = $('#mgPersonNota');
+    if(nom) nom.textContent = p.name;
+    const sinTarifa = (p.rate === null);
+    if(sub) sub.innerHTML = esc(p.label) + ' &middot; ' + (sinTarifa
+      ? '<b style="color:var(--danger);">sin tarifa AMG</b>'
+      : money(+p.rate) + '/hora AMG');
+
+    const rep   = MG_FICHA.reporte[mgPersonKey] || {};
+    const dias  = MG_FICHA.dias[mgPersonKey] || {};
+    // Todos los dias que existen de esta persona: los que marco Y los que el
+    // reporte le pone. Un dia del reporte en que NO marco tiene que verse --
+    // es justo el que hay que arreglar, y si solo listara lo que marco,
+    // desapareceria.
+    const todos = [...new Set([...Object.keys(dias), ...Object.keys(rep)])].sort().reverse();
+
+    let minsSinPagar = 0, minsPagados = 0, pagado = 0, cuadran = 0, difieren = 0;
+    const filas = todos.map(d => {
+      const e = dias[d] || null;
+      const hMarco = e ? e.horas : 0;
+      const hRep   = rep[d] || 0;
+      if(e){ const m = Math.round(hMarco * 60);
+             if(e.pagado){ minsPagados += m; pagado += e.monto; } else minsSinPagar += m; }
+      // El mismo cuarto de hora de tolerancia que usa el cierre y la lista.
+      let marca, color;
+      if(!e){ marca = '⚠ no marcó este día'; color = 'var(--danger)'; difieren++; }
+      else if(!hRep){ marca = '⚠ el reporte no lo trae'; color = 'var(--danger)'; difieren++; }
+      else if(Math.abs(hMarco - hRep) <= 0.26){ marca = 'reporte ✓'; color = 'var(--green)'; cuadran++; }
+      else { const dif = Math.round((hMarco - hRep) * 100) / 100;
+             marca = '⚠ el reporte dice ' + (Math.round(hRep*100)/100) + ' h (' + (dif > 0 ? '+' : '') + dif + ')';
+             color = 'var(--danger)'; difieren++; }
+      const estado = !e ? '<span style="color:var(--danger);">sin marcar</span>'
+        : e.pagado ? '<span style="color:var(--green);">pagado</span>'
+                   : '<b>sin pagar</b>';
+      return '<div class="entryrow"><span><span class="who">' + esc(d) + '</span><br>'
+        + '<span class="when">' + (e ? hhmm(Math.round(hMarco*60)) + ' h' : '&mdash;')
+        + ' &middot; ' + estado + ' &middot; <span style="color:' + color + ';">' + marca + '</span></span></span>'
+        + '<span class="hrs">' + (e ? hhmm(Math.round(hMarco*60)) : '&mdash;') + '</span></div>';
+    }).join('');
+    if(box) box.innerHTML = filas || '<p class="clockhint">Todavía no tiene días de mudanza.</p>';
+
+    const debe = sinTarifa ? null : (minsSinPagar / 60) * (+p.rate);
+    if(sum) sum.innerHTML =
+        '<div class="line"><span>Días en mudanza</span><span>' + todos.length + '</span></div>'
+      + '<div class="line"><span>Horas AMG en total</span><span>' + hhmm(minsSinPagar + minsPagados) + '</span></div>'
+      + (minsPagados ? '<div class="line"><span>Ya pagadas</span><span>' + hhmm(minsPagados)
+          + (pagado ? ' &middot; ' + money(pagado) : '') + '</span></div>' : '')
+      + '<div class="line"><span>Sin pagar</span><span>' + hhmm(minsSinPagar) + '</span></div>'
+      // SIN TARIFA NO SE INVENTA UN MONTO. Poner $0.00 le haria creer que no
+      // le debe nada a alguien que si trabajo.
+      + '<div class="line tot"><span>' + (sinTarifa ? 'Falta su tarifa de AMG' : 'Se le debe') + '</span><span>'
+      + (sinTarifa ? '<span style="color:var(--danger);">no se puede calcular</span>' : money(debe)) + '</span></div>';
+
+    if(nota){
+      const partes = [];
+      if(difieren) partes.push('<b style="color:var(--danger);">' + difieren + ' día(s) no cuadran con el reporte.</b>');
+      if(cuadran)  partes.push(cuadran + ' cuadran.');
+      partes.push('Se compara lo que marcó contra las horas que el líder le puso en el reporte de mudanza, con un cuarto de hora de tolerancia.');
+      nota.innerHTML = partes.join(' ');
+      nota.hidden = false;
+    }
+  }
+  // Toda la fila abre la ficha, menos los botones, que hacen lo suyo.
+  if($('#mgMgList')) $('#mgMgList').addEventListener('click', (e)=>{
+    if(e.target.closest('.minibtn, input, button')) return;
+    const fila = e.target.closest('[data-mgkey]'); if(!fila) return;
+    abrirMgPersona(fila.dataset.mgkey);
+  });
+  if($('#mgPersonBack')) $('#mgPersonBack').addEventListener('click', cerrarMgPersona);
+
   async function loadMgHours(){
     const box = $('#mgMgList'), sum = $('#mgMgSum'), sel = $('#mgAddWho');
     if(!box) return;
@@ -8240,8 +8369,10 @@ body.fija main{ padding-bottom:14px; }
         // mando el lider, y TODAS las fechas que cada quien marco (pagadas o no)
         // para saber que dia no marco nadie.
         authFetch('/rest/v1/labor_logs?select=log_date,payload&work_kind=eq.mudanza&order=log_date.desc&limit=500', H),
-        authFetch('/rest/v1/time_entries?select=user_id,work_date&work_kind=eq.mudanza', H),
-        authFetch('/rest/v1/casual_hours?select=casual_worker_id,work_date&work_kind=eq.mudanza', H)
+        // Con las horas y el paid_at: la ficha de cada persona ensena su
+        // historial completo, no solo lo que falta por pagar (8 oct 2026).
+        authFetch('/rest/v1/time_entries?select=user_id,work_date,clock_in,clock_out,paid_at,paid_amount&work_kind=eq.mudanza', H),
+        authFetch('/rest/v1/casual_hours?select=casual_worker_id,work_date,reported_hours,paid_at,paid_amount&work_kind=eq.mudanza', H)
       ]);
       const pr = prRes.ok ? await prRes.json() : [];
       const cw = cwRes.ok ? await cwRes.json() : [];
@@ -8385,6 +8516,26 @@ body.fija main{ padding-bottom:14px; }
             <button type="button" class="minibtn mgRateDel" style="color:var(--danger);" title="Quitar de AMG">Quitar</button></span>
         </div>`;
       }).join('');
+      // LO QUE LA FICHA DE CADA PERSONA NECESITA. Todo esto ya se calculo
+      // para pintar la lista; guardarlo evita una segunda consulta y, sobre
+      // todo, una segunda aritmetica que podria no cuadrar con la lista.
+      MG_FICHA = { reporte, marco, rows: {},
+        dias: (() => {
+          const d = {};
+          const mete = (k, dia, horas, pagado, monto) => {
+            if(!dia) return;
+            (d[k] = d[k] || {});
+            const e = d[k][dia] = d[k][dia] || { horas:0, pagado:true, monto:0 };
+            e.horas += horas || 0;
+            if(!pagado) e.pagado = false; else e.monto += (+monto || 0);
+          };
+          teAll.forEach(e => mete('c:' + e.user_id, dia(e.work_date),
+            (hoursBetween(e.clock_in, e.clock_out) || 0) / 60, !!e.paid_at, e.paid_amount));
+          chAll.forEach(h => mete('t:' + h.casual_worker_id, dia(h.work_date),
+            +h.reported_hours || 0, !!h.paid_at, h.paid_amount));
+          return d;
+        })() };
+      rows.forEach(r => { MG_FICHA.rows[r.tipo + ':' + r.id] = r; });
       if(sum){
         sum.hidden = false;
         sum.innerHTML = `<div class="line"><span>Personas en AMG</span><span>${rows.length}</span></div>`
@@ -8395,6 +8546,8 @@ body.fija main{ padding-bottom:14px; }
           + (faltan ? `<div class="line"><span style="color:var(--danger);">Sin tarifa AMG todavía (${faltan})</span>`
                       + `<span style="color:var(--danger);">${hhmm(minsSinTarifa)} h fuera del total</span></div>` : '');
       }
+      // Si estaba mirando a alguien, su ficha se repinta con lo recien traido.
+      if(mgPersonKey && MG_FICHA.rows[mgPersonKey]) pintarMgPersona();
     }catch(e){
       box.innerHTML = '<p class="clockhint">No se pudo cargar. Revise su internet.</p>';
     }
@@ -9585,6 +9738,9 @@ body.fija main{ padding-bottom:14px; }
     // Salir del calendario con cambios = UN aviso a la cuadrilla (no uno por dia).
     if(amgSeg === 'cal' && which !== 'cal'){ try{ calCerrarHoja(); if(calHayCambiosSinAvisar()) calAvisar(); }catch(e){} }
     amgSeg = which || null;
+    // Cambiar de seccion con una ficha abierta la dejaba puesta: al volver a
+    // Horas AMG saldria la persona de antes en vez de la lista.
+    if(typeof mgPersonKey !== 'undefined' && mgPersonKey) cerrarMgPersona();
     if(typeof finCardsHome === 'function') finCardsHome();
     const map = [['hours','#amgSegHours','#amgHoursBox'],
                  ['fin',  '#amgSegFin',  '#amgFinBox'],
