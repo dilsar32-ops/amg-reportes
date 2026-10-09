@@ -4920,7 +4920,6 @@ body.fija main{ padding-bottom:14px; }
       <div class="mgrtools" style="margin:0 0 10px;">
         <button type="button" class="minibtn on" id="finMSegGastos"><svg class="ico"><use href="#i-fuel"/></svg>Gastos</button>
         <button type="button" class="minibtn" id="finMSegPagos"><svg class="ico"><use href="#i-cash"/></svg>Pagos de clientes</button>
-        <button type="button" class="minibtn" id="finMSegCierre"><svg class="ico"><use href="#i-chart"/></svg>Cierre</button>
       </div>
       <div id="finMGastos">
         <div class="mgrtools" style="margin:0 0 8px;"><button type="button" class="minibtn" id="finMAddGasto">+ Agregar gasto (seguro, storage, otro)</button></div>
@@ -4937,7 +4936,20 @@ body.fija main{ padding-bottom:14px; }
         <div id="finPClients"></div>
         <div id="finPHeld" hidden></div>
       </div>
-      <div id="finMCierre" hidden>
+    </section>
+    </div>
+    <!-- CIERRE, SU PROPIA PANTALLA (9 oct 2026): "como ya sacaste la carpeta
+         de ahi, cierres tiene que aparecer sola; ahora abro cierres y va
+         incluyendo la pastilla de gastos y pagos del cliente, no debe
+         incluir eso; y en finanzas tampoco debe incluir cierre, ya la
+         separamos". El bloque es el MISMO que vivia dentro de Finanzas: se
+         movio entero, no se copio, asi que no hay dos que mantener. -->
+    <div class="amgbox amg-mgr" id="amgCierreBox" hidden>
+    <section class="card amgcard">
+      <div class="inboxhead" style="margin-bottom:2px;">
+        <h2 style="margin:0;">Cierre</h2>
+      </div>
+      <div id="finMCierre">
         <p class="hint">Escoja el período: una semana de un cliente o el mes. Cobrado a clientes, menos mano de obra de AMG, gastos, seguro y storage; lo que queda se parte a la mitad.</p>
         <!-- CIERRE POR INVOICE (8 oct 2026): "tambien agregale por invoice,
              que podamos hacer cierres por invoices, y que el calcule lo que
@@ -4965,6 +4977,7 @@ body.fija main{ padding-bottom:14px; }
       </div>
     </section>
     </div>
+
     <!-- EL CALENDARIO DE MUDANZAS, lado del manager (23 sep 2026). La semana de
          lunes a domingo; tocar un dia abre la hoja para llenarlo. Cuando termina
          de cambiarlo, a la cuadrilla de AMG le llega UN aviso (no uno por dia). -->
@@ -7865,7 +7878,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-A';
+  const APP_BUILD = '2026-10-09-B';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -9750,8 +9763,6 @@ body.fija main{ padding-bottom:14px; }
   // devuelve el menu, con la misma maquinaria que ya usa Visitas
   // (NIVELES_ADENTRO), asi que dice "◀ Atrás" mientras hay algo abierto.
   let amgSeg = null;                    // null = solo el menu
-  // El azulejo de Cierre entra a Finanzas con esa pastilla ya puesta.
-  let amgCierreDirecto = false;
   function amgShow(which){
     // Salir del calendario con cambios = UN aviso a la cuadrilla (no uno por dia).
     if(amgSeg === 'cal' && which !== 'cal'){ try{ calCerrarHoja(); if(calHayCambiosSinAvisar()) calAvisar(); }catch(e){} }
@@ -9763,7 +9774,8 @@ body.fija main{ padding-bottom:14px; }
     const map = [['hours','#amgSegHours','#amgHoursBox'],
                  ['fin',  '#amgSegFin',  '#amgFinBox'],
                  ['inv',  '#amgSegInv',  '#amgInvBox'],
-                 ['cal',  '#amgSegCal',  '#amgCalBox']];
+                 ['cal',  '#amgSegCal',  '#amgCalBox'],
+                 ['cierre','#amgSegCierre','#amgCierreBox']];
     map.forEach(([key, btnSel, boxSel]) => {
       const btn = $(btnSel), box = $(boxSel);
       const on = key === amgSeg;
@@ -9775,7 +9787,16 @@ body.fija main{ padding-bottom:14px; }
     if(menu) menu.hidden = !!amgSeg;
     if(amgSeg === 'hours' && typeof loadMgHours === 'function') loadMgHours();
     if(amgSeg === 'inv' && typeof invOpen === 'function') invOpen();
-    if(amgSeg === 'fin'){ finMShow(amgCierreDirecto ? 'cierre' : 'gastos'); loadFinAll(); amgCierreDirecto = false; }
+    if(amgSeg === 'fin'){ finMShow('gastos'); loadFinAll(); }
+    // El cierre necesita los mismos datos que Finanzas (reportes, pagos,
+    // gastos) Y la lista de invoices, que antes solo cargaba la pantalla de
+    // Invoices: sin eso el selector salia vacio (9 oct 2026, su reporte:
+    // "no me da los invoices que tenemos para poder cerrar esos").
+    if(amgSeg === 'cierre'){
+      loadFinAll();
+      if(typeof invLoadInvoices === 'function') invLoadInvoices().then(()=> paintCierreForm());
+      paintCierreForm();
+    }
     if(amgSeg === 'cal') calAbrirMgr();
     if(typeof pintarSalidas === 'function') pintarSalidas();
     window.scrollTo(0, 0);
@@ -11168,7 +11189,7 @@ body.fija main{ padding-bottom:14px; }
   // materiales ni en el interruptor.
   if($('#amgSegClients')) $('#amgSegClients').addEventListener('click', ()=>{ pushBack('amgmoving'); showTab('amgclientes'); amgPriceShow('clients'); });
   if($('#amgSegInv')) $('#amgSegInv').addEventListener('click', ()=> amgShow('inv'));
-  if($('#amgSegCierre')) $('#amgSegCierre').addEventListener('click', ()=>{ amgCierreDirecto = true; amgShow('fin'); });
+  if($('#amgSegCierre')) $('#amgSegCierre').addEventListener('click', ()=> amgShow('cierre'));
   if($('#amgSegFin')) $('#amgSegFin').addEventListener('click', ()=> amgShow('fin'));
   if($('#amgSegCal')) $('#amgSegCal').addEventListener('click', ()=> amgShow('cal'));
 
@@ -36717,16 +36738,16 @@ body.fija main{ padding-bottom:14px; }
   // ---- lado del manager: AMG Moving -> Finanzas ----
   function finMShow(which){
     if(typeof finCardsHome === 'function') finCardsHome();       // el formulario no se queda abierto en otra pastilla
-    [['gastos','#finMSegGastos','#finMGastos'],['pagos','#finMSegPagos','#finMPagos'],['cierre','#finMSegCierre','#finMCierre']].forEach(([k, b, c]) => {
+    // El cierre se fue a su propia pantalla (9 oct 2026): aqui quedan Gastos
+    // y Pagos de clientes, que es de lo que Finanzas habla.
+    [['gastos','#finMSegGastos','#finMGastos'],['pagos','#finMSegPagos','#finMPagos']].forEach(([k, b, c]) => {
       const btn = $(b), box = $(c); const on = k === which;
       if(btn) btn.classList.toggle('on', on); if(box) box.hidden = !on;
     });
-    if(which === 'cierre') paintCierreForm();
     window.scrollTo(0, 0);
   }
   if($('#finMSegGastos')) $('#finMSegGastos').addEventListener('click', ()=> finMShow('gastos'));
   if($('#finMSegPagos'))  $('#finMSegPagos').addEventListener('click',  ()=> finMShow('pagos'));
-  if($('#finMSegCierre')) $('#finMSegCierre').addEventListener('click', ()=> finMShow('cierre'));
   // El manager anota el gasto AQUI MISMO. Es el mismo formulario de la pantalla Finanzas (los mismos
   // campos y el mismo Guardar): se mueve a la ranura y se regresa a su lugar al cerrarlo, para que no
   // haya dos formularios que mantener ni dos ids iguales.
