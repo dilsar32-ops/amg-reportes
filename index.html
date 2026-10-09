@@ -4799,6 +4799,14 @@ body.fija main{ padding-bottom:14px; }
         <button type="button" class="menubtn amg" id="amgSegInv">
           <b><svg class="ico"><use href="#i-receipt"/></svg>Invoices</b>
           <small>Hacer la factura del cliente y mandarla</small></button>
+        <!-- CIERRE AL FRENTE (8 oct 2026): "esa carpeta de cierre tienes que
+             traerla al frente, donde esta el resto... agregarle cierre hasta
+             abajo". Vivia dos niveles adentro, en Finanzas. Es la misma
+             pantalla: el azulejo abre Finanzas con la pastilla de Cierre ya
+             escogida, no se duplica nada. -->
+        <button type="button" class="menubtn amg" id="amgSegCierre">
+          <b><svg class="ico"><use href="#i-chart"/></svg>Cierre</b>
+          <small>Lo cobrado menos la mano de obra y los gastos &middot; por fecha, cliente o invoice</small></button>
       </div>
       <p class="hint" id="amgPriceWarn" hidden style="color:var(--danger); font-weight:600; margin:0 0 8px;"></p>
       <p class="clockhint" style="margin:0 0 8px;">Todo lo que mande o guarde desde aqu&iacute; es de AMG Moving.</p>
@@ -4931,8 +4939,16 @@ body.fija main{ padding-bottom:14px; }
       </div>
       <div id="finMCierre" hidden>
         <p class="hint">Escoja el período: una semana de un cliente o el mes. Cobrado a clientes, menos mano de obra de AMG, gastos, seguro y storage; lo que queda se parte a la mitad.</p>
-        <div class="row2"><div class="field"><label>Desde</label><input type="date" id="finCFrom"></div><div class="field"><label>Hasta</label><input type="date" id="finCTo"></div></div>
-        <div class="field"><label>Cliente</label><select id="finCClient"><option value="">Todos los clientes (el período completo)</option></select></div>
+        <!-- CIERRE POR INVOICE (8 oct 2026): "tambien agregale por invoice,
+             que podamos hacer cierres por invoices, y que el calcule lo que
+             se le ha pagado a los muchachos".
+             Un invoice ya sabe EXACTAMENTE de que reportes salio (log_ids),
+             asi que el cierre no tiene que adivinar que entra: la mano de
+             obra se saca de esos mismos reportes. -->
+        <div class="field"><label>Cerrar por invoice <span class="hint">o dejelo vacío y use el período de abajo</span></label>
+          <select id="finCInvoice"><option value="">No &mdash; cerrar por fecha</option></select></div>
+        <div class="row2" id="finCRango"><div class="field"><label>Desde</label><input type="date" id="finCFrom"></div><div class="field"><label>Hasta</label><input type="date" id="finCTo"></div></div>
+        <div class="field" id="finCClientField"><label>Cliente</label><select id="finCClient"><option value="">Todos los clientes (el período completo)</option></select></div>
         <div class="field"><label>Socio (la otra mitad)</label><select id="finCPartner"></select></div>
         <div class="field"><label>Notas <span class="hint">se guardan con el cierre y salen en el PDF</span></label><textarea id="finCNotes" rows="2" placeholder="Ej: Robert pagó con cheque el sábado. Falta la gasolina del martes."></textarea></div>
         <button type="button" class="btn btn-outline btn-block" id="finCRun">Calcular el cierre</button>
@@ -7849,7 +7865,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-08-Z';
+  const APP_BUILD = '2026-10-09-A';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -9734,6 +9750,8 @@ body.fija main{ padding-bottom:14px; }
   // devuelve el menu, con la misma maquinaria que ya usa Visitas
   // (NIVELES_ADENTRO), asi que dice "◀ Atrás" mientras hay algo abierto.
   let amgSeg = null;                    // null = solo el menu
+  // El azulejo de Cierre entra a Finanzas con esa pastilla ya puesta.
+  let amgCierreDirecto = false;
   function amgShow(which){
     // Salir del calendario con cambios = UN aviso a la cuadrilla (no uno por dia).
     if(amgSeg === 'cal' && which !== 'cal'){ try{ calCerrarHoja(); if(calHayCambiosSinAvisar()) calAvisar(); }catch(e){} }
@@ -9757,7 +9775,7 @@ body.fija main{ padding-bottom:14px; }
     if(menu) menu.hidden = !!amgSeg;
     if(amgSeg === 'hours' && typeof loadMgHours === 'function') loadMgHours();
     if(amgSeg === 'inv' && typeof invOpen === 'function') invOpen();
-    if(amgSeg === 'fin'){ finMShow('gastos'); loadFinAll(); }
+    if(amgSeg === 'fin'){ finMShow(amgCierreDirecto ? 'cierre' : 'gastos'); loadFinAll(); amgCierreDirecto = false; }
     if(amgSeg === 'cal') calAbrirMgr();
     if(typeof pintarSalidas === 'function') pintarSalidas();
     window.scrollTo(0, 0);
@@ -11150,6 +11168,7 @@ body.fija main{ padding-bottom:14px; }
   // materiales ni en el interruptor.
   if($('#amgSegClients')) $('#amgSegClients').addEventListener('click', ()=>{ pushBack('amgmoving'); showTab('amgclientes'); amgPriceShow('clients'); });
   if($('#amgSegInv')) $('#amgSegInv').addEventListener('click', ()=> amgShow('inv'));
+  if($('#amgSegCierre')) $('#amgSegCierre').addEventListener('click', ()=>{ amgCierreDirecto = true; amgShow('fin'); });
   if($('#amgSegFin')) $('#amgSegFin').addEventListener('click', ()=> amgShow('fin'));
   if($('#amgSegCal')) $('#amgSegCal').addEventListener('click', ()=> amgShow('cal'));
 
@@ -36898,6 +36917,30 @@ body.fija main{ padding-bottom:14px; }
 
   // ---- CIERRE: lo que quedo en un periodo y como se reparte ----
   function paintCierreForm(){ paintCierreSelects(); loadCierres(); }
+  // Con un invoice escogido, el periodo y el cliente ya NO los escoge el: los
+  // manda el invoice. Dejarlos abiertos invitaria a un cierre que dice "este
+  // invoice" pero cuenta dias que ese invoice no cobra.
+  function invoiceDelCierre(){
+    const sel = $('#finCInvoice'); if(!sel || !sel.value) return null;
+    const invs = (typeof INVOICES !== 'undefined' && Array.isArray(INVOICES)) ? INVOICES : [];
+    return invs.find(v => String(v.id) === String(sel.value)) || null;
+  }
+  function aplicarModoInvoice(){
+    const inv = invoiceDelCierre();
+    const rango = $('#finCRango'), cf = $('#finCClientField');
+    if(rango) rango.hidden = !!inv;
+    if(cf) cf.hidden = !!inv;
+    const out = $('#finCOut');
+    if(inv && out && !out.dataset.calculado) out.innerHTML =
+      '<p class="clockhint">Va a cerrar el invoice <b>#' + esc(inv.number) + '</b> de <b>'
+      + esc(inv.client_name || '') + '</b>: solo los reportes que ese invoice cobra.</p>';
+  }
+  if($('#finCInvoice')) $('#finCInvoice').addEventListener('change', ()=>{
+    const out = $('#finCOut'); if(out){ delete out.dataset.calculado; out.innerHTML = ''; }
+    const pb = $('#finCPdf'); if(pb) pb.hidden = true;
+    const sb = $('#finCSendBox'); if(sb) sb.hidden = true;
+    aplicarModoInvoice();
+  });
   function paintCierreSelects(){
     const f = $('#finCFrom'), t = $('#finCTo'); const today = localToday();
     const cs = $('#finCClient'); if(cs){
@@ -36908,6 +36951,18 @@ body.fija main{ padding-bottom:14px; }
       amgClientNames().forEach(n => { if(!names.has(clientKey(n))) names.set(clientKey(n), n); });
       cs.innerHTML = '<option value="">Todos los clientes (el período completo)</option>' + [...names.values()].sort((a, b) => a.localeCompare(b)).map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('');
       if(cur && [...cs.options].some(o => o.value === cur)) cs.value = cur;
+    }
+    // Los invoices guardados, para poder cerrar por uno de ellos.
+    const isel = $('#finCInvoice');
+    if(isel){
+      const cur = isel.value;
+      const invs = (typeof INVOICES !== 'undefined' && Array.isArray(INVOICES)) ? INVOICES : [];
+      isel.innerHTML = '<option value="">No &mdash; cerrar por fecha</option>'
+        + invs.map(v => '<option value="' + esc(v.id) + '">#' + esc(v.number) + ' &middot; '
+            + esc(v.client_name || '') + ' &middot; ' + finMoney(+v.total || 0)
+            + (v.status === 'paid' ? ' &middot; pagado' : '') + '</option>').join('');
+      if(cur && [...isel.options].some(o => o.value === cur)) isel.value = cur;
+      aplicarModoInvoice();
     }
     paintCierreSendTo();
     if(f && !f.value) f.value = today.slice(0, 8) + '01';
@@ -36963,10 +37018,30 @@ body.fija main{ padding-bottom:14px; }
     return { labor, hours, noRate, people: [...people.values()].sort((a, b) => b.amount - a.amount).map(pp => ({ name: pp.name, days: pp.days.length, hours: pp.hours, rate: pp.rate, amount: pp.amount })) };
   }
   async function runCierre(){
-    const from = $('#finCFrom').value, to = $('#finCTo').value, out = $('#finCOut');
-    if(!from || !to || from > to){ out.innerHTML = '<p class="clockhint" style="color:var(--danger);">Escoja el período (desde y hasta).</p>'; return; }
+    const out = $('#finCOut');
+    // ---- POR INVOICE (8 oct 2026) ----
+    // Un invoice sabe EXACTAMENTE de que reportes salio (log_ids). Asi que el
+    // periodo no se escoge: se deduce de esos reportes, y lo que entra al
+    // cierre son esos y nada mas. Nada de adivinar que dias cobra.
+    const inv = invoiceDelCierre();
+    let from, to;
+    if(inv){
+      const ids = new Set((inv.log_ids || []).map(String));
+      const suyos = finLogs.filter(l => ids.has(String(l.id)));
+      if(!suyos.length){
+        out.innerHTML = '<p class="clockhint" style="color:var(--danger);">Ese invoice no tiene reportes de mudanza guardados. No se puede cerrar por invoice.</p>';
+        return;
+      }
+      const fechas = suyos.map(l => String(l.log_date || '').slice(0, 10)).filter(Boolean).sort();
+      from = fechas[0]; to = fechas[fechas.length - 1];
+    }else{
+      from = $('#finCFrom').value; to = $('#finCTo').value;
+      if(!from || !to || from > to){ out.innerHTML = '<p class="clockhint" style="color:var(--danger);">Escoja el período (desde y hasta).</p>'; return; }
+    }
     const partnerV = $('#finCPartner').value; const partner = partnerV ? whoFromSelect($('#finCPartner')) : null;
-    const client = normClient(($('#finCClient') && $('#finCClient').value) || '') || null; const ckey = client ? clientKey(client) : null;
+    const client = inv ? (normClient(inv.client_name) || null)
+                       : (normClient(($('#finCClient') && $('#finCClient').value) || '') || null);
+    const ckey = client ? clientKey(client) : null;
     const notes = (($('#finCNotes') && $('#finCNotes').value) || '').trim();
     out.innerHTML = '<p class="clockhint">Calculando…</p>';
     const inP = d => String(d||'').slice(0, 10) >= from && String(d||'').slice(0, 10) <= to;
@@ -36983,9 +37058,16 @@ body.fija main{ padding-bottom:14px; }
       crewRows.forEach(r => { const mins = hoursBetween(r.clock_in, r.clock_out); if(mins === null) return; const h = mins/60; laborHours += h; const rate = mgRateCrew(r.user_id); if(rate === null) laborNoRate += h; else labor += h * rate; });
       tempRows.forEach(r => { const h = +r.reported_hours || 0; laborHours += h; const rate = mgRateTemp(r.casual_worker_id); if(rate === null) laborNoRate += h; else labor += h * rate; });
     }
-    const logs = finLogs.filter(l => inP(l.log_date) && (!ckey || clientKey((l.payload||{}).t) === ckey));
+    const logs = inv
+      ? finLogs.filter(l => (inv.log_ids || []).map(String).includes(String(l.id)))
+      : finLogs.filter(l => inP(l.log_date) && (!ckey || clientKey((l.payload||{}).t) === ckey));
     if(client){ const rl = reportLaborOf(logs); labor = rl.labor; laborHours = rl.hours; laborNoRate = rl.noRate; people = rl.people; }
-    const pays = finPayments.filter(r => inP(r.paid_on) && (!ckey || clientKey(r.client) === ckey));
+    // Lo cobrado de un invoice son los pagos marcados con SU numero. Si el
+    // cliente todavia no ha pagado, el cierre tiene que decir cero, no tomar
+    // prestados pagos de otra semana del mismo cliente.
+    const pays = inv
+      ? finPayments.filter(r => String(r.invoice_number || '') === String(inv.number))
+      : finPayments.filter(r => inP(r.paid_on) && (!ckey || clientKey(r.client) === ckey));
     const cobrado = pays.reduce((s, r) => s + (+r.amount||0), 0);
     const byClient = [...groupBy(pays, r => clientKey(r.client)).entries()].map(([k, rows]) => ({ name: normClient(rows[0].client), total: rows.reduce((s, r) => s + (+r.amount||0), 0) })).sort((x, y) => y.total - x.total);
     // En el cierre de UN cliente, seguro y storage no entran en nada (ni en gastos, ni en "lo que puso", ni en las líneas).
@@ -37005,8 +37087,10 @@ body.fija main{ padding-bottom:14px; }
     // para siempre de qué factura fue ese dinero (18 sep 2026).
     const payLines = pays.map(r => ({ date: r.paid_on, method: FIN_METHOD[r.method] || r.method, by: whoLabel(r.received_by_kind, r.received_by_name), amount: +r.amount||0, delivered: !!r.delivered_at, invoice: r.invoice_number || null }));
     const expLines = exps.map(r => ({ date: r.spent_on, what: finQue(r), by: whoLabel(r.paid_by_kind, r.paid_by_name), amount: +r.amount||0, fixed: FIN_FIXED.includes(r.what) }));
-    lastCierre = { from, to, client, notes, cobrado, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner };
+    lastCierre = { from, to, client, notes, cobrado,
+      invoice: inv ? { number: inv.number, total: +inv.total || 0, status: inv.status, logs: logs.length } : null, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner };
     out.innerHTML = cierreHtml(lastCierre);
+    out.dataset.calculado = '1';
     const pb = $('#finCPdf'); if(pb) pb.hidden = false;
     const sb = $('#finCSendBox'); if(sb){ sb.hidden = false; const st = $('#finCSendTo'); if(st && !st.dataset.touched && partnerV && [...st.options].some(o => o.value === partnerV)) st.value = partnerV; }
   }
@@ -37022,15 +37106,23 @@ body.fija main{ padding-bottom:14px; }
     if(!st.dataset.touched) st.value = '';                      // que no se escoja solo al manager: la copia es para el otro
     if(!st.dataset.wired){ st.dataset.wired = '1'; st.addEventListener('change', ()=>{ st.dataset.touched = '1'; const f2 = $('#finCSendOtherField'); if(f2) f2.hidden = st.value !== 'x'; }); }
   }
-  const cierreTitle = c => (c.client ? 'Cierre de ' + esc(c.client) : 'Cierre de todos los clientes') + ' · del ' + esc(finDate(c.from)) + ' al ' + esc(finDate(c.to));
+  const cierreTitle = c => (c.invoice
+      ? 'Cierre del invoice #' + esc(c.invoice.number) + (c.client ? ' · ' + esc(c.client) : '')
+      : (c.client ? 'Cierre de ' + esc(c.client) : 'Cierre de todos los clientes'))
+    + ' · del ' + esc(finDate(c.from)) + ' al ' + esc(finDate(c.to));
   // El mismo dibujo para el cierre recién calculado y para uno guardado (snapshot): nunca se recalcula.
   function cierreHtml(c){
     const line = (a, b, cls) => '<div class="' + (cls || 'line') + '"><span>' + a + '</span><span>' + b + '</span></div>';
     const h2 = n => (Math.round((+n||0)*100)/100).toFixed(2);
-    const laborLabel = c.client
+    const laborLabel = c.invoice
+      ? '− Lo que se le paga a los muchachos por este invoice (' + h2(c.laborHours) + ' h × tarifa AMG de cada uno)'
+      : c.client
       ? '− Trabajadores según los reportes de ' + esc(c.client) + ' (' + h2(c.laborHours) + ' h × tarifa AMG de cada uno)'
       : '− Mano de obra de AMG (' + h2(c.laborHours) + ' h del reloj a la tarifa de cada uno)';
     let html = '<div class="paysum" style="margin-top:8px;"><div class="grand" style="border-top:0;"><span>' + cierreTitle(c) + '</span><span></span></div>'
+      + (c.invoice ? line('<span class="clockhint">' + c.invoice.logs + ' reporte(s) &middot; el invoice cobra '
+            + finMoney(c.invoice.total) + (c.cobrado < 0.005
+               ? ' &middot; <b style="color:var(--danger);">el cliente todavía no lo ha pagado</b>' : '') + '</span>', '') : '')
       + (c.notes ? '<div class="line"><span style="white-space:pre-wrap;">📝 ' + esc(c.notes) + '</span><span></span></div>' : '')
       + line('<b>' + (c.client ? 'Pagó ' + esc(c.client) : 'Cobrado a clientes') + '</b> (' + (c.payLines ? c.payLines.length : (c.byClient||[]).length) + ' pago' + ((c.payLines ? c.payLines.length : 1)===1?'':'s') + ')', '<b>' + finMoney(c.cobrado) + '</b>')
       + (c.client ? (c.payLines||[]).map(r => line('&nbsp;&nbsp;' + esc(finDate(r.date)) + ' · ' + esc(r.method) + (r.invoice ? ' · Factura #' + esc(r.invoice) : '') + ' · lo tiene ' + esc(r.delivered ? c.meName : r.by), finMoney(r.amount))).join('') : (c.byClient||[]).map(x => line('&nbsp;&nbsp;' + esc(x.name), finMoney(x.total))).join(''))
