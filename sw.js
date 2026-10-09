@@ -15,7 +15,10 @@ const APP_SCOPE = self.registration.scope;
 function appUrl(u) {
   // A tapped notification lands in the manager's hub (?door=manager): boot()
   // honours it only when the saved session is a manager, else the door shows.
-  const withDoor = href => { try { const x = new URL(href); x.searchParams.set('door', 'manager'); return x.href; } catch (e) { return href; } };
+  // Si el aviso YA dice por que puerta se abre, esa manda. El de cierres
+  // manda door=mudanza porque la carpeta de Cierres vive en la puerta de AMG;
+  // sin esto, al tocarlo caia en el hub del manager y la carpeta ni se veia.
+  const withDoor = href => { try { const x = new URL(href); if (!x.searchParams.get('door')) x.searchParams.set('door', 'manager'); return x.href; } catch (e) { return href; } };
   if (!u) return withDoor(APP_SCOPE);
   if (/^https?:\/\//i.test(u)) return u;
   try { return withDoor(new URL(String(u).replace(/^\/+/, ''), APP_SCOPE).href); }

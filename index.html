@@ -2704,6 +2704,15 @@ body.fija main{ padding-bottom:14px; }
         <b id="laborTileTitle">Mano de Obra<span class="en"> / Labor</span></b><small id="laborTileHint">Reporte del día y enviarlo al manager</small></button>
       <button type="button" class="menubtn" data-go-tab="finanzas" data-side="mudanza">
         <b>&#129534; Gastos</b><small>Anote lo que gastó en el trabajo, con su recibo</small></button>
+      <!-- CIERRES (9 oct 2026). Su pedido: "deberías de agregárselo abajo de
+           donde dice Labor Log, Gastos, Cierres. Pero solo ciertas personas
+           deberían tener acceso a esa carpeta, como Raúl, solo él la pudiera
+           ver". La reja NO es una lista de nombres escrita a mano: el azulejo
+           sale solo si a ESA persona le mandaron un cierre (la base ya se lo
+           entrega solo a quien va dirigido). Quien no tiene ninguno no ve la
+           carpeta, y el día que le manden uno le aparece sola, con su número. -->
+      <button type="button" class="menubtn" id="menuCierres" data-go-tab="amgcierres" data-side="mudanza" hidden>
+        <b>&#9878;&#65039; Cierres<span class="badge" id="menuCierresBadge" hidden></span></b><small id="menuCierresHint">El cierre de la mudanza: revíselo y diga si está de acuerdo</small></button>
       <button type="button" class="menubtn amg" data-go-tab="amgmoving" data-side="manager">
         <b>&#128666; AMG Moving<span class="badge" id="menuAmgBadge" hidden></span></b><small id="menuAmgHint">Todo lo de mudanza: horas, tarifas y reportes de mudanza</small></button>
       <button type="button" class="menubtn" data-go-tab="equipment" data-side="restauracion manager">
@@ -4672,6 +4681,19 @@ body.fija main{ padding-bottom:14px; }
       <p class="hint">Cambiar el precio <b>no cambia</b> los labor logs de AMG que ya mand&oacute; &mdash; cada uno guarda el precio con el que se mand&oacute;.</p>
     </section>
   </section>
+  <!-- Su propia ventanilla, no una pastilla dentro de Gastos: un control que se
+       llama como un lugar abre su pantalla, con su salida al pie. -->
+  <section class="tab-panel" data-tab="amgcierres">
+    <div class="amgbanner">
+      <div class="amgbanner-t">&#9878;&#65039; CIERRES &middot; AMG MOVING</div>
+      <div class="amgbanner-s">El cierre de una mudanza: lo que pagó el cliente, lo que se le paga a los muchachos, los gastos y a quién le toca qué.</div>
+    </div>
+    <section class="card amgcard">
+      <h2>Cierres para revisar</h2>
+      <p class="clockhint">Le mandaron copia de un cierre para que lo revise. Vea los números y responda si está de acuerdo o no; puede escribir una nota.</p>
+      <div id="finCierresMine"><p class="clockhint">Ninguno todavía.</p></div>
+    </section>
+  </section>
   <section class="tab-panel" data-tab="finanzas">
     <div class="amgbanner">
       <div class="amgbanner-t">&#129534; GASTOS &middot; AMG MOVING</div>
@@ -4681,13 +4703,7 @@ body.fija main{ padding-bottom:14px; }
       <button type="button" class="minibtn on" id="finSegGasto"><svg class="ico"><use href="#i-fuel"/></svg>Gasto</button>
       <button type="button" class="minibtn" id="finSegPago" hidden><svg class="ico"><use href="#i-cash"/></svg>Pagó cliente</button>
       <button type="button" class="minibtn" id="finSegMine"><svg class="ico"><use href="#i-list"/></svg>Míos</button>
-      <button type="button" class="minibtn" id="finSegCierres" hidden><svg class="ico"><use href="#i-list"/></svg>Cierres</button>
     </div>
-    <section class="card amgcard" id="finCierresCard" hidden>
-      <h2>Cierres para revisar</h2>
-      <p class="clockhint">Le mandaron copia de un cierre para que lo revise. Vea los números y responda si está de acuerdo o no; puede escribir una nota.</p>
-      <div id="finCierresMine"><p class="clockhint">Ninguno todavía.</p></div>
-    </section>
     <section class="card amgcard" id="finGastoCard" data-drafttab="finanzas">
       <h2>Gasto</h2>
       <div class="row2">
@@ -4980,7 +4996,7 @@ body.fija main{ padding-bottom:14px; }
           <div class="field"><label>Mandar copia a</label><select id="finCSendTo"></select></div>
           <div class="field" id="finCSendOtherField" hidden><label>Nombre</label><input type="text" id="finCSendOther" placeholder="Nombre de la persona" autocapitalize="words" autocomplete="off"></div>
           <button type="button" class="btn btn-amg btn-block" id="finCSave">Guardar y mandar copia</button>
-          <p class="clockhint">La persona lo ve en la app (Gastos → Cierres, o en su página de trabajador si entra con PIN) y responde "De acuerdo" o "No estoy de acuerdo", con su nota. Un cierre guardado no se recalcula.</p>
+          <p class="clockhint">A esa persona le llega un aviso al teléfono y le aparece la carpeta <b>Cierres</b> en AMG Moving (o en su página de trabajador si entra con PIN), con el número de los que faltan. Ahí responde "De acuerdo" o "No estoy de acuerdo", con su nota. Un cierre guardado no se recalcula.</p>
         </div>
         <h2 style="margin-top:18px;">Cierres guardados</h2>
         <div id="finCList"><p class="clockhint">Ninguno todavía.</p></div>
@@ -5272,6 +5288,40 @@ body.fija main{ padding-bottom:14px; }
     if(typeof paintCompanyHeader === 'function') paintCompanyHeader();
     paintSideMenu(); paintSideBanner();
   }
+  // CUANTOS CIERRES LE MANDARON A QUIEN TIENE EL TELEFONO. Los llena
+  // loadFinCierresMine; viven aqui arriba porque paintSideMenu corre desde el
+  // arranque y leer una variable declarada mas abajo tumba la app (ya paso
+  // dos veces este ano).
+  let CIERRES_MIOS = 0, CIERRES_PEND = 0;
+  // Y se recuerdan en el telefono: sin senal la lectura no llega, y un cierre
+  // que lleva dos dias esperando su respuesta no puede desaparecer del menu
+  // solo porque hoy no hay internet. Se guarda con el dueno, para que el
+  // telefono que cambia de manos no le ensene la carpeta a otra persona.
+  const CIERRES_KEY = 'cierresMios:v1';
+  function cierresRecordar(){
+    try{ localStorage.setItem(CIERRES_KEY, JSON.stringify({ uid: (SES && SES.user_id) || null, n: CIERRES_MIOS, p: CIERRES_PEND })); }catch(e){}
+  }
+  function cierresRecordados(){
+    try{
+      const o = JSON.parse(localStorage.getItem(CIERRES_KEY) || 'null');
+      if(!o || !SES || String(o.uid) !== String(SES.user_id)) return false;
+      CIERRES_MIOS = +o.n || 0; CIERRES_PEND = +o.p || 0;
+      return true;
+    }catch(e){ return false; }
+  }
+  // El azulejo de Cierres es la carpeta de quien RECIBE: sale solo si a esa
+  // persona le mandaron uno, y lleva el numero de los que faltan contestar.
+  function paintCierresTile(){
+    const b = $('#menuCierres'); if(!b) return;
+    const deEstaPuerta = b.dataset.side.split(' ').includes(SIDE);
+    b.hidden = !deEstaPuerta || !CIERRES_MIOS;
+    const bg = $('#menuCierresBadge');
+    if(bg){ bg.textContent = CIERRES_PEND || ''; bg.hidden = !CIERRES_PEND; }
+    const h = $('#menuCierresHint');
+    if(h) h.textContent = CIERRES_PEND
+      ? (CIERRES_PEND === 1 ? 'Hay 1 cierre esperando su respuesta' : 'Hay ' + CIERRES_PEND + ' cierres esperando su respuesta')
+      : 'El cierre de la mudanza: rev\u00edselo y diga si est\u00e1 de acuerdo';
+  }
   function paintSideMenu(){
     const mgr = (typeof isManager === 'function') && isManager();
     $$('#homeMenu .menubtn[data-side]').forEach(b => {
@@ -5280,6 +5330,8 @@ body.fija main{ padding-bottom:14px; }
       b.hidden = !b.dataset.side.split(' ').includes(SIDE);
     });
     const sw = $('#menuSwitchSide'); if(sw) sw.hidden = !SIDE;
+    // data-side lo muestra; tener un cierre es lo que de verdad abre la carpeta.
+    paintCierresTile();
   }
   function paintSideBanner(){
     const el = $('#sideBanner'); if(!el) return;
@@ -5302,7 +5354,7 @@ body.fija main{ padding-bottom:14px; }
     floorplan:'Plano / Floor Plan', planomed:'Plano y Medidas',
     medguardadas:'Medidas Guardadas', clientes:'Clientes', visitas:'Visitas / Visits',
     manual:'Manual', manager:'Manager',
-    mgrrest:'Restoration Doctor', mgrmore:'Precios, pagos y equipo', finanzas:'Gastos', amgclientes:'Clientes de AMG', amgcal:'Calendario',
+    mgrrest:'Restoration Doctor', mgrmore:'Precios, pagos y equipo', finanzas:'Gastos', amgcierres:'Cierres', amgclientes:'Clientes de AMG', amgcal:'Calendario',
     fpscans:'Planos Guardados', mgrcodes:'Códigos', mgrplanos:'Planos y medidas',
     'floorplan-view':'Floor Plan', 'floorplan-moisture':'Moisture Map'
   };
@@ -6360,7 +6412,7 @@ body.fija main{ padding-bottom:14px; }
   // por el rastro de arriba, lejos del pulgar. Las carpetas con pasos no van en
   // esta lista porque su barra la arma buildDocks.
   const CARPETAS_SIN_PASOS = ['reloj', 'visitas', 'clientes', 'planomed', 'finanzas',
-                              'amgmoving', 'amgclientes', 'amgcal', 'manual',
+                              'amgmoving', 'amgcierres', 'amgclientes', 'amgcal', 'manual',
                               'manager', 'mgrmore', 'mgrcodes', 'mgrplanos',
                               'mgrrest',
                               'fpscans', 'medguardadas'];
@@ -6834,11 +6886,11 @@ body.fija main{ padding-bottom:14px; }
     if(tab === 'finanzas'){
       loadPeople().then(paintFinForms); paintFinForms();
       finShow('gasto'); paintCompanyHeader();
-      // La bandeja es de QUIEN RECIBE, no de un puesto. Raul es manager
-      // desde el 7 de octubre y con el filtro viejo su pastilla "Cierres"
-      // nunca salia: la copia se guardaba bien y el no la veia nunca.
-      loadFinCierresMine();
     }
+    // La bandeja es de QUIEN RECIBE, no de un puesto: Raul es manager desde el
+    // 7 de octubre y con una reja por rol no habria visto nunca su propio
+    // cierre. Aqui se vuelve a leer por si llego otro mientras estaba adentro.
+    if(tab === 'amgcierres'){ loadFinCierresMine(); paintCompanyHeader(); }
     if(tab === 'amgcal'){ calAbrirCrew(); paintCompanyHeader(); }
     if(tab !== 'amgmoving' && calHayCambiosSinAvisar()) calAvisar();
     if(tab === 'amgmoving'){
@@ -7891,7 +7943,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-G';
+  const APP_BUILD = '2026-10-09-H';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -10647,6 +10699,38 @@ body.fija main{ padding-bottom:14px; }
     if(SIDE === 'manager' && isManager()){ navStack = []; pushBack('manager'); showTab('amgmoving'); amgShow('cal'); return; }
     if(SIDE === 'mudanza' && signedIn()){ navStack = []; updateNavButtons(); showTab('amgcal'); }
     // Por la puerta de Restoration Doctor no se abre nada de AMG.
+  }
+
+  // ---- TOCO EL AVISO DE UN CIERRE (9 oct 2026) ----
+  // Mismo camino probado que el del calendario: el aviso trae abrir:'cierres' y
+  // la app abre LA CARPETA de Cierres. Si todavia esta en la puerta (la app
+  // estaba cerrada), se recuerda y se abre en cuanto entra.
+  let cieAbrirPend = false;
+  try{
+    const u = new URL(location.href);
+    if(u.searchParams.get('abrir') === 'cierres'){
+      cieAbrirPend = true;
+      u.searchParams.delete('abrir');
+      history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+    }
+  }catch(e){}
+  function cierreTocoAviso(data){
+    if(!data || data.abrir !== 'cierres') return;
+    cieAbrirPend = true; cierreAbrirPendiente();
+  }
+  function cierreAbrirPendiente(){
+    if(!cieAbrirPend) return;
+    const g = $('#authGate');
+    if(!SIDE || (g && !g.classList.contains('done'))) return;       // en la puerta: al entrar
+    if(SIDE === 'restauracion') return;                              // por esa puerta no se abre nada de AMG
+    if(!signedIn()) return;
+    cieAbrirPend = false;
+    navStack = [];
+    // Un manager que entro por su propia puerta tambien la abre: el cierre es
+    // SUYO, no de su puesto.
+    if(SIDE === 'manager' && isManager()) pushBack('manager');
+    loadFinCierresMine();
+    showTab('amgcierres'); updateNavButtons();
   }
 
   // ---- EL MANAGER (caja #amgCalBox en AMG Moving) ----
@@ -34140,9 +34224,9 @@ body.fija main{ padding-bottom:14px; }
         }catch(e){}
       });
       PN.addListener('registrationError', ()=>{});
-      const onPush = ()=>{ if(isManager()) refreshInbox(); else { loadMyEntries(); loadMyPayments(); } if(isAmgSide()){ try{ calRefrescarHint(); }catch(e){} } };
+      const onPush = ()=>{ if(isManager()) refreshInbox(); else { loadMyEntries(); loadMyPayments(); } if(isAmgSide()){ try{ calRefrescarHint(); }catch(e){} } try{ loadFinCierresMine(); }catch(e){} };
       // Tocar un aviso del calendario (abrir: 'amgcal') abre el calendario (24 sep 2026).
-      PN.addListener('pushNotificationActionPerformed', a => { onPush(); try{ calTocoAviso(a && a.notification && a.notification.data); }catch(e){} });
+      PN.addListener('pushNotificationActionPerformed', a => { onPush(); const d = a && a.notification && a.notification.data; try{ calTocoAviso(d); }catch(e){} try{ cierreTocoAviso(d); }catch(e){} });
       PN.addListener('pushNotificationReceived', onPush);
       await PN.register();
     }catch(e){}
@@ -35514,8 +35598,14 @@ body.fija main{ padding-bottom:14px; }
     flushOutbox();
     // El azulejo 📅 Calendario dice la proxima mudanza (solo por la puerta de AMG).
     if(isAmgSide()) setTimeout(() => { try{ calRefrescarHint(); }catch(e){} }, 1200);
+    // El azulejo de Cierres tiene que estar en el menu ANTES de que entre a
+    // ningun lado: si solo se leyera al abrirlo, nunca sabria que hay uno.
+    // Primero lo que ya sabiamos (sirve sin senal), y encima la lectura nueva.
+    if(isAmgSide()){ try{ if(cierresRecordados()) paintCierresTile(); }catch(e){} }
+    if(isAmgSide()) setTimeout(() => { try{ loadFinCierresMine(); }catch(e){} }, 1400);
     // Tocó un aviso del calendario con la app cerrada (o llegó con ?abrir=amgcal): se abre ahora.
     setTimeout(() => { try{ calAbrirPendiente(); }catch(e){} }, 0);
+    setTimeout(() => { try{ cierreAbrirPendiente(); }catch(e){} }, 1500);
     // Un aviso del calendario que quedo sin mandar (la app se cerro de golpe) sale ahora.
     if(isManager()) setTimeout(() => { try{ if(calHayCambiosSinAvisar()) calAvisar(); }catch(e){} }, 3000);
     // Los planos y medidas: sube lo que falte y baja lo que hizo en otro telefono.
@@ -36275,12 +36365,11 @@ body.fija main{ padding-bottom:14px; }
 
   // ---- pantalla Finanzas (puerta AMG: crew y manager) ----
   function finShow(which){
-    [['gasto','#finSegGasto','#finGastoCard'],['pago','#finSegPago','#finPagoCard'],['mine','#finSegMine','#finMineCard'],['cierres','#finSegCierres','#finCierresCard']].forEach(([k, b, c]) => {
+    [['gasto','#finSegGasto','#finGastoCard'],['pago','#finSegPago','#finPagoCard'],['mine','#finSegMine','#finMineCard']].forEach(([k, b, c]) => {
       const btn = $(b), card = $(c); const on = k === which;
       if(btn) btn.classList.toggle('on', on); if(card) card.hidden = !on;
     });
     if(which === 'mine') loadFinMine();
-    if(which === 'cierres') loadFinCierresMine();
     // LA CASILLA DE LA FACTURA TAMBIEN AL ENTRAR, no solo al cambiar el cliente
     // (18 sep 2026).
     //
@@ -36292,7 +36381,6 @@ body.fija main{ padding-bottom:14px; }
     if(which === 'pago' && typeof finPintarFacturas === 'function') finPintarFacturas();
     window.scrollTo(0, 0);
   }
-  if($('#finSegCierres')) $('#finSegCierres').addEventListener('click', ()=> finShow('cierres'));
   if($('#finSegGasto')) $('#finSegGasto').addEventListener('click', ()=> finShow('gasto'));
   if($('#finSegPago'))  $('#finSegPago').addEventListener('click',  ()=> finShow('pago'));
   if($('#finSegMine'))  $('#finSegMine').addEventListener('click',  ()=> finShow('mine'));
@@ -37560,12 +37648,13 @@ body.fija main{ padding-bottom:14px; }
     refreshCierresBadge();
   }
   function refreshCierresBadge(){
-    const b = $('#finSegCierres'); if(!b) return;
-    const n = finCierresMine.filter(r => r.status === 'pendiente').length;
-    b.innerHTML = '<svg class="ico"><use href="#i-list"/></svg> Cierres' + (n ? ' (' + n + ')' : '');
-    // Nace escondida. Esta pantalla es para anotar gastos; la de cierres solo
-    // tiene sentido cuando el manager de verdad le mando uno que contestar.
-    b.hidden = !finCierresMine.length;
+    // El numero vive en el AZULEJO del menu, no en una pastilla adentro de
+    // Gastos: su pedido fue "en esa carpeta deberia aparecerle un 1, como en la
+    // carpeta, anunciandole que hay un cierre que tiene que poner atencion".
+    CIERRES_MIOS = finCierresMine.length;
+    CIERRES_PEND = finCierresMine.filter(r => r.status === 'pendiente').length;
+    cierresRecordar();
+    paintCierresTile();
   }
   async function loadCasualCierres(ses){
     const card = $('#casualCierresCard'), box = $('#casualCierresList'); if(!card || !box) return;
