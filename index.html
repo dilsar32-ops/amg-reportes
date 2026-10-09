@@ -7878,7 +7878,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-B';
+  const APP_BUILD = '2026-10-09-C';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -37036,7 +37036,11 @@ body.fija main{ padding-bottom:14px; }
         });
       });
     });
-    return { labor, hours, noRate, people: [...people.values()].sort((a, b) => b.amount - a.amount).map(pp => ({ name: pp.name, days: pp.days.length, hours: pp.hours, rate: pp.rate, amount: pp.amount })) };
+    // La LLAVE viaja con cada persona (9 oct 2026): sin ella, el cierre puede
+    // decir "sin tarifa AMG" pero no sabe a quien ponersela. Una llave 'x:...'
+    // es un nombre del reporte que no casa con nadie: ese NO se puede arreglar
+    // desde aqui, y hay que decirlo en vez de ofrecer un campo que no guarda.
+    return { labor, hours, noRate, people: [...people.values()].sort((a, b) => b.amount - a.amount).map(pp => ({ key: pp.key, name: pp.name, days: pp.days.length, hours: pp.hours, rate: pp.rate, amount: pp.amount })) };
   }
   async function runCierre(){
     const out = $('#finCOut');
@@ -37116,6 +37120,28 @@ body.fija main{ padding-bottom:14px; }
     const sb = $('#finCSendBox'); if(sb){ sb.hidden = false; const st = $('#finCSendTo'); if(st && !st.dataset.touched && partnerV && [...st.options].some(o => o.value === partnerV)) st.value = partnerV; }
   }
   if($('#finCRun')) $('#finCRun').addEventListener('click', runCierre);
+  // Guardar la tarifa que falta SIN salir del cierre, y recalcular de una vez.
+  // Es el mismo mgSetRate que usa Horas AMG: una sola forma de escribir una
+  // tarifa, para que las dos pantallas no puedan quedar diciendo cosas
+  // distintas de la misma persona.
+  if($('#finCOut')) $('#finCOut').addEventListener('click', async (e)=>{
+    const btn = e.target.closest('.ciRateSave'); if(!btn) return;
+    const key = btn.dataset.ckey || '';
+    const inp = document.querySelector('.ciRateIn[data-ckey="' + key.replace(/"/g, '\\"') + '"]');
+    const val = parseFloat(inp && inp.value);
+    if(!(val >= 0)) return alert('Escriba la tarifa de AMG por hora.');
+    const i = key.indexOf(':');
+    const tipo = key.slice(0, i), id = key.slice(i + 1);
+    btn.disabled = true; const antes = btn.textContent; btn.textContent = 'Guardando…';
+    try{
+      await mgSetRate(tipo, id, val);
+      btn.textContent = 'Guardado ✓';
+      await runCierre();                       // con la tarifa puesta, el cierre ya cuadra
+    }catch(err){
+      btn.textContent = antes; btn.disabled = false;
+      alert('No se pudo guardar la tarifa.\n\n' + ((err && err.message) || err));
+    }
+  });
   // Las notas se pueden seguir escribiendo después de calcular: se leen al guardar y al hacer el PDF.
   function cierreNotesNow(c){ const n = $('#finCNotes'); if(c && n) c.notes = (n.value || '').trim(); return c; }
   // Si cambia el período, el cliente o el socio, el cálculo de la pantalla ya no vale: hay que volver a calcular.
@@ -37149,7 +37175,25 @@ body.fija main{ padding-bottom:14px; }
       + (c.client ? (c.payLines||[]).map(r => line('&nbsp;&nbsp;' + esc(finDate(r.date)) + ' · ' + esc(r.method) + (r.invoice ? ' · Factura #' + esc(r.invoice) : '') + ' · lo tiene ' + esc(r.delivered ? c.meName : r.by), finMoney(r.amount))).join('') : (c.byClient||[]).map(x => line('&nbsp;&nbsp;' + esc(x.name), finMoney(x.total))).join(''))
       + line('<span class="muted">Facturado por los reportes' + (c.reports !== undefined ? ' (' + c.reports + ')' : '') + '</span>', '<span class="muted">' + finMoney(c.billed) + '</span>')
       + line(laborLabel, '− ' + finMoney(c.labor))
-      + (c.people ? c.people.map(pp => line('&nbsp;&nbsp;' + esc(pp.name) + ' · ' + pp.days + ' día' + (pp.days===1?'':'s') + ' · ' + h2(pp.hours) + ' h' + (pp.rate === null ? ' · <span style="color:var(--danger);">sin tarifa AMG</span>' : ' × ' + finMoney(pp.rate)), pp.rate === null ? '—' : finMoney(pp.amount))).join('') : '')
+      + (c.people ? c.people.map(pp => {
+          const izq = '&nbsp;&nbsp;' + esc(pp.name) + ' · ' + pp.days + ' día' + (pp.days===1?'':'s') + ' · ' + h2(pp.hours) + ' h'
+            + (pp.rate === null ? ' · <span style="color:var(--danger);">sin tarifa AMG</span>' : ' × ' + finMoney(pp.rate));
+          const fila = line(izq, pp.rate === null ? '—' : finMoney(pp.amount));
+          // PONERLE LA TARIFA AQUI MISMO (9 oct 2026): "me dice que Duvan no
+          // tiene tarifa, entonces debería darme la opción de agregarle tarifa
+          // ahí mismo, para hacer el cierre correctamente".
+          // Solo en el cierre que se acaba de calcular: uno GUARDADO es una
+          // foto de lo que se acordó y no se vuelve a tocar.
+          if(pp.rate !== null || c.guardado || !pp.key) return fila;
+          const k = String(pp.key);
+          if(k.slice(0, 2) === 'x:') return fila + line('&nbsp;&nbsp;<span class="clockhint" style="color:var(--danger);">'
+            + esc(pp.name) + ' no está en la lista de AMG. Agréguelo en <b>Horas AMG</b> y vuelva a calcular.</span>', '');
+          return fila + '<div class="line"><span>&nbsp;&nbsp;<span class="clockhint">Póngale su tarifa de AMG y el cierre se vuelve a calcular</span></span>'
+            + '<span style="display:flex; gap:6px; align-items:center;">'
+            + '<input type="number" class="ciRateIn" data-ckey="' + esc(k) + '" step="0.01" inputmode="decimal" placeholder="$/hora"'
+            + ' style="width:92px; min-height:34px; margin:0; padding:6px 8px;">'
+            + '<button type="button" class="minibtn ciRateSave" data-ckey="' + esc(k) + '">Guardar</button></span></div>';
+        }).join('') : '')
       + (c.laborNoRate > 0 ? line('<span style="color:var(--danger);">&nbsp;&nbsp;⚠ ' + h2(c.laborNoRate) + ' h sin tarifa de AMG (no están sumadas)</span>', '') : '')
       + line('− Gastos (gasolina, material, etc.)', '− ' + finMoney(c.gastos))
       + (c.client ? (c.expLines||[]).map(r => line('&nbsp;&nbsp;' + esc(finDate(r.date)) + ' · ' + esc(r.what) + ' · lo puso ' + esc(r.by), finMoney(r.amount))).join('') : '')
@@ -37282,7 +37326,9 @@ body.fija main{ padding-bottom:14px; }
         + '<div class="row2"><button type="button" class="btn btn-outline cierreYes" data-id="' + esc(r.id) + '" data-ctx="' + ctx + '" style="color:var(--ok, #2e9e5b);">✓ De acuerdo</button><button type="button" class="btn btn-outline cierreNo" data-id="' + esc(r.id) + '" data-ctx="' + ctx + '" style="color:var(--danger);">✗ No estoy de acuerdo</button></div>'
         + '</div>' : '';
     return '<details class="whychip" style="display:block;"><summary style="flex-direction:column;align-items:flex-start;"><span style="display:block;"><b>' + cierreTitle(c) + '</b>' + who + '</span><span style="display:block;color:' + color + ';">' + esc(st) + '</span></summary><div class="whytext">'
-      + cierreHtml(c) + respondBox
+      // Un cierre GUARDADO es la foto de lo que se acordo: no ofrece ponerle
+      // tarifas ni nada que lo cambie. Por eso va marcado.
+      + cierreHtml(Object.assign({}, c, { guardado: true })) + respondBox
       + '<div class="row2" style="margin-top:8px;"><button type="button" class="btn btn-outline cierrePdf" data-id="' + esc(r.id) + '" data-ctx="' + ctx + '">PDF</button>'
       + (ctx === 'mgr' ? '<button type="button" class="btn btn-outline cierreDel" data-id="' + esc(r.id) + '" data-ctx="mgr" style="color:var(--danger);">Borrar</button>' : '<span></span>') + '</div>'
       + '</div></details>';
