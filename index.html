@@ -4685,7 +4685,7 @@ body.fija main{ padding-bottom:14px; }
     </div>
     <section class="card amgcard" id="finCierresCard" hidden>
       <h2>Cierres para revisar</h2>
-      <p class="clockhint">El manager le mandó copia de un cierre. Revíselo y responda si está de acuerdo o no; puede escribir una nota.</p>
+      <p class="clockhint">Le mandaron copia de un cierre para que lo revise. Vea los números y responda si está de acuerdo o no; puede escribir una nota.</p>
       <div id="finCierresMine"><p class="clockhint">Ninguno todavía.</p></div>
     </section>
     <section class="card amgcard" id="finGastoCard" data-drafttab="finanzas">
@@ -6834,7 +6834,10 @@ body.fija main{ padding-bottom:14px; }
     if(tab === 'finanzas'){
       loadPeople().then(paintFinForms); paintFinForms();
       finShow('gasto'); paintCompanyHeader();
-      if(!isManager()) loadFinCierresMine();
+      // La bandeja es de QUIEN RECIBE, no de un puesto. Raul es manager
+      // desde el 7 de octubre y con el filtro viejo su pastilla "Cierres"
+      // nunca salia: la copia se guardaba bien y el no la veia nunca.
+      loadFinCierresMine();
     }
     if(tab === 'amgcal'){ calAbrirCrew(); paintCompanyHeader(); }
     if(tab !== 'amgmoving' && calHayCambiosSinAvisar()) calAvisar();
@@ -7888,7 +7891,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-F';
+  const APP_BUILD = '2026-10-09-G';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -37490,14 +37493,18 @@ body.fija main{ padding-bottom:14px; }
     const c = r.snapshot || {}; const st = cierreStatusText(r);
     const color = r.status === 'acuerdo' ? 'var(--ok, #2e9e5b)' : r.status === 'desacuerdo' ? 'var(--danger)' : 'inherit';
     const isMine = ctx !== 'mgr' || (r.sent_to_kind === 'c' && String(r.sent_to_id) === String(SES && SES.user_id));
-    const canRespond = ctx !== 'mgr' || isMine || true;   // el manager también puede anotar lo que le dijeron
+    // Un solo lugar para contestar: si el cierre viene dirigido a quien lo
+    // esta mirando, se responde en SU bandeja (Gastos -> Cierres). Esta
+    // lista es lo que EL mando, no lo que le mandaron.
+    const canRespond = !(ctx === 'mgr' && isMine);
     const who = ctx === 'mgr' ? (r.sent_to_name ? ' · copia a ' + esc(r.sent_to_name) : '') : (' · de ' + esc(c.meName || 'el manager'));
     const respondBox = canRespond ? '<div style="margin-top:10px;">'
         + (r.status !== 'pendiente' ? '<p class="clockhint" style="color:' + color + ';"><b>' + esc(st) + '</b>' + (r.responded_at ? ' · ' + esc(finDate(String(r.responded_at).slice(0, 10))) : '') + (r.response_note ? '<br>"' + esc(r.response_note) + '"' : '') + '</p>' : '')
         + (ctx === 'mgr' && !isMine ? '<p class="clockhint">Si ' + esc(r.sent_to_name || 'la persona') + ' le respondió por teléfono, anótelo aquí:</p>' : '')
         + '<div class="field"><label>Nota <span class="hint">opcional</span></label><textarea class="cierre-note" rows="2" placeholder="Ej: falta la gasolina del martes"></textarea></div>'
         + '<div class="row2"><button type="button" class="btn btn-outline cierreYes" data-id="' + esc(r.id) + '" data-ctx="' + ctx + '" style="color:var(--ok, #2e9e5b);">✓ De acuerdo</button><button type="button" class="btn btn-outline cierreNo" data-id="' + esc(r.id) + '" data-ctx="' + ctx + '" style="color:var(--danger);">✗ No estoy de acuerdo</button></div>'
-        + '</div>' : '';
+        + '</div>'
+      : '<p class="clockhint" style="margin-top:10px;"><b>Este cierre es para usted.</b> Contéstelo en <b>Gastos &rarr; Cierres</b>.</p>';
     return '<details class="whychip" style="display:block;"><summary style="flex-direction:column;align-items:flex-start;"><span style="display:block;"><b>' + cierreTitle(c) + '</b>' + who + '</span><span style="display:block;color:' + color + ';">' + esc(st) + '</span></summary><div class="whytext">'
       // Un cierre GUARDADO es la foto de lo que se acordo: no ofrece ponerle
       // tarifas ni nada que lo cambie. Por eso va marcado.
