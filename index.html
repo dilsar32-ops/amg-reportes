@@ -4958,7 +4958,8 @@ body.fija main{ padding-bottom:14px; }
              asi que el cierre no tiene que adivinar que entra: la mano de
              obra se saca de esos mismos reportes. -->
         <div class="field"><label>Cerrar por invoice <span class="hint">o dejelo vacío y use el período de abajo</span></label>
-          <select id="finCInvoice"><option value="">No &mdash; cerrar por fecha</option></select></div>
+          <select id="finCInvoice"><option value="">No &mdash; cerrar por fecha</option></select>
+          <p class="clockhint" id="finCInvoiceNota" hidden style="margin:6px 0 0;"></p></div>
         <div class="row2" id="finCRango"><div class="field"><label>Desde</label><input type="date" id="finCFrom"></div><div class="field"><label>Hasta</label><input type="date" id="finCTo"></div></div>
         <div class="field" id="finCClientField"><label>Cliente</label><select id="finCClient"><option value="">Todos los clientes (el período completo)</option></select></div>
         <!-- HORAS DE OFICINA (9 oct 2026): "agregale una seccion que nos de
@@ -7887,7 +7888,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-E';
+  const APP_BUILD = '2026-10-09-F';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -9858,6 +9859,7 @@ body.fija main{ padding-bottom:14px; }
     // Invoices: sin eso el selector salia vacio (9 oct 2026, su reporte:
     // "no me da los invoices que tenemos para poder cerrar esos").
     if(amgSeg === 'cierre'){
+      limpiarCierre();                    // entrar nunca ensena el calculo de la vez pasada
       loadFinAll();
       if(typeof invLoadInvoices === 'function') invLoadInvoices().then(()=> paintCierreForm());
       paintCierreForm();
@@ -37002,6 +37004,35 @@ body.fija main{ padding-bottom:14px; }
   }
 
   // ---- CIERRE: lo que quedo en un periodo y como se reparte ----
+  // LAS FACTURAS QUE YA SE CERRARON NO VUELVEN A LA LISTA (9 oct 2026):
+  // "en los invoices ya no tendrian que dar la opcion de volver a hacer ese
+  // cierre de nuevo; si ya se hizo el cierre de ellos no deberian volver a
+  // aparecer ahi". Se sacan del snapshot que quedo guardado con cada cierre,
+  // asi que si borra un cierre, su factura vuelve sola a estar disponible.
+  function facturasYaCerradas(){
+    const n = new Set();
+    (finCierres || []).forEach(r => {
+      const inv = r && r.snapshot && r.snapshot.invoice;
+      if(inv && (inv.number || inv.number === 0)) n.add(String(inv.number));
+    });
+    return n;
+  }
+  // DEJAR LA PANTALLA COMO NUEVA (9 oct 2026): "ya mande el cierre, pero si
+  // entro otra vez a cierres sigo viendo todo lo que se calculo del cierre
+  // anterior; deberia estar todo de nuevo". Un calculo viejo en pantalla es
+  // el que se guarda dos veces por equivocacion.
+  function limpiarCierre(){
+    lastCierre = null;
+    const out = $('#finCOut'); if(out){ out.innerHTML = ''; delete out.dataset.calculado; }
+    const pb = $('#finCPdf'); if(pb) pb.hidden = true;
+    const sb = $('#finCSendBox'); if(sb) sb.hidden = true;
+    const isel = $('#finCInvoice'); if(isel) isel.value = '';
+    ['#finCNotes', '#finCOffice'].forEach(sel => { const e = $(sel); if(e) e.value = ''; });
+    const st = $('#finCSendTo'); if(st){ delete st.dataset.touched; st.value = ''; }
+    const of2 = $('#finCSendOtherField'); if(of2) of2.hidden = true;
+    const oi = $('#finCSendOther'); if(oi) oi.value = '';
+    aplicarModoInvoice();                 // vuelve a enseñar el período y el cliente
+  }
   function paintCierreForm(){ paintCierreSelects(); loadCierres(); }
   // Con un invoice escogido, el periodo y el cliente ya NO los escoge el: los
   // manda el invoice. Dejarlos abiertos invitaria a un cierre que dice "este
@@ -37042,12 +37073,23 @@ body.fija main{ padding-bottom:14px; }
     const isel = $('#finCInvoice');
     if(isel){
       const cur = isel.value;
-      const invs = (typeof INVOICES !== 'undefined' && Array.isArray(INVOICES)) ? INVOICES : [];
+      const todas = (typeof INVOICES !== 'undefined' && Array.isArray(INVOICES)) ? INVOICES : [];
+      const cerradas = facturasYaCerradas();
+      const invs = todas.filter(v => !cerradas.has(String(v.number)));
       isel.innerHTML = '<option value="">No &mdash; cerrar por fecha</option>'
         + invs.map(v => '<option value="' + esc(v.id) + '">#' + esc(v.number) + ' &middot; '
             + esc(v.client_name || '') + ' &middot; ' + finMoney(+v.total || 0)
             + (v.status === 'paid' ? ' &middot; pagado' : '') + '</option>').join('');
       if(cur && [...isel.options].some(o => o.value === cur)) isel.value = cur;
+      // No se esconden en silencio: si falta una, tiene que saber por que.
+      const nota = $('#finCInvoiceNota');
+      const n = todas.length - invs.length;
+      if(nota){
+        nota.hidden = !n;
+        nota.innerHTML = n ? (n === 1 ? '1 invoice ya tiene su cierre y por eso no sale aquí.'
+          : n + ' invoices ya tienen su cierre y por eso no salen aquí.')
+          + ' Están abajo, en <b>Cierres guardados</b>.' : '';
+      }
       aplicarModoInvoice();
     }
     paintCierreSendTo();
@@ -37420,8 +37462,12 @@ body.fija main{ padding-bottom:14px; }
       btn.textContent = 'Guardado ✓';
       const hint = to.kind === 'x' ? ' ' + to.name + ' no entra a la app con ese nombre: mándele el PDF y anote aquí lo que responda.' : '';
       alert('Cierre guardado y copia mandada a ' + to.name + '.' + hint);
-      const sb = $('#finCSendBox'); if(sb) sb.hidden = true;   // para guardar otra vez hay que volver a calcular (evita el doble toque)
       await loadCierres();
+      // La pantalla queda COMO NUEVA: el cierre ya se mando, y lo que quedaba
+      // en pantalla solo servia para guardarlo dos veces por equivocacion.
+      // loadCierres va primero: de ahi sale cuales facturas ya estan cerradas.
+      limpiarCierre();
+      paintCierreSelects();
     }catch(e){ alert('No se pudo guardar.\n\n' + ((e && e.message) || e)); }
     setTimeout(()=>{ btn.disabled = false; btn.textContent = old; }, 1500);
   }
@@ -37435,6 +37481,9 @@ body.fija main{ padding-bottom:14px; }
       finCierres = await res.json();
     }catch(e){ box.innerHTML = FIN_SIN_LEER; return; }
     box.innerHTML = finCierres.length ? finCierres.map(r => cierreRowHtml(r, 'mgr')).join('') : '<p class="clockhint">Ninguno todavía. Calcule un cierre y toque "Guardar y mandar copia".</p>';
+    // El selector esconde las facturas ya cerradas, y eso sale de ESTA lista:
+    // hay que repintarlo cuando llega, porque se pinto antes que ella.
+    if($('#finCInvoice')) paintCierreSelects();
   }
   const myCierreKey = () => 'c:' + (SES && SES.user_id);
   function cierreRowHtml(r, ctx){
