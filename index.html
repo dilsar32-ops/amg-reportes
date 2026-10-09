@@ -7878,7 +7878,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-C';
+  const APP_BUILD = '2026-10-09-D';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -9484,6 +9484,52 @@ body.fija main{ padding-bottom:14px; }
         + '</div></details>';
     }).join('');
   }
+  // El pago de una factura, anotado en el libro de pagos de clientes.
+  // Idempotente por numero de factura: si ya hay una fila suya, no escribe.
+  // Quien recibio el dinero se PREGUNTA, no se adivina: el reparto del cierre
+  // depende de eso ("dinero de clientes en manos del socio").
+  async function anotarPagoDeFactura(inv, dia, metodo){
+    try{
+      // ¿Ya hay un pago de esta factura? Se le pregunta AL SERVIDOR, no a la
+      // lista que tenemos en el telefono: si esa lista no se pudo recargar
+      // (sin senal) vendria vacia y escribiriamos el pago dos veces. Y si la
+      // pregunta falla, NO se escribe: es mejor que falte un pago -- que se
+      // ve y se anota a mano -- a cobrarle dos veces al cliente.
+      const q = await authFetch('/rest/v1/client_payments?select=id&limit=1&invoice_number=eq.'
+        + encodeURIComponent(inv.number), { headers: cloudHeaders() });
+      if(!q.ok) throw new Error('no se pudo revisar si ya estaba anotado');
+      if((await q.json()).length) return;
+      const gente = (typeof finFixedOptions === 'function') ? finFixedOptions() : [];
+      const quien = prompt('¿Quién recibió el dinero de la factura #' + inv.number + '?\n\n'
+        + 'Escriba el nombre tal como lo conoce (por ejemplo: Amilcar, Raúl, o "La empresa" si entró a la cuenta).\n\n'
+        + 'Esto es lo que el cierre usa para saber quién tiene el dinero. Déjelo vacío para no anotar el pago ahora.',
+        (SES && SES.full_name) || '');
+      if(quien === null || !quien.trim()) return;
+      const nombre = quien.trim();
+      // Si el nombre casa con alguien de la lista, se guarda con su id; si no,
+      // queda como nombre libre ('x'), que es lo mismo que hace el formulario.
+      const hit = gente.find(o => finNorm(o.name) === finNorm(nombre));
+      const [k, id] = hit ? hit.value.split(':') : ['x', null];
+      const METODOS = { cash:'efectivo', efectivo:'efectivo', zelle:'zelle', transfer:'zelle',
+                        check:'cheque', cheque:'cheque', card:'tarjeta', tarjeta:'tarjeta' };
+      const met = METODOS[String(metodo || '').trim().toLowerCase()] || 'otro';
+      const res = await authFetch('/rest/v1/client_payments', {
+        method:'POST', headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal'}),
+        body: JSON.stringify({ company_id: SES.company_id, work_kind:'mudanza',
+          client: inv.client_name || '', paid_on: dia, amount: +inv.total || 0,
+          kind:'pago', method: met, invoice_number: inv.number,
+          received_by_kind: (k === 'e' ? 'e' : k), received_by_id: (k === 'x' || k === 'e') ? null : id,
+          received_by_name: nombre, created_by: SES.user_id }) });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      if(typeof loadFinAll === 'function') await loadFinAll();
+    }catch(e){
+      // La factura SI quedo marcada: lo que fallo es el libro. Decirlo, para
+      // que lo anote a mano y el cierre no quede corto.
+      alert('La factura quedó marcada como pagada, pero no se pudo anotar el pago en el libro.\n\n'
+          + ((e && e.message) || 'Revise su internet') + '\n\n'
+          + 'Anótelo en Finanzas → Pagos de clientes para que el cierre lo cuente.');
+    }
+  }
   if($('#invList')) $('#invList').addEventListener('click', async (e) => {
     const b = e.target.closest('button'); if(!b || !b.dataset.id) return;
     const inv = INVOICES.find(i => String(i.id) === b.dataset.id); if(!inv) return;
@@ -9497,6 +9543,16 @@ body.fija main{ padding-bottom:14px; }
       try{
         const res = await authFetch('/rest/v1/amg_invoices?id=eq.' + encodeURIComponent(inv.id), { method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=minimal'}), body: JSON.stringify({ status:'paid', paid_on: d.trim(), paid_method: (m || '').trim() || null, updated_at: new Date().toISOString() }) });
         if(!res.ok) throw new Error('HTTP ' + res.status);
+        // Y SE ANOTA EL PAGO EN EL LIBRO (9 oct 2026). Este boton solo
+        // escribia en la factura, asi que el cierre y la cuenta del cliente
+        // -- que leen el libro de pagos de clientes -- no se enteraban: la
+        // factura decia PAGADO y el cierre decia "todavia no ha pagado".
+        // Eran dos registros del mismo hecho. Ahora es uno.
+        //
+        // No se escribe si ya hay una fila de esa factura: el otro camino
+        // (Finanzas -> Pago de cliente) la crea, y dos filas serian cobrar
+        // dos veces.
+        await anotarPagoDeFactura(inv, d.trim(), m);
         await invLoadInvoices(); invRenderList();
         const upd = INVOICES.find(i => String(i.id) === String(inv.id));
         if(upd && confirm('Invoice #' + upd.number + ' marcado como pagado.\n\n¿Mandarle el recibo al cliente ahora?')) invShare(upd, 'receipt');
@@ -37093,7 +37149,22 @@ body.fija main{ padding-bottom:14px; }
     const pays = inv
       ? finPayments.filter(r => String(r.invoice_number || '') === String(inv.number))
       : finPayments.filter(r => inP(r.paid_on) && (!ckey || clientKey(r.client) === ckey));
-    const cobrado = pays.reduce((s, r) => s + (+r.amount||0), 0);
+    let cobrado = pays.reduce((s, r) => s + (+r.amount||0), 0);
+    // UN INVOICE MARCADO PAGADO CUENTA COMO COBRADO (9 oct 2026, su reporte:
+    // "el cierre dice que no ha pagado y en invoices guardados dice que Susan
+    // sí pagó").
+    //
+    // Eran dos registros del mismo hecho que no se hablaban: "Marcar pagado"
+    // desde Invoices solo escribia en la factura, y el cierre lee el libro de
+    // pagos de clientes. Desde esta build ese boton tambien anota el pago
+    // (ver invPaid), pero las facturas que ya se marcaron antes no tienen
+    // fila, y el cierre tiene que decir la verdad igual.
+    //
+    // Se toma el total de la factura SOLO si no hay ninguna fila suya: si la
+    // hay, manda el libro de pagos, que es donde esta el detalle y quien
+    // tiene el dinero. Nunca se suman los dos.
+    const soloPorLaFactura = !!(inv && !pays.length && inv.status === 'paid');
+    if(soloPorLaFactura) cobrado = +inv.total || 0;
     const byClient = [...groupBy(pays, r => clientKey(r.client)).entries()].map(([k, rows]) => ({ name: normClient(rows[0].client), total: rows.reduce((s, r) => s + (+r.amount||0), 0) })).sort((x, y) => y.total - x.total);
     // En el cierre de UN cliente, seguro y storage no entran en nada (ni en gastos, ni en "lo que puso", ni en las líneas).
     const exps = finExpenses.filter(r => inP(r.spent_on) && (!ckey || clientKey(r.client) === ckey)).filter(r => !client || !FIN_FIXED.includes(r.what));
@@ -37113,7 +37184,8 @@ body.fija main{ padding-bottom:14px; }
     const payLines = pays.map(r => ({ date: r.paid_on, method: FIN_METHOD[r.method] || r.method, by: whoLabel(r.received_by_kind, r.received_by_name), amount: +r.amount||0, delivered: !!r.delivered_at, invoice: r.invoice_number || null }));
     const expLines = exps.map(r => ({ date: r.spent_on, what: finQue(r), by: whoLabel(r.paid_by_kind, r.paid_by_name), amount: +r.amount||0, fixed: FIN_FIXED.includes(r.what) }));
     lastCierre = { from, to, client, notes, cobrado,
-      invoice: inv ? { number: inv.number, total: +inv.total || 0, status: inv.status, logs: logs.length } : null, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner };
+      invoice: inv ? { number: inv.number, total: +inv.total || 0, status: inv.status, logs: logs.length,
+                       paidOn: inv.paid_on || null, method: inv.paid_method || null, soloFactura: soloPorLaFactura } : null, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner };
     out.innerHTML = cierreHtml(lastCierre);
     out.dataset.calculado = '1';
     const pb = $('#finCPdf'); if(pb) pb.hidden = false;
@@ -37168,8 +37240,20 @@ body.fija main{ padding-bottom:14px; }
       : '− Mano de obra de AMG (' + h2(c.laborHours) + ' h del reloj a la tarifa de cada uno)';
     let html = '<div class="paysum" style="margin-top:8px;"><div class="grand" style="border-top:0;"><span>' + cierreTitle(c) + '</span><span></span></div>'
       + (c.invoice ? line('<span class="clockhint">' + c.invoice.logs + ' reporte(s) &middot; el invoice cobra '
-            + finMoney(c.invoice.total) + (c.cobrado < 0.005
-               ? ' &middot; <b style="color:var(--danger);">el cliente todavía no lo ha pagado</b>' : '') + '</span>', '') : '')
+            + finMoney(c.invoice.total)
+            + (c.invoice.soloFactura
+                 ? ' &middot; <b style="color:var(--green);">marcado PAGADO'
+                   + (c.invoice.paidOn ? ' el ' + esc(finDate(c.invoice.paidOn)) : '')
+                   + (c.invoice.method ? ' &middot; ' + esc(c.invoice.method) : '') + '</b>'
+                 : (c.cobrado < 0.005 && c.invoice.status !== 'paid'
+                      ? ' &middot; <b style="color:var(--danger);">el cliente todavía no lo ha pagado</b>' : ''))
+            + '</span>', '')
+          // De donde salio el numero: de la factura, no del libro de pagos.
+          // Ahi no se sabe quien tiene el dinero, y el reparto lo necesita.
+          + (c.invoice.soloFactura ? line('<span class="clockhint" style="color:var(--ink-soft);">'
+              + 'Ese cobro sale de la factura, no del libro de pagos: ahí no dice <b>quién tiene el dinero</b>. '
+              + 'Anótelo en <b>Finanzas &rarr; Pagos de clientes</b> si quiere que el reparto lo tome en cuenta.</span>', '') : '')
+        : '')
       + (c.notes ? '<div class="line"><span style="white-space:pre-wrap;">📝 ' + esc(c.notes) + '</span><span></span></div>' : '')
       + line('<b>' + (c.client ? 'Pagó ' + esc(c.client) : 'Cobrado a clientes') + '</b> (' + (c.payLines ? c.payLines.length : (c.byClient||[]).length) + ' pago' + ((c.payLines ? c.payLines.length : 1)===1?'':'s') + ')', '<b>' + finMoney(c.cobrado) + '</b>')
       + (c.client ? (c.payLines||[]).map(r => line('&nbsp;&nbsp;' + esc(finDate(r.date)) + ' · ' + esc(r.method) + (r.invoice ? ' · Factura #' + esc(r.invoice) : '') + ' · lo tiene ' + esc(r.delivered ? c.meName : r.by), finMoney(r.amount))).join('') : (c.byClient||[]).map(x => line('&nbsp;&nbsp;' + esc(x.name), finMoney(x.total))).join(''))
