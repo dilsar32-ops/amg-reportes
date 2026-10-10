@@ -2484,6 +2484,24 @@ body.fija #barraPie .action-bar{
 /* Con la barra YA en la columna, el hueco que main reservaba para un boton
    flotante sobra y dejaba un vacio grande debajo de la ultima fila. */
 body.fija main{ padding-bottom:14px; }
+
+/* UN NOMBRE QUE NO ES DE NADIE (9 oct 2026). Ambar, no rojo: no esta MAL --
+   esta por confirmar, y el que lo escribio es quien sabe. Va al final de la
+   hoja a proposito: .nametag se define mas arriba y una regla puesta en medio
+   la pierde (la trampa de siempre en este archivo). */
+.nametag.nametag-duda{
+  background:rgba(214,158,46,.18); border:1px solid #d69e2e; color:#f0c674;
+}
+.namewarn{
+  margin-top:8px; display:flex; flex-direction:column; gap:8px;
+  font-size:13px; line-height:1.45; color:#f0c674;
+}
+.namewarn > div{
+  display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+  padding:9px 11px; border-radius:var(--radius);
+  background:rgba(214,158,46,.12); border:1px solid rgba(214,158,46,.45);
+}
+.namewarn .minibtn{ border-color:#d69e2e; color:#f0c674; }
 </style>
 </head>
 <body>
@@ -7578,6 +7596,63 @@ body.fija main{ padding-bottom:14px; }
   }
   function paySave(c){ try{ localStorage.setItem('pay', JSON.stringify(c)); }catch(e){} }
 
+  // ¿ESTE NOMBRE ES DE ALGUIEN? (9 oct 2026)
+  // Su reclamo, y tiene razon: "me dejo enviar el reporte sin que se viera ese
+  // error... es perder dinero dejar ir ese error". Samuel escribio "Ridrigo" en
+  // un turno y nadie lo vio hasta el cierre, con el invoice ya mandado y
+  // Rodrigo cobrando 3 horas de menos. El aviso tiene que salir AQUI, cuando
+  // se escribe, no semanas despues.
+  //
+  // Tres estados, y solo UNO se marca:
+  //   casa con alguien          -> ok, nada que decir
+  //   no casa pero se parece a  -> SE MARCA. Esto es el error de dedo.
+  //     UNA sola persona
+  //   no casa y no se parece    -> callado. Puede ser gente nueva de verdad,
+  //     a nadie                    y acusar a un ayudante nuevo seria peor.
+  function nombreDudoso(name){
+    const nm = String(name || '').trim();
+    if(!nm) return null;
+    if(typeof finPersonFor !== 'function' || typeof finNombreParecido !== 'function') return null;
+    if(!Array.isArray(FIN_PEOPLE) || !FIN_PEOPLE.length) return null;   // sin lista no se acusa a nadie
+    if(finPersonFor(nm)) return null;
+    const parecido = finNombreParecido(nm);
+    return parecido ? { name: nm, parecido } : null;
+  }
+  function dudasDeLaCard(card){ return nameTags(card).map(nombreDudoso).filter(Boolean); }
+  // El aviso va pegado a los nombres de ESE turno, con el boton que lo corrige
+  // de un toque: decirle el problema y dejarlo escribiendo otra vez seria la
+  // mitad del trabajo.
+  function pintarDudas(card){
+    const box = $('.namebox', card); if(!box) return;
+    // SIN ':scope >': el aviso queda dentro del .field que envuelve al
+    // .namebox, no colgando del turno. Con el selector de hijo directo no se
+    // encontraba nunca: se creaba uno NUEVO en cada repintado y el viejo no se
+    // quitaba, asi que el aviso seguia ahi despues de corregir el nombre.
+    let w = card.querySelector('.namewarn');
+    const dudas = dudasDeLaCard(card);
+    card.querySelectorAll('.nametag').forEach(t => {
+      t.classList.toggle('nametag-duda', dudas.some(d => d.name === t.dataset.name));
+    });
+    if(!dudas.length){ if(w) w.remove(); return; }
+    if(!w){ w = document.createElement('div'); w.className = 'namewarn'; box.insertAdjacentElement('afterend', w); }
+    w.innerHTML = dudas.map(d =>
+      '<div><span>&#9888; <b>' + esc(d.name) + '</b> no es nadie del equipo. ¿Será <b>' + esc(d.parecido) + '</b>?'
+      + ' Así no se le pagan esas horas a nadie.</span>'
+      + '<button type="button" class="minibtn nameFix" data-mal="' + esc(d.name) + '" data-bien="' + esc(d.parecido) + '">Sí, es ' + esc(d.parecido) + '</button></div>').join('');
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('.nameFix'); if(!b) return;
+    const card = b.closest('.shift-card'); if(!card) return;
+    const mal = b.dataset.mal, bien = b.dataset.bien;
+    const t = [...card.querySelectorAll('.nametag')].find(x => x.dataset.name === mal);
+    if(t){
+      // Si el bueno ya estaba en el turno, el malo simplemente sobra.
+      const yaEsta = nameTags(card).some(n => finNorm(n) === finNorm(bien));
+      if(yaEsta) t.remove();
+      else { t.dataset.name = bien; t.innerHTML = esc(bien) + '<button type="button" aria-label="Quitar">&times;</button>'; }
+    }
+    syncNames(card); pintarDudas(card);
+  });
   function nameTags(card){ return [...card.querySelectorAll('.nametag')].map(t=>t.dataset.name); }
   function syncNames(card){
     const hidden = $('.s-names', card);
@@ -7598,11 +7673,17 @@ body.fija main{ padding-bottom:14px; }
       tag.dataset.name = name;
       tag.innerHTML = esc(name) + '<button type="button" aria-label="Quitar">&times;</button>';
       box.insertBefore(tag, input);
-      const key = 'person';
-      const list = sugStore.get(key).filter(x=>x.toLowerCase()!==name.toLowerCase());
-      list.unshift(name); sugStore.set(key, list.slice(0, sugMax(key)));
+      // UN NOMBRE DUDOSO NO SE GUARDA EN LAS SUGERENCIAS. Si se guardara,
+      // "Ridrigo" se le volveria a ofrecer a Samuel manana y el error se
+      // quedaria pegado para siempre.
+      if(!nombreDudoso(name)){
+        const key = 'person';
+        const list = sugStore.get(key).filter(x=>x.toLowerCase()!==name.toLowerCase());
+        list.unshift(name); sugStore.set(key, list.slice(0, sugMax(key)));
+      }
     });
     syncNames(card);
+    pintarDudas(card);
     const inp=$('.nameadd', card); if(inp && $('.sug', card)) sugRender(inp);
   }
   // A name typed into the box but never turned into a chip. The ONLY thing
@@ -7943,7 +8024,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-J';
+  const APP_BUILD = '2026-10-09-K';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -34794,6 +34875,20 @@ body.fija main{ padding-bottom:14px; }
     return !!ok;
   }
 
+  // Junta las dudas de TODOS los turnos y pregunta una sola vez.
+  function laborAvisarNombres(){
+    if(typeof dudasDeLaCard !== 'function') return true;
+    const todas = [];
+    $$('.shift-card', shiftsContainer).forEach(c => dudasDeLaCard(c).forEach(d => {
+      if(!todas.some(x => x.name === d.name)) todas.push(d);
+    }));
+    if(!todas.length) return true;
+    const lista = todas.map(d => '\u2022 "' + d.name + '"  \u2192  ¿' + d.parecido + '?').join('\n');
+    return confirm('Hay ' + (todas.length === 1 ? 'un nombre que no es' : todas.length + ' nombres que no son')
+      + ' de nadie del equipo:\n\n' + lista
+      + '\n\nSi lo manda así, esas horas NO se le pagan a nadie.'
+      + '\n\nAceptar = mandarlo de todos modos.\nCancelar = volver a los turnos y corregirlo.');
+  }
   async function sendToManager(){
     // Entrada = salida no es un turno: un telefono viejo lo cobraria como 24 h.
     // (va antes de todo, tambien cuando se esta corrigiendo uno devuelto)
@@ -34802,6 +34897,11 @@ body.fija main{ padding-bottom:14px; }
     // Las horas que se quedarían sin cobrar: se avisan ANTES de mandar, con la
     // cifra, y se le deja volver a los Turnos a corregirlas (17 sep 2026).
     if(!(await laborAvisarHuecos())) return;
+    // UN NOMBRE QUE NO ES DE NADIE (9 oct 2026). No bloquea: un ayudante nuevo
+    // de verdad tiene que poder mandar su dia. Pero lo DICE con el nombre y con
+    // la consecuencia, que es lo que faltaba -- el reporte de Susan se fue con
+    // "Ridrigo" y nadie lo supo hasta el cierre, con el invoice ya mandado.
+    if(!laborAvisarNombres()) return;
     // CORRIGIENDO UNO DEVUELTO: se actualiza EL MISMO reporte, no se manda otro.
     // Dos reportes del mismo dia es como se le cobro dos veces a Susan.
     if(fixingLogId) return resendFixedLog();
@@ -35592,6 +35692,12 @@ body.fija main{ padding-bottom:14px; }
     if(isManager()) refreshInbox();
     registerPush();
     loadCompanySettings();
+    // Sin la lista del equipo no se puede revisar un nombre escrito en un
+    // turno, y sin revisarlo el error se va con el reporte. Si no hay señal
+    // queda la copia del telefono (people:v1); si tampoco, no se acusa a nadie.
+    if(typeof loadPeople === 'function') loadPeople().then(() => {
+      try{ $$('.shift-card', shiftsContainer).forEach(pintarDudas); }catch(e){}
+    }).catch(()=>{});
     if($('#teDate') && !$('#teDate').value) $('#teDate').value = todayStr();
     if($('#teNameFix')) $('#teNameFix').hidden = !!(SES && SES.full_name);
     loadMyEntries();
