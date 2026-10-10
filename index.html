@@ -8024,7 +8024,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-L';
+  const APP_BUILD = '2026-10-09-M';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -37403,6 +37403,104 @@ body.fija main{ padding-bottom:14px; }
     // desde aqui, y hay que decirlo en vez de ofrecer un campo que no guarda.
     return { labor, hours, noRate, people: [...people.values()].sort((a, b) => b.amount - a.amount).map(pp => ({ key: pp.key, name: pp.name, days: pp.days.length, hours: pp.hours, rate: pp.rate, amount: pp.amount, parecido: pp.parecido || null })) };
   }
+  // ========= QUE CUADRE ANTES DE CALCULAR (9 oct 2026) =========
+  // Su pedido: "en el momento del cierre debe ver opcion de ver el labor log de
+  // lo que estan cobrando los muchachos, o los materiales, o el monto cobrado,
+  // tambien el invoice enviado al cliente; la app debe asegurarse que cuadren
+  // los cobros y gastos para hacer los calculos bien".
+  //
+  // Dos cosas distintas y las dos hacen falta: la REVISION (que avisa cuando
+  // algo no cuadra, con la cifra) y el DETALLE (el reporte y el invoice ahi
+  // mismo, para mirarlos sin salir). Van dentro del snapshot a proposito: un
+  // cierre guardado se lleva su propia prueba, y quien lo aprueba ve de donde
+  // salio cada numero.
+  function cierreRevision(logs, inv, exps, people, cobrado, billed){
+    const items = []; const add = (ok, t, monto) => items.push({ ok, t, monto: (monto == null ? null : monto) });
+    const invLines = (inv && Array.isArray(inv.lines)) ? inv.lines : null;
+    const enElInvoice = txt => !invLines || invLines.some(ln => finNorm(String(ln.d || '')).includes(finNorm(txt)));
+
+    // 1. los nombres del reporte
+    const fantasmas = (people || []).filter(x => String(x.key || '').slice(0, 2) === 'x:');
+    add(!fantasmas.length,
+        fantasmas.length ? 'Hay ' + fantasmas.length + ' nombre(s) que no son de nadie del equipo: '
+          + fantasmas.map(x => '"' + x.name + '"' + (x.parecido ? ' (¿' + x.parecido + '?)' : '')).join(', ')
+          + ' — esas horas no se le pagan a nadie'
+          : 'Todos los nombres del reporte son del equipo',
+        fantasmas.length ? null : undefined);
+    // 2. tarifas de AMG
+    const sinTarifa = (people || []).filter(x => x.rate === null && String(x.key || '').slice(0, 2) !== 'x:');
+    add(!sinTarifa.length,
+        sinTarifa.length ? 'Falta la tarifa de AMG de ' + sinTarifa.map(x => x.name).join(', ')
+          : 'Todos tienen su tarifa de AMG');
+    // 3. materiales anotados en el reporte que no se le cobraron al cliente
+    const matsFuera = [];
+    (logs || []).forEach(l => (((l.payload || {}).mat) || []).forEach(m => {
+      if(!(+m.q > 0) || !m.n) return;
+      if(!enElInvoice(m.n)) matsFuera.push(m.n + ' x' + (+m.q));
+    }));
+    add(!matsFuera.length,
+        matsFuera.length ? 'Material anotado en el reporte que NO está en el invoice: ' + matsFuera.join(', ')
+          : (invLines ? 'Los materiales del reporte están en el invoice' : 'No hay materiales anotados'));
+    // 4. extras del reporte: los que no se cobraron y los que quedaron sin monto
+    const exFuera = [], exSinMonto = [];
+    (logs || []).forEach(l => (((l.payload || {}).s) || []).forEach(sh => extraItemsOfShift(sh).forEach(it => {
+      const lbl = extraLabel(it); if(!lbl) return;
+      const x = parseFloat(it.x);
+      if(!Number.isFinite(x) || x === 0){ exSinMonto.push(lbl); return; }
+      if(!enElInvoice(lbl)) exFuera.push(lbl + ' ' + finMoney(x));
+    })));
+    add(!exFuera.length && !exSinMonto.length,
+        (exFuera.length ? 'Extra del reporte que NO está en el invoice: ' + exFuera.join(', ') : '')
+        + (exFuera.length && exSinMonto.length ? '. ' : '')
+        + (exSinMonto.length ? 'Extra sin monto en el reporte: ' + exSinMonto.join(', ') : '')
+        || 'Los extras del reporte están cobrados');
+    // 5. lo que valian los turnos contra lo que dice la factura
+    if(inv){
+      const d = Math.round(((+billed || 0) - (+inv.total || 0)) * 100) / 100;
+      add(Math.abs(d) < 0.005,
+          Math.abs(d) < 0.005 ? 'El invoice cobra lo mismo que valen los turnos'
+            : (d > 0 ? 'Los turnos valían ' + finMoney(billed) + ' y el invoice cobra ' + finMoney(inv.total)
+                     : 'El invoice cobra ' + finMoney(inv.total) + ' y los turnos valían ' + finMoney(billed)),
+          Math.abs(d) < 0.005 ? undefined : Math.abs(d));
+      // 6. lo que de verdad entro
+      const dc = Math.round(((+inv.total || 0) - (+cobrado || 0)) * 100) / 100;
+      add(Math.abs(dc) < 0.005,
+          Math.abs(dc) < 0.005 ? 'El cliente pagó todo el invoice'
+            : (dc > 0 ? 'Falta cobrarle al cliente' : 'El cliente pagó de más'),
+          Math.abs(dc) < 0.005 ? undefined : Math.abs(dc));
+    }
+    // 7. los gastos que venian en el reporte, ¿se anotaron en Finanzas?
+    const faltanGastos = [];
+    (logs || []).forEach(l => {
+      const pl = l.payload || {}; if(!pl.cid) return;
+      let deben = [];
+      try{ deben = expenseRowsOf(String(pl.cid), pl, 'mudanza', l.log_date) || []; }catch(e){ return; }
+      deben.forEach(r => {
+        if(!(exps || []).some(x => String(x.source_key || '') === String(r.source_key)))
+          faltanGastos.push((r.what || 'gasto') + ' ' + finMoney(r.amount) + ' (' + (r.paid_by_name || '') + ')');
+      });
+    });
+    add(!faltanGastos.length,
+        faltanGastos.length ? 'Gasto anotado en el reporte que NO está en Finanzas: ' + faltanGastos.join(', ')
+          + ' — no se le está devolviendo a quien lo puso'
+          : 'Los gastos del reporte están anotados en Finanzas');
+
+    // ---- el detalle, para mirarlo sin salir ----
+    const detalle = (logs || []).map(l => {
+      const pl = l.payload || {};
+      return { id: String(l.id), date: l.log_date || pl.d || '', leader: l.crew_leader || '', client: pl.t || '',
+        shifts: (pl.s || []).map(sh => {
+          const mins = hoursBetween(sh.f, sh.o);
+          return { f: sh.f || '', o: sh.o || '', n: sh.n || '', k: sh.k || '',
+            h: mins === null ? 0 : Math.round(mins / 60 * 100) / 100, p: countPeople(sh.n || ''),
+            extras: extraItemsOfShift(sh).map(it => ({ d: extraLabel(it), x: parseFloat(it.x) })).filter(x => x.d) };
+        }),
+        mats: (pl.mat || []).filter(m => +m.q > 0 && m.n).map(m => ({ n: m.n, q: +m.q })),
+        gastos: (pl.ex || []).filter(e => +e.a > 0 && e.w).map(e => ({ w: e.w, a: +e.a, who: e.who || '' })) };
+    });
+    return { items, logs: detalle, invLines: invLines ? invLines.map(x => ({ d: x.d, q: x.q, u: x.u, a: x.a })) : null,
+      invNumber: inv ? inv.number : null };
+  }
   async function runCierre(){
     const out = $('#finCOut');
     // ---- POR INVOICE (8 oct 2026) ----
@@ -37494,7 +37592,8 @@ body.fija main{ padding-bottom:14px; }
     const expLines = exps.map(r => ({ date: r.spent_on, what: finQue(r), by: whoLabel(r.paid_by_kind, r.paid_by_name), amount: +r.amount||0, fixed: FIN_FIXED.includes(r.what) }));
     lastCierre = { from, to, client, notes, cobrado, officeHours, officeRate: OFFICE_RATE, oficina,
       invoice: inv ? { number: inv.number, total: +inv.total || 0, status: inv.status, logs: logs.length,
-                       paidOn: inv.paid_on || null, method: inv.paid_method || null, soloFactura: soloPorLaFactura } : null, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner };
+                       paidOn: inv.paid_on || null, method: inv.paid_method || null, soloFactura: soloPorLaFactura } : null, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner,
+      revision: cierreRevision(logs, inv, exps, people, cobrado, billed) };
     out.innerHTML = cierreHtml(lastCierre);
     out.dataset.calculado = '1';
     const pb = $('#finCPdf'); if(pb) pb.hidden = false;
@@ -37552,7 +37651,16 @@ body.fija main{ padding-bottom:14px; }
       : c.client
       ? '− Trabajadores según los reportes de ' + esc(c.client) + ' (' + h2(c.laborHours) + ' h × tarifa AMG de cada uno)'
       : '− Mano de obra de AMG (' + h2(c.laborHours) + ' h del reloj a la tarifa de cada uno)';
+    const rev = c.revision || null;
+    const malas = rev ? rev.items.filter(x => !x.ok) : [];
     let html = '<div class="paysum" style="margin-top:8px;"><div class="grand" style="border-top:0;"><span>' + cierreTitle(c) + '</span><span></span></div>'
+      // LO PRIMERO: ¿se puede confiar en estos numeros? Arriba el semaforo,
+      // abajo el detalle. Si algo no cuadra, se dice ANTES de los totales.
+      + (rev ? line('<span style="color:' + (malas.length ? 'var(--danger)' : 'var(--ok, #2e9e5b)') + ';">'
+          + (malas.length
+              ? '\u26a0 ' + malas.length + (malas.length === 1 ? ' cosa que revisar' : ' cosas que revisar') + ' — abajo, en <b>Revisión</b>'
+              : '\u2713 Todo cuadra: nombres, tarifas, materiales, extras y gastos')
+          + '</span>', '') : '')
       + (c.invoice ? line('<span class="clockhint">' + c.invoice.logs + ' reporte(s) &middot; el invoice cobra '
             + finMoney(c.invoice.total)
             + (c.invoice.soloFactura
@@ -37655,6 +37763,39 @@ body.fija main{ padding-bottom:14px; }
           ? 'Las horas son las de los reportes de mudanza de ' + esc(c.client) + ' en el período, a la tarifa de AMG de cada uno; se les paga en Horas del equipo y pagos como siempre. Un gasto entra si se guardó con este cliente.'
           : 'La mano de obra son las horas de AMG del período a la tarifa de cada trabajador; se les paga en Horas del equipo y pagos como siempre.')
         + ' Lo devuelto y lo entregado se marca en Gastos y en Pagos de clientes; este cierre es el cálculo del momento.</p>';
+    if(rev){
+      html += '<div class="paysum" style="margin-top:14px;"><div class="grand" style="border-top:0;"><span>REVISIÓN</span><span></span></div>'
+        + rev.items.map(it => line('<span style="color:' + (it.ok ? 'var(--ink-soft)' : 'var(--danger)') + ';">'
+            + (it.ok ? '\u2713 ' : '\u26a0 ') + esc(it.t) + '</span>',
+            it.monto == null ? '' : '<span style="color:var(--danger);">' + finMoney(it.monto) + '</span>')).join('')
+        + '</div>';
+      // EL REPORTE, tal como lo mandó la cuadrilla.
+      (rev.logs || []).forEach(l => {
+        const horas = l.shifts.reduce((t, sh) => t + sh.h * sh.p, 0);
+        html += '<details class="whychip" style="display:block; margin-top:10px;"><summary><span>'
+          + '\u{1F4C4} Ver el reporte de la mudanza \u00b7 ' + esc(finDate(l.date)) + (l.leader ? ' \u00b7 ' + esc(l.leader) : '')
+          + ' \u00b7 ' + (Math.round(horas * 100) / 100) + ' h de persona</span></summary><div class="whytext"><div class="paysum">'
+          + l.shifts.map((sh, i) => line('<b>Turno ' + (i + 1) + '</b> ' + esc(fmtTime12(sh.f) || sh.f) + ' - ' + esc(fmtTime12(sh.o) || sh.o)
+              + '<br><span class="clockhint">' + esc(sh.n || '(sin nombres)') + (sh.k ? ' \u00b7 ' + esc(sh.k) : '') + '</span>',
+              // compacto a proposito: la columna de la derecha es angosta y
+              // "2 x 0.5 h" se partia en tres renglones en el telefono.
+              sh.h + 'h \u00d7' + sh.p)
+            + sh.extras.map(x => line('&nbsp;&nbsp;<span class="clockhint">Extra: ' + esc(x.d) + '</span>',
+                Number.isFinite(x.x) && x.x !== 0 ? finMoney(x.x) : '<span style="color:var(--danger);">sin monto</span>')).join('')).join('')
+          + (l.mats.length ? l.mats.map(m => line('&nbsp;&nbsp;<span class="clockhint">Material: ' + esc(m.n) + '</span>', '\u00d7 ' + m.q)).join('') : '')
+          + (l.gastos.length ? l.gastos.map(g => line('&nbsp;&nbsp;<span class="clockhint">Gasto: ' + esc(g.w) + (g.who ? ' \u00b7 lo puso ' + esc(g.who) : '') + '</span>', finMoney(g.a))).join('') : '')
+          + '</div></div></details>';
+      });
+      // EL INVOICE, tal como se le mandó al cliente.
+      if(rev.invLines){
+        html += '<details class="whychip" style="display:block; margin-top:10px;"><summary><span>'
+          + '\u{1F9FE} Ver el invoice #' + esc(rev.invNumber) + ' que se le mandó al cliente</span></summary><div class="whytext"><div class="paysum">'
+          + rev.invLines.map(ln => line('<span class="clockhint" style="white-space:pre-wrap;">' + esc(String(ln.d || '').split('\n')[0])
+              + '</span><br><span class="clockhint">' + (+ln.q || 0) + ' \u00d7 ' + finMoney(ln.u) + '</span>', finMoney(ln.a))).join('')
+          + line('<b>Total del invoice</b>', '<b>' + finMoney((rev.invLines || []).reduce((t, x) => t + (+x.a || 0), 0)) + '</b>', 'grand')
+          + '</div></div></details>';
+      }
+    }
     return html;
   }
   function buildCierrePdf(c, meta){
