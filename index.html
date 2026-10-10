@@ -8024,7 +8024,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-K';
+  const APP_BUILD = '2026-10-09-L';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -37206,11 +37206,27 @@ body.fija main{ padding-bottom:14px; }
   // cierre de nuevo; si ya se hizo el cierre de ellos no deberian volver a
   // aparecer ahi". Se sacan del snapshot que quedo guardado con cada cierre,
   // asi que si borra un cierre, su factura vuelve sola a estar disponible.
+  // UN CIERRE RECHAZADO NO ES UN CIERRE (9 oct 2026).
+  // El de la factura 4009 salio con un nombre mal escrito, se mando, y la
+  // respuesta fue "No estoy de acuerdo". Rehacerlo es EXACTAMENTE lo que toca,
+  // y la factura no salia en la lista: habia que adivinar que primero hay que
+  // ir a borrar el viejo. El que esta de acuerdo si cierra la factura; el
+  // rechazado y el que sigue sin contestar no.
   function facturasYaCerradas(){
     const n = new Set();
     (finCierres || []).forEach(r => {
+      if(r && r.status === 'desacuerdo') return;
       const inv = r && r.snapshot && r.snapshot.invoice;
       if(inv && (inv.number || inv.number === 0)) n.add(String(inv.number));
+    });
+    return n;
+  }
+  // Las que vuelven a la lista porque las rechazaron, para decirlo en la nota.
+  function facturasRechazadas(){
+    const n = new Set();
+    (finCierres || []).forEach(r => {
+      const inv = r && r.snapshot && r.snapshot.invoice;
+      if(r && r.status === 'desacuerdo' && inv && (inv.number || inv.number === 0)) n.add(String(inv.number));
     });
     return n;
   }
@@ -37281,11 +37297,17 @@ body.fija main{ padding-bottom:14px; }
       // No se esconden en silencio: si falta una, tiene que saber por que.
       const nota = $('#finCInvoiceNota');
       const n = todas.length - invs.length;
+      const rech = facturasRechazadas();
+      const vuelven = invs.filter(v => rech.has(String(v.number))).map(v => '#' + v.number);
       if(nota){
-        nota.hidden = !n;
-        nota.innerHTML = n ? (n === 1 ? '1 invoice ya tiene su cierre y por eso no sale aquí.'
-          : n + ' invoices ya tienen su cierre y por eso no salen aquí.')
-          + ' Están abajo, en <b>Cierres guardados</b>.' : '';
+        nota.hidden = !n && !vuelven.length;
+        nota.innerHTML = (n ? (n === 1 ? '1 invoice ya tiene su cierre y por eso no sale aquí.'
+            : n + ' invoices ya tienen su cierre y por eso no salen aquí.')
+            + ' Están abajo, en <b>Cierres guardados</b>.' : '')
+          + (vuelven.length ? (n ? '<br>' : '')
+            + (vuelven.length === 1 ? 'El invoice ' + vuelven[0] + ' sí sale: su cierre quedó'
+                                    : 'Los invoices ' + vuelven.join(', ') + ' sí salen: sus cierres quedaron')
+            + ' en <b>No estoy de acuerdo</b>, así que se puede volver a hacer.' : '');
       }
       aplicarModoInvoice();
     }
