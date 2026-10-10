@@ -7943,7 +7943,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-I';
+  const APP_BUILD = '2026-10-09-J';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -37219,6 +37219,40 @@ body.fija main{ padding-bottom:14px; }
   // Horas × tarifa de AMG de cada nombre que aparece en los REPORTES de mudanza (para el cierre de UN cliente,
   // porque el reloj no sabe con qué cliente se trabajó ese día).
   const splitNames = str => String(str || '').split(/[,\n;\/&]|\sy\s|\sand\s/i).map(x => x.trim()).filter(Boolean);
+  // ¿SE LE FUE UN DEDO AL ESCRIBIR EL NOMBRE? (9 oct 2026)
+  // Caso real: el lider escribio "Ridrigo" en uno de los tres turnos. Para el
+  // cierre eso es OTRA persona, sin tarifa, y esas 3 h no se le pagan a nadie.
+  // La app lo marcaba en rojo pero no decia de quien se trataba.
+  function finDistancia(a, b){
+    const m = a.length, n = b.length;
+    if(Math.abs(m - n) > 2) return 99;
+    let fila = Array.from({length:n+1}, (_, j) => j);
+    for(let i = 1; i <= m; i++){
+      let ant = fila[0]; fila[0] = i;
+      for(let j = 1; j <= n; j++){
+        const tmp = fila[j];
+        fila[j] = Math.min(fila[j] + 1, fila[j-1] + 1, ant + (a[i-1] === b[j-1] ? 0 : 1));
+        ant = tmp;
+      }
+    }
+    return fila[n];
+  }
+  // Solo se sugiere cuando hay UN candidato claro. Con dos parecidos se calla:
+  // adivinar a quien se le paga seria peor que no decir nada.
+  function finNombreParecido(nm){
+    const q = finNorm(nm); if(q.length < 4) return null;
+    const tope = Math.min(2, Math.floor(q.length * 0.4));
+    if(tope < 1) return null;
+    let mejor = null, mejorD = 99, empate = false;
+    (typeof FIN_PEOPLE !== 'undefined' ? FIN_PEOPLE : []).forEach(x => {
+      const d = finDistancia(q, finNorm(x.name));
+      if(d === 0) { mejor = null; mejorD = 0; empate = true; return; }   // ya casa exacto: no hay nada que sugerir
+      if(d > tope) return;
+      if(d < mejorD){ mejorD = d; mejor = x; empate = false; }
+      else if(d === mejorD && mejor && finNorm(x.name) !== finNorm(mejor.name)) empate = true;
+    });
+    return (mejor && !empate) ? mejor.name : null;
+  }
   function reportLaborOf(logs){
     const people = new Map(); let labor = 0, hours = 0, noRate = 0;
     logs.forEach(l => {
@@ -37228,7 +37262,8 @@ body.fija main{ padding-bottom:14px; }
         splitNames(sh.n).forEach(nm => {
           const { person, rate } = finRateForName(nm);
           const key = person ? (person.kind + ':' + person.id) : ('x:' + finNorm(nm));
-          if(!people.has(key)) people.set(key, { key, name: person ? person.name : nm, hours:0, rate, amount:0, days:[] });
+          if(!people.has(key)) people.set(key, { key, name: person ? person.name : nm, hours:0, rate, amount:0, days:[],
+            parecido: person ? null : finNombreParecido(nm) });
           const pp = people.get(key); pp.hours += h; if(!pp.days.includes(l.log_date)) pp.days.push(l.log_date); hours += h;
           if(rate === null) noRate += h; else { pp.amount += h * rate; labor += h * rate; }
         });
@@ -37238,7 +37273,7 @@ body.fija main{ padding-bottom:14px; }
     // decir "sin tarifa AMG" pero no sabe a quien ponersela. Una llave 'x:...'
     // es un nombre del reporte que no casa con nadie: ese NO se puede arreglar
     // desde aqui, y hay que decirlo en vez de ofrecer un campo que no guarda.
-    return { labor, hours, noRate, people: [...people.values()].sort((a, b) => b.amount - a.amount).map(pp => ({ key: pp.key, name: pp.name, days: pp.days.length, hours: pp.hours, rate: pp.rate, amount: pp.amount })) };
+    return { labor, hours, noRate, people: [...people.values()].sort((a, b) => b.amount - a.amount).map(pp => ({ key: pp.key, name: pp.name, days: pp.days.length, hours: pp.hours, rate: pp.rate, amount: pp.amount, parecido: pp.parecido || null })) };
   }
   async function runCierre(){
     const out = $('#finCOut');
@@ -37408,7 +37443,23 @@ body.fija main{ padding-bottom:14px; }
       + (c.notes ? '<div class="line"><span style="white-space:pre-wrap;">📝 ' + esc(c.notes) + '</span><span></span></div>' : '')
       + line('<b>' + (c.client ? 'Pagó ' + esc(c.client) : 'Cobrado a clientes') + '</b> (' + (c.payLines ? c.payLines.length : (c.byClient||[]).length) + ' pago' + ((c.payLines ? c.payLines.length : 1)===1?'':'s') + ')', '<b>' + finMoney(c.cobrado) + '</b>')
       + (c.client ? (c.payLines||[]).map(r => line('&nbsp;&nbsp;' + esc(finDate(r.date)) + ' · ' + esc(r.method) + (r.invoice ? ' · Factura #' + esc(r.invoice) : '') + ' · lo tiene ' + esc(r.delivered ? c.meName : r.by), finMoney(r.amount))).join('') : (c.byClient||[]).map(x => line('&nbsp;&nbsp;' + esc(x.name), finMoney(x.total))).join(''))
-      + line('<span class="muted">Facturado por los reportes' + (c.reports !== undefined ? ' (' + c.reports + ')' : '') + '</span>', '<span class="muted">' + finMoney(c.billed) + '</span>')
+      // EN UN CIERRE POR INVOICE MANDA LO QUE DICE EL INVOICE (9 oct 2026).
+      // Su reclamo: arriba decia "el invoice cobra $790" y dos renglones abajo
+      // "Facturado por los reportes $830". Las dos cifras eran ciertas y se
+      // contradecian: $830 es lo que valian los turnos, $790 lo que de verdad
+      // se le cobro -- la diferencia son las lineas que usted marco "No
+      // cobrar" (aqui, la media hora de cargar el camion). Ahora manda la
+      // factura y la diferencia se nombra en vez de quedar como misterio.
+      + (c.invoice
+          ? line('<span class="muted">Facturado en el invoice #' + esc(c.invoice.number) + '</span>',
+                 '<span class="muted">' + finMoney(c.invoice.total) + '</span>')
+            + (Math.abs((+c.billed||0) - (+c.invoice.total||0)) > 0.005
+                ? line('<span class="muted">&nbsp;&nbsp;Los turnos del reporte valían ' + finMoney(c.billed)
+                     + ': ' + finMoney(Math.abs((+c.billed||0) - (+c.invoice.total||0)))
+                     + ((+c.billed||0) > (+c.invoice.total||0) ? ' no se le cobró al cliente' : ' se le cobró de más')
+                     + '</span>', '')
+                : '')
+          : line('<span class="muted">Facturado por los reportes' + (c.reports !== undefined ? ' (' + c.reports + ')' : '') + '</span>', '<span class="muted">' + finMoney(c.billed) + '</span>'))
       + line(laborLabel, '− ' + finMoney(c.labor))
       + (c.people ? c.people.map(pp => {
           const izq = '&nbsp;&nbsp;' + esc(pp.name) + ' · ' + pp.days + ' día' + (pp.days===1?'':'s') + ' · ' + h2(pp.hours) + ' h'
@@ -37419,10 +37470,19 @@ body.fija main{ padding-bottom:14px; }
           // ahí mismo, para hacer el cierre correctamente".
           // Solo en el cierre que se acaba de calcular: uno GUARDADO es una
           // foto de lo que se acordó y no se vuelve a tocar.
-          if(pp.rate !== null || c.guardado || !pp.key) return fila;
+          // AVISAR SI SIRVE PARA LEERLO, aunque el cierre ya este guardado: un
+          // nombre mal escrito hay que verlo JUSTO cuando alguien lo va a
+          // aprobar. Lo que no se ofrece en uno guardado es la casilla de
+          // tarifa, que si cambiaria los numeros de una foto ya acordada.
+          if(pp.rate !== null || !pp.key) return fila;
           const k = String(pp.key);
           if(k.slice(0, 2) === 'x:') return fila + line('&nbsp;&nbsp;<span class="clockhint" style="color:var(--danger);">'
-            + esc(pp.name) + ' no está en la lista de AMG. Agréguelo en <b>Horas AMG</b> y vuelva a calcular.</span>', '');
+            + (pp.parecido
+                ? '¿Será <b>' + esc(pp.parecido) + '</b>? Así escrito no es nadie del equipo, así que esas horas no se le pagan a nadie. '
+                  + 'Abra el reporte en <b>Mudanzas recibidas</b>, corrija el nombre, guarde, y vuelva a calcular el cierre.'
+                : esc(pp.name) + ' no está en la lista de AMG. Agréguelo en <b>Horas AMG</b> y vuelva a calcular.')
+            + '</span>', '');
+          if(c.guardado) return fila;
           return fila + '<div class="line"><span>&nbsp;&nbsp;<span class="clockhint">Póngale su tarifa de AMG y el cierre se vuelve a calcular</span></span>'
             + '<span style="display:flex; gap:6px; align-items:center;">'
             + '<input type="number" class="ciRateIn" data-ckey="' + esc(k) + '" step="0.01" inputmode="decimal" placeholder="$/hora"'
