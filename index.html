@@ -8024,7 +8024,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-09-M';
+  const APP_BUILD = '2026-10-09-N';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -37501,6 +37501,21 @@ body.fija main{ padding-bottom:14px; }
     return { items, logs: detalle, invLines: invLines ? invLines.map(x => ({ d: x.d, q: x.q, u: x.u, a: x.a })) : null,
       invNumber: inv ? inv.number : null };
   }
+  // Cambia un nombre en TODOS los turnos donde aparezca. Si el bueno ya estaba
+  // en ese turno, el malo simplemente se quita (no se duplica a nadie).
+  function renombrarEnTurnos(payload, mal, bien){
+    let cambios = 0;
+    const s = (payload.s || []).map(sh => {
+      const partes = splitNames(sh.n || '');
+      if(!partes.some(x => finNorm(x) === finNorm(mal))) return sh;
+      const fuera = partes.filter(x => finNorm(x) !== finNorm(mal));
+      const yaEsta = fuera.some(x => finNorm(x) === finNorm(bien));
+      const nuevos = yaEsta ? fuera : partes.map(x => finNorm(x) === finNorm(mal) ? bien : x);
+      cambios++;
+      return Object.assign({}, sh, { n: nuevos.join(', ') });
+    });
+    return { payload: Object.assign({}, payload, { s }), cambios };
+  }
   async function runCierre(){
     const out = $('#finCOut');
     // ---- POR INVOICE (8 oct 2026) ----
@@ -37605,6 +37620,42 @@ body.fija main{ padding-bottom:14px; }
   // tarifa, para que las dos pantallas no puedan quedar diciendo cosas
   // distintas de la misma persona.
   if($('#finCOut')) $('#finCOut').addEventListener('click', async (e)=>{
+    const fx = e.target.closest('.ciFixName');
+    if(fx){
+      const mal = fx.dataset.mal, bien = fx.dataset.bien;
+      if(!confirm('¿Cambiar "' + mal + '" por "' + bien + '" en el reporte de la mudanza?\n\n'
+        + 'Se corrige el reporte que mandó la cuadrilla, y el cierre se vuelve a calcular con las horas ya puestas donde van.')) return;
+      const old = fx.textContent; fx.disabled = true; fx.textContent = 'Corrigiendo…';
+      try{
+        if(!cloudOn()) throw new Error('Sin internet.');
+        const ids = ((lastCierre && lastCierre.revision && lastCierre.revision.logs) || []).map(x => String(x.id));
+        let tocados = 0;
+        for(const id of ids){
+          const l = finLogs.find(x => String(x.id) === id); if(!l) continue;
+          const r = renombrarEnTurnos(l.payload || {}, mal, bien);
+          if(!r.cambios) continue;
+          // return=representation a proposito: se comprueba que el servidor de
+          // verdad lo guardo, no que la peticion no reniego. Un PATCH puede
+          // contestar 200 y no haber cambiado nada si una reja lo filtro.
+          const res = await authFetch('/rest/v1/labor_logs?id=eq.' + encodeURIComponent(id), {
+            method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
+            body: JSON.stringify({ payload: r.payload }) });
+          if(!res.ok) throw new Error('El servidor no lo aceptó (HTTP ' + res.status + ').');
+          const vuelta = await res.json();
+          const guardado = Array.isArray(vuelta) ? vuelta[0] : vuelta;
+          const quedo = ((guardado && guardado.payload && guardado.payload.s) || []).some(sh =>
+            splitNames(sh.n || '').some(x => finNorm(x) === finNorm(bien)));
+          if(!quedo) throw new Error('El servidor contestó, pero el nombre no quedó guardado.');
+          l.payload = guardado.payload; tocados += r.cambios;
+        }
+        if(!tocados) throw new Error('Ese nombre ya no está en el reporte. Vuelva a calcular el cierre.');
+        await runCierre();
+      }catch(err){
+        fx.disabled = false; fx.textContent = old;
+        alert('No se pudo corregir el reporte.\n\n' + ((err && err.message) || err));
+      }
+      return;
+    }
     const btn = e.target.closest('.ciRateSave'); if(!btn) return;
     const key = btn.dataset.ckey || '';
     const inp = document.querySelector('.ciRateIn[data-ckey="' + key.replace(/"/g, '\\"') + '"]');
@@ -37714,10 +37765,20 @@ body.fija main{ padding-bottom:14px; }
           const k = String(pp.key);
           if(k.slice(0, 2) === 'x:') return fila + line('&nbsp;&nbsp;<span class="clockhint" style="color:var(--danger);">'
             + (pp.parecido
-                ? '¿Será <b>' + esc(pp.parecido) + '</b>? Así escrito no es nadie del equipo, así que esas horas no se le pagan a nadie. '
-                  + 'Abra el reporte en <b>Mudanzas recibidas</b>, corrija el nombre, guarde, y vuelva a calcular el cierre.'
+                ? '¿Será <b>' + esc(pp.parecido) + '</b>? Así escrito no es nadie del equipo, así que esas horas no se le pagan a nadie.'
+                  // SE COMPONE AQUI MISMO (9 oct 2026): "deberia poder componer
+                  // todo desde el cierre o ajustarlo a todo". Mandarlo a otra
+                  // pantalla a corregir una letra era la mitad del trabajo.
+                  // En uno GUARDADO no: esa es la foto de lo que se acordo, y
+                  // ahi solo se dice donde se arregla.
+                  + (c.guardado ? ' Ábralo en <b>Mudanzas recibidas</b>, corrija el nombre y guarde.' : '')
                 : esc(pp.name) + ' no está en la lista de AMG. Agréguelo en <b>Horas AMG</b> y vuelva a calcular.')
-            + '</span>', '');
+            + '</span>', '')
+            + ((pp.parecido && !c.guardado)
+                ? '<div class="line"><span>&nbsp;&nbsp;<span class="clockhint">Se corrige el reporte y el cierre se vuelve a calcular</span></span>'
+                  + '<span><button type="button" class="minibtn ciFixName" data-mal="' + esc(pp.name) + '" data-bien="' + esc(pp.parecido) + '">'
+                  + 'Sí, es ' + esc(pp.parecido) + '</button></span></div>'
+                : '');
           if(c.guardado) return fila;
           return fila + '<div class="line"><span>&nbsp;&nbsp;<span class="clockhint">Póngale su tarifa de AMG y el cierre se vuelve a calcular</span></span>'
             + '<span style="display:flex; gap:6px; align-items:center;">'
