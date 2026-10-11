@@ -3584,6 +3584,7 @@ body.fija main{ padding-bottom:14px; }
     <section class="card" data-step="job">
       <h2><span class="num">1</span>Información del Trabajo<span class="en"> / Job Info</span></h2>
       <div id="ct-reanudar" class="ct-check" hidden></div>
+      <div id="ct-firmadoAviso" class="ct-check" hidden></div>
       <div class="field"><label>Nombre del Cliente<span class="en"> / Client Name</span></label><input type="text" id="ct-client" placeholder="Nombre" autocomplete="off"></div>
       <div class="field"><label>Teléfono del Cliente<span class="en"> / Client Phone</span></label><input type="tel" id="ct-phone" inputmode="tel" placeholder="(703) 555-1234" autocomplete="off"></div>
       <div class="field"><label>Dirección del Trabajo<span class="en"> / Job Address</span></label><input type="text" id="ct-address" placeholder="Calle, Ciudad, Estado" autocomplete="off"></div>
@@ -8470,7 +8471,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-11-T';
+  const APP_BUILD = '2026-10-11-U';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -40370,6 +40371,9 @@ body.fija main{ padding-bottom:14px; }
   function ctEntrar(){
     ctCerrarGuardado();
     let t = ctActual();
+    // (11 oct 2026) Firmado y ya mandado a CompanyCam: al volver a entrar, el formulario arranca con uno
+    // nuevo; el firmado queda abajo, en "Trabajos en este telefono" (Amilcar: "deberia reiniciar uno nuevo").
+    if(t && t.estado === 'firmado' && t.ccEnviado){ const viejo = t; resetContenidos(); t = ctNuevo(); ctAvisoVerde('El trabajo firmado' + (viejo.cliente ? ' de ' + esc(viejo.cliente) : '') + ' quedó guardado abajo, en <b>Trabajos en este teléfono</b>. Este es uno nuevo.'); }
     if(!t) t = ctNuevo();
     ctCargarFormulario(t);
     if(!ctListo){ ctListo = true; ctCablear(); }
@@ -40389,6 +40393,14 @@ body.fija main{ padding-bottom:14px; }
     v('ct-client', t.cliente); v('ct-address', t.direccion); v('ct-phone', t.telefono); v('ct-date', t.fecha); v('ct-leader', t.lider);
     const bloqueado = t.estado !== 'abierto';
     ['ct-client', 'ct-address', 'ct-phone', 'ct-date', 'ct-leader'].forEach(id => { const el = $('#' + id); if(el) el.disabled = bloqueado; });
+    // TRABAJO FIRMADO EN EL PASO 1 (11 oct 2026; Amilcar: "no me deja ingresar nombre de alguien mas"): se dice
+    // por que los campos estan grises y ahi mismo esta la salida: empezar otro trabajo o una adenda.
+    const av = $('#ct-firmadoAviso');
+    if(av){
+      av.hidden = !bloqueado;
+      av.innerHTML = !bloqueado ? '' : '<span class="ok">&#128274; Este trabajo' + (t.cliente ? ' de <b>' + esc(t.cliente) + '</b>' : '') + ' ya está ' + esc(t.estado) + (t.estado === 'firmado' ? (t.ccCompleto ? ' y completo en CompanyCam' : (t.ccEnviado ? ' y mandado a CompanyCam' : '')) : '') + '.</span> Sus datos ya no se cambian. Para un cliente nuevo empiece otro trabajo; para agregarle fotos a este, una adenda.<span class="en"> / Signed: start another job, or add an addendum.</span>'
+        + '<div class="row2" style="margin-top:10px;"><button type="button" class="btn btn-accent" data-ct-nuevo>&#65291; Empezar otro trabajo<span class="en"> / New job</span></button>' + (t.estado === 'firmado' ? '<button type="button" class="btn btn-outline" data-ct-adenda>&#65291; Adenda<span class="en"> / Addendum</span></button>' : '') + '</div>';
+    }
     ctPintarProyecto(t);
     // "Tiene un trabajo sin terminar": solo si trae algo, y una vez por sesion.
     const re = $('#ct-reanudar');
@@ -40415,10 +40427,10 @@ body.fija main{ padding-bottom:14px; }
     $('#ct-otrosTit').textContent = 'Trabajos en este teléfono (' + e.trabajos + ')';
     const estado = x => x.estado !== 'firmado' ? 'abierto' : (x.ccCompleto ? 'completo en CompanyCam' : (x.ccNube ? (ctEnvioPendiente(x) ? 'la nube lo está subiendo a CompanyCam…' : 'CompanyCam: ' + (x.ccNube.estado === 'fallo' ? 'no se pudo terminar' : 'faltaron fotos')) : (x.ccEnviado ? (ctEnColaCompanyCam(x) ? 'subiendo a CompanyCam…' : 'en CompanyCam') : (x.enlace ? 'firmando por enlace' : 'firmado · falta CompanyCam'))));
     const resumen = '<div class="fila ct-espacio"><span><b>' + esc(ctMB(e.grande + e.chica)) + ' en fotos</b> · ' + e.fotos + (e.fotos === 1 ? ' foto' : ' fotos') + ' de ' + e.trabajos + (e.trabajos === 1 ? ' trabajo' : ' trabajos')
-      + '<small>Las fotos grandes viven en la nube: en cuanto una sube, se borra del teléfono y queda la miniatura (para la lista, la vista previa y el PDF). Sin señal se quedan aquí hasta que suban.</small></span></div>';
+      + '<small>Las fotos grandes viven en la nube: en cuanto una sube, se borra del teléfono y queda la miniatura (para la lista, la vista previa y el PDF). Sin señal se quedan aquí hasta que suban. Un trabajo firmado se puede quitar del teléfono: su registro y su PDF siguen en la nube.</small></span></div>';
     lista.innerHTML = resumen + otros.map(x => { return '<div class="fila"><span><b>' + esc(x.cliente || 'Sin cliente') + '</b><small>' + esc(fechaDeMs(x.creado)) + ' &middot; ' + x.fotos.length + (x.fotos.length === 1 ? ' foto' : ' fotos') + ' &middot; ' + estado(x) + '</small></span>'
       + '<button type="button" class="minibtn" data-ct-abrir="' + x.id + '">Abrir</button>'
-      + (x.estado === 'abierto' && !x.fotos.some(f => f.enNube) ? '<button type="button" class="minibtn gh" data-ct-borrartrabajo="' + x.id + '">Borrar</button>' : '') + '</div>'; }).join('');
+      + (x.estado === 'abierto' ? '<button type="button" class="minibtn gh" data-ct-borrartrabajo="' + x.id + '">Borrar</button>' : '<button type="button" class="minibtn gh" data-ct-quitartrabajo="' + x.id + '">Quitar del teléfono</button>') + '</div>'; }).join('');
   }
   // ---- EL ESPACIO DEL TELEFONO (11 oct 2026; Amilcar: "que use el espacio del telefono y, cuando se
   // sube a CompanyCam, que libere ese espacio"). Las fotos grandes (1600 px) viven en el telefono
@@ -40508,6 +40520,43 @@ body.fija main{ padding-bottom:14px; }
       const panel = document.querySelector('.tab-panel[data-tab="contenidos"]');
       if(panel && panel.classList.contains('active') && ctActual() === t) ctPintarFirma();
     }catch(e){ /* sin señal: en la siguiente vuelta de la cola */ }
+  }
+  // EMPEZAR OTRO / QUITAR DEL TELEFONO (11 oct 2026). Amilcar: "quiero borrar todos esos y reiniciar uno
+  // nuevo... despues de que lo suba a CompanyCam ya esta firmado, deberia reiniciar uno nuevo". El firmado
+  // NUNCA se borra de la nube (es la prueba; el manager lo ve y lo reimprime): solo se olvida en este
+  // telefono. Un trabajo abierto si se borra del todo (sus fotos de la nube tambien).
+  function ctEmpezarOtro(preguntar){
+    const t = ctActual();
+    if(preguntar && t && t.estado === 'firmado' && !confirm('¿Empezar otro trabajo? El firmado se queda guardado en el teléfono y en la nube.')) return;
+    resetContenidos(); ctNuevo(); ctCargarFormulario(ctActual()); ctPintar(); goStep('contenidos', 0);
+    const c = $('#ct-client'); if(c) setTimeout(() => { try{ c.focus(); }catch(e){} }, 60);
+  }
+  async function ctOlvidarTrabajo(x){
+    for(const f of (x.fotos || [])){ try{ await ctBorrarArchivo(f.archivo); }catch(e){} try{ await ctBorrarArchivo(f.vista); }catch(e){} delete ctVistas[x.id + '|' + f.k]; }
+    try{ const F = fpDisco(); if(F) await F.rmdir({ path: CT_CARPETA + '/' + x.id, directory: 'DATA', recursive: true }); }catch(e){}
+    const eraActual = CT.actual === x.id;
+    delete CT.trabajos[x.id];
+    if(eraActual) CT.actual = null;
+    ctEscribir();
+    if(eraActual){ ctNuevo(); ctCargarFormulario(ctActual()); ctPintar(); goStep('contenidos', 0); } else ctPintarOtros();
+  }
+  async function ctQuitarDelTelefono(id){
+    const x = CT.trabajos[id]; if(!x) return;
+    if(x.estado === 'abierto') return ctBorrarTrabajoAbierto(id);
+    if(!x.fila){ alert('Este trabajo firmado todavía no está en la nube. Con señal sube solo; después se puede quitar del teléfono.'); ctProcesarCola(); return; }
+    if(x.pdfPendiente){ alert('El PDF firmado todavía se está guardando en la nube. Espere a que termine y vuelva a intentar.'); ctProcesarCola(); return; }
+    if(ctEnvioPendiente(x) || (x.ccEnviado && !x.ccNube && ctEnColaCompanyCam(x))){ alert('Este trabajo todavía se está mandando a CompanyCam. Cuando termine se puede quitar del teléfono.'); return; }
+    const enCC = x.ccCompleto ? ' y en CompanyCam' : (x.ccEnviado ? ' y mandado a CompanyCam' : '');
+    if(!confirm('¿Quitar del teléfono el trabajo firmado' + (x.cliente ? ' de ' + x.cliente : '') + ' (' + (x.fotos || []).length + ' fotos)?\n\nEl registro firmado y el PDF siguen en la nube' + enCC + ': el manager los ve. En este teléfono ya no se va a poder ver ni reimprimir.' + (x.ccEnviado ? '' : '\n\nOJO: todavía no se ha mandado a CompanyCam.'))) return;
+    await ctOlvidarTrabajo(x);
+  }
+  async function ctBorrarTrabajoAbierto(id){
+    const x = CT.trabajos[id]; if(!x || x.estado !== 'abierto') return;
+    const enNube = (x.fotos || []).filter(f => f.enNube && f.path);
+    if(enNube.length && (navigator.onLine === false || !signedIn())){ alert('Este trabajo tiene ' + enNube.length + (enNube.length === 1 ? ' foto' : ' fotos') + ' en la nube: para borrarlas hace falta internet y la sesión abierta.'); return; }
+    if(!confirm('¿Borrar del teléfono el trabajo' + (x.cliente ? ' de ' + x.cliente : '') + ' con ' + (x.fotos || []).length + ' fotos?' + (enNube.length ? '\n\nSus ' + enNube.length + (enNube.length === 1 ? ' foto' : ' fotos') + ' de la nube también se borran.' : '') + ' No se puede deshacer.')) return;
+    for(const f of enNube){ try{ await ctBorrarEnNube(x, { k: f.k, path: f.path }); }catch(e){ if(!e.permanente){ alert('No se pudo borrar de la nube (' + (e.message || e) + '). Intente otra vez con señal.'); return; } } }
+    await ctOlvidarTrabajo(x);
   }
   // Trabajos mandados antes de esta version, o con la app cerrada cuando la cola termino: al entrar.
   async function ctLiberarAuto(){
@@ -41933,16 +41982,18 @@ body.fija main{ padding-bottom:14px; }
     $('#ct-firmarBtn').addEventListener('click', ctFirmarFlujo);
     if($('#ct-enlaceBtn')) $('#ct-enlaceBtn').addEventListener('click', ctEnlaceCrear);
     $('#ct-copiaCliente').addEventListener('click', () => ctHacerPdf({ texto: 'Contents inventory / Inventario de contenidos' }));
-    $('#ct-nuevo').addEventListener('click', () => { if(!confirm('¿Empezar otro trabajo? El firmado se queda guardado en el teléfono y en la nube.')) return; resetContenidos(); ctNuevo(); ctCargarFormulario(ctActual()); ctPintar(); goStep('contenidos', 0); });
+    $('#ct-nuevo').addEventListener('click', () => ctEmpezarOtro(true));
     panel.addEventListener('click', e => {
       const t = ctActual(); if(!t) return;
       const re = e.target.closest('[data-ct-reanudar]');
       if(re){ ctAvisoReanudar[t.id] = true; if(re.dataset.ctReanudar === 'otro'){ resetContenidos(); ctNuevo(); ctCargarFormulario(ctActual()); ctPintar(); } else { $('#ct-reanudar').hidden = true; } return; }
       const ab = e.target.closest('[data-ct-abrir]');
       if(ab){ CT.actual = ab.dataset.ctAbrir; ctEscribir(); ctCargarFormulario(ctActual()); ctPintar(); goStep('contenidos', 0); return; }
+      if(e.target.closest('[data-ct-nuevo]')){ ctEmpezarOtro(true); return; }
       const bo = e.target.closest('[data-ct-borrartrabajo]');
-      if(bo){ const x = CT.trabajos[bo.dataset.ctBorrartrabajo]; if(!x) return; if(!confirm('¿Borrar del teléfono el trabajo' + (x.cliente ? ' de ' + x.cliente : '') + ' con ' + x.fotos.length + ' fotos? No se puede deshacer.')) return;
-        x.fotos.forEach(f => { ctBorrarArchivo(f.archivo); ctBorrarArchivo(f.vista); }); delete CT.trabajos[x.id]; ctEscribir(); ctPintarOtros(); return; }
+      if(bo){ ctBorrarTrabajoAbierto(bo.dataset.ctBorrartrabajo); return; }
+      const qt = e.target.closest('[data-ct-quitartrabajo]');
+      if(qt){ ctQuitarDelTelefono(qt.dataset.ctQuitartrabajo); return; }
       if(e.target.closest('[data-ct-reintentar]')){ ctReintentar(); return; }
       if(e.target.closest('[data-ct-guardar]')){ ctGuardarYSalir(); return; }
       const en = e.target.closest('[data-ct-enlace]');
