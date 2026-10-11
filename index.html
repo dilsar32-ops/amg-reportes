@@ -2556,6 +2556,16 @@ body.fija main{ padding-bottom:14px; }
 .ct-pill:disabled{opacity:.6; cursor:default;}
 .ct-nota{font-size:12px; color:var(--blue); margin-top:6px; cursor:pointer;}
 .ct-nota input{width:100%; margin-top:4px; padding:6px 8px; font-size:13px;}
+.ct-nota .enl{display:block; color:var(--ink-soft); font-size:11.5px; margin-top:2px;}
+.ct-nota .enl.warn{color:var(--pick);}
+.ct-notaed{margin-top:6px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--surface-2);}
+.ct-notaed small{display:block; font-size:11.5px; color:var(--ink-soft); margin:2px 0 4px;}
+.ct-notaed small.warn{color:var(--pick); margin-top:4px;}
+.ct-notaed .es{font-size:13.5px; line-height:1.35; padding:2px 0 6px;}
+.ct-notaed textarea{width:100%; min-height:52px; margin:0; padding:7px 9px; font-size:14px; line-height:1.4;}
+.ct-notaed .acts{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;}
+.ct-notaed .acts .minibtn{min-height:34px; padding:6px 12px; font-size:13px;}
+.ct-notaed .acts .minibtn.gh{background:transparent; border:1px solid var(--line); color:var(--ink-soft);}
 .ct-x{align-self:start; background:none; border:none; color:var(--ink-soft); font-size:18px; text-align:center; padding:2px 0; cursor:pointer;}
 .ct-check{background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:13.5px; line-height:1.55; margin-bottom:12px;}
 .ct-check:empty{display:none;}
@@ -8367,7 +8377,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-11-J';
+  const APP_BUILD = '2026-10-11-K';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -40377,6 +40387,40 @@ body.fija main{ padding-bottom:14px; }
   // sugerencia que la cuadrilla ya corrigio.
   function ctNombreEn(f){ if(!f || !f.nombre) return ''; return f.fuente === 'persona' ? (f.en || '') : ((f.ia && f.ia.en) || ''); }
   function ctNombreEnFuente(f){ if(!f || !f.nombre) return ''; return f.fuente === 'persona' ? (f.en ? (f.en_fuente || 'diccionario') : '') : ((f.ia && f.ia.en) ? 'ia' : ''); }
+  // ---- la nota de un objeto, tambien en ingles (11 oct 2026) ----
+  // La cuadrilla escribe la nota en espanol; la hoja (solo ingles) imprime nota_en.
+  // Se traduce sin pagar: 1) frases de notas que se repiten en este trabajo, 2) el
+  // diccionario de objetos (si la nota es solo un nombre), 3) el traductor del iPhone
+  // (plugin Traducir, iOS 18). Si nada aplica devuelve vacio: NUNCA se inventa; la
+  // cuadrilla la escribe en ingles, o la nota sale en espanol y la hoja lo dice.
+  const CT_NOTAS_EN = {
+    'dañado por el agua': 'water damaged', 'daño por agua': 'water damage', 'daño de agua': 'water damage', 'el mueble fue dañado por el agua': 'the furniture was damaged by the water',
+    'mojado': 'wet', 'empapado': 'soaked', 'húmedo': 'damp', 'con agua adentro': 'has water inside', 'con humedad': 'has moisture',
+    'con moho': 'has mold', 'moho': 'mold', 'con hongo': 'has mold', 'olor a humedad': 'musty smell', 'huele mal': 'smells bad', 'olor a humo': 'smells of smoke', 'con hollín': 'has soot',
+    'roto': 'broken', 'quebrado': 'broken', 'rajado': 'cracked', 'rayado': 'scratched', 'manchado': 'stained', 'sucio': 'dirty', 'oxidado': 'rusted', 'hinchado': 'swollen', 'descolorido': 'discolored', 'despegado': 'coming apart', 'doblado': 'bent', 'torcido': 'warped',
+    'no funciona': 'does not work', 'no prende': 'does not turn on', 'no se probó': 'not tested', 'sin daño': 'no damage', 'sin daño visible': 'no visible damage', 'en buen estado': 'in good condition',
+    'ya estaba roto': 'was already broken', 'ya estaba dañado': 'was already damaged', 'ya venía dañado': 'was already damaged', 'ya venía roto': 'was already broken',
+    'el cliente lo quiere tirar': 'the client wants it discarded', 'el cliente lo quiere conservar': 'the client wants to keep it', 'el cliente lo quiere guardar': 'the client wants to keep it', 'el cliente dice que no es suyo': 'the client says it is not theirs',
+    'se le devolvió al cliente': 'returned to the client', 'devuelto al cliente': 'returned to the client', 'entregado al cliente': 'handed to the client',
+    'empacado en caja': 'packed in a box', 'en caja': 'in a box', 'en bolsa': 'in a bag', 'para limpieza': 'for cleaning', 'se limpió': 'cleaned', 'se limpió y se empacó': 'cleaned and packed', 'limpiado y empacado': 'cleaned and packed', 'no se pudo limpiar': 'could not be cleaned', 'no se puede recuperar': 'cannot be recovered', 'irrecuperable': 'unrecoverable',
+    'le falta una pieza': 'missing a part', 'le falta la tapa': 'missing the lid', 'le faltan piezas': 'missing parts', 'pantalla rota': 'broken screen', 'vidrio roto': 'broken glass', 'la pata está rota': 'the leg is broken', 'con óxido': 'has rust', 'con agua': 'has water'
+  };
+  let ctNotasEnMapa = null;
+  function ctNotaFrase(texto){ if(!ctNotasEnMapa){ ctNotasEnMapa = {}; Object.keys(CT_NOTAS_EN).forEach(k => { ctNotasEnMapa[ctNormEs(k)] = CT_NOTAS_EN[k]; }); } return ctNotasEnMapa[ctNormEs(texto)] || ''; }
+  async function ctTraducirTexto(texto){
+    const s = String(texto || '').trim(); if(!s) return { en: '', fuente: '' };
+    const fr = ctNotaFrase(s); if(fr) return { en: fr, fuente: 'diccionario' };
+    const d = ctTraducirDiccionario(s); if(d) return { en: d, fuente: 'diccionario' };
+    const P = ctPluginTraducir();
+    if(P){
+      try{
+        const r = await Promise.race([P.texto({ texto: s, de: 'es', a: 'en' }), new Promise((_, rej) => setTimeout(() => rej(new Error('tardo')), 15000))]);
+        const en = String((r && r.texto) || '').trim();
+        if(en && ctNormEs(en) !== ctNormEs(s)) return { en, fuente: 'iphone' };
+      }catch(e){}
+    }
+    return { en: '', fuente: '' };
+  }
   function ctPluginTraducir(){ try{ const P = window.Capacitor && window.Capacitor.Plugins; return (P && P.Traducir && typeof P.Traducir.texto === 'function') ? P.Traducir : null; }catch(e){ return null; } }
   async function ctTraducirNombre(f){
     if(!f || f.fuente !== 'persona' || !f.nombre){ return false; }
@@ -40734,10 +40778,50 @@ body.fija main{ padding-bottom:14px; }
   }
 
   // ---- paso 3: que paso con cada cosa ----
+  // ---- la nota de la fila: se escribe en espanol, se revisa con su ingles (11 oct 2026) ----
+  // ctNotaEditando = { k, fase: 'escribir' | 'traduciendo' | 'revisar', es, en, en_auto, en_fuente }.
+  // En 'revisar' se ve el espanol tal cual y el ingles que va al PDF, corregible.
+  let ctNotaEditando = null;
+  function ctNotaStash(){ if(!ctNotaEditando) return; const a = document.querySelector('.ct-nota-es'); if(a) ctNotaEditando.es = a.value; const b = document.querySelector('.ct-nota-en'); if(b) ctNotaEditando.en = b.value; }
+  function ctNotaHtml(f, abierto){
+    const ed = (ctNotaEditando && ctNotaEditando.k === f.k) ? ctNotaEditando : null;
+    if(!ed){
+      if(!f.nota) return abierto ? '<div class="ct-nota">+ nota</div>' : '';
+      return '<div class="ct-nota">Nota: ' + esc(f.nota) + (abierto ? ' <span style="color:var(--blue)">(cambiar)</span>' : '')
+        + (f.nota_en ? '<span class="enl">EN: ' + esc(f.nota_en) + (f.nota_en_fuente === 'iphone' ? ' · la tradujo el iPhone' : (f.nota_en_fuente === 'diccionario' ? ' · del diccionario' : '')) + '</span>'
+                     : '<span class="enl warn">sin inglés: en el PDF saldrá en español' + (abierto ? ' (toque para ponerla)' : '') + '</span>') + '</div>';
+    }
+    if(ed.fase === 'traduciendo') return '<div class="ct-notaed"><small>Traduciendo al inglés…</small><div class="es">' + esc(ed.es) + '</div></div>';
+    if(ed.fase === 'revisar') return '<div class="ct-notaed"><small>Así la escribió</small><div class="es">' + esc(ed.es) + '</div>'
+      + '<small>Así va en el PDF (en inglés)' + (ed.en_auto ? (ed.en_fuente === 'iphone' ? ' · la tradujo el iPhone, revísela' : ' · del diccionario') : (ed.en ? ' · escrita por la cuadrilla' : '')) + '</small>'
+      + '<textarea class="ct-nota-en" rows="2" placeholder="Write it in English">' + esc(ed.en || '') + '</textarea>'
+      + ((!ed.en_auto && !ed.en) ? '<small class="warn">' + (ctPluginTraducir() ? 'No se pudo traducir.' : 'Este teléfono todavía no tiene el traductor.') + ' Escríbala en inglés, o déjela vacía y en el PDF saldrá en español.</small>' : '')
+      + '<div class="acts"><button type="button" class="minibtn" data-ct-nota-ok>Guardar así</button><button type="button" class="minibtn gh" data-ct-nota-cambiar>Cambiar el español</button><button type="button" class="minibtn gh" data-ct-nota-cancelar>Cancelar</button></div></div>';
+    return '<div class="ct-notaed"><small>Nota de este objeto (en español, como la quiera decir)</small><textarea class="ct-nota-es" rows="2" placeholder="Ej.: el mueble fue dañado por el agua">' + esc(ed.es || '') + '</textarea>'
+      + '<div class="acts"><button type="button" class="minibtn" data-ct-nota-guardar>Guardar</button>' + (f.nota ? '<button type="button" class="minibtn gh" data-ct-nota-quitar>Quitar la nota</button>' : '') + '<button type="button" class="minibtn gh" data-ct-nota-cancelar>Cancelar</button></div></div>';
+  }
+  async function ctNotaGuardar(k){
+    const t = ctActual(); const f = t && t.fotos.find(x => x.k === k); if(!f || !ctNotaEditando || ctNotaEditando.k !== k) return;
+    ctNotaStash(); const es = String(ctNotaEditando.es || '').trim();
+    if(!es){ f.nota = ''; f.nota_en = ''; f.nota_en_fuente = ''; f.dirty = true; ctNotaEditando = null; ctEscribir(); ctPintarLista(); ctProcesarCola(); return; }
+    // El mismo espanol que ya tenia, con un ingles escrito a mano: se respeta, no se vuelve a traducir.
+    if(es === f.nota && f.nota_en && f.nota_en_fuente === 'persona'){ ctNotaEditando = { k, fase: 'revisar', es, en: f.nota_en, en_auto: '', en_fuente: 'persona' }; ctPintarLista(); return; }
+    ctNotaEditando = { k, fase: 'traduciendo', es }; ctPintarLista();
+    const r = await ctTraducirTexto(es);
+    if(!ctNotaEditando || ctNotaEditando.k !== k || ctNotaEditando.fase !== 'traduciendo') return;
+    ctNotaEditando = { k, fase: 'revisar', es, en: r.en, en_auto: r.en, en_fuente: r.fuente }; ctPintarLista();
+  }
+  function ctNotaConfirmar(k){
+    const t = ctActual(); const f = t && t.fotos.find(x => x.k === k); const ed = ctNotaEditando; if(!f || !ed || ed.k !== k) return;
+    ctNotaStash(); const en = String(ed.en || '').trim();
+    f.nota = ed.es; f.nota_en = en; f.nota_en_fuente = !en ? '' : ((en === ed.en_auto && ed.en_fuente) ? ed.en_fuente : 'persona'); f.dirty = true;
+    ctNotaEditando = null; ctEscribir(); ctPintarLista(); ctProcesarCola();
+  }
   let ctDeshacerPila = [];
   function ctPintarLista(){
     const t = ctActual(); const lista = $('#ct-lista'); if(!t || !lista) return;
     const r = ctResumen(t), abierto = t.estado === 'abierto';
+    ctNotaStash();                                                   // lo escrito en el editor de la nota sobrevive al repintado
     $('#ct-resumen').innerHTML = ctResumenHtml(r);
     const bulk = $('#ct-bulk');
     // Un objeto puede llevar varias marcas (11 oct 2026): la barra lo dice una sola vez.
@@ -40752,7 +40836,7 @@ body.fija main{ padding-bottom:14px; }
         + '<div class="n">#' + f.n + (ctNombreEn(f) ? ' <span style="font-weight:400;">' + esc(ctNombreEn(f)) + (ctNombreEnFuente(f) === 'ia' ? '' : ' <small style="color:var(--ink-soft);">· traducido</small>') + '</span>' : (f.nombre && f.fuente === 'persona' ? ' <span style="font-weight:400; color:var(--ink-soft);">sin inglés</span>' : '')) + '</div>'
         + '<div class="nombre"><input type="text" class="ct-nombre" value="' + esc(f.nombre) + '" placeholder="' + (f.ia && f.ia.estado === 'procesando' ? 'nombrando…' : 'Nombre del objeto') + '"' + (abierto ? '' : ' disabled') + '>' + tag + '</div>'
         + '<div class="ct-pills">' + CT_ACCIONES.map(a => '<button type="button" class="ct-pill ' + a.css + ((a.k === 'pendiente' ? ctEsPendiente(f) : ctEstados(f).includes(a.k)) ? ' on' : '') + '" data-ct-acc="' + a.k + '"' + (abierto ? '' : ' disabled') + '>' + a.es + '</button>').join('') + '</div>'
-        + (f.nota ? '<div class="ct-nota">Nota: ' + esc(f.nota) + (abierto ? ' <span style="color:var(--blue)">(cambiar)</span>' : '') + '</div>' : (abierto ? '<div class="ct-nota">+ nota</div>' : ''))
+        + ctNotaHtml(f, abierto)
         + ctListaExtrasHtml(t, f, abierto)
         + '</div>' + (abierto ? '<button type="button" class="ct-x" data-ct-quitar title="Quitar">&#10005;</button>' : '<span></span>') + '</div>';
     }).join('') || '<p class="hint">Todavía no hay fotos. Vuelva al paso 2 y tome la primera.</p>';
@@ -40885,7 +40969,7 @@ body.fija main{ padding-bottom:14px; }
   }
   function ctArmarSnapshot(t, datos, extra){
     const r = ctResumen(t); const x = extra || {};
-    const objetos = ctObjetos(t).map(f => ({ n: f.n, k: f.k, fotos: ctExtrasDe(t, f.k).map(x => ({ rol: x.rol, k: x.k, path: x.path || '', sha256: x.sha256 || '', md5: x.md5 || '' })), nombre: f.nombre || '', nombre_fuente: f.nombre ? (f.fuente || 'persona') : '', nombre_en: ctNombreEn(f), nombre_en_fuente: ctNombreEnFuente(f), estado: ctEstadoPrincipal(f), estados: ctEstados(f), path: f.path || '', sha256: f.sha256, md5: f.md5 || '', nota: f.nota || '', tomada_at: f.tomada || '' }));
+    const objetos = ctObjetos(t).map(f => ({ n: f.n, k: f.k, fotos: ctExtrasDe(t, f.k).map(x => ({ rol: x.rol, k: x.k, path: x.path || '', sha256: x.sha256 || '', md5: x.md5 || '' })), nombre: f.nombre || '', nombre_fuente: f.nombre ? (f.fuente || 'persona') : '', nombre_en: ctNombreEn(f), nombre_en_fuente: ctNombreEnFuente(f), estado: ctEstadoPrincipal(f), estados: ctEstados(f), path: f.path || '', sha256: f.sha256, md5: f.md5 || '', nota: f.nota || '', nota_en: f.nota_en || '', nota_en_fuente: f.nota_en ? (f.nota_en_fuente || 'persona') : '', tomada_at: f.tomada || '' }));
     // version 3 (11 oct 2026): cada objeto trae estados (todas sus marcas) ademas de estado (la principal).
     return { version: 3, app: (typeof APP_BUILD !== 'undefined' ? APP_BUILD : ''), nonce: x.nonce || ctId(),
              trabajo: { id: t.id, cliente: t.cliente || '', direccion: t.direccion || '', fecha: t.fecha || '', lider: t.lider || '', cuadrilla: x.cuadrilla || t.lider || '' },
@@ -40975,7 +41059,7 @@ body.fija main{ padding-bottom:14px; }
     return fila;
   }
   async function ctSubirFilaFoto(t, f){
-    const body = { trabajo_id: t.id, k: f.k, path: f.path, sha256: f.sha256, md5: f.md5 || null, bytes: f.bytes || null, tomada_at: f.tomada || null, n: f.n, estado_objeto: ctEstadoPrincipal(f), estados: ctEstados(f), nota: f.nota || null, rol: f.rol || 'objeto', de_k: ctEsObjeto(f) ? null : (f.de || null) };
+    const body = { trabajo_id: t.id, k: f.k, path: f.path, sha256: f.sha256, md5: f.md5 || null, bytes: f.bytes || null, tomada_at: f.tomada || null, n: f.n, estado_objeto: ctEstadoPrincipal(f), estados: ctEstados(f), nota: f.nota || null, nota_en: f.nota_en || null, nota_en_fuente: f.nota_en ? (f.nota_en_fuente || 'persona') : null, rol: f.rol || 'objeto', de_k: ctEsObjeto(f) ? null : (f.de || null) };
     if(!ctEsObjeto(f)) body.ia_estado = 'hecho';                         // las fotos extra no se nombran
     body.nombre_en = ctNombreEn(f) || null; body.nombre_en_fuente = ctNombreEnFuente(f) || null;
     // El nombre solo viaja si lo puso una persona o lo saco el iPhone (apple-vision): si no,
@@ -41125,7 +41209,7 @@ body.fija main{ padding-bottom:14px; }
       // un nombre escrito a mano se imprime tal cual: no se inventa una traduccion.
       const enIngles = (o.nombre_en && (o.nombre_en_fuente || o.nombre_fuente === 'ia' || o.nombre_fuente === 'ia-confirmado')) ? o.nombre_en : '';
       const principal = enIngles || o.nombre || '';
-      return '<tr><td class="n">' + o.n + '</td><td><div class="pf">' + (img ? '<img src="' + img + '" alt="">' : '') + '</div></td><td class="it"><b>' + (principal ? esc(principal) : '(unnamed)') + '</b>' + ctHojaExtras(t, o) + (o.nota ? '<span>Note: ' + esc(o.nota) + '</span>' : '') + '<i>' + origen + '</i></td><td>' + acs.map(a => '<span class="st" style="background:' + a.color + ';">' + a.en.toUpperCase() + '</span>').join(' ') + '</td></tr>'; };
+      return '<tr><td class="n">' + o.n + '</td><td><div class="pf">' + (img ? '<img src="' + img + '" alt="">' : '') + '</div></td><td class="it"><b>' + (principal ? esc(principal) : '(unnamed)') + '</b>' + ctHojaExtras(t, o) + (o.nota_en ? '<span>Note: ' + esc(o.nota_en) + '</span>' : (o.nota ? '<span>Note (in Spanish, as written by the crew): ' + esc(o.nota) + '</span>' : '')) + '<i>' + origen + '</i></td><td>' + acs.map(a => '<span class="st" style="background:' + a.color + ';">' + a.en.toUpperCase() + '</span>').join(' ') + '</td></tr>'; };
     const firmaHtml = () => '<div class="resu"><span><b>' + r.total + '</b>items</span>' + ((r.fotos || 0) > r.total ? '<span><b>' + r.fotos + '</b>photos</span>' : '') + CT_ACCIONES.map(a => '<span><b>' + r[a.k] + '</b>' + a.en.toLowerCase() + '</span>').join('') + '</div>'
       + '<div class="aut"><h2>Client authorization</h2><p>' + esc(txt.en) + '</p><p class="en">The client was shown this authorization in Spanish and in English on the phone before signing; both versions are kept in the record.</p>'
       + '<div class="firma"><div><div class="caja">' + (firmado && t.firma && t.firma.png ? '<img src="' + t.firma.png + '" alt="">' : '') + '</div><div class="lab">Signature' + (firmado ? ' · ' + esc(s.firmante.nombre) + (s.firmante.relacion ? ' · ' + esc(ctRelacionEn(s.firmante.relacion)) : '') : ' · ____________________') + '</div></div>'
@@ -41316,9 +41400,15 @@ body.fija main{ padding-bottom:14px; }
       const acc = e.target.closest('[data-ct-acc]');
       if(acc){ if(t.estado === 'abierto') ctCambiarEstado([k], acc.dataset.ctAcc, false); return; }
       if(e.target.closest('[data-ct-quitar]')){ ctQuitarFoto(k); return; }
+      if(e.target.closest('[data-ct-nota-guardar]')){ ctNotaGuardar(k); return; }
+      if(e.target.closest('[data-ct-nota-ok]')){ ctNotaConfirmar(k); return; }
+      if(e.target.closest('[data-ct-nota-cambiar]')){ ctNotaStash(); ctNotaEditando = { k, fase: 'escribir', es: ctNotaEditando ? ctNotaEditando.es : (f.nota || '') }; ctPintarLista(); return; }
+      if(e.target.closest('[data-ct-nota-quitar]')){ f.nota = ''; f.nota_en = ''; f.nota_en_fuente = ''; f.dirty = true; ctNotaEditando = null; ctEscribir(); ctPintarLista(); ctProcesarCola(); return; }
+      if(e.target.closest('[data-ct-nota-cancelar]')){ ctNotaEditando = null; ctPintarLista(); return; }
+      if(e.target.closest('.ct-notaed')) return;                     // escribiendo adentro: no es un toque de la fila
       if(e.target.closest('.ct-nota') && t.estado === 'abierto' && !e.target.closest('input')){
-        const n = prompt('Nota de este objeto (opcional):', f.nota || ''); if(n === null) return;
-        f.nota = n.trim(); f.dirty = true; ctEscribir(); ctPintarLista(); ctProcesarCola(); return;
+        ctNotaEditando = { k, fase: 'escribir', es: f.nota || '' }; ctPintarLista();
+        const ta = document.querySelector('.ct-nota-es'); if(ta) ta.focus(); return;
       }
     });
     // El nombre: lo escrito a mano manda. Se guarda al soltar la casilla.
@@ -41412,7 +41502,7 @@ body.fija main{ padding-bottom:14px; }
       const r = await authFetch('/rest/v1/contenidos_trabajos?id=eq.' + encodeURIComponent(id) + '&select=*', { headers: cloudHeaders() });
       const fila = (await r.json())[0]; if(!fila) throw new Error('no existe');
       Object.assign(t, fila);
-      const fr = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(id) + '&order=k.asc&select=k,n,path,sha256,nombre,nombre_fuente,nombre_ia_en,nombre_en,ia_confianza,estado_objeto,estados,nota,tomada_at,rol,de_k', { headers: cloudHeaders() });
+      const fr = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(id) + '&order=k.asc&select=k,n,path,sha256,nombre,nombre_fuente,nombre_ia_en,nombre_en,ia_confianza,estado_objeto,estados,nota,nota_en,tomada_at,rol,de_k', { headers: cloudHeaders() });
       t.fotosNube = fr.ok ? await fr.json() : [];
     }catch(e){ $('#mcVerDatos').innerHTML = '<span style="color:var(--danger);">No se pudo leer el registro. Revise su internet.</span>'; return; }
     const s = t.snapshot || null, r = s ? s.resumen : null;
@@ -41427,10 +41517,10 @@ body.fija main{ padding-bottom:14px; }
       + (t.anterior_id ? '<span style="color:var(--pick);">Adenda del registro ' + esc(String(t.anterior_id).slice(0, 8)) + '</span><br>' : '')
       + '<span class="mono">Registro ' + esc(String(t.id).slice(0, 8)) + (t.huella ? ' · Huella ' + esc(String(t.huella).slice(0, 16)) + '…' : '') + '</span>';
     // Las miniaturas: las primeras 6, por enlace firmado.
-    const lista = (s ? s.objetos : t.fotosNube.filter(f => !f.rol || f.rol === 'objeto').map(f => ({ n: f.n, k: f.k, path: f.path, nombre: f.nombre, estado: f.estado_objeto, estados: f.estados, fotos: t.fotosNube.filter(x => x.rol && x.rol !== 'objeto' && x.de_k === f.k) }))).slice().sort((a, b) => a.n - b.n);
+    const lista = (s ? s.objetos : t.fotosNube.filter(f => !f.rol || f.rol === 'objeto').map(f => ({ n: f.n, k: f.k, path: f.path, nombre: f.nombre, nombre_en: f.nombre_en, nombre_fuente: f.nombre_fuente, nota: f.nota, nota_en: f.nota_en, estado: f.estado_objeto, estados: f.estados, fotos: t.fotosNube.filter(x => x.rol && x.rol !== 'objeto' && x.de_k === f.k) }))).slice().sort((a, b) => a.n - b.n);
     $('#mcVerFotos').innerHTML = lista.slice(0, 6).map(o => '<div class="ct-foto"><img alt="" data-path="' + esc(o.path) + '"></div>').join('') + (lista.length > 6 ? '<div class="ct-foto" style="font-size:13px; color:var(--ink-soft);">+' + (lista.length - 6) + '</div>' : '');
     $$('#mcVerFotos img[data-path]').forEach(img => urlFirmada('contenidos', img.dataset.path, 900).then(u => { if(img.isConnected) img.src = u; }).catch(() => {}));
-    $('#mcVerLista').innerHTML = lista.map(o => { const acs = ctAcciones(o); return '<div class="ct-mg"><div class="ic" style="font:700 13px IBM Plex Mono,monospace;">#' + o.n + (o.fotos && o.fotos.length ? '<small style="display:block; font-size:10px; font-weight:400;">+' + o.fotos.length + ' fotos</small>' : '') + '</div><div class="t"><b>' + (o.nombre ? esc(o.nombre) : '<span style="color:var(--ink-soft);">(sin nombre)</span>') + (o.nombre_en ? ' <span style="color:var(--ink-soft); font-weight:400;">/ ' + esc(o.nombre_en) + '</span>' : '') + '</b><small>' + (o.nota ? 'Nota: ' + esc(o.nota) + ' · ' : '') + (o.nombre_fuente === 'persona' ? 'escrito por la cuadrilla' : (o.nombre_fuente === 'ia-confirmado' ? 'sugerido y revisado' : (o.nombre ? 'sugerido por la app' : ''))) + '</small></div>' + acs.map(a => '<span class="ct-tag" style="color:' + a.color + '; border-color:' + a.color + ';">' + a.es + '</span>').join('') + '</div>'; }).join('');
+    $('#mcVerLista').innerHTML = lista.map(o => { const acs = ctAcciones(o); return '<div class="ct-mg"><div class="ic" style="font:700 13px IBM Plex Mono,monospace;">#' + o.n + (o.fotos && o.fotos.length ? '<small style="display:block; font-size:10px; font-weight:400;">+' + o.fotos.length + ' fotos</small>' : '') + '</div><div class="t"><b>' + (o.nombre ? esc(o.nombre) : '<span style="color:var(--ink-soft);">(sin nombre)</span>') + (o.nombre_en ? ' <span style="color:var(--ink-soft); font-weight:400;">/ ' + esc(o.nombre_en) + '</span>' : '') + '</b><small>' + (o.nota ? 'Nota: ' + esc(o.nota) + (o.nota_en ? ' / EN: ' + esc(o.nota_en) : '') + ' · ' : '') + (o.nombre_fuente === 'persona' ? 'escrito por la cuadrilla' : (o.nombre_fuente === 'ia-confirmado' ? 'sugerido y revisado' : (o.nombre ? 'sugerido por la app' : ''))) + '</small></div>' + acs.map(a => '<span class="ct-tag" style="color:' + a.color + '; border-color:' + a.color + ';">' + a.es + '</span>').join('') + '</div>'; }).join('');
   }
   async function mcVerificar(){
     const t = mcAbierto; if(!t) return;
