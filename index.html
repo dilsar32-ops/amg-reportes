@@ -2603,6 +2603,20 @@ body.fija main{ padding-bottom:14px; }
 .ct-firma.vertical .txt{border-right:none; border-bottom:1px solid var(--line);}
 @media (orientation: landscape){ .ct-firma .gire{display:none;} }
 .ct-firma.vertical .gire{display:none;}
+/* La camara de la app (11 oct 2026): misma capa fija que la firma. */
+.ct-cam{position:fixed; inset:0; z-index:9700; background:#000; color:#fff; display:flex; flex-direction:column;}
+.ct-cam video{flex:1; min-height:0; width:100%; object-fit:cover; background:#000;}
+.ct-cam .top{position:absolute; top:0; left:0; right:0; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:calc(10px + env(safe-area-inset-top)) 14px 12px; background:linear-gradient(rgba(0,0,0,.6), rgba(0,0,0,0)); font-size:15px;}
+.ct-cam .top b{font-size:20px;}
+.ct-cam .top .btn{min-height:42px; padding:0 18px; width:auto;}
+.ct-cam .bot{position:absolute; left:0; right:0; bottom:0; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; padding:14px 18px calc(18px + env(safe-area-inset-bottom)); background:linear-gradient(rgba(0,0,0,0), rgba(0,0,0,.65));}
+.ct-cam .shutter{width:80px; height:80px; border-radius:50%; border:5px solid #fff; background:rgba(255,255,255,.25); justify-self:center; padding:0; -webkit-tap-highlight-color:transparent;}
+.ct-cam .shutter:active{background:#fff;}
+.ct-cam .last{width:58px; height:58px; border-radius:10px; overflow:hidden; background:rgba(255,255,255,.12); border:2px solid rgba(255,255,255,.5);}
+.ct-cam .last img{width:100%; height:100%; object-fit:cover; display:block;}
+.ct-cam .hint{justify-self:end; font-size:12.5px; line-height:1.25; color:rgba(255,255,255,.88); text-align:right; max-width:124px;}
+.ct-cam .flash{position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; transition:opacity .25s;}
+.ct-cam .flash.on{opacity:.85; transition:none;}
 /* --- las hojas del PDF (760 px = A4 al ancho del resto de la app) --- */
 .ct-hoja{width:760px; height:1075px; background:#fff; color:#1C2530; font-family:'IBM Plex Sans',system-ui,sans-serif; padding:34px 38px; position:relative; overflow:hidden; box-sizing:border-box;}
 .ct-hoja .cab{display:flex; justify-content:space-between; align-items:flex-end; border-bottom:3px solid #1C2530; padding-bottom:10px; margin-bottom:12px;}
@@ -3484,12 +3498,12 @@ body.fija main{ padding-bottom:14px; }
       <div class="ct-estado" id="ct-estadoFotos"></div>
       <input type="file" id="ct-photoInput" accept="image/*" capture="environment" multiple style="display:none;">
       <input type="file" id="ct-photoInput2" accept="image/*" multiple style="display:none;">
-      <button type="button" class="btn btn-accent btn-block ct-big" id="ct-tomar">&#128247; Tomar foto<span class="en"> / Take photo</span></button>
+      <button type="button" class="btn btn-accent btn-block ct-big" id="ct-tomar">&#128247; Tomar fotos<span class="en"> / Take photos</span></button>
       <button type="button" class="btn btn-outline btn-block" id="ct-varias" style="margin-top:10px;">&#128444;&#65039; Elegir varias del carrete<span class="en"> / Choose several from the library</span></button>
       <p class="clockhint" id="ct-captura" hidden></p>
       <p class="clockhint ct-nombresAviso" hidden></p>
       <div class="ct-check ct-cerrado" hidden></div>
-      <p class="hint" style="margin:10px 0 0;">Una foto por objeto. Cada foto se guarda en el teléfono al momento y sube sola cuando hay señal. El nombre lo va poniendo la app; usted lo corrige en el paso 3.<span class="en"> / One item per photo. Saved on the phone instantly; uploads itself. Names are suggested; fix them in step 3.</span></p>
+      <p class="hint" style="margin:10px 0 0;">Una foto por objeto. La cámara se queda abierta: un toque por objeto y <b>Listo</b> al terminar. Cada foto se guarda en el teléfono al momento y sube sola cuando hay señal. El nombre lo va poniendo la app; usted lo corrige en el paso 3.<span class="en"> / One item per photo; the camera stays open, tap once per item. Saved on the phone instantly; uploads itself. Names are suggested; fix them in step 3.</span></p>
       <div class="ct-grid" id="ct-grid"></div>
     </section>
 
@@ -8321,7 +8335,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-11-A';
+  const APP_BUILD = '2026-10-11-B';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -40140,6 +40154,83 @@ body.fija main{ padding-bottom:14px; }
 
   // ---- las fotos ----
   let ctTomando = false;
+  // LA CAMARA DE LA APP (11 oct 2026). La camara del sistema (<input capture>) se
+  // cierra en cada foto y iOS no deja evitarlo: con 80 objetos son 240 toques. Esta
+  // se abre una vez (getUserMedia dentro del WKWebView, misma capa fija que la
+  // firma), un toque por objeto, y Listo al final. Cada disparo entra a la MISMA
+  // tuberia de siempre (ctTomarFotos: disco, huella, miniatura, cola). Si no se
+  // puede (permiso negado, telefono viejo), se cae a la camara del sistema.
+  let ctCam = null;
+  const CT_CAM_PIDE = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 2048 }, height: { ideal: 1536 } }, audio: false };
+  function ctCamPuede(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext !== false); }
+  function ctCamSistema(){ const i = $('#ct-photoInput'); if(i) i.click(); }
+  async function ctCamAbrir(){
+    const t = ctActual(); if(!t || t.estado !== 'abierto' || ctCam) return;
+    if(!ctCamPuede()){ ctCamSistema(); return; }
+    let stream;
+    try{ stream = await navigator.mediaDevices.getUserMedia(CT_CAM_PIDE); }
+    catch(e){ console.warn('contenidos: camara de la app no disponible', e); ctCamSistema(); return; }
+    const capa = document.createElement('div'); capa.className = 'ct-cam';
+    capa.innerHTML = '<video autoplay playsinline muted></video><div class="flash"></div>'
+      + '<div class="top"><span><b data-cam-n>' + t.fotos.length + '</b> fotos<span class="en"> / photos</span></span><button type="button" class="btn btn-accent" data-cam-listo>Listo<span class="en"> / Done</span></button></div>'
+      + '<div class="bot"><div class="last" data-cam-last></div><button type="button" class="shutter" data-cam-disparar aria-label="Tomar foto / Take photo"></button><div class="hint">Un toque por objeto<span class="en" style="display:block;">One tap per item</span></div></div>';
+    document.body.appendChild(capa);
+    const antes = document.body.style.overflow; document.body.style.overflow = 'hidden';
+    const video = capa.querySelector('video'); video.srcObject = stream;
+    try{ await video.play(); }catch(e){}
+    ctCam = { capa, video, stream, pendientes: [], enProceso: 0, procesando: false, antes };
+    capa.querySelector('[data-cam-disparar]').addEventListener('click', ctCamDisparar);
+    capa.querySelector('[data-cam-listo]').addEventListener('click', ctCamCerrar);
+    stream.getVideoTracks().forEach(tr => tr.addEventListener('ended', () => { if(ctCam && document.visibilityState === 'visible') ctCamReanudar(); }));
+  }
+  // iOS apaga la camara al mandar la app al fondo: al volver se vuelve a pedir.
+  async function ctCamReanudar(){
+    const c = ctCam; if(!c) return;
+    try{ c.stream.getTracks().forEach(tr => tr.stop()); }catch(e){}
+    try{
+      const s = await navigator.mediaDevices.getUserMedia(CT_CAM_PIDE);
+      if(ctCam !== c){ s.getTracks().forEach(tr => tr.stop()); return; }
+      c.stream = s; c.video.srcObject = s; try{ await c.video.play(); }catch(e){}
+      s.getVideoTracks().forEach(tr => tr.addEventListener('ended', () => { if(ctCam && document.visibilityState === 'visible') ctCamReanudar(); }));
+    }catch(e){ ctCamCerrar(); alert('La cámara se cerró. Vuelva a tocar "Tomar fotos".'); }
+  }
+  function ctCamContador(){ const c = ctCam; if(!c) return; const n = c.capa.querySelector('[data-cam-n]'); const t = ctActual(); if(n && t) n.textContent = String(t.fotos.length + c.pendientes.length + c.enProceso); }
+  function ctCamDisparar(){
+    const c = ctCam; if(!c) return;
+    const v = c.video, w = v.videoWidth, h = v.videoHeight; if(!w || !h) return;
+    let cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const g = cv.getContext('2d'); if(!g){ cv = null; return; }
+    g.drawImage(v, 0, 0, w, h);
+    const fl = c.capa.querySelector('.flash'); if(fl){ fl.classList.add('on'); setTimeout(() => fl.classList.remove('on'), 70); }
+    cv.toBlob(b => {
+      cv.width = 0; cv.height = 0; cv = null;
+      if(!b || ctCam !== c && !c.capa.isConnected && !c.pendientes) return;
+      c.pendientes.push(new File([b], 'foto-' + Date.now() + '.jpg', { type: 'image/jpeg' }));
+      const last = c.capa.querySelector('[data-cam-last]');
+      if(last){ const u = URL.createObjectURL(b); last.innerHTML = '<img alt="">'; const im = last.querySelector('img'); im.onload = () => URL.revokeObjectURL(u); im.src = u; }
+      ctCamContador(); ctCamProcesar(c);
+    }, 'image/jpeg', 0.92);
+  }
+  // Los disparos se guardan en orden, uno detras de otro, aunque el usuario siga
+  // tocando; cerrar la camara no corta lo que falta por guardar.
+  async function ctCamProcesar(c){
+    if(!c || c.procesando) return;
+    c.procesando = true;
+    try{
+      while(c.pendientes.length){
+        const lote = c.pendientes.splice(0); c.enProceso = lote.length; ctCamContador();
+        await ctTomarFotos(lote);
+        c.enProceso = 0; ctCamContador();
+      }
+    } finally { c.procesando = false; c.enProceso = 0; ctCamContador(); }
+  }
+  function ctCamCerrar(){
+    const c = ctCam; if(!c) return; ctCam = null;
+    try{ c.stream.getTracks().forEach(tr => tr.stop()); }catch(e){}
+    try{ c.video.srcObject = null; }catch(e){}
+    c.capa.remove(); document.body.style.overflow = c.antes || '';
+    ctPintarFotos();
+  }
   // Cuando el servidor no puede poner nombres (sin llave, sin funcion), se dice en la
   // pantalla en vez de dejar "sin nombre" sin explicacion (11 oct 2026).
   let ctNombresAviso = '';
@@ -40760,8 +40851,9 @@ body.fija main{ padding-bottom:14px; }
     });
     const input = $('#ct-photoInput');
     input.addEventListener('change', e => { const files = Array.from(e.target.files || []); e.target.value = ''; ctTomarFotos(files); });
-    $('#ct-tomar').addEventListener('click', () => input.click());
-    $('#ct-masFotos').addEventListener('click', () => input.click());
+    $('#ct-tomar').addEventListener('click', ctCamAbrir);
+    $('#ct-masFotos').addEventListener('click', ctCamAbrir);
+    document.addEventListener('visibilitychange', () => { if(!ctCam || document.visibilityState !== 'visible') return; const tr = ctCam.stream.getVideoTracks()[0]; if(!tr || tr.readyState === 'ended' || tr.muted) ctCamReanudar(); });
     // Varias de una vez: sin `capture`, iOS ofrece el carrete y deja marcar muchas.
     const input2 = $('#ct-photoInput2');
     if(input2){ input2.addEventListener('change', e => { const files = Array.from(e.target.files || []); e.target.value = ''; ctTomarFotos(files); }); }
