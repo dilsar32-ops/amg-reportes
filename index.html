@@ -7875,7 +7875,7 @@ body.fija main{ padding-bottom:14px; }
     try{ r = await Loc.searchAddress(Object.assign({ query: q }, LAST_FIX ? { lat: LAST_FIX.lat, lng: LAST_FIX.lng } : {})); }catch(e){ r = null; }
     if(seq !== addrSugSeq || !r || r.superseded) return;                     // ya escribio mas: esta respuesta es vieja
     if(document.activeElement !== el) return;
-    const rows = (r.results || []).filter(x => x && x.title);
+    const rows = (r.results || []).filter(x => x && x.title).slice(0, 2);   // dos, las mas cercanas a lo escrito (11 oct 2026)
     list.innerHTML = rows.map(x => { const full = [x.title, x.subtitle].filter(Boolean).join(', ').replace(/,\s*United States$/i, ''); return '<button type="button" class="addrsug" data-addr="' + esc(full) + '"><b>' + esc(x.title) + '</b>' + (x.subtitle ? '<small>' + esc(x.subtitle) + '</small>' : '') + '</button>'; }).join('');
   }
   document.addEventListener('input', e => {
@@ -7919,18 +7919,31 @@ body.fija main{ padding-bottom:14px; }
     if(!row){ row=document.createElement('div'); row.className='sug'; host.appendChild(row); }
     return row;
   }
+  // DOS SUGERENCIAS, LAS MAS PARECIDAS (11 oct 2026; Amilcar: "que sugiera solo dos, y a medida
+  // que van escribiendo, la direccion mas cercana"). Direcciones y nombres de cliente: sin nada
+  // escrito, las dos mas recientes; escribiendo, las dos que mas se parecen (empieza igual >
+  // una palabra empieza igual > lo contiene; sin acentos ni mayusculas). Las demas listas
+  // (gente, tareas, cuartos) siguen enteras: son pocas y se escogen de un toque.
+  const SUG_DOS = { address: 2, client: 2 };
+  const sugNorm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  function sugFiltrar(lista, q, n){
+    const t = sugNorm(q);
+    const puntos = v => { const x = sugNorm(v); if(!t) return 0; if(x.startsWith(t)) return 0; if(x.split(' ').some((w, i, a) => a.slice(i).join(' ').startsWith(t))) return 1; if(x.includes(t)) return 2; return 9; };
+    return lista.map((v, i) => ({ v, i, p: puntos(v) })).filter(x => x.p < 9).sort((a, b) => a.p - b.p || a.i - b.i).slice(0, n).map(x => x.v);
+  }
   function sugRender(el){
     const key=sugKeyFor(el); if(!key) return;
     const row=sugRow(el);
     const cur=(el.value||'').trim().toLowerCase();
     const already = el.classList.contains('nameadd')
       ? nameTags(el.closest('.shift-card')).map(n=>n.toLowerCase()) : [];
-    row.innerHTML = sugStore.get(key)
-      .filter(v=>v.toLowerCase()!==cur && !already.includes(v.toLowerCase()))
+    const lista = sugStore.get(key).filter(v=>v.toLowerCase()!==cur && !already.includes(v.toLowerCase()));
+    row.innerHTML = (SUG_DOS[key] ? sugFiltrar(lista, el.value, SUG_DOS[key]) : lista)
       .map(v=>`<span class="chip" data-sug="${esc(v)}" data-key="${key}">`
               +`<span class="lbl">${esc(v)}</span>`
               +`<button type="button" class="del" aria-label="Quitar">&times;</button></span>`).join('');
   }
+  document.addEventListener('input', e => { const el = e.target; if(el && el.tagName === 'INPUT' && SUG_DOS[sugKeyFor(el)] && el.parentElement && el.parentElement.querySelector(':scope > .sug')) sugRender(el); });
   function sugRenderAll(key){
     $$('input').forEach(el=>{ if(sugKeyFor(el)===key && el.parentElement.querySelector(':scope > .sug')) sugRender(el); });
   }
@@ -8456,7 +8469,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-11-P';
+  const APP_BUILD = '2026-10-11-Q';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -42457,7 +42470,7 @@ body.fija main{ padding-bottom:14px; }
     // el telefono la lista de Apple salia primero, el cliente quedaba abajo del
     // teclado, y tocaba la de Apple, que no llena el nombre).
     if(!caja){ caja = document.createElement('div'); caja.className = 'clisuglist'; const w = el.closest('.addrwrap'); ((w && w.parentElement === host) ? w : el).insertAdjacentElement('afterend', caja); }
-    const encontrados = clientesBuscar(el.value, 4)
+    const encontrados = clientesBuscar(el.value, 2)                     // dos, las mas parecidas (11 oct 2026)
       .filter(c => !(cliNorm(CLI_ES_NOMBRE[el.id] ? c.nombre : c.direccion) === cliNorm(el.value)
                      && cliNorm((document.getElementById(CLI_PAREJA[el.id]) || {}).value) === cliNorm(CLI_ES_NOMBRE[el.id] ? c.direccion : c.nombre)));
     caja.innerHTML = encontrados.map(c => '<button type="button" class="clisug" data-cliid="' + esc(c.id) + '">'
