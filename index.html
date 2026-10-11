@@ -8314,7 +8314,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-10-A';
+  const APP_BUILD = '2026-10-10-B';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -39564,6 +39564,8 @@ body.fija main{ padding-bottom:14px; }
         + '<div class="cc-sub">' + esc(cliente.nombre || 'Sin nombre') + (cliente.direccion ? ' &middot; ' + esc(cliente.direccion) : '') + '</div>'
         + '<div class="cc-sub" style="margin-top:8px;">' + (seguro ? 'Toque el proyecto para mandar:' : 'Hay más de un proyecto parecido. ¿Cuál es?') + '</div>'
         + lista.map((c, i) => '<button type="button" class="btn ' + (i === 0 && seguro ? 'btn-accent' : 'btn-outline') + ' cc-proy" data-i="' + i + '"><b>' + esc(c.nombre) + '</b><span>' + esc(c.direccion || '') + '</span></button>').join('')
+        // CREAR (10 oct 2026): si ninguno de los que salieron es el cliente, se crea el perfil nuevo.
+        + '<button type="button" class="btn btn-outline cc-proy" data-i="-2" style="border-style:dashed;"><b>&#65291; No es ninguno: crear el perfil nuevo</b><span>Create a new CompanyCam project</span></button>'
         + '<button type="button" class="btn btn-ghost cc-proy" data-i="-1">Cancelar<span class="en"> / Cancel</span></button></div>';
       document.body.appendChild(v);
       v.addEventListener('click', e => {
@@ -39571,9 +39573,37 @@ body.fija main{ padding-bottom:14px; }
         if(!b && e.target !== v) return;
         const i = b ? +b.dataset.i : -1;
         v.remove();
-        resolve(i >= 0 ? lista[i] : null);
+        resolve(i === -2 ? { crear: true } : (i >= 0 ? lista[i] : null));
       });
     });
+  }
+
+  // ---- crear el perfil de un cliente nuevo (10 oct 2026) ----
+  // Su regla: el perfil nuevo se llama "Apellido Nombre - Contents" cuando sale de
+  // Contenidos; desde las demas carpetas, "Apellido Nombre". Con dos palabras se
+  // voltea ("Maria Lopez" -> "Lopez Maria"); con mas, se deja como lo escribio y
+  // la persona lo corrige en la casilla antes de crear.
+  function ccNombreNuevo(nombre, tab){
+    const t = String(nombre || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+    const base = t.length === 2 ? t[1] + ' ' + t[0] : t.join(' ');
+    return (base + (tab === 'contenidos' ? ' - Contents' : '')).trim();
+  }
+  async function ccOfrecerCrear(cliente, tab, motivo){
+    const sugerido = ccNombreNuevo(cliente.nombre, tab);
+    if(!cliente.direccion){ alert('Para crear el perfil en CompanyCam hace falta la dirección (número y calle). Escríbala en Información del Trabajo y vuelva a intentar.'); return null; }
+    if(!confirm((motivo || ('No encontré a «' + (cliente.nombre || cliente.direccion) + '» en CompanyCam.')) + '\n\n¿Crear el perfil nuevo allá?\n\nNombre: ' + sugerido + '\nDirección: ' + cliente.direccion)) return null;
+    const nombre = prompt('Nombre del perfil en CompanyCam (así se va a ver allá):', sugerido);
+    if(nombre === null) return null;
+    if(!nombre.trim()){ alert('Hace falta el nombre.'); return null; }
+    showOverlay('Creando el perfil en CompanyCam…');
+    let r;
+    try{ r = await ccLlamar({ accion: 'crear_proyecto', nombre: nombre.trim(), direccion: cliente.direccion }); }
+    catch(e){ hideOverlay(); alert('No se pudo crear el perfil en CompanyCam.\n\n' + e.message); return null; }
+    hideOverlay();
+    const p = r && r.proyecto;
+    if(!p || !p.id){ alert('CompanyCam no devolvió el perfil nuevo. Inténtelo otra vez.'); return null; }
+    ccAviso((r.existia ? 'Ya existía en CompanyCam: ' : '&#10003; Perfil creado en CompanyCam: ') + esc(p.nombre), 5000);
+    return { id: String(p.id), nombre: String(p.nombre || nombre.trim()), direccion: String(p.direccion || cliente.direccion || '') };
   }
 
   // ---- mandar ----
@@ -39598,11 +39628,14 @@ body.fija main{ padding-bottom:14px; }
       catch(e){ hideOverlay(); alert('No se pudo buscar en CompanyCam.\n\n' + e.message); return null; }
       hideOverlay();
       if(!r.candidatos || !r.candidatos.length){
-        alert('No encontré a «' + (cliente.nombre || cliente.direccion) + '» en CompanyCam.\n\nRevise que el nombre y la dirección sean los del proyecto en CompanyCam.');
-        return null;
+        // CLIENTE NUEVO (10 oct 2026): se ofrece crear el perfil ahi mismo.
+        proyecto = await ccOfrecerCrear(cliente, tab);
+        if(!proyecto) return null;
+      } else {
+        proyecto = await ccEscoger(r.candidatos, cliente, r.seguro);
+        if(proyecto && proyecto.crear) proyecto = await ccOfrecerCrear(cliente, tab, 'Ninguno de los que salieron es «' + (cliente.nombre || cliente.direccion) + '».');
+        if(!proyecto) return null;
       }
-      proyecto = await ccEscoger(r.candidatos, cliente, r.seguro);
-      if(!proyecto) return null;
       }
       showOverlay('Preparando las fotos…');
       let paquete;
@@ -40090,8 +40123,9 @@ body.fija main{ padding-bottom:14px; }
     try{ r = await ccLlamar({ accion: 'buscar_proyecto', nombre: cliente.nombre, direccion: cliente.direccion }); }
     catch(e){ hideOverlay(); alert('No se pudo buscar en CompanyCam.\n\n' + e.message); return; }
     hideOverlay();
-    if(!r.candidatos || !r.candidatos.length){ alert('No encontré a «' + (cliente.nombre || cliente.direccion) + '» en CompanyCam.\n\nRevise que el nombre y la dirección sean los del proyecto en CompanyCam.'); return; }
-    const p = await ccEscoger(r.candidatos, cliente, r.seguro);
+    let p = null;
+    if(!r.candidatos || !r.candidatos.length) p = await ccOfrecerCrear(cliente, 'contenidos');
+    else { p = await ccEscoger(r.candidatos, cliente, r.seguro); if(p && p.crear) p = await ccOfrecerCrear(cliente, 'contenidos', 'Ninguno de los que salieron es «' + (cliente.nombre || cliente.direccion) + '».'); }
     if(!p) return;
     t.cc = { id: String(p.id), nombre: String(p.nombre || ''), direccion: String(p.direccion || '') }; t.cambios = true; ctEscribir();
     ctPintarProyecto(t); ctProcesarCola();
