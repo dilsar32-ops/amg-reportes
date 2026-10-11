@@ -4763,7 +4763,7 @@ body.fija main{ padding-bottom:14px; }
         <label><span id="casualLaborLoadLabel">Horas del líder</span> <span class="clockhint" id="casualLaborLoadSource" style="margin:0;"></span></label>
         <input type="number" step="0.25" min="0" inputmode="decimal" id="casualEntryLaborLoad" placeholder="0"></div>
       <button type="button" class="btn btn-outline" id="casualEntrySave" style="width:100%;">Guardar ese día</button>
-      <p class="clockhint"><b>Hora desde/hasta</b> = lo que avisó el trabajador. <span id="casualLaborLoadHint"><b>Horas del líder</b> se busca sola en los labor logs de ese día — si no aparece, escríbala usted mismo.</span> Si no coinciden, se marca en rojo. El pago se calcula con las horas del trabajador.</p>
+      <p class="clockhint"><b>Hora desde/hasta</b> = lo que avisó el trabajador. <span id="casualLaborLoadHint"><b>Horas del líder</b> se busca sola en los labor logs de ese día — si no aparece, escríbala usted mismo.</span> Si no coinciden, se marca en rojo. El pago se calcula con las horas del trabajador. Abajo, cada día se revisa solo contra el labor log o el reporte de mudanza de ese día, y lo que encuentra queda anotado en la fila.</p>
 
       <div class="seg">
         <button type="button" id="casualSegUnpaid" class="on">Sin pagar</button>
@@ -8471,7 +8471,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-11-U';
+  const APP_BUILD = '2026-10-11-V';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -13071,21 +13071,142 @@ body.fija main{ padding-bottom:14px; }
 
   // One line per DAY. Used as-is for unpaid days, and inside each payment
   // once the paid history is grouped.
+  // ---- Cruce EN VIVO del trabajador temporal contra los labor logs ----
+  // Antes cada dia mostraba labor_load_hours: un numero que se guardaba al
+  // meter las horas (lo que el manager anoto, o lo que la app encontro EN ESE
+  // MOMENTO) y nunca se volvia a buscar. Si el reporte de mudanza llegaba
+  // despues, el dia decia "mudanza: no hay dato" para siempre aunque el
+  // reporte ya estuviera en la nube (Cristian y Minor, 10 oct 2026: el
+  // reporte de Samuel se mando el 11 a las 2:17 PM). Ahora la ficha lee los
+  // labor logs de esos dias cada vez que se abre, igual que la ficha del crew
+  // (renderPerson), y lo que encuentra se anota en la fila si estaba vacia.
+  let casualLiveByDate = null;      // {fecha: [labor logs]} de los dias a la vista; null = cargando o fallo
+  let casualLiveEstado = 'cargando';
+  let casualLiveKey = '', casualLiveSeq = 0;
+  const casualLiveSynced = new Set();
+
+  async function casualLiveFetch(dates){
+    if(!dates.length) return {};
+    if(!cloudOn() || !isManager()) return null;
+    const minD = dates.reduce((a,b)=> a<b?a:b), maxD = dates.reduce((a,b)=> a>b?a:b);
+    try{
+      const res = await authFetch('/rest/v1/labor_logs?select=id,crew_leader,payload,log_date,work_kind'
+        + '&company_id=eq.' + SES.company_id + '&log_date=gte.' + minD + '&log_date=lte.' + maxD,
+        { headers: cloudHeaders() });
+      if(!res.ok) return null;
+      const rows = await res.json();
+      const byDate = {};
+      rows.forEach(r => { (byDate[r.log_date] = byDate[r.log_date] || []).push(r); });
+      return byDate;
+    }catch(e){ return null; }
+  }
+
+  // Una lectura por persona y por lista de dias; al llegar, se vuelve a pintar.
+  function casualLiveLoad(rows){
+    const dates = [...new Set(rows.map(r => r.work_date).filter(Boolean))].sort();
+    const key = casualPersonKey + '|' + dates.join(',');
+    if(key === casualLiveKey) return;
+    casualLiveKey = key; casualLiveByDate = null; casualLiveEstado = 'cargando';
+    const my = ++casualLiveSeq;
+    casualLiveFetch(dates).then(byDate => {
+      if(my !== casualLiveSeq) return;
+      casualLiveByDate = byDate;
+      casualLiveEstado = byDate ? 'ok' : 'fallo';
+      renderCasualPerson();
+      if(byDate) casualLiveSync(rows);
+    });
+  }
+
+  // Un dia de UNA persona contra los labor logs de ESE dia y de ESA empresa.
+  //   dayLogs: los labor logs del dia (las dos empresas), o null si no se leyeron.
+  function casualLiveCheck(r, dayLogs, nameLower){
+    const kind = (r.work_kind === 'mudanza') ? 'mudanza' : 'restauracion';
+    if(!Array.isArray(dayLogs)) return { kind, estado:'sinrevisar', hours:null, matches:[], logs:0 };
+    const logs = dayLogs.filter(l => (l.work_kind || 'restauracion') === kind);
+    const matches = nameLower ? findCasualShiftMatches(logs, nameLower) : [];
+    if(matches.length){
+      const mins = matches.reduce((s, m) => s + (hoursBetween(m.sh.f, m.sh.o) || 0), 0);
+      return { kind, estado:'encontrado', hours: Math.round(mins/60*100)/100, matches, logs: logs.length,
+               leader: matches[0].leader || '',
+               times: matches.map(m => fmtTime12(m.sh.f||'') + ' - ' + fmtTime12(m.sh.o||'')).join(', ') };
+    }
+    if(logs.length) return { kind, estado:'noaparece', hours:null, matches:[], logs: logs.length, leader: logs[0].crew_leader || '' };
+    return { kind, estado:'sinreporte', hours:null, matches:[], logs:0 };
+  }
+
+  // La linea "lider: ..." / "mudanza: ..." de cada dia, y el numero contra el
+  // que se compara. Regla: lo que dice el reporte HOY manda; lo que el manager
+  // anoto a mano se conserva y se ensena al lado si es distinto.
+  //   estadoCarga: 'ok' | 'cargando' | 'fallo' | 'historial' (dias pagados: no se revisan)
+  function casualLoadLine(r, live, estadoCarga){
+    const mg = (r.work_kind === 'mudanza');
+    const src = mg ? 'mudanza' : 'líder';
+    const stored = (r.labor_load_hours === null || r.labor_load_hours === undefined || r.labor_load_hours === '') ? null : parseFloat(r.labor_load_hours);
+    const fmt = h => String(Math.round(h*100)/100);
+    if(live && live.estado === 'encontrado'){
+      const quien = live.leader ? (mg ? ' · lo mandó ' + esc(live.leader) : ' · líder: ' + esc(live.leader)) : '';
+      const extra = (stored !== null && Math.abs(stored - live.hours) > 0.01) ? ' · usted había anotado ' + fmt(stored) + ' hrs' : '';
+      return { load: live.hours, text: src + ': ' + fmt(live.hours) + ' hrs' + (live.times ? ' (' + esc(live.times) + ')' : '') + quien + extra };
+    }
+    if(live && live.estado === 'noaparece'){
+      return { load: stored, text: src + ': no aparece en ' + (mg ? 'el reporte de mudanza' : 'el labor log') + ' de ese día'
+        + (live.leader ? ' (lo mandó ' + esc(live.leader) + ')' : '') + (stored !== null ? ' · usted anotó ' + fmt(stored) + ' hrs' : '') };
+    }
+    if(live && live.estado === 'sinreporte'){
+      return { load: stored, text: stored !== null ? src + ': ' + fmt(stored) + ' hrs (anotado a mano)'
+        : src + ': no hay ' + (mg ? 'reporte de mudanza' : 'labor log') + ' de ese día' };
+    }
+    if(estadoCarga === 'cargando') return { load: stored, text: src + ': revisando…' };
+    if(estadoCarga === 'fallo')    return { load: stored, text: stored !== null ? src + ': ' + fmt(stored) + ' hrs' : src + ': no se pudo revisar (sin internet)' };
+    return { load: stored, text: stored !== null ? src + ': ' + fmt(stored) + ' hrs' : src + ': sin dato' };
+  }
+
+  // Lo encontrado en el reporte se guarda en la fila (labor_load_hours) SOLO
+  // si estaba vacia y el dia no esta pagado: asi el telefono del trabajador y
+  // el PDF ven lo mismo que esta pantalla. Un numero anotado a mano nunca se
+  // pisa (el filtro labor_load_hours=is.null lo garantiza tambien en la base).
+  async function casualLiveSync(rows){
+    if(!casualLiveByDate || !cloudOn() || !isManager()) return;
+    for(const r of rows){
+      if(r.paid_at) continue;
+      if(!(r.labor_load_hours === null || r.labor_load_hours === undefined || r.labor_load_hours === '')) continue;
+      if(casualLiveSynced.has(String(r.id))) continue;
+      const w = casualWorkers.find(x => x.id === r.casual_worker_id);
+      const live = casualLiveCheck(r, casualLiveByDate[r.work_date] || [], ((w && w.name) || '').toLowerCase());
+      if(live.estado !== 'encontrado') continue;
+      casualLiveSynced.add(String(r.id));
+      try{
+        const res = await authFetch('/rest/v1/casual_hours?id=eq.' + encodeURIComponent(r.id) + '&paid_at=is.null&labor_load_hours=is.null',
+          { method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
+            body: JSON.stringify({ labor_load_hours: live.hours }) });
+        if(!res.ok) continue;
+        const saved = await res.json();
+        if(Array.isArray(saved) && saved.length) r.labor_load_hours = live.hours;
+      }catch(e){}
+    }
+  }
+
   function casualDayRow(r){
     const mg = (r.work_kind === 'mudanza');
-    const status = casualMatchStatus(r.reported_hours, r.labor_load_hours, r.work_kind);
-    const reviewable = status.cls === 'mismatch' || status.cls === 'partial';
+    const w = casualWorkers.find(x => x.id === r.casual_worker_id);
+    const nameLower = ((w && w.name) || '').toLowerCase();
+    const live = (!casualPaidView && casualLiveByDate) ? casualLiveCheck(r, casualLiveByDate[r.work_date] || [], nameLower) : null;
+    const line = casualLoadLine(r, live, casualPaidView ? 'historial' : casualLiveEstado);
+    // "No aparece" es un problema de verdad (quien mando el reporte no lo
+    // puso): se enciende en rojo. Lo demas sigue la regla de siempre.
+    const status = (live && live.estado === 'noaparece')
+      ? { cls:'mismatch', text:'⚠ No aparece en ' + (mg ? 'el reporte de mudanza' : 'el labor log') }
+      : casualMatchStatus(r.reported_hours, line.load, r.work_kind);
+    // Un dia encontrado tambien se puede tocar: abre el reporte de ese dia.
+    const reviewable = status.cls === 'mismatch' || status.cls === 'partial' || !!(live && live.estado === 'encontrado');
     const times = (r.clock_in && r.clock_out) ? ' &middot; ' + esc(fmtTime12(r.clock_in)) + ' - ' + esc(fmtTime12(r.clock_out)) : '';
-    const src = mg ? 'mudanza' : 'líder';
     // Solo se corrige lo que todavia no se ha pagado.
     const fixable = !r.paid_at;
     const editing = fixable && String(casualFixingId) === String(r.id);
     return `<div class="entryrow${reviewable ? ' reviewable' : ''}"${reviewable ? ' data-review-date="'+esc(r.work_date)+'" data-review-kind="' + (mg ? 'mudanza' : 'restauracion') + '"' : ''}>
       <span><span class="who">${esc(r.work_date)}</span>${mg ? '<span class="kindtag">AMG</span>' : ''}${times ? '<span class="when">' + times + '</span>' : ''}
         ${status.text ? '<br><span class="matchstatus '+status.cls+'">'+status.text+'</span>' : ''}
-        ${r.labor_load_hours != null
-          ? '<br><span class="when">' + src + ': ' + esc(String(r.labor_load_hours)) + ' hrs</span>'
-          : '<br><span class="when">' + src + ': no hay dato</span>'}</span>
+        <br><span class="when">${line.text}</span></span>
       <span style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
         <span class="hrs">${r.reported_hours != null ? r.reported_hours + ' hrs' : '—'}</span>
         ${fixable ? '<button type="button" class="teedit" data-cffix="' + esc(r.id) + '">' + (editing ? 'Cerrar' : 'Corregir') + '</button>' : ''}
@@ -13231,6 +13352,9 @@ body.fija main{ padding-bottom:14px; }
   function renderCasualPerson(){
     const box = $('#casualPersonEntries'); if(!box) return;
     const rows = casualPersonRows();
+    // Los labor logs de esos dias se leen aparte y, al llegar, se repinta.
+    // Los dias ya pagados no se revisan: son historial.
+    if(!casualPaidView) casualLiveLoad(rows); else { casualLiveKey = ''; casualLiveByDate = null; }
     if(!rows.length){
       box.innerHTML = '<p class="clockhint">Nada todavía.</p>';
     }else if(casualPaidView){
