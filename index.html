@@ -3483,8 +3483,12 @@ body.fija main{ padding-bottom:14px; }
       <div class="ct-count"><b id="ct-cuenta">0</b><span>fotos<span class="en"> / photos</span></span></div>
       <div class="ct-estado" id="ct-estadoFotos"></div>
       <input type="file" id="ct-photoInput" accept="image/*" capture="environment" multiple style="display:none;">
+      <input type="file" id="ct-photoInput2" accept="image/*" multiple style="display:none;">
       <button type="button" class="btn btn-accent btn-block ct-big" id="ct-tomar">&#128247; Tomar foto<span class="en"> / Take photo</span></button>
+      <button type="button" class="btn btn-outline btn-block" id="ct-varias" style="margin-top:10px;">&#128444;&#65039; Elegir varias del carrete<span class="en"> / Choose several from the library</span></button>
       <p class="clockhint" id="ct-captura" hidden></p>
+      <p class="clockhint ct-nombresAviso" hidden></p>
+      <div class="ct-check ct-cerrado" hidden></div>
       <p class="hint" style="margin:10px 0 0;">Una foto por objeto. Cada foto se guarda en el teléfono al momento y sube sola cuando hay señal. El nombre lo va poniendo la app; usted lo corrige en el paso 3.<span class="en"> / One item per photo. Saved on the phone instantly; uploads itself. Names are suggested; fix them in step 3.</span></p>
       <div class="ct-grid" id="ct-grid"></div>
     </section>
@@ -3493,8 +3497,10 @@ body.fija main{ padding-bottom:14px; }
       <h2><span class="num">3</span>Qué pasó con cada cosa<span class="en"> / What happened to each item</span></h2>
       <div class="ct-bulk" id="ct-bulk"></div>
       <p class="ct-sum" id="ct-resumen"></p>
+      <p class="clockhint ct-nombresAviso" hidden></p>
       <div id="ct-lista"></div>
       <button type="button" class="btn btn-outline btn-block" id="ct-masFotos" style="margin-top:12px;">+ Más fotos<span class="en"> / More photos</span></button>
+      <div class="ct-check ct-cerrado" hidden style="margin-top:12px;"></div>
     </section>
 
     <section class="card" data-step="firma">
@@ -3509,6 +3515,7 @@ body.fija main{ padding-bottom:14px; }
         <div class="sig-wrap ct-sigimg"><img id="ct-firmaImg" alt=""></div>
         <p class="ct-kv" id="ct-firmaDatos"></p>
         <button type="button" class="btn btn-outline btn-block" id="ct-copiaCliente">&#128228; Enviar copia al cliente<span class="en"> / Send the client a copy</span></button>
+        <button type="button" class="btn btn-outline btn-block" id="ct-adenda" style="margin-top:10px;">&#65291; Adenda: agregar más fotos<span class="en"> / Addendum: add more photos</span></button>
         <button type="button" class="btn btn-outline btn-block" id="ct-nuevo" style="margin-top:10px;">&#65291; Empezar otro trabajo<span class="en"> / Start another job</span></button>
       </div>
       <button type="button" class="btn btn-outline btn-block" data-previa-tab="contenidos" style="margin-top:12px;">&#128065; Vista previa<span class="en"> / Preview</span></button>
@@ -8314,7 +8321,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-10-B';
+  const APP_BUILD = '2026-10-11-A';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -40133,6 +40140,29 @@ body.fija main{ padding-bottom:14px; }
 
   // ---- las fotos ----
   let ctTomando = false;
+  // Cuando el servidor no puede poner nombres (sin llave, sin funcion), se dice en la
+  // pantalla en vez de dejar "sin nombre" sin explicacion (11 oct 2026).
+  let ctNombresAviso = '';
+  function ctPintarNombresAviso(){ document.querySelectorAll('.tab-panel[data-tab="contenidos"] .ct-nombresAviso').forEach(p => { p.textContent = ctNombresAviso; p.hidden = !ctNombresAviso; }); }
+  // Un trabajo firmado no se toca: la salida es la ADENDA (otro registro ligado al
+  // firmado, con los mismos datos del cliente). Es el mismo control en los pasos 2, 3 y 4.
+  function ctPintarCerrado(t){
+    document.querySelectorAll('.tab-panel[data-tab="contenidos"] .ct-cerrado').forEach(c => {
+      c.hidden = !t || t.estado === 'abierto';
+      if(c.hidden) return;
+      c.innerHTML = t.estado === 'firmado'
+        ? '<span class="ok">&#128274; Este trabajo ya está firmado.</span> Las fotos que vio y firmó el cliente no se tocan. Para agregar más objetos se abre una <b>adenda</b>: otro registro ligado a este, con los mismos datos del cliente, que el cliente también firma.<span class="en"> / Signed records are frozen; an addendum adds more items.</span>'
+          + '<button type="button" class="btn btn-outline btn-block" data-ct-adenda style="margin-top:10px;">&#65291; Adenda: agregar más fotos<span class="en"> / Addendum: add more photos</span></button>'
+        : '<span class="no">Este trabajo está ' + esc(t.estado) + ': ya no se puede cambiar.</span>';
+    });
+  }
+  function ctAdenda(){
+    const t = ctActual(); if(!t || t.estado !== 'firmado') return;
+    if(!confirm('Se abre un trabajo NUEVO de Contenidos para ' + (t.cliente || 'este cliente') + ', ligado al registro firmado (' + String(t.id).slice(0, 8) + '). El firmado no se toca. ¿Seguir?')) return;
+    const n = ctNuevo({ anterior: t.id, cliente: t.cliente, direccion: t.direccion, lider: t.lider, cc: t.cc ? Object.assign({}, t.cc) : null });
+    ctDeshacerPila = [];
+    ctCargarFormulario(n); ctPintar(); goStep('contenidos', 1);
+  }
   function ctAvisoCaptura(txt){ const p = $('#ct-captura'); if(!p) return; p.textContent = txt || ''; p.hidden = !txt; }
   async function ctTomarFotos(files){
     const t = ctActual(); if(!t || t.estado !== 'abierto' || !files || !files.length) return;
@@ -40198,7 +40228,10 @@ body.fija main{ padding-bottom:14px; }
       + (c.err ? '<span><i class="ct-dot err" style="position:static;"></i><b>' + c.err + ' sin subir</b> <button type="button" class="minibtn" data-ct-reintentar>Reintentar</button></span>' : '');
     grid.innerHTML = t.fotos.map(f => '<div class="ct-tile" data-k="' + f.k + '"><div class="ct-foto"><img alt="" data-ruta="' + esc(f.vista) + '"></div><span class="ct-num">#' + f.n + '</span><i class="ct-dot ' + ctEstadoFotoHtml(f) + '"></i>' + ctNombreHtml(f) + '</div>').join('');
     grid.querySelectorAll('img[data-ruta]').forEach(img => ctPonerImagen(img, img.dataset.ruta));
-    const tomar = $('#ct-tomar'); if(tomar) tomar.hidden = t.estado !== 'abierto';
+    const cerrado = t.estado !== 'abierto';
+    const tomar = $('#ct-tomar'); if(tomar) tomar.hidden = cerrado;
+    const varias = $('#ct-varias'); if(varias) varias.hidden = cerrado;
+    ctPintarCerrado(t); ctPintarNombresAviso();
   }
   function ctPintarEstadoFoto(f){
     const t = ctActual(); if(!t) return;
@@ -40230,6 +40263,7 @@ body.fija main{ padding-bottom:14px; }
     }).join('') || '<p class="hint">Todavía no hay fotos. Vuelva al paso 2 y tome la primera.</p>';
     lista.querySelectorAll('img[data-ruta]').forEach(img => ctPonerImagen(img, img.dataset.ruta));
     const mas = $('#ct-masFotos'); if(mas) mas.hidden = !abierto;
+    ctPintarCerrado(t); ctPintarNombresAviso();
   }
   function ctCambiarEstado(ks, estado, guardarDeshacer){
     const t = ctActual(); if(!t || t.estado !== 'abierto') return;
@@ -40518,9 +40552,15 @@ body.fija main{ padding-bottom:14px; }
     ctNombrando = true; ctNombrarDesde = Date.now();
     try{
       const res = await authFetch('/functions/v1/nombrar-objetos', { method: 'POST', headers: ctCabeceras(), body: JSON.stringify({ job_id: t.id }) });
-      if(res.status === 404) return;                                     // la funcion todavia no esta desplegada: se nombra a mano
+      if(res.status === 404){ ctNombresAviso = 'Los nombres automáticos no están instalados en el servidor. Escriba los nombres a mano en el paso 3.'; ctPintarNombresAviso(); return; }
       const j = await res.json().catch(() => null);
-      if(!res.ok || !j || !j.ok) return;
+      if(!res.ok || !j || !j.ok){
+        ctNombresAviso = (res.status === 503 && j && j.error === 'sin_llave')
+          ? 'Los nombres automáticos todavía no están activos (falta la llave en el servidor). Escriba los nombres a mano en el paso 3.'
+          : 'No se pudieron pedir los nombres automáticos (' + ((j && j.error) || res.status) + '). Escríbalos a mano en el paso 3.';
+        ctPintarNombresAviso(); return;
+      }
+      ctNombresAviso = ''; ctPintarNombresAviso();
       (j.items || []).forEach(it => {
         const f = t.fotos.find(x => x.k === it.k); if(!f) return;
         f.ia = { estado: it.ia_estado || 'hecho', en: it.nombre_ia_en || '', conf: it.ia_confianza || '' };
@@ -40722,6 +40762,11 @@ body.fija main{ padding-bottom:14px; }
     input.addEventListener('change', e => { const files = Array.from(e.target.files || []); e.target.value = ''; ctTomarFotos(files); });
     $('#ct-tomar').addEventListener('click', () => input.click());
     $('#ct-masFotos').addEventListener('click', () => input.click());
+    // Varias de una vez: sin `capture`, iOS ofrece el carrete y deja marcar muchas.
+    const input2 = $('#ct-photoInput2');
+    if(input2){ input2.addEventListener('change', e => { const files = Array.from(e.target.files || []); e.target.value = ''; ctTomarFotos(files); }); }
+    if($('#ct-varias')) $('#ct-varias').addEventListener('click', () => { if(input2) input2.click(); });
+    if($('#ct-adenda')) $('#ct-adenda').addEventListener('click', ctAdenda);
     $('#ct-ccEscoger').addEventListener('click', ctEscogerProyecto);
     $('#ct-firmarBtn').addEventListener('click', ctFirmarFlujo);
     $('#ct-copiaCliente').addEventListener('click', () => ctHacerPdf({ texto: 'Contents inventory / Inventario de contenidos' }));
@@ -40736,6 +40781,7 @@ body.fija main{ padding-bottom:14px; }
       if(bo){ const x = CT.trabajos[bo.dataset.ctBorrartrabajo]; if(!x) return; if(!confirm('¿Borrar del teléfono el trabajo' + (x.cliente ? ' de ' + x.cliente : '') + ' con ' + x.fotos.length + ' fotos? No se puede deshacer.')) return;
         x.fotos.forEach(f => { ctBorrarArchivo(f.archivo); ctBorrarArchivo(f.vista); }); delete CT.trabajos[x.id]; ctEscribir(); ctPintarOtros(); return; }
       if(e.target.closest('[data-ct-reintentar]')){ ctReintentar(); return; }
+      if(e.target.closest('[data-ct-adenda]')){ ctAdenda(); return; }
       const bulk = e.target.closest('[data-ct-bulk]');
       if(bulk){ ctCambiarEstado(t.fotos.filter(f => f.estado === 'pendiente').map(f => f.k), bulk.dataset.ctBulk, true); return; }
       if(e.target.closest('[data-ct-deshacer]')){ const u = ctDeshacerPila.pop(); if(u){ u.forEach(x => { const f = t.fotos.find(y => y.k === x.k); if(f){ f.estado = x.estado; f.dirty = true; } }); ctEscribir(); ctPintarLista(); ctProcesarCola(); } return; }
