@@ -8363,7 +8363,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-11-G';
+  const APP_BUILD = '2026-10-11-H';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -40272,6 +40272,97 @@ body.fija main{ padding-bottom:14px; }
     for(const e of lista){ const d = CT_ES_GENERICAS[e.id]; if(d && e.conf >= 0.2) return { id: e.id, es: d[0], en: d[1], conf: 'baja', valor: e.conf }; }
     return null;
   }
+  // ESPAÑOL -> INGLES para los nombres escritos a mano (11 oct 2026). La hoja va en ingles;
+  // si la cuadrilla corrige el nombre, se busca aqui al momento (sin señal) y, si no esta,
+  // se le pide al traductor del iPhone (plugin Traducir). Lo que no se pueda, se queda en
+  // español en la hoja con la nota "name typed by the crew": nunca se inventa.
+  const CT_EN_EXTRA = {
+    'sofa':'sofa','sillon':'armchair','mesa':'table','mesa de centro':'coffee table','mesa de comedor':'dining table','comedor':'dining set','silla':'chair','sillas':'chairs','banco':'stool','banca':'bench',
+    'cama':'bed','colchon':'mattress','cabecera':'headboard','buro':'nightstand','mesa de noche':'nightstand','comoda':'dresser','ropero':'wardrobe','armario':'wardrobe','closet':'closet','librero':'bookshelf',
+    'estante':'shelf','repisa':'shelf','escritorio':'desk','mueble de tv':'TV stand','mueble para tv':'TV stand','vitrina':'display cabinet','gabinete':'cabinet','tocador':'vanity','espejo':'mirror',
+    'lampara':'lamp','lampara de pie':'floor lamp','lampara de mesa':'table lamp','lampara de techo':'ceiling light','candil':'chandelier','ventilador':'fan','ventilador de techo':'ceiling fan',
+    'refrigerador':'refrigerator','refri':'refrigerator','nevera':'refrigerator','congelador':'freezer','estufa':'stove','horno':'oven','microondas':'microwave','lavadora':'washing machine','secadora':'dryer',
+    'lavaplatos':'dishwasher','lavavajillas':'dishwasher','licuadora':'blender','tostadora':'toaster','cafetera':'coffee maker','aspiradora':'vacuum cleaner','plancha':'clothes iron','calentador':'heater',
+    'aire acondicionado':'air conditioner','deshumidificador':'dehumidifier','purificador de aire':'air purifier','televisor':'television','television':'television','tele':'television','pantalla':'TV screen',
+    'bocina':'speaker','bocinas':'speakers','estereo':'stereo','radio':'radio','computadora':'computer','laptop':'laptop','monitor':'monitor','impresora':'printer','teclado':'keyboard','raton':'computer mouse',
+    'tableta':'tablet','ipad':'iPad','telefono':'phone','celular':'cell phone','cargador':'charger','cable':'cable','cables':'cables','control remoto':'remote control','control':'remote control',
+    'consola de videojuegos':'game console','consola':'game console','videojuego':'video game','videojuegos':'video games','camara':'camera','reloj':'clock','reloj de pared':'wall clock','reloj de pulsera':'watch',
+    'audifonos':'headphones','auriculares':'headphones','airpods':'AirPods','microfono':'microphone','proyector':'projector','router':'router','modem':'modem','disco duro':'hard drive','memoria usb':'USB drive',
+    'cobija':'blanket','cobertor':'blanket','frazada':'blanket','edredon':'comforter','colcha':'bedspread','sabanas':'sheets','sabana':'sheet','almohada':'pillow','almohadas':'pillows','cojin':'cushion','cojines':'cushions',
+    'toalla':'towel','toallas':'towels','cortina':'curtain','cortinas':'curtains','persiana':'blinds','alfombra':'rug','tapete':'rug','ropa':'clothes','camisa':'shirt','camisas':'shirts','playera':'t-shirt',
+    'pantalon':'pants','pantalones':'pants','vestido':'dress','vestidos':'dresses','falda':'skirt','zapatos':'shoes','zapato':'shoe','tenis':'sneakers','botas':'boots','bota':'boot','sandalias':'sandals',
+    'chamarra':'jacket','chaqueta':'jacket','abrigo':'coat','sueter':'sweater','sudadera':'hoodie','gorra':'cap','sombrero':'hat','bufanda':'scarf','calcetines':'socks','ropa interior':'underwear','pijama':'pajamas',
+    'traje':'suit','corbata':'tie','cinturon':'belt','bolsa':'bag','bolso':'purse','bolsa de mano':'handbag','mochila':'backpack','maleta':'suitcase','maletas':'suitcases','equipaje':'luggage','cartera':'wallet',
+    'plato':'plate','platos':'plates','vaso':'drinking glass','vasos':'drinking glasses','taza':'cup','tazas':'cups','tazon':'bowl','olla':'pot','ollas':'pots','sarten':'pan','cuchillo':'knife','cuchillos':'knives',
+    'tenedor':'fork','cuchara':'spoon','cucharon':'ladle','cubiertos':'silverware','tabla de picar':'cutting board','recipiente':'container','recipientes':'containers','tupper':'food container','jarra':'pitcher',
+    'termo':'thermos','botella':'bottle','botellas':'bottles','charola':'tray','bandeja':'tray','vajilla':'dish set','cristaleria':'glassware','especiero':'spice rack','bote de basura':'trash can','basurero':'trash can',
+    'cepillo de dientes':'toothbrush','secadora de pelo':'hair dryer','rasuradora':'shaver','maquina de afeitar':'shaver','maquillaje':'makeup','perfume':'perfume','medicina':'medicine','medicinas':'medicines',
+    'pastillas':'pills','botiquin':'first aid kit','bascula':'scale','cesto de ropa':'laundry basket','canasta':'basket','canasto':'basket','juguete':'toy','juguetes':'toys','muneca':'doll','munecas':'dolls',
+    'peluche':'stuffed animal','peluches':'stuffed animals','carrito':'toy car','carritos':'toy cars','pelota':'ball','pelotas':'balls','balon':'ball','cuna':'crib','carriola':'stroller','silla para bebe':'baby chair',
+    'silla de bebe':'high chair','periquera':'high chair','biberon':'baby bottle','panales':'diapers','juego de mesa':'board game','juegos de mesa':'board games','rompecabezas':'puzzle','libro':'book','libros':'books',
+    'revista':'magazine','revistas':'magazines','documento':'document','documentos':'documents','papeles':'papers','carpeta':'folder','carpetas':'folders','archivero':'file cabinet','caja de archivo':'file box',
+    'pasaporte':'passport','llaves':'keys','llave':'key','dinero':'money','joyas':'jewelry','joyeria':'jewelry','anillo':'ring','collar':'necklace','pulsera':'bracelet','aretes':'earrings','lentes':'eyeglasses',
+    'lentes de sol':'sunglasses','cuadro':'painting','cuadros':'paintings','pintura':'painting','foto':'photo','fotos':'photos','fotografia':'photograph','marco':'frame','portarretrato':'picture frame',
+    'florero':'vase','planta':'plant','plantas':'plants','maceta':'flower pot','macetas':'flower pots','adorno':'decoration','adornos':'decorations','figura':'figurine','figuras':'figurines','vela':'candle','velas':'candles',
+    'trofeo':'trophy','trofeos':'trophies','estatua':'statue','bicicleta':'bicycle','bici':'bicycle','patineta':'skateboard','pesas':'weights','mancuernas':'dumbbells','bolsa de boxeo':'punching bag',
+    'saco de boxeo':'punching bag','costal de boxeo':'punching bag','guantes de boxeo':'boxing gloves','guantes':'gloves','pelota de futbol':'soccer ball','balon de futbol':'soccer ball','raqueta':'racket','bate':'bat',
+    'casco':'helmet','patines':'skates','tabla de surf':'surfboard','caminadora':'treadmill','bicicleta estatica':'exercise bike','colchoneta':'exercise mat','tienda de campana':'tent','hielera':'cooler',
+    'parrilla':'grill','asador':'grill','mesa de jardin':'patio table','sillas de jardin':'patio chairs','silla de jardin':'patio chair','manguera':'garden hose','regadera':'watering can','podadora':'lawn mower',
+    'carretilla':'wheelbarrow','herramienta':'tool','herramientas':'tools','caja de herramientas':'toolbox','martillo':'hammer','desarmador':'screwdriver','taladro':'drill','sierra':'saw','escalera':'ladder',
+    'escoba':'broom','trapeador':'mop','cubeta':'bucket','extension electrica':'extension cord','extension':'extension cord','foco':'light bulb','focos':'light bulbs','bateria':'battery','pilas':'batteries',
+    'caja':'box','cajas':'boxes','caja de carton':'cardboard box','cajas de carton':'cardboard boxes','bolsa de plastico':'plastic bag','bolsa de basura':'trash bag','costal':'sack','baul':'trunk','cofre':'chest',
+    'instrumento musical':'musical instrument','guitarra':'guitar','piano':'piano','teclado musical':'keyboard','bateria musical':'drum set','tambor':'drum','violin':'violin','paraguas':'umbrella','sombrilla':'umbrella',
+    'puerta':'door','ventana':'window','madera':'wood','tablas':'boards','cemento':'cement','pintura de pared':'paint','lata de pintura':'paint can','brocha':'paintbrush','rodillo':'paint roller',
+    'papel':'paper','libreta':'notebook','cuaderno':'notebook','pluma':'pen','lapiz':'pencil','tijeras':'scissors','cinta':'tape','pegamento':'glue','calculadora':'calculator','agenda':'planner',
+    'mantel':'tablecloth','servilletas':'napkins','trapo':'rag','trapos':'rags','esponja':'sponge','detergente':'detergent','jabon':'soap','champu':'shampoo','papel de bano':'toilet paper','papel higienico':'toilet paper',
+    'comida':'food','alimentos':'food','despensa':'pantry items','bebidas':'drinks','vino':'wine','cerveza':'beer','licor':'liquor','mascota':'pet','jaula':'cage','pecera':'fish tank','cama de perro':'dog bed',
+    'arbol de navidad':'Christmas tree','adornos de navidad':'Christmas decorations','luces de navidad':'Christmas lights','disfraz':'costume','disfraces':'costumes','mascara':'mask','banderas':'flags','bandera':'flag',
+    'album de fotos':'photo album','album':'album','disco':'record','discos':'records','cd':'CD','dvd':'DVD','pelicula':'movie','peliculas':'movies','casete':'cassette','tocadiscos':'record player',
+    'sofa cama':'sofa bed','cama individual':'twin bed','cama matrimonial':'full bed','cama king':'king bed','litera':'bunk bed','base de cama':'bed frame','box spring':'box spring','mecedora':'rocking chair',
+    'silla de oficina':'office chair','silla de ruedas':'wheelchair','andadera':'walker','baston':'cane','muletas':'crutches','tanque de oxigeno':'oxygen tank','maquina de coser':'sewing machine',
+    'aire':'air conditioner','calefactor':'space heater','humidificador':'humidifier','extractor':'exhaust fan','generador':'generator','compresor':'compressor','bomba de agua':'water pump'
+  };
+  const ctNormEs = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^(el|la|los|las|un|una|unos|unas|mi|mis|su|sus) /, '');
+  let ctEnDeEsCache = null;
+  function ctEnDeEs(){
+    if(ctEnDeEsCache) return ctEnDeEsCache;
+    const m = {};
+    Object.values(CT_ES).concat(Object.values(CT_ES_GENERICAS)).forEach(v => { const k = ctNormEs(v[0]); if(k && !m[k]) m[k] = v[1]; });
+    Object.keys(CT_EN_EXTRA).forEach(k => { m[ctNormEs(k)] = CT_EN_EXTRA[k]; });
+    return (ctEnDeEsCache = m);
+  }
+  // El ingles de un nombre escrito en español: exacto, sin articulo, en singular o en plural.
+  function ctTraducirDiccionario(nombre){
+    const m = ctEnDeEs(); const k = ctNormEs(nombre); if(!k) return '';
+    if(m[k]) return m[k];
+    const plural = en => /(s|x|ch|sh)$/.test(en) ? en + 'es' : en + 's';
+    const sing = k.replace(/es$/, '').replace(/s$/, '');
+    if(k !== sing && m[sing]) return plural(m[sing]);
+    if(k.endsWith('es') && m[k.slice(0, -2)]) return plural(m[k.slice(0, -2)]);
+    if(m[k + 's']) return m[k + 's'];
+    return '';
+  }
+  // El ingles que corresponde al nombre ACTUAL: el de la app si la cuadrilla lo dejo, o la
+  // traduccion (diccionario / iPhone) si lo escribio a mano. Nunca el ingles viejo de una
+  // sugerencia que la cuadrilla ya corrigio.
+  function ctNombreEn(f){ if(!f || !f.nombre) return ''; return f.fuente === 'persona' ? (f.en || '') : ((f.ia && f.ia.en) || ''); }
+  function ctNombreEnFuente(f){ if(!f || !f.nombre) return ''; return f.fuente === 'persona' ? (f.en ? (f.en_fuente || 'diccionario') : '') : ((f.ia && f.ia.en) ? 'ia' : ''); }
+  function ctPluginTraducir(){ try{ const P = window.Capacitor && window.Capacitor.Plugins; return (P && P.Traducir && typeof P.Traducir.texto === 'function') ? P.Traducir : null; }catch(e){ return null; } }
+  async function ctTraducirNombre(f){
+    if(!f || f.fuente !== 'persona' || !f.nombre){ return false; }
+    const d = ctTraducirDiccionario(f.nombre);
+    if(d){ f.en = d; f.en_fuente = 'diccionario'; f.dirty = true; return true; }
+    const P = ctPluginTraducir();
+    if(P){
+      try{
+        const r = await Promise.race([P.texto({ texto: f.nombre, de: 'es', a: 'en' }), new Promise((_, rej) => setTimeout(() => rej(new Error('tardo')), 15000))]);
+        const en = String((r && r.texto) || '').trim();
+        if(en && ctNormEs(en) !== ctNormEs(f.nombre)){ f.en = en; f.en_fuente = 'iphone'; f.dirty = true; return true; }
+      }catch(e){ console.warn('contenidos: traducir', e); }
+    }
+    f.en = ''; f.en_fuente = ''; f.dirty = true; return false;
+  }
+
   // NOMBRAR CON EL iPHONE (11 oct 2026): el plugin Clasificar (Vision de Apple) le pone
   // nombre a cada foto de OBJETO al momento de guardarla: gratis, sin señal, y la foto no
   // sale del telefono. Si el plugin no esta (web, app vieja), no pasa nada y queda la ruta
@@ -40626,7 +40717,7 @@ body.fija main{ padding-bottom:14px; }
     lista.innerHTML = ctObjetos(t).map(f => {
       const tag = f.nombre ? (f.fuente === 'ia' ? '<span class="ct-tag ia">sugerido' + (f.ia && f.ia.conf ? ' · ' + esc(f.ia.conf) : '') + '</span>' : (f.fuente === 'ia-confirmado' ? '<span class="ct-tag ok">revisado</span>' : '<span class="ct-tag">escrito</span>')) : '';
       return '<div class="ct-row" data-k="' + f.k + '"><div class="ct-foto"><img alt="" data-ruta="' + esc(f.vista) + '"></div><div>'
-        + '<div class="n">#' + f.n + (f.ia && f.ia.en ? ' <span style="font-weight:400;">' + esc(f.ia.en) + '</span>' : '') + '</div>'
+        + '<div class="n">#' + f.n + (ctNombreEn(f) ? ' <span style="font-weight:400;">' + esc(ctNombreEn(f)) + (ctNombreEnFuente(f) === 'ia' ? '' : ' <small style="color:var(--ink-soft);">· traducido</small>') + '</span>' : (f.nombre && f.fuente === 'persona' ? ' <span style="font-weight:400; color:var(--ink-soft);">sin inglés</span>' : '')) + '</div>'
         + '<div class="nombre"><input type="text" class="ct-nombre" value="' + esc(f.nombre) + '" placeholder="' + (f.ia && f.ia.estado === 'procesando' ? 'nombrando…' : 'Nombre del objeto') + '"' + (abierto ? '' : ' disabled') + '>' + tag + '</div>'
         + '<div class="ct-pills">' + CT_ACCIONES.map(a => '<button type="button" class="ct-pill ' + a.css + (f.estado === a.k ? ' on' : '') + '" data-ct-acc="' + a.k + '"' + (abierto ? '' : ' disabled') + '>' + a.es + '</button>').join('') + '</div>'
         + (f.nota ? '<div class="ct-nota">Nota: ' + esc(f.nota) + (abierto ? ' <span style="color:var(--blue)">(cambiar)</span>' : '') + '</div>' : (abierto ? '<div class="ct-nota">+ nota</div>' : ''))
@@ -40696,7 +40787,7 @@ body.fija main{ padding-bottom:14px; }
     for(const f of ctFotosOrdenadas(t)){ idx++;
       const u = await ctUrlDe(f.archivo) || await ctUrlDe(f.vista);
       const a = ctAccion(f.estado);
-      paginas.push({ html: '<div class="ct-gal"><img src="' + esc(u) + '" alt=""></div><div class="ct-galcap"><div class="n">FOTO ' + ctEtiqueta(t, f) + (ctEsObjeto(f) ? '' : ' &middot; ' + esc(CT_ROLES[f.rol].es.toLowerCase()) + ' del objeto #' + f.n) + ' &middot; PHOTO ' + ctEtiqueta(t, f) + (ctEsObjeto(f) ? '' : ' &middot; ' + esc(CT_ROLES[f.rol].en.toLowerCase()) + ' of item #' + f.n) + '</div><div class="t">' + (f.nombre ? esc(f.nombre) : '<span>(sin nombre / unnamed)</span>') + (f.ia && f.ia.en && f.nombre ? ' <span>/ ' + esc(f.ia.en) + '</span>' : '') + '</div><span class="e" style="background:' + a.color + ';">' + a.ico + ' ' + a.es.toUpperCase() + ' · ' + a.en.toUpperCase() + '</span></div>',
+      paginas.push({ html: '<div class="ct-gal"><img src="' + esc(u) + '" alt=""></div><div class="ct-galcap"><div class="n">FOTO ' + ctEtiqueta(t, f) + (ctEsObjeto(f) ? '' : ' &middot; ' + esc(CT_ROLES[f.rol].es.toLowerCase()) + ' del objeto #' + f.n) + ' &middot; PHOTO ' + ctEtiqueta(t, f) + (ctEsObjeto(f) ? '' : ' &middot; ' + esc(CT_ROLES[f.rol].en.toLowerCase()) + ' of item #' + f.n) + '</div><div class="t">' + (f.nombre ? esc(f.nombre) : '<span>(sin nombre / unnamed)</span>') + (ctNombreEn(f) ? ' <span>/ ' + esc(ctNombreEn(f)) + '</span>' : '') + '</div><span class="e" style="background:' + a.color + ';">' + a.ico + ' ' + a.es.toUpperCase() + ' · ' + a.en.toUpperCase() + '</span></div>',
                      pie: 'Foto ' + idx + ' de ' + t.fotos.length + ' · deslice para la siguiente → / Photo ' + idx + ' of ' + t.fotos.length });
     }
     let revision = null;
@@ -40756,7 +40847,7 @@ body.fija main{ padding-bottom:14px; }
   }
   function ctArmarSnapshot(t, datos, extra){
     const r = ctResumen(t); const x = extra || {};
-    const objetos = ctObjetos(t).map(f => ({ n: f.n, k: f.k, fotos: ctExtrasDe(t, f.k).map(x => ({ rol: x.rol, k: x.k, path: x.path || '', sha256: x.sha256 || '', md5: x.md5 || '' })), nombre: f.nombre || '', nombre_fuente: f.nombre ? (f.fuente || 'persona') : '', nombre_en: (f.ia && f.ia.en) || '', estado: f.estado || 'pendiente', path: f.path || '', sha256: f.sha256, md5: f.md5 || '', nota: f.nota || '', tomada_at: f.tomada || '' }));
+    const objetos = ctObjetos(t).map(f => ({ n: f.n, k: f.k, fotos: ctExtrasDe(t, f.k).map(x => ({ rol: x.rol, k: x.k, path: x.path || '', sha256: x.sha256 || '', md5: x.md5 || '' })), nombre: f.nombre || '', nombre_fuente: f.nombre ? (f.fuente || 'persona') : '', nombre_en: ctNombreEn(f), nombre_en_fuente: ctNombreEnFuente(f), estado: f.estado || 'pendiente', path: f.path || '', sha256: f.sha256, md5: f.md5 || '', nota: f.nota || '', tomada_at: f.tomada || '' }));
     return { version: 2, app: (typeof APP_BUILD !== 'undefined' ? APP_BUILD : ''), nonce: x.nonce || ctId(),
              trabajo: { id: t.id, cliente: t.cliente || '', direccion: t.direccion || '', fecha: t.fecha || '', lider: t.lider || '', cuadrilla: x.cuadrilla || t.lider || '' },
              empresa: x.empresa || ctEmpresa(), cc: t.cc ? { id: t.cc.id, nombre: t.cc.nombre, direccion: t.cc.direccion || '' } : null,
@@ -40847,6 +40938,7 @@ body.fija main{ padding-bottom:14px; }
   async function ctSubirFilaFoto(t, f){
     const body = { trabajo_id: t.id, k: f.k, path: f.path, sha256: f.sha256, md5: f.md5 || null, bytes: f.bytes || null, tomada_at: f.tomada || null, n: f.n, estado_objeto: f.estado || 'pendiente', nota: f.nota || null, rol: f.rol || 'objeto', de_k: ctEsObjeto(f) ? null : (f.de || null) };
     if(!ctEsObjeto(f)) body.ia_estado = 'hecho';                         // las fotos extra no se nombran
+    body.nombre_en = ctNombreEn(f) || null; body.nombre_en_fuente = ctNombreEnFuente(f) || null;
     // El nombre solo viaja si lo puso una persona o lo saco el iPhone (apple-vision): si no,
     // el servidor conserva el que haya sugerido el mismo.
     const localVision = !!(f.ia && f.ia.modelo === 'apple-vision');
@@ -40989,10 +41081,10 @@ body.fija main{ padding-bottom:14px; }
     const empHtml = '<div class="emp"><b>' + esc(empresa).replace(/Doctor/i, '<span class="doc">Doctor</span>') + '</b><br>Record ' + esc(reg) + '</div>';
     const metaHtml = '<div class="meta"><div><b>Client</b>' + esc(s.trabajo.cliente || '—') + '</div><div><b>Date</b>' + esc(s.trabajo.fecha || '') + '</div><div><b>Address</b>' + esc(s.trabajo.direccion || '—') + '</div><div><b>Crew</b>' + esc(s.trabajo.cuadrilla || s.trabajo.lider || '—') + '</div></div>';
     const fila = o => { const a = ctAccion(o.estado); const img = ctVistas[t.id + '|' + o.k] || '';
-      const origen = !o.nombre ? 'no name given' : (o.nombre_fuente === 'persona' ? 'name typed by the crew' : (o.nombre_fuente === 'ia-confirmado' ? 'suggested by the app, reviewed by the crew' : 'name suggested by the app'));
+      const origen = !o.nombre ? 'no name given' : (o.nombre_fuente === 'persona' ? ('name typed by the crew' + (o.nombre_en && o.nombre_en_fuente === 'iphone' ? '; translated on the phone' : (o.nombre_en && o.nombre_en_fuente === 'diccionario' ? '; translated by the app' : (o.nombre_en ? '' : ' (no English name)')))) : (o.nombre_fuente === 'ia-confirmado' ? 'suggested by the app, reviewed by the crew' : 'name suggested by the app'));
       // En la hoja va el nombre en INGLES cuando lo hay (el que sugirio la app y la cuadrilla acepto);
       // un nombre escrito a mano se imprime tal cual: no se inventa una traduccion.
-      const enIngles = (o.nombre_fuente === 'ia' || o.nombre_fuente === 'ia-confirmado') && o.nombre_en ? o.nombre_en : '';
+      const enIngles = (o.nombre_en && (o.nombre_en_fuente || o.nombre_fuente === 'ia' || o.nombre_fuente === 'ia-confirmado')) ? o.nombre_en : '';
       const principal = enIngles || o.nombre || '';
       return '<tr><td class="n">' + o.n + '</td><td><div class="pf">' + (img ? '<img src="' + img + '" alt="">' : '') + '</div></td><td class="it"><b>' + (principal ? esc(principal) : '(unnamed)') + '</b>' + ctHojaExtras(t, o) + (o.nota ? '<span>Note: ' + esc(o.nota) + '</span>' : '') + '<i>' + origen + '</i></td><td><span class="st" style="background:' + a.color + ';">' + a.en.toUpperCase() + '</span></td></tr>'; };
     const firmaHtml = () => '<div class="resu"><span><b>' + r.total + '</b>items</span>' + ((r.fotos || 0) > r.total ? '<span><b>' + r.fotos + '</b>photos</span>' : '') + CT_ACCIONES.map(a => '<span><b>' + r[a.k] + '</b>' + a.en.toLowerCase() + '</span>').join('') + '</div>'
@@ -41107,7 +41199,7 @@ body.fija main{ padding-bottom:14px; }
       const reg = String(t.id).slice(0, 8), cuando = (t.firma && t.firma.firmado_at) || new Date().toISOString();
       await ctPrecargarVistas(t);
       const items = ctFotosOrdenadas(t).map(f => { const obj = ctEsObjeto(f) ? f : (t.fotos.find(x => x.k === f.de) || f); const a = ctAccion(obj.estado); const r = ctEsObjeto(f) ? null : (CT_ROLES[f.rol] || CT_ROLES.detalle);
-        return { archivo: f.archivo, vista: ctVistas[t.id + '|' + f.k] || '', descripcion: ('Contents ' + ctEtiqueta(t, f) + (r ? ' (' + r.en.toLowerCase() + ')' : '') + ' - ' + (obj.nombre || 'unnamed') + ' - ' + a.en + ' - Reg. ' + reg).slice(0, 300), tags: [CC_TAG, 'Contents', a.en].concat(r ? [r.en] : []), capturada: f.tomada || cuando }; });
+        return { archivo: f.archivo, vista: ctVistas[t.id + '|' + f.k] || '', descripcion: ('Contents ' + ctEtiqueta(t, f) + (r ? ' (' + r.en.toLowerCase() + ')' : '') + ' - ' + (ctNombreEn(obj) || obj.nombre || 'unnamed') + ' - ' + a.en + ' - Reg. ' + reg).slice(0, 300), tags: [CC_TAG, 'Contents', a.en].concat(r ? [r.en] : []), capturada: f.tomada || cuando }; });
       const hojas = await ctHojasImagenes(t);
       hojas.forEach((d, k) => items.push({ dataUrl: d, descripcion: 'Contents Inventory - signed - page ' + (k + 1) + ' of ' + hojas.length + ' - Reg. ' + reg, tags: [CC_TAG, 'Contents', 'Signed inventory'], capturada: cuando }));
       return { items, firma: ccHash(t.id + '|' + ((t.firma && t.firma.huella) || '') + '|' + t.fotos.length) };
@@ -41197,8 +41289,9 @@ body.fija main{ padding-bottom:14px; }
       const row = inp.closest('.ct-row'); const f = t.fotos.find(x => x.k === +row.dataset.k); if(!f) return;
       const v = inp.value.trim();
       if(v === (f.nombre || '')){ if(v && f.fuente === 'ia'){ f.fuente = 'ia-confirmado'; f.dirty = true; } }
-      else { f.nombre = v; f.fuente = v ? 'persona' : ''; f.dirty = true; }
+      else { f.nombre = v; f.fuente = v ? 'persona' : ''; f.en = ''; f.en_fuente = ''; f.dirty = true; }
       ctEscribir(); ctPintarLista(); ctProcesarCola();
+      if(f.fuente === 'persona') ctTraducirNombre(f).then(() => { ctEscribir(); ctPintarLista(); ctProcesarCola(); });
     });
   }
   window.addEventListener('online', () => ctProcesarCola());
@@ -41280,7 +41373,7 @@ body.fija main{ padding-bottom:14px; }
       const r = await authFetch('/rest/v1/contenidos_trabajos?id=eq.' + encodeURIComponent(id) + '&select=*', { headers: cloudHeaders() });
       const fila = (await r.json())[0]; if(!fila) throw new Error('no existe');
       Object.assign(t, fila);
-      const fr = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(id) + '&order=k.asc&select=k,n,path,sha256,nombre,nombre_fuente,nombre_ia_en,ia_confianza,estado_objeto,nota,tomada_at,rol,de_k', { headers: cloudHeaders() });
+      const fr = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(id) + '&order=k.asc&select=k,n,path,sha256,nombre,nombre_fuente,nombre_ia_en,nombre_en,ia_confianza,estado_objeto,nota,tomada_at,rol,de_k', { headers: cloudHeaders() });
       t.fotosNube = fr.ok ? await fr.json() : [];
     }catch(e){ $('#mcVerDatos').innerHTML = '<span style="color:var(--danger);">No se pudo leer el registro. Revise su internet.</span>'; return; }
     const s = t.snapshot || null, r = s ? s.resumen : null;
