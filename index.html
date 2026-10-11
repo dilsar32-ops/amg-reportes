@@ -2644,6 +2644,7 @@ body.fija main{ padding-bottom:14px; }
 .ct-otros .fila{display:flex; align-items:center; gap:8px; padding:8px 0; border-top:1px solid var(--line);}
 .ct-otros .fila > span{flex:1; min-width:0;}
 .ct-otros .fila small{display:block; color:var(--ink-soft);}
+.ct-otros .fila.ct-espacio{border-top:none; padding-top:6px;}
 #ct-firmaDespues[hidden], #ct-firmaAntes[hidden], #ct-otros[hidden], #ct-captura[hidden], #ct-borradorNota[hidden]{display:none !important;}
 /* --- la galería obligatoria --- */
 .ct-gal{width:100%; aspect-ratio:1; border-radius:10px 10px 0 0; background:#111; display:flex; align-items:center; justify-content:center; overflow:hidden;}
@@ -8469,7 +8470,7 @@ body.fija main{ padding-bottom:14px; }
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-11-Q';
+  const APP_BUILD = '2026-10-11-R';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -39846,7 +39847,7 @@ body.fija main{ padding-bottom:14px; }
         forzar = true;                                   // lo pidio: se sube aunque ya este en CompanyCam
       }
       showOverlay('Guardando para subir…');
-      try{ await ccEncolar(proyecto, tab, cliente, paquete.items, { forzar }); }
+      try{ await ccEncolar(proyecto, tab, cliente, paquete.items, { forzar, ref: fuente.ref || null }); }
       catch(e){ hideOverlay(); alert('No se pudo guardar en el teléfono para subir: ' + e.message); return null; }
       hideOverlay();
       enviados[clave] = { firma: paquete.firma, at: Date.now() };
@@ -39895,7 +39896,7 @@ body.fija main{ padding-bottom:14px; }
         lista.push({ archivo, propio: true, descripcion: String(it.descripcion || '').slice(0, 300), tags: (it.tags || []).slice(0, 5), capturada: it.capturada || new Date().toISOString(), estado: 'pendiente', intentos: 0 });
       }
       const cola = ccLeer(CC_COLA_KEY, []);
-      cola.push({ id, carpeta, projectId: String(proyecto.id), proyecto: String(proyecto.nombre || ''), tab, cliente: cliente.nombre || cliente.direccion || '', creado: Date.now(), forzar: !!(opts && opts.forzar), items: lista });
+      cola.push({ id, carpeta, projectId: String(proyecto.id), proyecto: String(proyecto.nombre || ''), tab, cliente: cliente.nombre || cliente.direccion || '', creado: Date.now(), forzar: !!(opts && opts.forzar), ref: (opts && opts.ref) || null, items: lista });
       if(!ccGuardar(CC_COLA_KEY, cola)) throw new Error('no hay espacio');
     }catch(e){
       try{ await F.rmdir({ path: carpeta, directory: 'DATA', recursive: true }); }catch(e2){}   // nada a medias en el telefono
@@ -39988,6 +39989,8 @@ body.fija main{ padding-bottom:14px; }
       try{ await fpDisco().rmdir({ path: t.carpeta, directory: 'DATA', recursive: true }); }catch(e){}
       const subidas = t.items.filter(i => i.estado === 'hecha').length;
       if(subidas) ccAviso('&#10003; ' + subidas + (subidas === 1 ? ' foto' : ' fotos') + ' en CompanyCam &middot; ' + esc(t.proyecto), 6000);
+      // CONTENIDOS (11 oct 2026): subio completo -> las fotos grandes salen del telefono (quedan las miniaturas).
+      if(t.tab === 'contenidos' && t.ref && subidas === t.items.length && typeof ctLiberarTrabajo === 'function'){ try{ await ctLiberarTrabajo(t.ref, 'cola'); }catch(e){ console.error('contenidos: liberar', e); } }
     }
   }
   function ccDescartar(){
@@ -40359,6 +40362,7 @@ body.fija main{ padding-bottom:14px; }
     ctProcesarCola();
     ctPedirNombres();
     if(t.enlace && t.estado === 'abierto') ctEnlaceRevisar(t, true);
+    ctLiberarAuto();
   }
   function ctCargarFormulario(t){
     const v = (id, val) => { const el = $('#' + id); if(el) el.value = val || ''; };
@@ -40390,11 +40394,45 @@ body.fija main{ padding-bottom:14px; }
   function ctPintarOtros(){
     const det = $('#ct-otros'), lista = $('#ct-otrosLista'); if(!det || !lista) return;
     const otros = Object.values(CT.trabajos).filter(x => x.id !== CT.actual).sort((a, b) => b.creado - a.creado);
-    det.hidden = !otros.length;
-    $('#ct-otrosTit').textContent = 'Otros trabajos en este teléfono (' + otros.length + ')';
-    lista.innerHTML = otros.map(x => '<div class="fila"><span><b>' + esc(x.cliente || 'Sin cliente') + '</b><small>' + esc(fechaDeMs(x.creado)) + ' &middot; ' + x.fotos.length + (x.fotos.length === 1 ? ' foto' : ' fotos') + ' &middot; ' + (x.estado === 'firmado' ? '&#10003; firmado' : (x.estado === 'abierto' ? 'sin firmar' : x.estado)) + '</small></span>'
+    const e = ctEspacio();
+    det.hidden = !otros.length && !e.fotos;
+    $('#ct-otrosTit').textContent = 'Trabajos en este teléfono (' + e.trabajos + ')';
+    const estado = x => x.estado !== 'firmado' ? 'abierto' : (x.ccEnviado ? (x.fotos.every(f => f.archivoBorrado || !f.archivo) ? 'en CompanyCam · espacio liberado' : 'en CompanyCam · liberando el espacio…') : (x.enlace ? 'firmando por enlace' : 'firmado · falta CompanyCam'));
+    const resumen = '<div class="fila ct-espacio"><span><b>' + esc(ctMB(e.grande + e.chica)) + ' en fotos</b> · ' + e.fotos + (e.fotos === 1 ? ' foto' : ' fotos') + ' de ' + e.trabajos + (e.trabajos === 1 ? ' trabajo' : ' trabajos')
+      + '<small>Las fotos grandes se borran solas del teléfono cuando el trabajo sube completo a CompanyCam; quedan las miniaturas para la lista, la vista previa y el PDF.</small></span></div>';
+    lista.innerHTML = resumen + otros.map(x => { return '<div class="fila"><span><b>' + esc(x.cliente || 'Sin cliente') + '</b><small>' + esc(fechaDeMs(x.creado)) + ' &middot; ' + x.fotos.length + (x.fotos.length === 1 ? ' foto' : ' fotos') + ' &middot; ' + estado(x) + '</small></span>'
       + '<button type="button" class="minibtn" data-ct-abrir="' + x.id + '">Abrir</button>'
-      + (x.estado === 'abierto' && !x.fotos.some(f => f.enNube) ? '<button type="button" class="minibtn gh" data-ct-borrartrabajo="' + x.id + '">Borrar</button>' : '') + '</div>').join('');
+      + (x.estado === 'abierto' && !x.fotos.some(f => f.enNube) ? '<button type="button" class="minibtn gh" data-ct-borrartrabajo="' + x.id + '">Borrar</button>' : '') + '</div>'; }).join('');
+  }
+  // ---- EL ESPACIO DEL TELEFONO (11 oct 2026; Amilcar: "que use el espacio del telefono y, cuando se
+  // sube a CompanyCam, que libere ese espacio"). Las fotos grandes (1600 px) viven en el telefono
+  // mientras se trabaja; en cuanto el trabajo esta firmado y TODO lo suyo subio a CompanyCam, se
+  // borran del telefono y quedan las miniaturas (320 px): con ellas siguen la lista, la vista previa
+  // y el PDF. Las fotos grandes siguen en CompanyCam (y en la nube hasta su propia limpieza). ----
+  const CT_VISTA_BYTES = 25 * 1024;                                     // miniatura sin tamano anotado (fotos de antes): estimado
+  function ctBytesDe(t){ let grande = 0, chica = 0, liberado = 0; (t && t.fotos || []).forEach(f => { const b = +f.bytes || 0, v = +f.vbytes || CT_VISTA_BYTES; chica += v; if(f.archivoBorrado) liberado += b; else grande += b; }); return { grande, chica, liberado, total: grande + chica }; }
+  function ctMB(b){ b = +b || 0; return (b >= 10 * 1048576 ? Math.round(b / 1048576) : (b / 1048576).toFixed(1)) + ' MB'; }
+  function ctEspacio(){ const r = { trabajos: 0, fotos: 0, grande: 0, chica: 0, liberado: 0 }; Object.values(CT.trabajos).forEach(t => { const b = ctBytesDe(t); r.trabajos++; r.fotos += (t.fotos || []).length; r.grande += b.grande; r.chica += b.chica; r.liberado += b.liberado; }); return r; }
+  // Se libera solo lo firmado y ya mandado a CompanyCam, y solo las fotos grandes que siguen aqui.
+  function ctLiberable(t){ return !!(t && t.estado === 'firmado' && t.ccEnviado && (t.fotos || []).some(f => !f.archivoBorrado && f.archivo)); }
+  // ¿Queda algo de este trabajo por subir en la cola de CompanyCam? (una entrada sin `ref` es de una
+  // version anterior de la app: se cuenta como si fuera de este trabajo, por si acaso)
+  function ctEnColaCompanyCam(t){ try{ return (typeof ccLeer === 'function' ? ccLeer(CC_COLA_KEY, []) : []).some(e => e.tab === 'contenidos' && (e.ref ? e.ref === t.id : true) && (e.items || []).some(i => i.estado !== 'hecha' && i.estado !== 'descartada')); }catch(e){ return true; } }
+  async function ctLiberarTrabajo(id, motivo){
+    const t = CT.trabajos[id]; if(!ctLiberable(t)) return 0;
+    let bytes = 0, n = 0;
+    for(const f of t.fotos){ if(f.archivoBorrado || !f.archivo) continue; try{ await ctBorrarArchivo(f.archivo); }catch(e){} f.archivoBorrado = true; bytes += +f.bytes || 0; n++; }
+    t.liberado = { at: new Date().toISOString(), bytes: ((t.liberado && t.liberado.bytes) || 0) + bytes, fotos: ((t.liberado && t.liberado.fotos) || 0) + n, motivo: motivo || '' };
+    ctEscribir();
+    const panel = document.querySelector('.tab-panel[data-tab="contenidos"]');
+    if(panel && panel.classList.contains('active')){ ctPintarOtros(); if(ctActual() === t) ctPintarFirma(); }
+    return bytes;
+  }
+  // Trabajos mandados antes de esta version, o con la app cerrada cuando la cola termino: al entrar.
+  async function ctLiberarAuto(){
+    for(const t of Object.values(CT.trabajos)){
+      if(ctLiberable(t) && !ctEnColaCompanyCam(t) && (Date.now() - (Date.parse(t.ccEnviado.at || '') || 0)) > 10 * 60000) await ctLiberarTrabajo(t.id, 'auto');
+    }
   }
   async function ctEscogerProyecto(){
     const t = ctActual(); if(!t || t.estado !== 'abierto') return;
@@ -40882,10 +40920,11 @@ body.fija main{ padding-bottom:14px; }
           const vista = CT_CARPETA + '/' + t.id + '/foto-' + k + '-t.jpg';
           await ctEscribirArchivo(archivo, grande);                   // PRIMERO al disco
           const sha256 = await ctSha256(grande);
-          try{ await ctEscribirArchivo(vista, await ctAchicar(grande, 320, 0.7)); }catch(e){}
+          let vbytes = 0;
+          try{ const chica = await ctAchicar(grande, 320, 0.7); vbytes = chica.size; await ctEscribirArchivo(vista, chica); }catch(e){}
           let md5 = null;
           try{ const S = (typeof ccPlugin === 'function') ? ccPlugin() : null; if(S && S.md5) md5 = (await S.md5({ path: archivo })).md5 || null; }catch(e){}
-          const foto = { k, archivo, vista, sha256, md5, bytes: grande.size, tomada: new Date().toISOString(), n: 0, nombre: '', fuente: '', ia: { estado: rol === 'objeto' ? 'pendiente' : 'hecho' },
+          const foto = { k, archivo, vista, sha256, md5, bytes: grande.size, vbytes, tomada: new Date().toISOString(), n: 0, nombre: '', fuente: '', ia: { estado: rol === 'objeto' ? 'pendiente' : 'hecho' },
                          rol, de: rol === 'objeto' ? null : de, estado: 'pendiente', estados: (rol === 'objeto' && t.cat && CT_CARPETAS.some(c => c.k === t.cat)) ? [t.cat] : [], nota: '', subida: 'tel', enNube: false, dirty: true, intentos: 0, error: '' };
           t.fotos.push(foto);
           if(rol === 'objeto') await ctClasificarLocal(foto);              // el nombre, aqui mismo, con el iPhone
@@ -41072,7 +41111,8 @@ body.fija main{ padding-bottom:14px; }
       $('#ct-firmaDatos').innerHTML = '<b>' + esc(t.firma.firmante) + '</b>' + (t.firma.relacion ? ' &middot; ' + esc(t.firma.relacion) : '') + '<br>Presentó: <b>' + esc(t.lider || '—') + '</b><br>' + ctResumenHtml(r)
         + '<br><span class="mono">Registro ' + esc(String(t.id).slice(0, 8)) + ' &middot; Huella ' + esc(String(t.firma.huella || '').slice(0, 16)) + '…</span>'
         + (t.pdfPendiente ? '<br><span style="color:var(--pick);">El PDF se está guardando en la nube…</span>' : (t.pdf ? '<br><span style="color:var(--green);">&#10003; PDF guardado en la nube</span>' : ''))
-        + (t.ccEnviado ? '<br><span style="color:var(--green);">&#10003; Mandado a CompanyCam</span>' : '');
+        + (t.ccEnviado ? '<br><span style="color:var(--green);">&#10003; Mandado a CompanyCam</span>' : '')
+;
       return;
     }
     antes.hidden = false; despues.hidden = true; nota.hidden = false;
@@ -41687,7 +41727,7 @@ body.fija main{ padding-bottom:14px; }
 
   // ---- CompanyCam: solo con la firma puesta; al perfil escogido en el paso 1 ----
   function ctFuenteCompanyCam(t){
-    return { cliente: { nombre: t.cliente || '', direccion: t.direccion || '', telefono: t.telefono || '' }, proyecto: t.cc || null, fotos: async () => {
+    return { ref: t.id, cliente: { nombre: t.cliente || '', direccion: t.direccion || '', telefono: t.telefono || '' }, proyecto: t.cc || null, fotos: async () => {
       const reg = String(t.id).slice(0, 8), cuando = (t.firma && t.firma.firmado_at) || new Date().toISOString();
       await ctPrecargarVistas(t);
       const items = ctFotosOrdenadas(t).map(f => { const obj = ctEsObjeto(f) ? f : (t.fotos.find(x => x.k === f.de) || f); const acs = ctAcciones(obj); const r = ctEsObjeto(f) ? null : (CT_ROLES[f.rol] || CT_ROLES.detalle);
@@ -41700,6 +41740,7 @@ body.fija main{ padding-bottom:14px; }
   async function ctMandarCompanyCam(){
     const t = ctActual(); if(!t) return;
     if(t.estado !== 'firmado'){ alert('A CompanyCam se manda con la firma del cliente puesta. Primero firme (paso 4).'); return; }
+    if(t.fotos.some(f => f.archivoBorrado)){ alert('Este trabajo ya se mandó a CompanyCam' + (t.ccEnviado ? ' el ' + ctFechaBonita(t.ccEnviado.at) : '') + ' y las fotos grandes ya se liberaron del teléfono. No hace falta mandarlo otra vez.'); return; }
     const p = await ccEnviar('contenidos', ctFuenteCompanyCam(t));
     if(!p) return;
     t.ccEnviado = { id: String(p.id), nombre: String(p.nombre || ''), at: new Date().toISOString() }; ctEscribir();
@@ -41882,6 +41923,9 @@ body.fija main{ padding-bottom:14px; }
       Object.assign(t, fila);
       const fr = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(id) + '&order=k.asc&select=k,n,path,sha256,nombre,nombre_fuente,nombre_ia_en,nombre_en,ia_confianza,estado_objeto,estados,nota,nota_en,tomada_at,rol,de_k', { headers: cloudHeaders() });
       t.fotosNube = fr.ok ? await fr.json() : [];
+      // LIMPIEZA DE LA NUBE (11 oct 2026): si las fotos grandes ya se limpiaron, se dice y no se buscan.
+      t.limpieza = null;
+      try{ const lr = await authFetch('/rest/v1/contenidos_limpiezas?trabajo_id=eq.' + encodeURIComponent(id) + '&select=limpiado_at,archivos,bytes', { headers: cloudHeaders() }); if(lr.ok){ const lj = await lr.json(); t.limpieza = (Array.isArray(lj) && lj[0]) || null; } }catch(e){}
     }catch(e){ $('#mcVerDatos').innerHTML = '<span style="color:var(--danger);">No se pudo leer el registro. Revise su internet.</span>'; return; }
     const s = t.snapshot || null, r = s ? s.resumen : null;
     $('#mcVerDatos').innerHTML =
@@ -41893,10 +41937,11 @@ body.fija main{ padding-bottom:14px; }
       + (r ? ctResumenHtml(r) + '<br>' : (t.fotosNube.length + (t.fotosNube.length === 1 ? ' foto' : ' fotos') + ' en la nube<br>'))
       + (t.estado === 'anulado' ? '<span style="color:var(--danger);">ANULADO ' + esc(ctFechaBonita(t.anulado_at)) + ' · ' + esc(t.anulado_motivo || '') + '</span><br>' : '')
       + (t.anterior_id ? '<span style="color:var(--pick);">Adenda del registro ' + esc(String(t.anterior_id).slice(0, 8)) + '</span><br>' : '')
+      + (t.limpieza ? '<span style="color:var(--green);">&#10003; Nube: las fotos grandes se limpiaron el ' + esc(ctFechaBonita(t.limpieza.limpiado_at)) + ' (' + (+t.limpieza.archivos || 0) + ' archivos). Siguen en CompanyCam y en el PDF guardado; sus huellas quedaron selladas en el registro.</span><br>' : '')
       + '<span class="mono">Registro ' + esc(String(t.id).slice(0, 8)) + (t.huella ? ' · Huella ' + esc(String(t.huella).slice(0, 16)) + '…' : '') + '</span>';
     // Las miniaturas: las primeras 6, por enlace firmado.
     const lista = (s ? s.objetos : t.fotosNube.filter(f => !f.rol || f.rol === 'objeto').map(f => ({ n: f.n, k: f.k, path: f.path, nombre: f.nombre, nombre_en: f.nombre_en, nombre_fuente: f.nombre_fuente, nota: f.nota, nota_en: f.nota_en, estado: f.estado_objeto, estados: f.estados, fotos: t.fotosNube.filter(x => x.rol && x.rol !== 'objeto' && x.de_k === f.k) }))).slice().sort((a, b) => a.n - b.n);
-    $('#mcVerFotos').innerHTML = lista.slice(0, 6).map(o => '<div class="ct-foto"><img alt="" data-path="' + esc(o.path) + '"></div>').join('') + (lista.length > 6 ? '<div class="ct-foto" style="font-size:13px; color:var(--ink-soft);">+' + (lista.length - 6) + '</div>' : '');
+    $('#mcVerFotos').innerHTML = t.limpieza ? '' : lista.slice(0, 6).map(o => '<div class="ct-foto"><img alt="" data-path="' + esc(o.path) + '"></div>').join('') + (lista.length > 6 ? '<div class="ct-foto" style="font-size:13px; color:var(--ink-soft);">+' + (lista.length - 6) + '</div>' : '');
     $$('#mcVerFotos img[data-path]').forEach(img => urlFirmada('contenidos', img.dataset.path, 900).then(u => { if(img.isConnected) img.src = u; }).catch(() => {}));
     $('#mcVerLista').innerHTML = lista.map(o => { const acs = ctAcciones(o); return '<div class="ct-mg"><div class="ic" style="font:700 13px IBM Plex Mono,monospace;">#' + o.n + (o.fotos && o.fotos.length ? '<small style="display:block; font-size:10px; font-weight:400;">+' + o.fotos.length + ' fotos</small>' : '') + '</div><div class="t"><b>' + (o.nombre ? esc(o.nombre) : '<span style="color:var(--ink-soft);">(sin nombre)</span>') + (o.nombre_en ? ' <span style="color:var(--ink-soft); font-weight:400;">/ ' + esc(o.nombre_en) + '</span>' : '') + '</b><small>' + (o.nota ? 'Nota: ' + esc(o.nota) + (o.nota_en ? ' / EN: ' + esc(o.nota_en) : '') + ' · ' : '') + (o.nombre_fuente === 'persona' ? 'escrito por la cuadrilla' : (o.nombre_fuente === 'ia-confirmado' ? 'sugerido y revisado' : (o.nombre ? 'sugerido por la app' : ''))) + '</small></div>' + acs.map(a => '<span class="ct-tag" style="color:' + a.color + '; border-color:' + a.color + ';">' + a.es + '</span>').join('') + '</div>'; }).join('');
   }
@@ -41917,6 +41962,7 @@ body.fija main{ padding-bottom:14px; }
   async function mcVerificarFotos(){
     const t = mcAbierto; if(!t || !t.snapshot) return alert('Primero tiene que estar firmado.');
     const objetos = t.snapshot.objetos || [];
+    if(t.limpieza){ $('#mcVerificado').innerHTML = '<span class="ok">Las fotos grandes ya no están en la nube</span> (limpieza del ' + esc(ctFechaBonita(t.limpieza.limpiado_at)) + '). La huella de cada foto quedó sellada en el registro firmado y la copia está en CompanyCam; use <b>Verificar</b> para comprobar la huella del registro.'; return; }
     if(!confirm('Se van a descargar ' + objetos.length + ' fotos para comparar cada una con la huella que se firmó. ¿Seguir?')) return;
     const caja = $('#mcVerificado'); let ok = 0, mal = 0, faltan = 0;
     for(let i = 0; i < objetos.length; i++){
@@ -41943,6 +41989,7 @@ body.fija main{ padding-bottom:14px; }
   }
   async function mcReimprimir(){
     const t = mcAbierto; if(!t) return;
+    if(t.limpieza){ if(confirm('Las fotos grandes ya se limpiaron de la nube: la reimpresión saldría sin fotos.\n\n¿Abrir el PDF guardado? (ese sí trae las fotos)')) mcPdfGuardado(); return; }
     if(!t.snapshot) return alert('Todavía no está firmado: no hay nada que reimprimir.');
     showOverlay('Preparando la reimpresión…');
     try{ const pseudo = await mcTrabajoParaImprimir(t); await ctHacerPdfDe(pseudo, { texto: 'Contents inventory (reprint) / Inventario de contenidos (reimpresión)' }); }
