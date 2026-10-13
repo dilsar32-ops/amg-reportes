@@ -8598,7 +8598,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-13-E';
+  const APP_BUILD = '2026-10-14-A';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -21774,12 +21774,19 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
           const bcux = bc.x/lbc, bcuy = bc.y/lbc;   // along the mouth
           const abux = ab.x/lab, abuy = ab.y/lab;   // into the pocket
           const roomLevel = room.level || 1;
+          // DÓNDE está la puerta decide (14-oct, su clóset real del Master Bedroom): una puerta en la BOCA
+          // del rincón (donde se une al cuarto) es la puerta del clóset -> sigue siendo clóset. Una puerta
+          // al FONDO o a un lado es un paso a otro cuarto -> vestíbulo, no clóset (el caso del baño).
+          let puertaEnLaBoca = false;
           const hasDoor = doorPts.some(p => {
             if(p.level !== roomLevel) return false; // a door two floors up is irrelevant
             const rx = p.x - cx, ry = p.y - cy;
             const along = Math.abs(rx*bcux + ry*bcuy);
-            const into = Math.abs(rx*abux + ry*abuy);
-            return along <= width/2 + 0.5 && into <= depth/2 + 0.5;
+            const intoS = rx*abux + ry*abuy;            // + hacia el fondo, - hacia la boca
+            const into = Math.abs(intoS);
+            const dentro = along <= width/2 + 0.5 && into <= depth/2 + 0.5;
+            if(dentro && intoS <= -depth/2 + 0.6 && along <= width/2 - 0.3){ puertaEnLaBoca = true; return false; }
+            return dentro;
           });
           // The door veto exists to kill entry vestibules (you walk THROUGH
           // a doorway; it is not a closet). But a real closet with its own
@@ -21796,7 +21803,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
             if(o.category === 'washerDryer' && o.center && Math.hypot(o.center.x-cx, o.center.y-cy) <= Math.max(depth, width)) name = 'Laundry';
           });
           found.push({ name, cx: Math.round(cx*100)/100, cy: Math.round(cy*100)/100,
-                       w: Math.round(width*100)/100, d: Math.round(depth*100)/100, _suggested: true });
+                       w: Math.round(width*100)/100, d: Math.round(depth*100)/100, _suggested: true, conPuerta: puertaEnLaBoca || undefined });
         }
       }
       // Dedupe overlapping detections (an alcove can match from both
@@ -21834,6 +21841,69 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         if(!carried.some(p => Math.hypot(p.cx-q.cx, p.cy-q.cy) <= 1.5)) carried.push(q);
       });
       room._subAreas = carried;
+    });
+    fpReconocerClosets(data);
+  }
+
+  // RECONOCER CLÓSETS (su pedido, 14-oct: "entrena a la aplicación"). Reglas sacadas de cómo son las casas,
+  // con ejemplos en tests/closets_test.js:
+  //   - un espacio chico SIN nombre o con nombre genérico ("Open Space", "Room 5", "Space") que da a una
+  //     recámara o a un pasillo es un CLÓSET (al lado del cuarto o a un lado del pasillo);
+  //   - si adentro hay inodoro/tina/regadera es BAÑO (Master Bath si da a la recámara principal);
+  //   - si hay lavadora/secadora es LAUNDRY;
+  //   - un cuarto de 30 sq ft o menos sin otra pista también es clóset.
+  // Nunca toca un nombre que alguien dio (por voz o a mano) que no sea genérico: solo nombra lo que no tenía.
+  const FP_NOMBRE_GENERICO = /^\s*(|open space|space|espacio|room\s*\d*|cuarto\s*\d*|unknown|unnamed|area|área)\s*$/i;
+  const FP_ES_RECAMARA = /bed\s*room|recamara|recámara|habitaci|dormitorio|master|nursery|guest/i;
+  const FP_ES_PASILLO = /hall|pasillo|corridor|entry|foyer|entrada|landing/i;
+  function fpTipoPorMuebles(objs){
+    const cats = (objs || []).filter(o => o && !o._hidden).map(o => o.category);
+    if(cats.some(c => c === 'toilet' || c === 'bathtub')) return 'bath';
+    if(cats.includes('washerDryer')) return 'laundry';
+    return null;
+  }
+  function fpReconocerClosets(data){
+    if(!data || !Array.isArray(data.rooms)) return;
+    const vivos = data.rooms.filter(r => r && !r.deleted && (r.walls || []).length >= 3);
+    const poligonos = vivos.map(r => { try{ return fpOrderedRoomPolygon(r); }catch(e){ return null; } });
+    const distAlPoligono = (p, pg) => {
+      let m = Infinity;
+      for(let i = 0, j = pg.length - 1; i < pg.length; j = i++){
+        const a = pg[j], b = pg[i], dx = b.x - a.x, dy = b.y - a.y, L2 = dx*dx + dy*dy || 1;
+        const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2));
+        m = Math.min(m, Math.hypot(p.x - (a.x + t*dx), p.y - (a.y + t*dy)));
+      }
+      return m;
+    };
+    // vecinos de una figura (lista de puntos del borde): los cuartos que comparten al menos ~1.5 ft de pared
+    const vecinosDe = (borde, yo, nivel) => vivos.filter((r, i) => r !== yo && (r.level || 1) === nivel && poligonos[i] && poligonos[i].length >= 3
+      && borde.filter(p => distAlPoligono(p, poligonos[i]) <= 1.0).length >= 3);
+    const bordeDe = (pg) => { const out = []; for(let i = 0, j = pg.length - 1; i < pg.length; j = i++){ const a = pg[j], b = pg[i], L = Math.hypot(b.x - a.x, b.y - a.y); const n = Math.max(1, Math.round(L / 0.5)); for(let k = 0; k < n; k++) out.push({ x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n }); } return out; };
+    const decide = (area, minDim, tipoMuebles, vecinos) => {
+      if(tipoMuebles === 'bath') return vecinos.some(v => /master/i.test(v.roomName || '')) ? 'Master Bath' : 'Bathroom';
+      if(tipoMuebles === 'laundry') return 'Laundry';
+      if(!(area > 0)) return null;
+      const daARecamaraOPasillo = vecinos.some(v => FP_ES_RECAMARA.test(v.roomName || '') || FP_ES_PASILLO.test(v.roomName || ''));
+      if(area <= 45 && daARecamaraOPasillo) return 'Closet';
+      if(minDim > 0 && minDim <= 3.6 && area <= 60 && daARecamaraOPasillo) return 'Closet';
+      if(area <= 30) return 'Closet';
+      return null;
+    };
+    // 1) cuartos escaneados sin nombre (o "Room 3")
+    vivos.forEach((r, i) => {
+      if(!FP_NOMBRE_GENERICO.test(r.roomName || '') || r._namedByVoice) return;
+      const pg = poligonos[i]; if(!pg || pg.length < 3 || fpAiFragileOutline(r)) return;
+      const b = floorplanRoomBounds(r), area = fpRoomDisplayAreaSqFt(r);
+      const nombre = decide(area, Math.min(b.maxX - b.minX, b.maxY - b.minY), fpTipoPorMuebles(r.objects), vecinosDe(bordeDe(pg), r, r.level || 1));
+      if(nombre){ r.roomName = nombre; r._nombreAuto = nombre; r._suggestedConfidence = r._suggestedConfidence || 'Medium'; }
+    });
+    // 2) espacios con nombre genérico que se le pusieron al plano (el "Open Space" junto al pasillo)
+    (data._spaceLabels || []).forEach(sp => {
+      if(!sp || !FP_NOMBRE_GENERICO.test(sp.name || '') || !(sp.w > 0 && sp.d > 0)) return;
+      const pg = [{ x: sp.x - sp.w/2, y: sp.y - sp.d/2 }, { x: sp.x + sp.w/2, y: sp.y - sp.d/2 }, { x: sp.x + sp.w/2, y: sp.y + sp.d/2 }, { x: sp.x - sp.w/2, y: sp.y + sp.d/2 }];
+      const adentro = []; vivos.forEach(r => (r.objects || []).forEach(o => { if(o && o.center && Math.abs(o.center.x - sp.x) <= sp.w/2 && Math.abs(o.center.y - sp.y) <= sp.d/2) adentro.push(o); }));
+      const nombre = decide(sp.w * sp.d, Math.min(sp.w, sp.d), fpTipoPorMuebles(adentro), vecinosDe(bordeDe(pg), null, sp.level || 1));
+      if(nombre){ sp.name = nombre; sp._nombreAuto = nombre; }
     });
   }
 
@@ -22083,6 +22153,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     { name: 'Living Room', cats: ['sofa','television','fireplace'] },
     { name: 'Dining Room', cats: ['table','chair'] }
   ];
+  // "Nuevo cuarto"/"Otro cuarto" es la orden de pasar al siguiente cuarto, nunca un nombre (14-oct: en Scanova
+  // salieron dos cuartos llamados "Nuevo cuarto"). Mismo arreglo en las dos apps: el escaner y el plano son uno solo.
+  function fpEsOrdenDeCuarto(nombre){
+    const k = String(nombre || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return ['nuevo cuarto', 'cuarto nuevo', 'otro cuarto', 'siguiente cuarto', 'otro nivel', 'es nuevo', 'el siguiente', 'el que sigue', 'new room', 'next room', 'another room']
+      .some(o => k === o || k.startsWith(o + ' ') || k.endsWith(' ' + o));
+  }
   function suggestFloorplanRoomName(objects, room){
     const cats = (objects||[]).filter(o => !o._hidden).map(o => o.category);
     let best = null;
@@ -22209,9 +22286,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // grandes se proponen en Plan review (asistente de esquinas).
       floorplanCloseCorners(result);
       (result.rooms||[]).forEach(room => {
-        if(room.voiceName){
+        if(room.voiceName && !fpEsOrdenDeCuarto(room.voiceName)){
+          // El nombre dicho reemplaza al que hubiera (nunca un segundo rótulo) y se centra en el cuarto.
           room.roomName = room.voiceName;
           room._namedByVoice = true;
+          delete room._labelOffsetPx;
         }else{
           const suggestion = suggestFloorplanRoomName(room.objects, room);
           if(suggestion){ room.roomName = suggestion.name; room._suggestedConfidence = suggestion.confidence; }
@@ -24760,6 +24839,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       fpRecordLabelCorrection(room, dx/FLOORPLAN_SVG_SCALE, dy/FLOORPLAN_SVG_SCALE);
     }
     room._labelOffsetPx = { dx, dy };
+    // Movido a mano EN la vista nueva: se respeta ahí. Uno movido con el estilo viejo no (ver fpBloqueVista).
+    if(fpVista()) room._labelVista = true; else delete room._labelVista;
     saveFloorplanDraft();
     renderFloorplanSvg(floorplanData);
     renderFloorplanRoomList(floorplanData);
@@ -29344,7 +29425,10 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const k = Math.max(0.6, Math.min(2.4, meta._labelScale || 1));
     const sx = X(cx + (off.dx||0)), sy = Y(cy + (off.dy||0));
     const dim = (w > 0 && d > 0)
-      ? `<text x="${sx}" y="${sy + 11*k}" font-size="${(15*k).toFixed(1)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#5a6472" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpFeetInches(w)} x ${fpFeetInches(d)}</text>`
+      ? (fpVista()
+        ? `<text x="${sx}" y="${sy + 11*k}" font-size="${(14*k).toFixed(1)}" font-weight="600" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpPiesPulg(w)} x ${fpPiesPulg(d)}</text>`
+          + `<text x="${sx}" y="${sy + 28*k}" font-size="${(14*k).toFixed(1)}" font-weight="400" font-family="'IBM Plex Sans',sans-serif" fill="#2c3642" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${(w*d).toFixed(1)} sq ft</text>`
+        : `<text x="${sx}" y="${sy + 11*k}" font-size="${(15*k).toFixed(1)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#5a6472" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpFeetInches(w)} x ${fpFeetInches(d)}</text>`)
       : '';
     return `<g class="${cls}" ${attrs} style="cursor:grab;">`
       + `<text x="${sx}" y="${sy - 9*k}" font-size="${(17*k).toFixed(1)}" font-weight="700" letter-spacing="0.4" font-family="'IBM Plex Sans',sans-serif" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${esc(name).toUpperCase()}</text>`
@@ -29384,6 +29468,15 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // dimension line bookends a measurement.
   // Standard feet-inches architectural notation (16'-6") instead of decimal
   // feet (16.5') - the format real US blueprints use.
+  // EL ESTILO DE LA VISTA (14-oct-2026, su diseño): en la pantalla (web y teléfono) el plano se ve como una
+  // hoja limpia — paredes unidas, ventanas de doble línea, nombre + sq ft de cada cuarto, cadenas de medidas
+  // por fuera del edificio y un marco con encabezado y pie. La hoja que se manda (fpSheetExport) y el mapa
+  // de humedad no cambian aquí. Scanova usa el mismo dibujo (tools/extraer_plano.py) y prende/apaga esto
+  // con ponerVista().
+  let fpEstiloVista = true;
+  function fpVista(){ return fpEstiloVista && !fpSheetExport && fpRenderMode !== 'moisture'; }
+  // 6' 8" (con espacio, como su diseño), no 6'-8".
+  function fpPiesPulg(ft){ const t = Math.round((+ft || 0) * 12); return `${Math.floor(t / 12)}' ${t % 12}"`; }
   function fpFeetInches(decimalFeet){
     const totalInches = Math.round(decimalFeet * 12);
     const feet = Math.floor(totalInches / 12);
@@ -29646,8 +29739,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // Heavier outline + mullion so the window bar reads as a solid part
     // of the wall run, not a thin break in it (field feedback: window
     // sections looked like the wall got thinner there).
-    return `<polygon points="${c1} ${c2} ${c3} ${c4}" fill="#ffffff" stroke="#1C2530" stroke-width="2.2"/>`
-      + `<line x1="${cx-dxPx}" y1="${cy-dyPx}" x2="${cx+dxPx}" y2="${cy+dyPx}" stroke="#1C2530" stroke-width="1.6"/>`;
+    // Su diseño (14-oct): el vidrio son DOS líneas finas dentro del corte de la pared.
+    const q = 0.3;
+    return `<polygon points="${c1} ${c2} ${c3} ${c4}" fill="#ffffff" stroke="#1C2530" stroke-width="1.8"/>`
+      + `<line x1="${cx-dxPx+p.x*t*q}" y1="${cy-dyPx+p.y*t*q}" x2="${cx+dxPx+p.x*t*q}" y2="${cy+dyPx+p.y*t*q}" stroke="#1C2530" stroke-width="1.2"/>`
+      + `<line x1="${cx-dxPx-p.x*t*q}" y1="${cy-dyPx-p.y*t*q}" x2="${cx+dxPx-p.x*t*q}" y2="${cy+dyPx-p.y*t*q}" stroke="#1C2530" stroke-width="1.2"/>`;
   }
 
   // Simple line-icon glyphs for the most common RoomPlan categories, sized
@@ -30433,7 +30529,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // this floor", which is the truth, and floorplanValidate's "break in
     // the outline" item already carries the message with a one-tap fix.
     if(fpAiFragileOutline(room)) return '';
-    let out = `<polygon points="${fpPts(pts)}" fill="${FLOORPLAN_FLOOR_FILL}"/>`;
+    let out = `<polygon points="${fpPts(pts)}" fill="${fpVista() ? '#ffffff' : FLOORPLAN_FLOOR_FILL}"/>`;
     // Where the outline had to be BRIDGED, that run of the boundary is a
     // guess. Put the doubt on the segment that is actually doubtful
     // instead of over the whole room: measured on the real plan, only the
@@ -30455,7 +30551,21 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     });
     return out;
   }
-  function buildFloorplanRoomContent(room, roomIdx, X, Y, scale, allRooms, buildingCentroid, overlays, drawnObjectKeys, skipFloorFill){
+  // El recorte de los muebles es el contorno del cuarto (a media pared; la otra mitad la tapa la pared que
+  // va encima). Si el contorno es dudoso (se cruza solo, o la app tuvo que cerrar un hueco grande) NO se
+  // recorta: un contorno adivinado podría esconder un mueble de verdad. Ahí basta con que la pared vaya encima.
+  let fpRecorteN = 0;
+  function fpRecorteDelCuarto(room, roomIdx, X, Y){
+    try{
+      if(!room || (room.walls || []).length < 3 || fpAiFragileOutline(room)) return null;
+      const gap = {}; const poly = fpOrderedRoomPolygon(room, gap);
+      if(!poly || poly.length < 3) return null;
+      if((gap.bridgeSegs || []).some(b => b && b.d > 4)) return null;
+      const id = 'fpcm' + roomIdx + '_' + (++fpRecorteN);
+      return { id, defs: `<clipPath id="${id}"><polygon points="${fpPts(poly.map(p => ({ x: X(p.x), y: Y(p.y) })))}"/></clipPath>` };
+    }catch(e){ return null; }
+  }
+  function buildFloorplanRoomContent(room, roomIdx, X, Y, scale, allRooms, buildingCentroid, overlays, drawnObjectKeys, skipFloorFill, capaMuebles){
     const centroid = floorplanRoomCentroid(room);
     const dimCentroid = buildingCentroid || centroid;
     const wallsById = {};
@@ -30468,6 +30578,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // fill drawn here buried the previous room's walls, doors and
     // furniture (measured: 27 of 77 Hallway wall samples were overpainted).
     if(!skipFloorFill) s += fpRoomFloorFill(room, X, Y);
+    const iTrasPiso = s.length;   // aquí van los muebles: DEBAJO de las paredes (ver más abajo)
 
     // Walls as filled, properly-thick, hatched rectangles (the real
     // difference between a wireframe and an architectural drawing) -
@@ -30530,6 +30641,21 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         const poly = fpWallPolygonScreen(seg, X, Y);
         s += `<polygon class="fp-wall" data-room-idx="${roomIdx}" data-wall-id="${wallId}" points="${poly}" fill="#1C2530" stroke="${stud ? '#8a6d1a' : lowConf ? '#c0392b' : '#1C2530'}" stroke-width="${(stud || lowConf) ? 2.2 : 0.75}"${stud ? ' stroke-dasharray="8,5"' : lowConf ? ' stroke-dasharray="6,4"' : ''} style="cursor:pointer;"/>`;
       });
+      // PAREDES UNIDAS (su diseño, 14-oct): cada pared es un rectángulo sobre su línea central, así que en
+      // una esquina quedaba un mordisco de media pared por fuera. Un cuadro del grueso de la pared en cada
+      // punta llena la esquina. Solo en una punta que de verdad lleva pared (si ahí empieza una puerta, el
+      // hueco de la puerta se queda limpio).
+      if(!stud){
+        const wdx0 = wall.end.x - wall.start.x, wdy0 = wall.end.y - wall.start.y, wl0 = Math.hypot(wdx0, wdy0);
+        if(wl0 > 0.05){
+          const ux0 = wdx0 / wl0, uy0 = wdy0 / wl0, hh = FLOORPLAN_WALL_THICKNESS_FT / 2;
+          [wall.start, wall.end].forEach(pt => {
+            if(!segments.some(sg => Math.hypot(sg.start.x - pt.x, sg.start.y - pt.y) < 0.02 || Math.hypot(sg.end.x - pt.x, sg.end.y - pt.y) < 0.02)) return;
+            const q4 = [[1,1],[1,-1],[-1,-1],[-1,1]].map(([a, b]) => ({ x: X(pt.x + ux0*hh*a - uy0*hh*b), y: Y(pt.y + uy0*hh*a + ux0*hh*b) }));
+            s += `<polygon points="${fpPts(q4)}" fill="#1C2530" style="pointer-events:none;"/>`;
+          });
+        }
+      }
       // If an opening spans the wall's whole length there's no solid
       // segment left to tap - a thin invisible line along the centerline
       // keeps the wall reachable for a length correction either way.
@@ -30568,7 +30694,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const midX = (wall.start.x+wall.end.x)/2, midY = (wall.start.y+wall.end.y)/2;
       // A genuinely zero-length wall exists in the real scan (Hallway
       // wall 4, start === end) and printed "0'-0"" on the plan.
-      if(effLen >= 0.25 && !seenNear('dim', midX, midY)){
+      if(!fpVista() && effLen >= 0.25 && !seenNear('dim', midX, midY)){
         if(floorplanIsExteriorWall(wall, room, allRooms)){
           dims.push(fpDimensionLine(wall, dimCentroid, X, Y, dimTxt));
         } else if(effLen >= 2 && fpMeasurePrefs.interior){
@@ -30594,11 +30720,14 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     (room.doors||[]).forEach((d, di) => {
       if(d._removed) return;
       if(seenNear('doorway', d.position.x, d.position.y)) return;
-      s += fpDoorSwingMarkup(d, wallsById[d.wallId], centroid, X, Y);
+      // La puerta de un clóset se dibuja corrediza (su pedido, 14-oct: "se ve más limpio" que el arco). Solo
+      // cuando nadie escogió el tipo a mano (_doorStyle).
+      const dDib = (!d._doorStyle && fpEsPuertaDeCloset(d, room, allRooms)) ? Object.assign({}, d, { _doorStyle: 'sliding' }) : d;
+      s += fpDoorSwingMarkup(dDib, wallsById[d.wallId], centroid, X, Y);
       const cx = X(d.position.x), cy = Y(d.position.y);
       const dId = esc(String(d.id != null ? d.id : di));
       s += fpOpeningHitTarget('fp-door', roomIdx, dId, d, wallsById[d.wallId], X, Y);
-      if(fpMeasurePrefs.openings){
+      if(fpMeasurePrefs.openings && !fpVista()){
         const dw = floorplanOpeningEffectiveWidth(d);
         if(dw >= 1){
           // dimCentroid, not centroid: fpDimensionLine offsets its text
@@ -30621,7 +30750,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const winId = esc(String(win.id != null ? win.id : wi2));
       const ww = floorplanOpeningEffectiveWidth(win), wh = floorplanOpeningEffectiveHeight(win);
       s += fpOpeningHitTarget('fp-window', roomIdx, winId, win, wallsById[win.wallId], X, Y);
-      if(fpMeasurePrefs.openings){
+      if(fpMeasurePrefs.openings && !fpVista()){
         const winLabel = fpOpeningLabelPos(wallsById[win.wallId], dimCentroid, win.position, X, Y);
         s += `<text x="${winLabel.x}" y="${winLabel.y}" font-size="19" font-weight="700" fill="#39699e" text-anchor="middle" dominant-baseline="middle" paint-order="stroke" stroke="#fff" stroke-width="5">${fpFeetInches(ww)} x ${fpFeetInches(wh)}${(!fpSheetExport && win._added) ? '*' : ''}</text>`;
       }
@@ -30651,9 +30780,16 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const w = floorplanOpeningEffectiveWidth(op) || 3;
       const a = { x: op.position.x - ux*w/2, y: op.position.y - uy*w/2 };
       const b = { x: op.position.x + ux*w/2, y: op.position.y + uy*w/2 };
-      s += `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="#9aa3ad" stroke-width="2" stroke-dasharray="6,4"/>`;
+      s += fpVista()
+        ? `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="#5b6573" stroke-width="1.4"/>`   // su diseño: línea fina donde un cuarto pasa al otro
+        : `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="#9aa3ad" stroke-width="2" stroke-dasharray="6,4"/>`;
     });
 
+    // LOS MUEBLES NUNCA TAPAN UNA PARED (su pedido, 14-oct, con el plano real marcado): se dibujaban al
+    // final, encima de todo, y un mueble pegado a la pared (gabinetes, la tina, una caja junto a la sala)
+    // la cortaba o la hacía ver delgada. Ahora van debajo de las paredes, y recortados a su cuarto para que
+    // ninguno se asome por fuera del edificio.
+    const sAntesMuebles = s; s = '';
     (room.objects||[]).forEach((o, idx) => {
       if(o._hidden) return;
       // Movable furniture stays OFF the drawing unless the Measure menu
@@ -30691,6 +30827,15 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         + (showLabel ? `<text x="${cx}" y="${cy+od/2+20}" font-size="18" font-weight="600" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">${label}</text>` : '')
         + `</g>`;
     });
+    {
+      let muebles = s; s = sAntesMuebles;
+      if(muebles){
+        const recorte = fpRecorteDelCuarto(room, roomIdx, X, Y);
+        if(recorte) muebles = recorte.defs + `<g clip-path="url(#${recorte.id})">` + muebles + `</g>`;
+        if(capaMuebles) capaMuebles.push(muebles);
+        else s = s.slice(0, iTrasPiso) + muebles + s.slice(iTrasPiso);
+      }
+    }
     // Dimension lines paint LAST within this room's own markup (above
     // its furniture) - and in the merged view they're lifted out
     // entirely, above every room's content.
@@ -30825,6 +30970,299 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // room's own true index in data.rooms is kept throughout (never
   // re-based against a filtered array) so tap-to-edit's data-room-idx
   // attributes keep pointing at the right room in floorplanData.rooms.
+  // VISTA (su diseño, 14-oct): nombre del cuarto en negritas y abajo sus sq ft, letra normal. El tamaño sale
+  // del cuarto mismo: crece hasta donde quepa adentro, sin pasar de ~0.8 ft de alto, para que un plano
+  // entero en la pantalla del teléfono se pueda leer.
+  function fpHuecoDelNombre(room, c, todos){
+    try{
+      const sp = fpRoomSpanAt(fpOrderedRoomPolygon(room), c) || {};
+      // Las paredes de los OTROS cuartos también cuentan: en el plano real una pared del cuarto de al lado
+      // cruzaba el hueco del Hallway y el nombre quedaba encima de ella.
+      // Se mide toda la franja que ocupa el nombre (su alto, ~1 ft arriba y abajo), no una sola línea: en el
+      // plano real la pared terminaba justo arriba de la línea y las letras le quedaban encima.
+      const franja = [-1.0, -0.5, 0, 0.5, 1.0].map(k => c.y + k);
+      (todos || []).forEach(r2 => (r2.walls || []).forEach(w => {
+        if(!w || !w.start || !w.end) return;
+        const ax = w.start.x, ay = w.start.y, bx = w.end.x, by = w.end.y;
+        franja.forEach(yy => {
+          if((ay - yy) * (by - yy) <= 0 && Math.abs(by - ay) > 1e-6){
+            const x = ax + (yy - ay) * (bx - ax) / (by - ay);
+            if(sp.h){ if(x < c.x && x > sp.h[0]) sp.h[0] = x; if(x > c.x && x < sp.h[1]) sp.h[1] = x; }
+          }
+        });
+        if((ax - c.x) * (bx - c.x) <= 0 && Math.abs(bx - ax) > 1e-6){
+          const y = ay + (c.x - ax) * (by - ay) / (bx - ax);
+          if(sp.v){ if(y < c.y && y > sp.v[0]) sp.v[0] = y; if(y > c.y && y < sp.v[1]) sp.v[1] = y; }
+        }
+      }));
+      if(!sp.h && !sp.v) return null;
+      const T = FLOORPLAN_WALL_THICKNESS_FT;
+      const w = sp.h ? 2 * Math.min(c.x - sp.h[0], sp.h[1] - c.x) - T : 0;
+      const h = sp.v ? 2 * Math.min(c.y - sp.v[0], sp.v[1] - c.y) - T : 0;
+      // Si en el punto del nombre no cabe, se corre al centro del hueco de pared a pared en esa misma
+      // altura (sigue adentro del cuarto): wC es ese hueco entero.
+      const wC = sp.h ? (sp.h[1] - sp.h[0]) - T : 0, xC = sp.h ? (sp.h[0] + sp.h[1]) / 2 : c.x;
+      return { w: w > 0.5 ? w : 0, h: h > 0.5 ? h : 0, wC: wC > 0.5 ? wC : 0, xC };
+    }catch(e){ return null; }
+  }
+  // De pared a pared por la línea que pasa por un punto: el contorno del cuarto y además TODAS las paredes del
+  // piso (una pared del cuarto de al lado o de un clóset adentro también corta). Es lo que mide el bloque.
+  // ¿Esta puerta es de un clóset? Su cuarto se llama clóset, o da a un cuarto llamado clóset (a menos de
+  // ~1 ft de su contorno), o a un rincón detectado como clóset.
+  let fpEspaciosDelPlano = [];
+  function fpEsPuertaDeCloset(d, room, todos){
+    if(!d || !d.position) return false;
+    const esCloset = n => /closet|closset|clóset/.test(String(n || '').toLowerCase());
+    if(esCloset(room && room.roomName)) return true;
+    const p = d.position;
+    for(const r of (todos || [])){
+      if(r === room || r.deleted) continue;
+      if(esCloset(r.roomName)){
+        const pg = fpOrderedRoomPolygon(r);
+        if(pg && pg.length >= 3){
+          if(fpPointInPolygon(p, pg)) return true;
+          for(let i = 0, j = pg.length - 1; i < pg.length; j = i++){
+            const a = pg[j], b = pg[i], dx = b.x - a.x, dy = b.y - a.y, L2 = dx*dx + dy*dy || 1;
+            const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2));
+            if(Math.hypot(p.x - (a.x + t*dx), p.y - (a.y + t*dy)) <= 0.9) return true;
+          }
+        }
+      }
+    }
+    // los espacios con nombre que se le pusieron al plano (un clóset que no se escaneó como cuarto aparte)
+    for(const sp of (fpEspaciosDelPlano || [])){
+      if(!esCloset(sp.name) || !(sp.w > 0)) continue;
+      if(Math.abs(p.x - sp.x) <= sp.w / 2 + 0.9 && Math.abs(p.y - sp.y) <= sp.d / 2 + 0.9) return true;
+    }
+    for(const r of [room].concat(todos || [])){
+      for(const sa of ((r && r._subAreas) || [])){
+        if(!esCloset(sa.name) || !(sa.w > 0)) continue;
+        if(Math.abs(p.x - sa.cx) <= sa.w / 2 + 0.9 && Math.abs(p.y - sa.cy) <= sa.d / 2 + 0.9) return true;
+      }
+    }
+    return false;
+  }
+  function fpNombreClave(n){ return String(n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
+  // banda (pies): además de la línea, mide arriba y abajo de ella — para saber cuánto cabe el bloque de
+  // letras, que tiene alto (una pared que termina justo arriba de la línea también estorba).
+  function fpSpanEnLinea(room, P, todos, banda){
+    const sp = fpRoomSpanAt(fpOrderedRoomPolygon(room), P) || {};
+    let h = sp.h ? sp.h.slice() : null, v = sp.v ? sp.v.slice() : null;
+    const ys = [P.y]; if(banda) for(let k = 0.5; k <= banda + 1e-9; k += 0.5){ ys.push(P.y - k, P.y + k); }
+    (todos || []).forEach(r2 => (r2.walls || []).forEach(w => {
+      if(!w || !w.start || !w.end) return;
+      const ax = w.start.x, ay = w.start.y, bx = w.end.x, by = w.end.y;
+      if(h) ys.forEach(yy => { if((ay - yy) * (by - yy) <= 0 && Math.abs(by - ay) > 1e-6){
+        const x = ax + (yy - ay) * (bx - ax) / (by - ay);
+        if(x < P.x - 0.05 && x > h[0]) h[0] = x; if(x > P.x + 0.05 && x < h[1]) h[1] = x;
+      } });
+      if(v && (ax - P.x) * (bx - P.x) <= 0 && Math.abs(bx - ax) > 1e-6){
+        const y = ay + (P.x - ax) * (by - ay) / (bx - ax);
+        if(y < P.y - 0.05 && y > v[0]) v[0] = y; if(y > P.y + 0.05 && y < v[1]) v[1] = y;
+      }
+    }));
+    return { h, v };
+  }
+
+  // VISTA (su pedido, 14-oct): UN solo bloque centrado en el cuarto — el nombre, luego largo x ancho
+  // (19' 10" x 19' 2") y debajo el área en sq ft — y puntitas de flecha junto a las paredes que marcan
+  // justo esa medida, sin líneas largas entre ellas.
+  function fpBloqueVista(room, label, areaTxt, rb, scale, X, Y, labelX, labelY, escala, libre, todos, minX, minY, movidoAMano){
+    const T = FLOORPLAN_WALL_THICKNESS_FT;
+    const letras = Math.max(4, String(label).replace(/&[a-z#0-9]+;/g, 'x').length);
+    // 1. CENTRADO (su pedido): el bloque va al medio del cuarto, de pared a pared a lo largo y luego a lo ancho,
+    // por la línea que pasa por el punto del nombre (siempre adentro del cuarto, aunque sea en L). Se compara
+    // con el punto de siempre y gana donde el bloque se lee más grande sin tocar pared (en un cuarto raro, el
+    // centro puede caer en un pasillo angosto). Un nombre que alguien movió a mano se queda donde lo dejó.
+    // Todos los cuartos con la MISMA letra (su diseño): un tope parejo, y un cuarto chico (baño, clóset) más
+    // chico en proporción — antes el tope dependía solo de lo que cabía y el baño salía más grande que la sala.
+    const areaR = fpRoomDisplayAreaSqFt(room) || ((rb.maxX - rb.minX) * (rb.maxY - rb.minY));
+    const tope = 0.56 * scale * (areaR > 0 && areaR < 80 ? Math.max(0.62, Math.sqrt(areaR / 80)) : 1);
+    const evalua = (P) => {
+      const sp = fpSpanEnLinea(room, P, todos);
+      const largo = sp.h ? sp.h[1] - sp.h[0] : (rb.maxX - rb.minX), ancho = sp.v ? sp.v[1] - sp.v[0] : (rb.maxY - rb.minY);
+      const dimTxt = `${fpPiesPulg(largo)} x ${fpPiesPulg(ancho)}`;
+      // lo que cabe ALREDEDOR del punto (el doble de la distancia a la pared más cercana), no todo el tramo
+      const sb = fpSpanEnLinea(room, P, todos, 1.0);   // el bloque mide ~2 ft de alto
+      const libreW = Math.max(1, ((sb.h ? 2 * Math.min(P.x - sb.h[0], sb.h[1] - P.x) : largo) - T) * scale);
+      const libreH = Math.max(1, ((sp.v ? 2 * Math.min(P.y - sp.v[0], sp.v[1] - P.y) : ancho) - T) * scale);
+      const fit = Math.min(tope, (libreW * 0.84) / (0.66 * letras), (libreW * 0.84) / (0.6 * 0.74 * dimTxt.length), libreH * 0.2);
+      return { P, sp, dimTxt, libreW, libreH, fit };
+    };
+    const P0 = { x: labelX / scale + minX, y: labelY / scale + minY };
+    let mejor = evalua(P0);
+    if(!movidoAMano){
+      const Pc = { x: P0.x, y: P0.y };
+      for(let i = 0; i < 2; i++){
+        const a1 = fpSpanEnLinea(room, Pc, todos); if(a1.h) Pc.x = (a1.h[0] + a1.h[1]) / 2;
+        const a2 = fpSpanEnLinea(room, Pc, todos); if(a2.v) Pc.y = (a2.v[0] + a2.v[1]) / 2;
+      }
+      const c2 = evalua(Pc);
+      if(c2.fit >= mejor.fit * 0.95) mejor = c2;
+    }
+    const { P, sp, dimTxt, libreW, libreH } = mejor;
+    const px = X(P.x); labelY = Y(P.y);
+    // 2. tamaño: que quepan las tres líneas adentro, de pared a pared
+    let fs = Math.max(0.34 * scale, mejor.fit) * Math.max(0.6, Math.min(2.2, escala || 1));
+    const f2 = fs * 0.74, y0 = labelY - fs * 0.6;
+    const t = (y, size, peso, color, txt, ls) => `<text x="${px.toFixed(1)}" y="${y.toFixed(1)}" font-size="${size.toFixed(1)}" font-weight="${peso}"${ls ? ` letter-spacing="${ls}"` : ''} font-family="'IBM Plex Sans',sans-serif" fill="${color}" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${(size * 0.16).toFixed(1)}">${txt}</text>`;
+    const svg = t(y0, fs, 700, '#1C2530', label, '0.6') + t(y0 + fs * 1.02, f2, 600, '#1C2530', dimTxt) + t(y0 + fs * 1.92, f2, 400, '#2c3642', areaTxt);
+    // 4. puntitas de flecha, solo si hay lugar entre el bloque y la pared
+    const a = Math.max(9, Math.min(15, 0.26 * scale)), dentro = T / 2 + 0.12;
+    const tri = (x, y, dir) => {
+      const pts = dir === 'l' ? `${x},${y} ${x + a},${y - a * 0.5} ${x + a},${y + a * 0.5}`
+        : dir === 'r' ? `${x},${y} ${x - a},${y - a * 0.5} ${x - a},${y + a * 0.5}`
+        : dir === 'u' ? `${x},${y} ${x - a * 0.5},${y + a} ${x + a * 0.5},${y + a}`
+        : `${x},${y} ${x - a * 0.5},${y - a} ${x + a * 0.5},${y - a}`;
+      return `<polygon points="${pts}" fill="#1C2530"/>`;
+    };
+    const anchoTxt = Math.max(0.66 * letras * fs, 0.6 * dimTxt.length * f2);
+    let flechas = '';
+    // la flecha va en la pared; solo hace falta que entre el bloque y la pared quede aire
+    if(sp.h && Math.min(px - X(sp.h[0] + dentro), X(sp.h[1] - dentro) - px) > anchoTxt / 2 + a + 10) flechas += tri(X(sp.h[0] + dentro), labelY, 'l') + tri(X(sp.h[1] - dentro), labelY, 'r');
+    if(sp.v && Math.min(labelY - Y(sp.v[0] + dentro), Y(sp.v[1] - dentro) - labelY) > fs * 1.6 + a + 10) flechas += tri(px, Y(sp.v[0] + dentro), 'u') + tri(px, Y(sp.v[1] - dentro), 'd');
+    return { svg, flechas };
+  }
+
+  function fpEtiquetaVista(label, areaTxt, rb, scale, x, y, escala, libre){
+    // libre = el hueco real alrededor del punto del nombre (de pared a pared), no la caja del cuarto: en un
+    // cuarto en L la caja es grande y el nombre se salía encima de la pared (el Hallway real).
+    const anchoPx = Math.max(1, ((libre && libre.w) || (rb.maxX - rb.minX)) * scale), altoPx = Math.max(1, ((libre && libre.h) || (rb.maxY - rb.minY)) * scale);
+    const letras = Math.max(4, String(label).replace(/&[a-z#0-9]+;/g, 'x').length);
+    let fs = Math.min(0.8 * scale, (anchoPx * 0.82) / (0.66 * letras), altoPx * 0.24);
+    if(libre && libre.wC && libre.correr && fs < 0.5 * scale){
+      // No cabe donde está: al centro del hueco entero, que es más ancho.
+      const fs2 = Math.min(0.8 * scale, (libre.wC * scale * 0.82) / (0.66 * letras), altoPx * 0.24);
+      if(fs2 > fs){ fs = fs2; x = libre.xPx; }
+    }
+    fs = Math.max(0.36 * scale, fs) * Math.max(0.6, Math.min(2.2, escala || 1));
+    const fa = fs * 0.8;
+    return `<text x="${x}" y="${(y - fs * 0.18).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="700" letter-spacing="0.6" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${(fs * 0.16).toFixed(1)}">${label}</text>`
+      + `<text x="${x}" y="${(y + fs * 0.98).toFixed(1)}" font-size="${fa.toFixed(1)}" font-weight="400" font-family="'IBM Plex Sans',sans-serif" fill="#2c3642" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${(fa * 0.16).toFixed(1)}">${areaTxt}</text>`;
+  }
+
+  // VISTA: las medidas de afuera en CADENAS, una por lado (arriba, abajo, izquierda, derecha), como su
+  // diseño: cada tramo de pared exterior que da a ese lado, con sus rayitas en las orillas y el número
+  // afuera. Solo paredes a escuadra (después de enderezar son casi todas); una pared en ángulo lleva su
+  // medida sola, como siempre. Las de adentro no se miden en la vista (están en la hoja y al tocar la pared).
+  function fpCadenasCotas(rooms, b, centro, X, Y, scale){
+    const T = FLOORPLAN_WALL_THICKNESS_FT;
+    const lados = { top: [], bottom: [], left: [], right: [] };
+    let sueltas = '';
+    const vistas = new Set();
+    rooms.forEach(room => (room.walls || []).forEach(w => {
+      if(!w || !w.start || !w.end) return;
+      const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y, L = Math.hypot(dx, dy);
+      if(L < 0.4 || !floorplanIsExteriorWall(w, room, rooms)) return;
+      const mx = (w.start.x + w.end.x) / 2, my = (w.start.y + w.end.y) / 2;
+      if(Math.abs(dy) <= L * 0.035){
+        (my < centro.y ? lados.top : lados.bottom).push([Math.min(w.start.x, w.end.x), Math.max(w.start.x, w.end.x)]);
+      } else if(Math.abs(dx) <= L * 0.035){
+        (mx < centro.x ? lados.left : lados.right).push([Math.min(w.start.y, w.end.y), Math.max(w.start.y, w.end.y)]);
+      } else {
+        const k = mx.toFixed(1) + ',' + my.toFixed(1);
+        if(!vistas.has(k)){ vistas.add(k); sueltas += fpDimensionLine(w, centro, X, Y, fpPiesPulg(floorplanWallEffectiveLength(w))); }
+      }
+    }));
+    const fs = Math.max(20, Math.min(34, 0.52 * scale));
+    const tic = 0.32 * scale;
+    let out = '<g class="fp-cadenas" style="pointer-events:none;" font-family="\'IBM Plex Sans\',sans-serif">';
+    Object.keys(lados).forEach(lado => {
+      const iv = lados[lado]; if(!iv.length) return;
+      // Cortes: todas las puntas; un tramo se mide si alguna pared lo cubre.
+      const pts = []; iv.forEach(([a, c]) => { pts.push(a, c); });
+      pts.sort((p, q) => p - q);
+      const cortes = []; pts.forEach(v => { if(!cortes.length || v - cortes[cortes.length - 1] > 0.15) cortes.push(v); });
+      const tramos = [];
+      for(let i = 0; i + 1 < cortes.length; i++){
+        const a = cortes[i], c = cortes[i + 1], m = (a + c) / 2;
+        if(c - a >= 0.4 && iv.some(([p, q]) => m >= p - 0.05 && m <= q + 0.05)) tramos.push([a, c]);
+      }
+      // Un pedacito de menos de 9" (la punta de una pared que asoma) no se mide solo: se suma al tramo de
+      // al lado si están pegados, y si está suelto se deja (con sus de 5" el lado se llenaba de basura).
+      for(let i = 0; i < tramos.length; i++){
+        const [a, c] = tramos[i]; if(c - a >= 0.75) continue;
+        const prev = tramos[i - 1], next = tramos[i + 1];
+        if(prev && Math.abs(prev[1] - a) < 0.05 && (!next || Math.abs(next[0] - c) >= 0.05 || prev[1] - prev[0] <= next[1] - next[0])){ prev[1] = c; tramos.splice(i--, 1); }
+        else if(next && Math.abs(next[0] - c) < 0.05){ next[0] = a; tramos.splice(i--, 1); }
+        else { tramos.splice(i--, 1); }
+      }
+      if(!tramos.length) return;
+      const horiz = lado === 'top' || lado === 'bottom';
+      const fuera = 1.25 + T / 2;
+      const linea = lado === 'top' ? b.minY - fuera : lado === 'bottom' ? b.maxY + fuera : lado === 'left' ? b.minX - fuera : b.maxX + fuera;
+      const P = v => horiz ? { x: X(v), y: Y(linea) } : { x: X(linea), y: Y(v) };
+      // Línea por cada tramo seguido (un hueco entre tramos deja la línea cortada, como su diseño).
+      let ini = tramos[0][0], fin = tramos[0][1];
+      const corridas = [];
+      tramos.slice(1).forEach(([a, c]) => { if(a - fin < 0.05) fin = c; else { corridas.push([ini, fin]); ini = a; fin = c; } });
+      corridas.push([ini, fin]);
+      corridas.forEach(([a, c]) => { const A = P(a), C = P(c); out += `<line x1="${A.x.toFixed(1)}" y1="${A.y.toFixed(1)}" x2="${C.x.toFixed(1)}" y2="${C.y.toFixed(1)}" stroke="#1C2530" stroke-width="1.4"/>`; });
+      const rayas = new Set(); tramos.forEach(([a, c]) => { rayas.add(a.toFixed(3)); rayas.add(c.toFixed(3)); });
+      rayas.forEach(v => { const Q = P(+v); out += horiz
+        ? `<line x1="${Q.x.toFixed(1)}" y1="${(Q.y - tic / 2).toFixed(1)}" x2="${Q.x.toFixed(1)}" y2="${(Q.y + tic / 2).toFixed(1)}" stroke="#1C2530" stroke-width="1.4"/>`
+        : `<line x1="${(Q.x - tic / 2).toFixed(1)}" y1="${Q.y.toFixed(1)}" x2="${(Q.x + tic / 2).toFixed(1)}" y2="${Q.y.toFixed(1)}" stroke="#1C2530" stroke-width="1.4"/>`; });
+      // Números afuera de la línea; si no caben en su tramo, se suben a una segunda fila (nunca encimados).
+      let finFila = [-Infinity, -Infinity];
+      tramos.forEach(([a, c]) => {
+        const txt = fpPiesPulg(c - a), M = P((a + c) / 2);
+        const largo = horiz ? txt.length * fs * 0.55 : fs * 1.05;
+        const ini2 = (horiz ? M.x : M.y) - largo / 2;
+        let fila = ini2 >= finFila[0] + 6 ? 0 : 1;
+        finFila[fila] = ini2 + largo;
+        const sep = fs * 0.45 + fila * fs * (horiz ? 1.15 : 3.4);
+        if(lado === 'top') out += `<text x="${M.x.toFixed(1)}" y="${(M.y - sep).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="600" fill="#1C2530" text-anchor="middle">${txt}</text>`;
+        else if(lado === 'bottom') out += `<text x="${M.x.toFixed(1)}" y="${(M.y + sep + fs * 0.75).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="600" fill="#1C2530" text-anchor="middle">${txt}</text>`;
+        else if(lado === 'left') out += `<text x="${(M.x - sep).toFixed(1)}" y="${(M.y + fs * 0.35).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="600" fill="#1C2530" text-anchor="end">${txt}</text>`;
+        else out += `<text x="${(M.x + sep).toFixed(1)}" y="${(M.y + fs * 0.35).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="600" fill="#1C2530" text-anchor="start">${txt}</text>`;
+      });
+    });
+    return out + '</g>' + sueltas;
+  }
+
+  // VISTA: el marco de la hoja (su diseño, 14-oct): orilla fina, encabezado con la empresa y el cliente a la
+  // izquierda y "DRAFT • FOR REVIEW" a la derecha, y abajo el pie con Level / Units / Scale / nota / Page.
+  function fpMarcoVista(svgW, svgH, u, data, floorNum){
+    const company = esc(($('#companyName') && $('#companyName').value) || 'Restoration Doctor');
+    const job = (data && data.job) || fpJobInfo();
+    const quien = esc([job.client, job.address].filter(Boolean).join(' · '));
+    const m = Math.round(u * 0.6), hH = u * 3.6, hF = u * 3.2;
+    const lv = floorplanLevels(data);
+    const iNivel = Math.max(0, lv.indexOf(floorNum));
+    const nombreNivel = (data && data._nivelBase) ? (fpPlantaDeNivel(data, floorNum) || ('Floor ' + floorNum)) : ('Floor ' + floorNum);
+    const hayDudosas = (data.rooms || []).some(r => !r.deleted && (r.level || 1) === floorNum && (r.walls || []).some(w => w.confidence === 'low'));
+    let o = `<g class="fp-marco" style="pointer-events:none;" font-family="'IBM Plex Sans',sans-serif">`;
+    o += `<rect x="${m}" y="${m}" width="${svgW - 2*m}" height="${svgH - 2*m}" fill="none" stroke="#8d96a2" stroke-width="1.5"/>`;
+    // encabezado
+    o += `<text x="${m + u}" y="${m + u * 1.55}" font-size="${(u * 1.05).toFixed(1)}" font-weight="700" letter-spacing="1.2" fill="#1C2530">${company.toUpperCase()}</text>`;
+    if(quien) o += `<text x="${m + u}" y="${m + u * 2.75}" font-size="${(u * 0.78).toFixed(1)}" font-weight="500" fill="#4a5462">${quien}</text>`;
+    o += `<text x="${svgW - m - u}" y="${m + u * 1.75}" font-size="${(u * 0.95).toFixed(1)}" font-weight="700" letter-spacing="1" fill="#8d96a2" text-anchor="end">DRAFT • FOR REVIEW</text>`;
+    o += `<line x1="${m + u * 0.6}" y1="${m + hH}" x2="${svgW - m - u * 0.6}" y2="${m + hH}" stroke="#8d96a2" stroke-width="1.2"/>`;
+    // pie: cinco casillas
+    const yT = svgH - m - hF, yTxt = yT + hF * 0.56, ancho = svgW - 2*m;
+    o += `<line x1="${m + u * 0.6}" y1="${yT}" x2="${svgW - m - u * 0.6}" y2="${yT}" stroke="#8d96a2" stroke-width="1.2"/>`;
+    const cols = [0.2, 0.2, 0.2, 0.28, 0.12];
+    const celdas = [
+      `<tspan fill="#4a5462">Level:</tspan> <tspan font-weight="700">${esc(nombreNivel)}</tspan>`,
+      `<tspan fill="#4a5462">Units:</tspan> <tspan font-weight="700">ft / in</tspan>`,
+      `<tspan fill="#4a5462">Scale:</tspan> <tspan font-weight="700">Not to scale</tspan>`,
+      null,
+      `Page <tspan font-weight="700">${iNivel + 1}</tspan> of <tspan font-weight="700">${Math.max(1, lv.length)}</tspan>`,
+    ];
+    let x = m;
+    cols.forEach((c, i) => {
+      const w = ancho * c;
+      if(i) o += `<line x1="${x}" y1="${yT + hF * 0.22}" x2="${x}" y2="${yT + hF * 0.82}" stroke="#8d96a2" stroke-width="1"/>`;
+      if(celdas[i]) o += `<text x="${x + u * 0.9}" y="${yTxt}" font-size="${(u * 0.82).toFixed(1)}" fill="#1C2530">${celdas[i]}</text>`;
+      else {
+        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.42}" font-size="${(u * 0.62).toFixed(1)}" fill="#3a4452">Measurements from the LiDAR scan; verify before final export.</text>`;
+        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.74}" font-size="${(u * 0.62).toFixed(1)}" fill="#3a4452">${hayDudosas ? 'Red dashed wall = verify measurement.' : 'Dimensions are wall-to-wall at the wall center.'}</text>`;
+      }
+      x += w;
+    });
+    return o + '</g>';
+  }
+
   function buildFloorplanSvgMerged(data, level){
     const onLevel = r => level == null || (r.level||1) === level;
     // Voice-deleted rooms (room.deleted, the native soft flag) are
@@ -30847,11 +31285,23 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // measurements. 3ft leaves the full dimension string comfortably
     // inside the sheet on every side.
     const pad = 3.0;
-    minX-=pad; minY-=pad; maxX+=pad; maxY+=pad;
+    // Vista (su diseño, 14-oct): más margen a los lados para las cadenas de medidas, y arriba/abajo el alto
+    // del encabezado y del pie del marco. Va dentro del margen en pies, así X()/Y() no cambian y el editor
+    // sigue tocando donde debe.
+    const vista = fpVista();
+    const bEdif = { minX, minY, maxX, maxY };
+    let padL = pad, padR = pad, padT = pad, padB = pad, vu = 0;
+    if(vista){
+      vu = Math.max(16, Math.min(34, (maxX - minX + 9) * FLOORPLAN_SVG_SCALE / 90));
+      padL = padR = 4.6;
+      padT = 3.3 + (vu * 3.6) / FLOORPLAN_SVG_SCALE;
+      padB = 2.8 + (vu * 3.2) / FLOORPLAN_SVG_SCALE;
+    }
+    minX-=padL; minY-=padT; maxX+=padR; maxY+=padB;
     const w = Math.max(1, maxX-minX), h = Math.max(1, maxY-minY);
     const scale = FLOORPLAN_SVG_SCALE;
     const svgW = w*scale, svgH = h*scale;
-    const totalSvgH = svgH + (fpSheetExport ? 0 : FLOORPLAN_STAMP_HEIGHT);
+    const totalSvgH = svgH + ((fpSheetExport || vista) ? 0 : FLOORPLAN_STAMP_HEIGHT);
     const X = x => (x-minX)*scale;
     const Y = y => (y-minY)*scale;
 
@@ -30864,7 +31314,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // shrinking it until the numbers disappear.
     let s = `<svg viewBox="0 0 ${svgW} ${totalSvgH}" width="${svgW}" height="${totalSvgH}" data-fp-minx="${minX}" data-fp-miny="${minY}" data-fp-scale="${scale}" style="display:block; background:#fff;" xmlns="http://www.w3.org/2000/svg">`;
     s += fpDefs();
-    if(!fpSheetExport) s += `<rect x="1" y="1" width="${svgW-2}" height="${totalSvgH-2}" fill="none" stroke="#dfe4ea" stroke-width="1"/>`;
+    if(!fpSheetExport && !vista) s += `<rect x="1" y="1" width="${svgW-2}" height="${totalSvgH-2}" fill="none" stroke="#dfe4ea" stroke-width="1"/>`;
     const buildingCentroid = floorplanBuildingCentroid(rooms);
     // Top layer, painted after EVERY room's content: dimension lines and
     // room labels can never be covered by another room's furniture.
@@ -30879,9 +31329,14 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       if(!(room.walls||[]).length || !onLevel(room) || room.deleted) return;
       s += fpRoomFloorFill(room, X, Y);
     });
+    // Muebles de TODOS los cuartos primero y luego las paredes de todos: así el mueble de un cuarto tampoco
+    // tapa la pared del cuarto de al lado (los cuartos se dibujan uno tras otro).
+    const capaMuebles = [];
+    let paredes = '';
+    fpEspaciosDelPlano = (data._spaceLabels || []).filter(sp => level == null || (sp.level || 1) === level);
     (data.rooms||[]).forEach((room, idx) => {
       if(!(room.walls||[]).length || !onLevel(room) || room.deleted) return;
-      s += buildFloorplanRoomContent(room, idx, X, Y, scale, rooms, buildingCentroid, overlays, drawnObjectKeys, true);
+      paredes += buildFloorplanRoomContent(room, idx, X, Y, scale, rooms, buildingCentroid, overlays, drawnObjectKeys, true, capaMuebles);
       // A manually-positioned label anchors at the PLAIN geometric
       // center plus its own saved offset - the learned bias only steers
       // rooms with no manual override (applying it under an override
@@ -30890,8 +31345,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // the guaranteed-inside geometric center, nudged by the pattern
       // of past manual corrections. Wrapped in one draggable <g> so the
       // whole name/area/dimensions stack moves together.
-      const c = room._labelOffsetPx ? floorplanLabelAnchor(room) : floorplanSmartLabelAnchor(room);
-      const labelOff = room._labelOffsetPx || {dx:0, dy:0};
+      // Vista (su pedido, 14-oct): un nombre que se movió a mano con el dibujo de ANTES quedaba en una
+      // esquina (el Master Bedroom real). En la vista solo cuenta lo que se movió en la vista misma.
+      const offVale = room._labelOffsetPx && (!vista || room._labelVista);
+      const c = offVale ? floorplanLabelAnchor(room) : floorplanSmartLabelAnchor(room);
+      const labelOff = offVale ? room._labelOffsetPx : {dx:0, dy:0};
       const labelX = X(c.x) + labelOff.dx, labelY = Y(c.y) + labelOff.dy;
       const label = esc((room.roomName || `Room ${idx+1}`).toUpperCase());
       // "approx." after the unit, not inside the number - a room whose
@@ -30921,7 +31379,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // lines"). Each sits just INSIDE the room, clear of the black wall
       // body, so it reads plainly on the white floor. Viewer only; never
       // on the exported sheet, which stays a clean professional document.
-      if(!fpSheetExport && fpMeasurePrefs.extents !== false && areaNum >= 20){
+      if(!fpSheetExport && !vista && fpMeasurePrefs.extents !== false && areaNum >= 20){
         const span = fpRoomSpanAt(fpOrderedRoomPolygon(room), c);
         // Span crossings land on wall CENTERLINES - pull each marker in
         // by half the wall thickness plus a gap so it floats visibly on
@@ -30949,7 +31407,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // Stack order per explicit instruction: room name, then the room's
       // DIMENSIONS, then the square footage under them. Pushed to the
       // overlay layer so no later room's furniture can paint over it.
-      const labelLines = fpMeasurePrefs.roomArea
+      const hueco = vista ? fpHuecoDelNombre(room, c, rooms) : null;
+      if(hueco){ hueco.correr = !offVale; hueco.xPx = X(hueco.xC); }   // un nombre movido a mano no se corre
+      const bloque = vista ? fpBloqueVista(room, label, areaTxt, rb, scale, X, Y, labelX, labelY, room._labelScale || 1, hueco, rooms, minX, minY, offVale) : null;
+      if(bloque && bloque.flechas) overlays.push(`<g class="fp-extent" style="pointer-events:none;">${bloque.flechas}</g>`);
+      const labelLines = vista ? bloque.svg : fpMeasurePrefs.roomArea
         ? `<text x="${labelX}" y="${labelY-48*k}" font-size="${f(30)}" font-weight="700" letter-spacing="0.5" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${label}</text>`
           + `<text x="${labelX}" y="${labelY-14*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${dimTxt}</text>`
           + `<text x="${labelX}" y="${labelY+18*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${areaTxt}</text>`
@@ -30958,16 +31420,24 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // Auto-detected sub-areas (closet/laundry alcoves): name + own
       // dimensions, the way a pro plan annotates them. Tappable to
       // rename in Edit Plan.
+      // Sin nombres repetidos (su pedido, 14-oct): un rincón detectado con el MISMO nombre que su cuarto (un
+      // cuarto que el personal llamó "Closet" con un rincón que la app también llamó closet) no se escribe dos veces.
+      const nomCuarto = fpNombreClave(room.roomName);
       (room._subAreas||[]).forEach((sa, si) => {
+        if(nomCuarto && fpNombreClave(sa.name) === nomCuarto) return;
         overlays.push(fpAnnotationLabelSvg(X, Y, 'fp-subarea',
           `data-room-idx="${idx}" data-sub-idx="${si}"`, sa, sa.cx, sa.cy, sa.name, sa.w, sa.d));
       });
     });
+    s += capaMuebles.join('') + paredes;
     // Hand-named open spaces (AI Fix asks, the human answers): a label
     // with dimensions on an area no scanned room claims - annotation
     // only, honest that no geometry was invented there.
     (data._spaceLabels||[]).forEach((sp, si) => {
       if(level != null && (sp.level||1) !== level) return;
+      // Un "espacio sin cuarto" que cae ADENTRO de un cuarto escaneado no es un espacio aparte: es un rótulo
+      // suelto encima del nombre de ese cuarto (en el plano real, "LAUNDRY ROOM" encima del Master Bedroom).
+      if(rooms.some(r => { const pg = fpOrderedRoomPolygon(r); return pg && pg.length >= 3 && !fpAiFragileOutline(r) && fpPointInPolygon({ x: sp.x, y: sp.y }, pg); })) return;
       overlays.push(fpAnnotationLabelSvg(X, Y, 'fp-spacelabel',
         `data-space-idx="${si}"`, sp, sp.x, sp.y, sp.name, sp.w, sp.d));
     });
@@ -31013,11 +31483,12 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       legendKinds = [...new Set(waterMarks.map(m => m.kind || 'water'))];
     }
     s += overlays.join('');
+    if(vista) s += fpCadenasCotas(rooms, bEdif, buildingCentroid, X, Y, scale);
     if(!fpSheetExport){
       // One legend line per kind actually used on this floor.
       legendKinds.forEach((k, ki) => {
         const kd = legendDefs[k] || Object.values(legendDefs)[0];
-        const ly = svgH - 88 - ki*22;
+        const ly = (vista ? Y(bEdif.maxY) + 1.6*scale + 30 : svgH - 88) - ki*22;
         s += `<g><rect x="16" y="${ly}" width="26" height="12" rx="6" fill="${kd.color}"/>`
           + `<text x="50" y="${ly+11}" font-size="15" font-weight="600" fill="${kd.legendColor}">${kd.legend} (drawn by hand)</text></g>`;
       });
@@ -31033,10 +31504,14 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // ve en la pantalla — el papel lleva el suyo en la banda —, pero decia
       // "FLOOR 1" encima del dibujo de un sotano, que es la misma mentira.
       const sello = ((data && data._nivelBase) ? (fpPlantaDeNivel(data, floorNum) || '') : '') || ('FLOOR ' + floorNum);
-      s += `<text x="16" y="${svgH-64}" font-size="24" font-weight="700" letter-spacing="1" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530">${esc(sello.toUpperCase())}</text>`;
-      s += fpTitleBlock(svgW, svgH, data);
+      if(vista){
+        s += fpMarcoVista(svgW, svgH, vu, data, floorNum);
+      } else {
+        s += `<text x="16" y="${svgH-64}" font-size="24" font-weight="700" letter-spacing="1" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530">${esc(sello.toUpperCase())}</text>`;
+        s += fpTitleBlock(svgW, svgH, data);
+      }
     }
-    s += fpCompassAndScale(svgW, svgH, scale);
+    if(!vista) s += fpCompassAndScale(svgW, svgH, scale);
     s += `</svg>`;
     return s;
   }
