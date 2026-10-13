@@ -8598,7 +8598,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-14-A';
+  const APP_BUILD = '2026-10-14-B';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -29474,7 +29474,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // de humedad no cambian aquí. Scanova usa el mismo dibujo (tools/extraer_plano.py) y prende/apaga esto
   // con ponerVista().
   let fpEstiloVista = true;
-  function fpVista(){ return fpEstiloVista && !fpSheetExport && fpRenderMode !== 'moisture'; }
+  // La hoja de Scanova que se EXPORTA lleva abajo la tabla de medidas (la de Field Reports va en HTML en su hoja).
+  let fpConTablaMedidas = false;
+  // 14-oct (su "sí, que el PDF también lleve ese estilo"): el estilo vale también para la hoja que se manda.
+  // Lo único que la hoja no lleva es el MARCO (la hoja ya trae su encabezado, sus totales y su tabla).
+  function fpVista(){ return fpEstiloVista && fpRenderMode !== 'moisture'; }
   // 6' 8" (con espacio, como su diseño), no 6'-8".
   function fpPiesPulg(ft){ const t = Math.round((+ft || 0) * 12); return `${Math.floor(t / 12)}' ${t % 12}"`; }
   function fpFeetInches(decimalFeet){
@@ -31222,25 +31226,102 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
 
   // VISTA: el marco de la hoja (su diseño, 14-oct): orilla fina, encabezado con la empresa y el cliente a la
   // izquierda y "DRAFT • FOR REVIEW" a la derecha, y abajo el pie con Level / Units / Scale / nota / Page.
-  function fpMarcoVista(svgW, svgH, u, data, floorNum){
+  // LA TABLA DE MEDIDAS EN EL DIBUJO (14-oct, su pedido: "a Scanova le faltan los datos de abajo como los de
+  // Field Reports"). Mismos números que fpMeasurementTable (fpRoomMeasurements / fpPlanMeasurements); va en SVG
+  // porque Scanova exporta una imagen, no una hoja HTML.
+  function fpAltoTablaMedidas(nCuartos, u){ return u * (2.4 + 2.0 + 1.75 * nCuartos + 2.0 + 2.0); }
+  function fpTablaMedidasSvg(data, floorNum, x0, y0, w, u){
+    const enPiso = r => (r.level || 1) === floorNum;
+    const cuartos = ((data && data.rooms) || []).map((r, i) => ({ r, i })).filter(x => !x.r.deleted && (x.r.walls || []).length && enPiso(x.r));
+    if(!cuartos.length) return '';
+    const t = fpPlanMeasurements(data, enPiso);
+    const n1 = v => (+v || 0).toFixed(1), raya = '\u2014';
+    const fs = u * 1.05, fh = u * 0.8;
+    const cols = [0.30, 0.11, 0.11, 0.11, 0.13, 0.13, 0.11];
+    const xs = []; let acc = x0; cols.forEach(c => { acc += w * c; xs.push(acc); });   // borde derecho de cada columna
+    const celda = (i, y, txt, peso, color) => i === 0
+      ? `<text x="${x0 + u * 0.2}" y="${y}" font-size="${fs.toFixed(1)}" font-weight="${peso || 400}" fill="${color || '#3A4552'}">${txt}</text>`
+      : `<text x="${xs[i] - u * 0.2}" y="${y}" font-size="${fs.toFixed(1)}" font-weight="${peso || 400}" fill="${color || '#3A4552'}" text-anchor="end">${txt}</text>`;
+    let y = y0 + u * 1.7, o = `<g class="fp-tabla" font-family="'IBM Plex Sans',sans-serif" style="pointer-events:none;">`;
+    o += `<line x1="${x0}" y1="${y0}" x2="${x0 + w}" y2="${y0}" stroke="#1C2530" stroke-width="2"/>`;
+    o += `<text x="${x0 + u * 0.2}" y="${y}" font-size="${(u * 1.25).toFixed(1)}" font-weight="700" fill="#1C2530">Total Area: ${n1(fpDisplayTotalAreaSqFt(data))} sq ft &#160;&#160; Rooms: ${cuartos.length}</text>`;
+    o += `<text x="${x0 + w - u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="1" fill="#1C2530" text-anchor="end">LEVEL ${floorNum}</text>`;
+    y += u * 2.0;
+    ['ROOM', 'FLOOR SF', 'WALL SF', 'CEILING SF', 'PERIMETER LF', 'BASEBOARD LF', 'CEILING HT'].forEach((h, i) => {
+      o += i === 0 ? `<text x="${x0 + u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="0.8" fill="#5a6472">${h}</text>`
+        : `<text x="${xs[i] - u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="0.8" fill="#5a6472" text-anchor="end">${h}</text>`;
+    });
+    o += `<line x1="${x0}" y1="${y + u * 0.55}" x2="${x0 + w}" y2="${y + u * 0.55}" stroke="#1C2530" stroke-width="1.6"/>`;
+    cuartos.forEach(({ r, i }) => {
+      y += u * 1.75;
+      const m = fpRoomMeasurements(r);
+      const marca = m.guessedFt > 1 ? '<tspan fill="#8a6d1a">\u2020</tspan>' : '';
+      o += celda(0, y, esc(r.roomName || `Room ${i + 1}`) + marca);
+      o += celda(1, y, n1(m.floorSqFt));
+      o += celda(2, y, (m.outlineOk && m.heightKnown) ? n1(m.netWallSqFt) : raya);
+      o += celda(3, y, n1(m.ceilingSqFt));
+      o += celda(4, y, m.outlineOk ? n1(m.perimeterFt) : raya);
+      o += celda(5, y, m.outlineOk ? n1(m.baseboardFt) : raya);
+      o += celda(6, y, m.heightKnown ? fpFeetInches(m.wallHeightFt) : raya);
+    });
+    y += u * 0.7;
+    o += `<line x1="${x0}" y1="${y}" x2="${x0 + w}" y2="${y}" stroke="#1C2530" stroke-width="1.6"/>`;
+    y += u * 1.35;
+    o += celda(0, y, 'TOTAL', 700, '#1C2530') + celda(1, y, n1(t.floorSqFt), 700, '#1C2530')
+      + celda(2, y, n1(t.netWallSqFt) + (t.noHeight.length ? '\u2020' : ''), 700, '#1C2530') + celda(3, y, n1(t.ceilingSqFt), 700, '#1C2530')
+      + celda(4, y, n1(t.perimeterFt), 700, '#1C2530') + celda(5, y, n1(t.baseboardFt), 700, '#1C2530');
+    const notas = [];
+    if(t.guessedRooms) notas.push(`\u2020 part of the boundary was closed by the app, not measured (${n1(t.guessedFt)} ft in ${t.guessedRooms} room${t.guessedRooms > 1 ? 's' : ''})`);
+    if(t.noHeight.length) notas.push(`\u2020 ${t.noHeight.length} room${t.noHeight.length > 1 ? 's have' : ' has'} no wall height, so ${t.noHeight.length > 1 ? 'they are' : 'it is'} left out of the Wall SF total`);
+    if(t.noOutline.length) notas.push(`${t.noOutline.length} room${t.noOutline.length > 1 ? 's' : ''} could not be outlined`);
+    if(notas.length) o += `<text x="${x0 + u * 0.2}" y="${y + u * 1.5}" font-size="${(u * 0.78).toFixed(1)}" fill="#5a6472">${notas.join(' \u00b7 ')}</text>`;
+    return o + '</g>';
+  }
+
+  function fpMarcoVista(svgW, svgH, u, data, floorNum, conTabla){
     const company = esc(($('#companyName') && $('#companyName').value) || 'Restoration Doctor');
     const job = (data && data.job) || fpJobInfo();
-    const quien = esc([job.client, job.address].filter(Boolean).join(' · '));
-    const m = Math.round(u * 0.6), hH = u * 3.6, hF = u * 3.2;
+    // Su pedido (14-oct): el nombre del cliente y ABAJO su dirección; el teléfono no va en la hoja.
+    const nomCli = esc(job.client || ''), dirCli = esc(job.address || '');
+    const m = Math.round(u * 0.6), hH = u * 5.0, hF = u * 3.2;
+    // La marca de Scanova360 se escribe como su logo: "Scanova" en tinta y "360" en su azul, Plus Jakarta Sans.
+    const esMarca360 = /360$/.test(company);
+    const letra = esMarca360 ? "'Plus Jakarta Sans',-apple-system,'Helvetica Neue',Arial,sans-serif" : "'IBM Plex Sans',sans-serif";
     const lv = floorplanLevels(data);
     const iNivel = Math.max(0, lv.indexOf(floorNum));
     const nombreNivel = (data && data._nivelBase) ? (fpPlantaDeNivel(data, floorNum) || ('Floor ' + floorNum)) : ('Floor ' + floorNum);
     const hayDudosas = (data.rooms || []).some(r => !r.deleted && (r.level || 1) === floorNum && (r.walls || []).some(w => w.confidence === 'low'));
-    let o = `<g class="fp-marco" style="pointer-events:none;" font-family="'IBM Plex Sans',sans-serif">`;
-    o += `<rect x="${m}" y="${m}" width="${svgW - 2*m}" height="${svgH - 2*m}" fill="none" stroke="#8d96a2" stroke-width="1.5"/>`;
-    // encabezado
-    o += `<text x="${m + u}" y="${m + u * 1.55}" font-size="${(u * 1.05).toFixed(1)}" font-weight="700" letter-spacing="1.2" fill="#1C2530">${company.toUpperCase()}</text>`;
-    if(quien) o += `<text x="${m + u}" y="${m + u * 2.75}" font-size="${(u * 0.78).toFixed(1)}" font-weight="500" fill="#4a5462">${quien}</text>`;
-    o += `<text x="${svgW - m - u}" y="${m + u * 1.75}" font-size="${(u * 0.95).toFixed(1)}" font-weight="700" letter-spacing="1" fill="#8d96a2" text-anchor="end">DRAFT • FOR REVIEW</text>`;
-    o += `<line x1="${m + u * 0.6}" y1="${m + hH}" x2="${svgW - m - u * 0.6}" y2="${m + hH}" stroke="#8d96a2" stroke-width="1.2"/>`;
+    let o = `<g class="fp-marco" style="pointer-events:none;" font-family="${letra}">`;
+    o += `<rect x="${m}" y="${m}" width="${svgW - 2*m}" height="${svgH - 2*m}" rx="${(u * 0.3).toFixed(1)}" fill="none" stroke="#d3dce8" stroke-width="1.4"/>`;
+    // encabezado: la marca, y debajo el cliente (nombre) y su dirección
+    // Su diseño (14-oct): la marca a la izquierda, una línea fina que la separa, y AL LADO el cliente (nombre
+    // grande y abajo la dirección), aprovechando todo el renglón.
+    const yMedio = m + hH / 2;
+    let anchoMarca;
+    if(esMarca360){
+      const fm = u * 2.7;
+      anchoMarca = company.length * fm * 0.6;
+      o += `<text x="${m + u}" y="${(yMedio + fm * 0.36).toFixed(1)}" font-size="${fm.toFixed(1)}" font-weight="800" letter-spacing="-0.035em" fill="#0f1a2e">${company.replace(/360$/, '')}<tspan fill="#2563eb">360</tspan></text>`;
+    } else {
+      const fm = u * 1.55;
+      anchoMarca = company.length * fm * 0.66;
+      o += `<text x="${m + u}" y="${(yMedio + fm * 0.36).toFixed(1)}" font-size="${fm.toFixed(1)}" font-weight="700" letter-spacing="1.2" fill="#1C2530">${company.toUpperCase()}</text>`;
+    }
+    if(nomCli || dirCli){
+      const xSep = m + u + anchoMarca + u * 1.3, xCli = xSep + u * 1.3;
+      o += `<line x1="${xSep.toFixed(1)}" y1="${(m + hH * 0.22).toFixed(1)}" x2="${xSep.toFixed(1)}" y2="${(m + hH * 0.8).toFixed(1)}" stroke="#d3dce8" stroke-width="1.6"/>`;
+      if(nomCli) o += `<text x="${xCli.toFixed(1)}" y="${(dirCli ? yMedio - u * 0.15 : yMedio + u * 0.55).toFixed(1)}" font-size="${(u * 1.55).toFixed(1)}" font-weight="700" fill="#0f1a2e">${nomCli}</text>`;
+      if(dirCli) o += `<text x="${xCli.toFixed(1)}" y="${(nomCli ? yMedio + u * 1.45 : yMedio + u * 0.5).toFixed(1)}" font-size="${(u * 1.2).toFixed(1)}" font-weight="400" fill="#56657c">${dirCli}</text>`;
+    }
+    // Su pedido (14-oct): la esquina derecha va limpia — sin "DRAFT • FOR REVIEW" ni el total (el total va en la tabla).
+    o += `<line x1="${m + u * 0.6}" y1="${m + hH}" x2="${svgW - m - u * 0.6}" y2="${m + hH}" stroke="#d3dce8" stroke-width="1.2"/>`;
     // pie: cinco casillas
     const yT = svgH - m - hF, yTxt = yT + hF * 0.56, ancho = svgW - 2*m;
-    o += `<line x1="${m + u * 0.6}" y1="${yT}" x2="${svgW - m - u * 0.6}" y2="${yT}" stroke="#8d96a2" stroke-width="1.2"/>`;
+    if(conTabla){
+      const nC = ((data && data.rooms) || []).filter(r => !r.deleted && (r.walls || []).length && (r.level || 1) === floorNum).length;
+      o += fpTablaMedidasSvg(data, floorNum, m + u * 0.6, yT - fpAltoTablaMedidas(nC, u) + u * 0.3, svgW - 2*m - u * 1.2, u);
+    }
+    o += `<line x1="${m + u * 0.6}" y1="${yT}" x2="${svgW - m - u * 0.6}" y2="${yT}" stroke="#d3dce8" stroke-width="1.2"/>`;
     const cols = [0.2, 0.2, 0.2, 0.28, 0.12];
     const celdas = [
       `<tspan fill="#4a5462">Level:</tspan> <tspan font-weight="700">${esc(nombreNivel)}</tspan>`,
@@ -31252,7 +31333,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     let x = m;
     cols.forEach((c, i) => {
       const w = ancho * c;
-      if(i) o += `<line x1="${x}" y1="${yT + hF * 0.22}" x2="${x}" y2="${yT + hF * 0.82}" stroke="#8d96a2" stroke-width="1"/>`;
+      if(i) o += `<line x1="${x}" y1="${yT + hF * 0.22}" x2="${x}" y2="${yT + hF * 0.82}" stroke="#d3dce8" stroke-width="1"/>`;
       if(celdas[i]) o += `<text x="${x + u * 0.9}" y="${yTxt}" font-size="${(u * 0.82).toFixed(1)}" fill="#1C2530">${celdas[i]}</text>`;
       else {
         o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.42}" font-size="${(u * 0.62).toFixed(1)}" fill="#3a4452">Measurements from the LiDAR scan; verify before final export.</text>`;
@@ -31294,8 +31375,10 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     if(vista){
       vu = Math.max(16, Math.min(34, (maxX - minX + 9) * FLOORPLAN_SVG_SCALE / 90));
       padL = padR = 4.6;
-      padT = 3.3 + (vu * 3.6) / FLOORPLAN_SVG_SCALE;
-      padB = 2.8 + (vu * 3.2) / FLOORPLAN_SVG_SCALE;
+      // con marco (pantalla) el alto del encabezado y del pie; en la hoja del PDF no hay marco
+      padT = fpSheetExport ? 3.0 : 3.3 + (vu * 5.0) / FLOORPLAN_SVG_SCALE;
+      padB = fpSheetExport ? 3.0 : 2.8 + (vu * 3.2) / FLOORPLAN_SVG_SCALE;
+      if(fpConTablaMedidas && !fpSheetExport) padB += fpAltoTablaMedidas(rooms.length, vu) / FLOORPLAN_SVG_SCALE;
     }
     minX-=padL; minY-=padT; maxX+=padR; maxY+=padB;
     const w = Math.max(1, maxX-minX), h = Math.max(1, maxY-minY);
@@ -31505,7 +31588,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // "FLOOR 1" encima del dibujo de un sotano, que es la misma mentira.
       const sello = ((data && data._nivelBase) ? (fpPlantaDeNivel(data, floorNum) || '') : '') || ('FLOOR ' + floorNum);
       if(vista){
-        s += fpMarcoVista(svgW, svgH, vu, data, floorNum);
+        s += fpMarcoVista(svgW, svgH, vu, data, floorNum, fpConTablaMedidas);
       } else {
         s += `<text x="16" y="${svgH-64}" font-size="24" font-weight="700" letter-spacing="1" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530">${esc(sello.toUpperCase())}</text>`;
         s += fpTitleBlock(svgW, svgH, data);
@@ -31622,7 +31705,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     document.body.appendChild(el);
     return el;
   }
-  function fpMakeSheet({ title, svgHtml, infoHtml, footHtml }){
+  function fpMakeSheet({ title, svgHtml, infoHtml, footHtml, cliente }){
     const vb = /viewBox="0 0 ([0-9.]+) ([0-9.]+)"/.exec(svgHtml || '');
     const vbW = vb ? +vb[1] : 1000, vbH = vb ? +vb[2] : 700;
     // ALWAYS a vertical (portrait) sheet: the plan sits on top and the
@@ -31632,7 +31715,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // Explicit pixel fit for the plan box - html2canvas is unreliable
     // with percentage-sized svgs, so the contain math happens here.
     const boxW = W - 48;
-    const boxH = H - 118 - 52 - 36 - 300; // header, footer, padding, info band
+    const boxH = H - 118 - 52 - 36 - 300 - (cliente && cliente.izq ? 56 : 0); // header (+ cliente), footer, padding, info band
     // The DRAWING stands vertical on the page whenever that renders it
     // at least comparably large (slight bias toward vertical - the tall
     // orientation uses the portrait page the way a drafted sheet does).
@@ -31665,8 +31748,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         <div>
           <div style="font-family:'Oswald',sans-serif; color:#D2601A; font-size:15px; letter-spacing:0.18em; text-transform:uppercase;">Daily Field Report</div>
           <div style="font-family:'Oswald',sans-serif; font-size:34px; text-transform:uppercase; margin-top:4px;">${title}</div>
+          ${cliente && cliente.izq ? `<div style="font-size:17px; color:#fff; margin-top:10px; line-height:1.45;">${cliente.izq}</div>` : ''}
         </div>
-        <div style="font-size:15px; color:#c8d0da;">${new Date().toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'})}</div>
+        <div style="font-size:15px; color:#c8d0da; text-align:right; line-height:1.6;">${(cliente && cliente.der) || new Date().toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'})}</div>
       </div>
       <div data-fp-planbox style="flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; padding:18px 24px;">${fitSvg}</div>
       <div data-fp-info style="flex:0 0 auto; overflow:hidden; padding:0 40px 8px; border-top:2px solid #1C2530;">${infoHtml}</div>
@@ -31776,6 +31860,16 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // de quien es sin depender de la que trae el dibujo.
     const job = (data && data.job) || fpJobInfo();
     const jobLine = [job.client, job.address].filter(Boolean).map(esc).join(' &middot; ') || 'No client on this plan';
+    // EL CLIENTE EN EL ENCABEZADO DE LA HOJA DEL PLANO (su pregunta del 14-oct: "¿dónde lleva la información
+    // del cliente?"): nombre en negritas, teléfono y dirección abajo; a la derecha la fecha, el reclamo y el técnico.
+    const fechaJob = job.date ? new Date(job.date + 'T12:00:00').toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'})
+      : new Date().toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'});
+    const clienteHoja = {
+      izq: job.client || job.address
+        ? `<b>${esc(job.client || 'No client name')}</b>${job.address ? `<br><span style="color:#c8d0da;">${esc(job.address)}</span>` : ''}`   // sin teléfono (su pedido, 14-oct)
+        : '<span style="color:#c8d0da;">No client on this plan</span>',
+      der: [fechaJob, job.claim ? 'Claim ' + esc(job.claim) : '', job.tech ? 'Tech: ' + esc(job.tech) : ''].filter(Boolean).join('<br>'),
+    };
     // 26 cuartos por hoja. Medido: a los 40 las NOTAS se salian de la
     // hoja (overflow:hidden) y desaparecian sin avisar - y son justo las
     // advertencias. 26 deja aire para una lista larga de notas.
@@ -31853,7 +31947,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         // Los espacios rotulados ya van escritos sobre el propio dibujo;
         // repetirlos abajo era el mismo dato dos veces en una pagina.
         const extra = '';
-        sheetOpts.push({ title: titleBase, svgHtml: svg, planta: plantaDelNivel(lvl),
+        sheetOpts.push({ title: titleBase, svgHtml: svg, planta: plantaDelNivel(lvl), cliente: clienteHoja,
           infoHtml: fitsOnPlanSheet
             ? infoFor(headLeft, esc(rotuloNivel(lvl).toUpperCase()), '') + measTable + extra
             : infoFor(headLeft, esc(rotuloNivel(lvl).toUpperCase()), lvlRooms.map(x => roomLine(x.r, x.i)).concat(spaceLines).join('<br>')),
@@ -31876,7 +31970,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         const r = rooms[ri];
         if(!r || r.deleted) return;
         const note = `<div style="font-size:12px; color:#5a6472; padding-top:8px;">Rooms are shown on separate sheets - the app could not confirm how they connect, so it does not guess. Each room's own measurements are unaffected.</div>`;
-        sheetOpts.push({ title: titleBase, svgHtml: mm[0], planta: plantaDelNivel(r.level||1),
+        sheetOpts.push({ title: titleBase, svgHtml: mm[0], planta: plantaDelNivel(r.level||1), cliente: clienteHoja,
           infoHtml: infoFor(`<b>${esc(r.roomName || `Room ${ri+1}`)}</b>`, esc(rotuloNivel(r.level||1).toUpperCase()), roomLine(r, ri)) + note,
           footHtml: foot });
       });
