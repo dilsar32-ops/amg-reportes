@@ -2761,6 +2761,13 @@ body.ct-visor-abierto{overflow:hidden;}
 .ct-cam .last img{width:100%; height:100%; object-fit:cover; display:block;}
 .ct-cam .flash{position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; transition:opacity .25s;}
 .ct-cam .flash.on{opacity:.85; transition:none;}
+/* La cámara del iPhone va DETRÁS de la página: todo lo demás se esconde y el fondo queda transparente. */
+html.cam-nativa, html.cam-nativa body{background:transparent !important;}
+html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
+.ct-cam.nativa{background:transparent !important;}
+.ct-cam.nativa .vid{position:absolute; inset:0; touch-action:none;}
+.ct-cam .foco{position:absolute; width:74px; height:74px; margin:-37px 0 0 -37px; border:2px solid #ffd60a; border-radius:6px; pointer-events:none;}
+.ct-cam .foco[hidden]{display:none;}
 .ct-cam .info .cnt small{font-size:12px; color:rgba(255,255,255,.8);}
 .ct-cam .roles{display:flex; gap:6px; margin:0 -14px; padding:2px 14px; overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; scrollbar-width:none;}
 .ct-cam .roles::-webkit-scrollbar{display:none;}
@@ -8573,7 +8580,7 @@ body.ct-visor-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-13-B';
+  const APP_BUILD = '2026-10-13-C';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -41176,6 +41183,8 @@ body.ct-visor-abierto{overflow:hidden;}
   async function ctCamAbrir(opts){
     const o = (opts && typeof opts === 'object' && typeof opts.de === 'number') ? opts : {};
     const t = ctActual(); if(!t || t.estado !== 'abierto' || ctCam) return;
+    const Cn = ctPluginCamara();
+    if(Cn && await ctCamAbrirNativa(o, t, Cn)) return;
     if(!ctCamPuede()){ ctCamSistema(); return; }
     let stream;
     try{ stream = await navigator.mediaDevices.getUserMedia(CT_CAM_PIDE); }
@@ -41230,8 +41239,8 @@ body.ct-visor-abierto{overflow:hidden;}
   function ctCamPintarControles(){
     const c = ctCam; if(!c) return; const t = ctActual(); if(!t) return;
     const objs = ctObjetos(t);
-    const porVenir = c.pendientes.filter(p => p.rol === 'objeto').length + (c.enProcesoObj || 0);
-    const nObj = objs.length + porVenir, nFot = t.fotos.length + c.pendientes.length + c.enProceso;
+    const porVenir = c.pendientes.filter(p => p.rol === 'objeto').length + (c.enProcesoObj || 0) + (c.esperandoObj || 0);
+    const nObj = objs.length + porVenir, nFot = t.fotos.length + c.pendientes.length + c.enProceso + (c.esperando || 0);
     const n = c.capa.querySelector('[data-cam-n]'); if(n) n.textContent = String(nObj);
     const nl = c.capa.querySelector('[data-cam-nl]'); if(nl) nl.textContent = nObj === 1 ? 'objeto' : 'objetos';
     const f = c.capa.querySelector('[data-cam-f]'); if(f) f.textContent = nFot !== nObj ? ' · ' + nFot + ' fotos' : '';
@@ -41263,7 +41272,8 @@ body.ct-visor-abierto{overflow:hidden;}
   async function ctCamZoom(v){
     const c = ctCam; if(!c) return; const zc = c.caps.zoom || {};
     const z = Math.min(typeof zc.max === 'number' ? zc.max : v, Math.max(typeof zc.min === 'number' ? zc.min : 1, v));
-    if(await ctCamAplicar(c, { zoom: z })) c.zoom = z;
+    if(c.nativa){ try{ const r = await c.nativa.zoom({ factor: z }); c.zoom = (r && typeof r.factor === 'number') ? r.factor : z; }catch(e){} }
+    else if(await ctCamAplicar(c, { zoom: z })) c.zoom = z;
     ctCamPintarControles();
   }
   // Acercar / alejar con dos dedos sobre el video.
@@ -41287,6 +41297,7 @@ body.ct-visor-abierto{overflow:hidden;}
   function ctCamLuzCiclo(){
     const c = ctCam; if(!c) return;
     c.luz = c.luz === 'auto' ? 'on' : (c.luz === 'on' ? 'off' : 'auto');
+    if(c.nativa){ ctCamPintarLuz(); return; }                       // con la cámara del iPhone la luz es el flash de cada foto
     if(c.luz === 'on') ctCamLuz(true); else if(c.luz === 'off') ctCamLuz(false); else { c.claro = 0; ctCamMedirLuz(); }
     ctCamPintarLuz();
   }
@@ -41312,7 +41323,8 @@ body.ct-visor-abierto{overflow:hidden;}
   function ctCamDisparar(){
     const c = ctCam; if(!c) return; const t = ctActual(); if(!t) return;
     const rol = c.rol, de = c.objetivo;
-    if(rol !== 'objeto' && !de && !ctObjetos(t).length && !c.pendientes.some(p => p.rol === 'objeto') && !c.enProcesoObj){ alert('Primero tome la foto del objeto; después el código o las medidas.'); return; }
+    if(rol !== 'objeto' && !de && !ctObjetos(t).length && !c.pendientes.some(p => p.rol === 'objeto') && !c.enProcesoObj && !c.esperandoObj){ alert('Primero tome la foto del objeto; después el código o las medidas.'); return; }
+    if(c.nativa){ ctCamDispararNativa(c, rol, de); return; }
     const v = c.video, w = v.videoWidth, h = v.videoHeight; if(!w || !h) return;
     let cv = document.createElement('canvas'); cv.width = w; cv.height = h;
     const g = cv.getContext('2d'); if(!g){ cv = null; return; }
@@ -41328,6 +41340,69 @@ body.ct-visor-abierto{overflow:hidden;}
       ctCamPintarControles(); ctCamProcesar(c);
     }, 'image/jpeg', 0.92);
   }
+  // ---- LA CÁMARA DE VERDAD (13 oct 2026, su queja "las fotos se ven muy borrosas") ----
+  // El plugin Camara (CamaraPlugin.swift) toma FOTOS del iPhone (enfoque y proceso de foto), no cuadros
+  // del video. La cámara va DETRÁS de la página: aquí solo se pintan los mismos botones de siempre
+  // (roles, contador, zoom, luz, Listo) sobre un fondo transparente. Si falla al abrir, sigue la de siempre.
+  function ctPluginCamara(){ try{ const P = window.Capacitor && window.Capacitor.Plugins; return (P && P.Camara && typeof P.Camara.abrir === 'function') ? P.Camara : null; }catch(e){ return null; } }
+  async function ctCamAbrirNativa(o, t, Cn){
+    const objetivo = o.de ? (t.fotos.find(f => f.k === o.de && ctEsObjeto(f)) || null) : null;
+    const capa = document.createElement('div'); capa.className = 'ct-cam nativa';
+    capa.innerHTML = '<div class="vid" data-cam-vid></div><div class="flash"></div><div class="foco" data-cam-foco hidden></div>'
+      + '<div class="bot">'
+      +   '<div class="fila ajustes"><div class="zoom" data-cam-zooms hidden></div><button type="button" class="luz" data-cam-luz hidden></button></div>'
+      +   '<div class="roles" data-cam-roles></div>'
+      +   '<div class="fila info"><span class="sig" data-cam-sig></span><span class="cnt"><b data-cam-n>0</b> <span data-cam-nl>objetos</span><span class="en"> / items</span><small data-cam-f></small></span></div>'
+      +   '<div class="fila acc"><div class="last" data-cam-last></div><button type="button" class="shutter" data-cam-disparar aria-label="Tomar foto / Take photo"></button><button type="button" class="btn btn-accent listo" data-cam-listo>Listo<span class="en"> / Done</span></button></div>'
+      + '</div>';
+    document.body.appendChild(capa);
+    document.documentElement.classList.add('cam-nativa');
+    const antes = document.body.style.overflow; document.body.style.overflow = 'hidden';
+    let r;
+    try{ r = await Cn.abrir(); }
+    catch(e){
+      capa.remove(); document.documentElement.classList.remove('cam-nativa'); document.body.style.overflow = antes || '';
+      if(e && e.code === 'permiso'){ alert(e.message || 'Sin permiso para la cámara.'); return true; }
+      console.warn('contenidos: la cámara del iPhone no abrió; sigue la de la app', e); return false;
+    }
+    ctCam = { capa, video: null, stream: null, nativa: Cn, cadena: Promise.resolve(), esperando: 0, esperandoObj: 0, pendientes: [], enProceso: 0, enProcesoObj: 0, procesando: false, antes,
+              rol: objetivo ? 'codigo' : 'objeto', objetivo: objetivo ? objetivo.k : null, zoom: 1,
+              caps: { zoom: { min: Math.max(0.5, +r.zoomMin || 1), max: Math.max(1, +r.zoomMax || 1) }, torch: !!r.flash }, luz: 'auto', luzOn: false, luma: null, claro: 0, tm: null };
+    ctCamPintarControles();
+    capa.querySelector('[data-cam-disparar]').addEventListener('click', ctCamDisparar);
+    capa.querySelector('[data-cam-listo]').addEventListener('click', ctCamCerrar);
+    capa.addEventListener('click', e => {
+      const rr = e.target.closest('[data-cam-rol]'); if(rr){ ctCamRol(rr.dataset.camRol); return; }
+      const z = e.target.closest('[data-cam-zoom]'); if(z){ ctCamZoom(+z.dataset.camZoom); return; }
+      if(e.target.closest('[data-cam-luz]')){ ctCamLuzCiclo(); return; }
+    });
+    const vid = capa.querySelector('[data-cam-vid]');
+    ctCamPinch(vid);
+    // Tocar la imagen = enfocar ahí (como la cámara del iPhone).
+    vid.addEventListener('click', e => {
+      const c = ctCam; if(!c || !c.nativa) return;
+      const rr = vid.getBoundingClientRect(); const x = (e.clientX - rr.left) / rr.width, y = (e.clientY - rr.top) / rr.height;
+      c.nativa.enfocar({ x, y }).catch(() => {});
+      const fo = capa.querySelector('[data-cam-foco]'); if(fo){ fo.style.left = e.clientX + 'px'; fo.style.top = e.clientY + 'px'; fo.hidden = false; clearTimeout(fo._t); fo._t = setTimeout(() => { fo.hidden = true; }, 900); }
+    });
+    return true;
+  }
+  function ctCamDispararNativa(c, rol, de){
+    const fl = c.capa.querySelector('.flash'); if(fl){ fl.classList.add('on'); setTimeout(() => fl.classList.remove('on'), 70); }
+    if(rol !== 'objeto' && !c.objetivo) c.rol = 'objeto';         // la que sigue vuelve a ser un objeto nuevo
+    c.esperando++; if(rol === 'objeto') c.esperandoObj++; ctCamPintarControles();
+    const p = c.nativa.disparar({ luz: c.luz });                    // la foto sale ya; el orden se respeta abajo
+    c.cadena = c.cadena.then(async () => {
+      try{
+        const r = await p;
+        const b = await ctLeerBlob(r.path);
+        c.pendientes.push({ file: new File([b], 'foto-' + Date.now() + '.jpg', { type: 'image/jpeg' }), rol, de, tmp: r.path });
+        const last = c.capa.querySelector('[data-cam-last]');
+        if(last){ const u = URL.createObjectURL(b); last.innerHTML = '<img alt="">' + (rol !== 'objeto' ? '<small>' + esc(CT_ROLES[rol].corto) + '</small>' : ''); const im = last.querySelector('img'); im.onload = () => URL.revokeObjectURL(u); im.src = u; }
+      }catch(e){ console.warn('contenidos: foto de la cámara del iPhone', e); alert('No se pudo tomar esa foto. Tómela otra vez.'); }
+      finally{ c.esperando--; if(rol === 'objeto') c.esperandoObj--; ctCamPintarControles(); ctCamProcesar(c); }
+    });
+  }
   // Los disparos se guardan en orden, uno detras de otro (los de un mismo tipo seguidos
   // van juntos), aunque el usuario siga tocando; cerrar la camara no corta lo que falta.
   async function ctCamProcesar(c){
@@ -41339,12 +41414,20 @@ body.ct-visor-abierto{overflow:hidden;}
         while(c.pendientes.length && c.pendientes[0].rol === primero.rol && c.pendientes[0].de === primero.de) lote.push(c.pendientes.shift());
         c.enProceso = lote.length; c.enProcesoObj = primero.rol === 'objeto' ? lote.length : 0; ctCamPintarControles();
         await ctTomarFotos(lote.map(p => p.file), { rol: primero.rol, de: primero.de });
+        for(const p of lote){ if(p.tmp){ try{ await ctBorrarArchivo(p.tmp); }catch(e){} } }
         c.enProceso = 0; c.enProcesoObj = 0; ctCamPintarControles();
       }
     } finally { c.procesando = false; c.enProceso = 0; c.enProcesoObj = 0; ctCamPintarControles(); }
   }
-  function ctCamCerrar(){
-    const c = ctCam; if(!c) return; ctCam = null;
+  async function ctCamCerrar(){
+    const c = ctCam; if(!c) return;
+    if(c.nativa){
+      const b = c.capa.querySelector('[data-cam-listo]'); if(b){ b.disabled = true; b.textContent = 'Guardando…'; }
+      await Promise.race([c.cadena, new Promise(r => setTimeout(r, 8000))]);
+      try{ await c.nativa.cerrar(); }catch(e){}
+      document.documentElement.classList.remove('cam-nativa');
+    }
+    if(ctCam !== c) return; ctCam = null;
     try{ clearInterval(c.tm); }catch(e){}
     try{ c.stream.getTracks().forEach(tr => tr.stop()); }catch(e){}
     try{ c.video.srcObject = null; }catch(e){}
@@ -41393,7 +41476,7 @@ body.ct-visor-abierto{overflow:hidden;}
       for(const f of files){
         n++; ctAvisoCaptura('Guardando foto ' + n + ' de ' + total + '…');
         try{
-          const grande = await ctAchicar(f, 1600, 0.8);
+          const grande = await ctAchicar(f, 2400, 0.85);   // 2400 px (antes 1600): nítida al ampliarla (13 oct 2026)
           const k = ++t.sigK;
           const archivo = CT_CARPETA + '/' + t.id + '/foto-' + k + '.jpg';
           const vista = CT_CARPETA + '/' + t.id + '/foto-' + k + '-t.jpg';
@@ -41559,15 +41642,31 @@ body.ct-visor-abierto{overflow:hidden;}
       + '<div class="ct-vnom"><input type="text" id="ct-vnombre" value="' + esc(obj.nombre || '') + '" placeholder="Nombre del objeto"' + (abierto ? '' : ' disabled') + '><span>&#9998;</span></div>'
       + (abierto ? '<button type="button" class="btn btn-accent btn-block" data-ctv="guardar">Guardar nombre</button>' : '') + '</div>';
     v.hidden = false; document.body.classList.add('ct-visor-abierto');
-    // La foto GRANDE siempre (su queja: "se ven muy borrosas"): la del teléfono si sigue ahí; si ya se soltó
-    // (se libera al mandarla a CompanyCam), la de la nube; la miniatura de 320 px es el último recurso.
+    // Sin pantalla negra (su queja del 13 oct): la miniatura, que ya está en el teléfono, sale AL INSTANTE;
+    // la grande entra encima en cuanto termina de cargar. Y la de antes y la de después se cargan de una vez.
     const img = v.querySelector('.ct-vimg img');
-    const nube = async () => (f.path ? ((await ctUrlsNube([f.path], 1800))[f.path] || '') : '');
-    let src = (f.archivo && !f.archivoBorrado) ? await ctUrlDe(f.archivo) : '';
-    if(!src) src = await nube();
-    img.onerror = async () => { img.onerror = async () => { img.onerror = null; img.src = await ctUrlDe(f.vista); }; const u = await nube(); if(u && u !== img.src) img.src = u; else { img.onerror = null; img.src = await ctUrlDe(f.vista); } };
-    img.src = src || await ctUrlDe(f.vista);
+    const chica = await ctUrlDe(f.vista); if(chica && ctVisorK === f.k) img.src = chica;
+    ctVisorGrande(f).then(u => { if(!u || ctVisorK !== f.k) return; const pre = new Image(); pre.onload = () => { if(ctVisorK === f.k && img.isConnected) img.src = u; }; pre.src = u; });
+    [todas[i - 1], todas[i + 1]].forEach(g => { if(g) ctVisorGrande(g).then(u => { if(u){ const p = new Image(); p.src = u; } }); });
     ctVisorPellizco(v.querySelector('.ct-vimg'), img);
+  }
+  // La foto GRANDE siempre (su queja: "se ven muy borrosas"): la del teléfono si sigue ahí; si ya se soltó
+  // (se libera al mandarla a CompanyCam), la de la nube. Se recuerda para no volver a pedirla al regresar.
+  const ctVisorUrls = {};
+  function ctVisorGrande(f){
+    const llave = f.archivo + '|' + f.path, ya = ctVisorUrls[llave];
+    if(ya && (ya.hasta > Date.now())) return ya.p;
+    const p = (async () => {
+      const nube = async () => (f.path ? ((await ctUrlsNube([f.path], 1800))[f.path] || '') : '');
+      if(f.archivo && !f.archivoBorrado){
+        const u = await ctUrlDe(f.archivo);
+        if(u && await new Promise(ok => { const t = new Image(); t.onload = () => ok(true); t.onerror = () => ok(false); t.src = u; })) return u;
+      }
+      return await nube();
+    })();
+    ctVisorUrls[llave] = { p, hasta: Date.now() + 25 * 60 * 1000 };
+    p.then(u => { if(!u) delete ctVisorUrls[llave]; });
+    return p;
   }
   function ctVisorCerrar(){ const v = $('#ct-visor'); if(v){ v.hidden = true; v.innerHTML = ''; } document.body.classList.remove('ct-visor-abierto'); ctVisorK = null; ctPintarLista(); }
   function ctVisorMover(d){ const t = ctActual(); if(!t) return; const todas = ctVisorLista(t), i = todas.findIndex(x => x.k === ctVisorK); const g = todas[i + d]; if(g) ctVisorAbrir(g.k); }
