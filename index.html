@@ -2662,14 +2662,16 @@ body.ct-visor-abierto{overflow:hidden;}
 .ct-vtop{position:absolute; top:calc(env(safe-area-inset-top,0px) + 10px); left:0; right:0; display:flex; justify-content:center; z-index:3; pointer-events:none;}
 .ct-vcuenta{padding:7px 14px; border-radius:999px; background:rgba(0,0,0,.6); color:#fff; font:600 14px/1 'IBM Plex Sans',sans-serif;}
 .ct-vx{position:absolute; right:14px; top:-4px; width:42px; height:42px; border-radius:50%; border:none; background:rgba(0,0,0,.6); color:#fff; font-size:20px; pointer-events:auto; cursor:pointer;}
-.ct-vimg{position:relative; flex:1; min-height:0; overflow:hidden; display:flex; align-items:center; justify-content:center; touch-action:none;}
-.ct-vimg img{max-width:100%; max-height:100%; object-fit:contain; display:block;}
+.ct-visor.limpio .ct-vtop, .ct-visor.limpio .ct-vflecha, .ct-visor.limpio .ct-vpie{opacity:0; pointer-events:none;}
+.ct-visor.limpio .ct-vx, .ct-visor.limpio .ct-vpie *{pointer-events:none;}
+.ct-vtop, .ct-vflecha, .ct-vpie{transition:opacity .18s;}
+.ct-vimg{position:absolute; inset:0; overflow:hidden; touch-action:none; background:#000;}
+.ct-vimg img{width:100%; height:100%; object-fit:contain; display:block;}
 .ct-vflecha{position:absolute; top:40%; width:48px; height:48px; border-radius:50%; border:1px solid rgba(255,255,255,.35); background:rgba(0,0,0,.5); color:#fff; font-size:30px; line-height:1; z-index:3; cursor:pointer;}
 .ct-vflecha.izq{left:12px;} .ct-vflecha.der{right:12px;}
-.ct-vzoom{position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom,0px) + 186px); text-align:center; color:#fff; font-size:13px; z-index:3; pointer-events:none;}
-.ct-vzoom b{display:inline-block; padding:5px 12px; border-radius:999px; background:rgba(0,0,0,.6);}
-.ct-vzoom small{display:block; margin-top:5px; color:rgba(255,255,255,.75);}
-.ct-vpie{flex:none; padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 14px); background:var(--surface); border-radius:16px 16px 0 0;}
+.ct-vpie{position:absolute; left:0; right:0; bottom:0; z-index:3; padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 12px); background:linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.72) 28%, rgba(0,0,0,.85) 100%);}
+.ct-vpie label{color:rgba(255,255,255,.8) !important;}
+.ct-vpie .ct-vnom{background:rgba(44,44,46,.85);}
 .ct-vpie label{display:block; font-size:13px; color:var(--ink-soft); margin-bottom:6px;}
 .ct-vnom{display:flex; align-items:center; gap:8px; padding:0 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface-2); margin-bottom:12px;}
 .ct-vnom input{flex:1; border:none; background:transparent; margin:0; padding:12px 0; font-size:16px;}
@@ -8571,7 +8573,7 @@ body.ct-visor-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-13-A';
+  const APP_BUILD = '2026-10-13-B';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -41553,15 +41555,18 @@ body.ct-visor-abierto{overflow:hidden;}
       + '<div class="ct-vimg"><img alt=""></div>'
       + (i > 0 ? '<button type="button" class="ct-vflecha izq" data-ctv="ant" aria-label="Anterior">&lsaquo;</button>' : '')
       + (i < todas.length - 1 ? '<button type="button" class="ct-vflecha der" data-ctv="sig" aria-label="Siguiente">&rsaquo;</button>' : '')
-      + '<div class="ct-vzoom">&#128269; <b id="ct-vz">1&times;</b><small>Pellizca para ampliar</small></div>'
       + '<div class="ct-vpie"><label>' + (ctEsObjeto(f) ? 'Nombre del objeto' : esc((CT_ROLES[f.rol] || CT_ROLES.detalle).es) + ' del objeto #' + obj.n) + '</label>'
       + '<div class="ct-vnom"><input type="text" id="ct-vnombre" value="' + esc(obj.nombre || '') + '" placeholder="Nombre del objeto"' + (abierto ? '' : ' disabled') + '><span>&#9998;</span></div>'
       + (abierto ? '<button type="button" class="btn btn-accent btn-block" data-ctv="guardar">Guardar nombre</button>' : '') + '</div>';
     v.hidden = false; document.body.classList.add('ct-visor-abierto');
+    // La foto GRANDE siempre (su queja: "se ven muy borrosas"): la del teléfono si sigue ahí; si ya se soltó
+    // (se libera al mandarla a CompanyCam), la de la nube; la miniatura de 320 px es el último recurso.
     const img = v.querySelector('.ct-vimg img');
-    const grande = f.archivo ? await ctUrlDe(f.archivo) : '';
-    img.onerror = async () => { img.onerror = null; img.src = await ctUrlDe(f.vista); };
-    img.src = grande || await ctUrlDe(f.vista);
+    const nube = async () => (f.path ? ((await ctUrlsNube([f.path], 1800))[f.path] || '') : '');
+    let src = (f.archivo && !f.archivoBorrado) ? await ctUrlDe(f.archivo) : '';
+    if(!src) src = await nube();
+    img.onerror = async () => { img.onerror = async () => { img.onerror = null; img.src = await ctUrlDe(f.vista); }; const u = await nube(); if(u && u !== img.src) img.src = u; else { img.onerror = null; img.src = await ctUrlDe(f.vista); } };
+    img.src = src || await ctUrlDe(f.vista);
     ctVisorPellizco(v.querySelector('.ct-vimg'), img);
   }
   function ctVisorCerrar(){ const v = $('#ct-visor'); if(v){ v.hidden = true; v.innerHTML = ''; } document.body.classList.remove('ct-visor-abierto'); ctVisorK = null; ctPintarLista(); }
@@ -41578,11 +41583,11 @@ body.ct-visor-abierto{overflow:hidden;}
   }
   // Dos dedos acercan y alejan; con la foto acercada, un dedo la mueve; dos toques: acerca / vuelve.
   function ctVisorPellizco(caja, img){
-    const e = ctVisorPZ, z = $('#ct-vz');
-    const poner = () => { const w = caja.clientWidth, h = caja.clientHeight; e.s = Math.max(1, Math.min(6, e.s)); e.x = Math.min(0, Math.max(w - w * e.s, e.x)); e.y = Math.min(0, Math.max(h - h * e.s, e.y)); if(e.s === 1){ e.x = 0; e.y = 0; } img.style.transformOrigin = '0 0'; img.style.transform = e.s === 1 ? '' : 'translate(' + e.x + 'px,' + e.y + 'px) scale(' + e.s + ')'; if(z) z.textContent = (Math.round(e.s * 10) / 10) + '×'; };
+    const e = ctVisorPZ;
+    const poner = () => { const w = caja.clientWidth, h = caja.clientHeight; e.s = Math.max(1, Math.min(6, e.s)); e.x = Math.min(0, Math.max(w - w * e.s, e.x)); e.y = Math.min(0, Math.max(h - h * e.s, e.y)); if(e.s === 1){ e.x = 0; e.y = 0; } img.style.transformOrigin = '0 0'; img.style.transform = e.s === 1 ? '' : 'translate(' + e.x + 'px,' + e.y + 'px) scale(' + e.s + ')'; };
     const zoomEn = (s2, mx, my) => { const px = (mx - e.x) / e.s, py = (my - e.y) / e.s; e.s = s2; e.x = mx - px * s2; e.y = my - py * s2; };
     const rel = tc => { const r = caja.getBoundingClientRect(); return { x: tc.clientX - r.left, y: tc.clientY - r.top }; };
-    let ini = null, ult = 0, movio = false, sx = 0;
+    let ini = null, ult = 0, movio = false, sx = 0, unToque = 0;
     caja.addEventListener('touchstart', ev => { movio = false; if(ev.touches.length === 2){ const a = rel(ev.touches[0]), b = rel(ev.touches[1]); ini = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s: e.s, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, x: e.x, y: e.y }; } else if(ev.touches.length === 1){ const a = rel(ev.touches[0]); sx = a.x; ini = { uno: true, px: a.x, py: a.y, x: e.x, y: e.y }; } }, { passive: true });
     caja.addEventListener('touchmove', ev => {
       if(!ini) return; ev.preventDefault();
@@ -41595,7 +41600,8 @@ body.ct-visor-abierto{overflow:hidden;}
       const fin = ev.changedTouches && ev.changedTouches[0] ? rel(ev.changedTouches[0]) : { x: fue.px, y: fue.py };
       if(movio){ if(e.s === 1 && Math.abs(fin.x - sx) > 60) ctVisorMover(fin.x < sx ? 1 : -1); return; }   // deslizar de lado = siguiente / anterior
       const ahora = ev.timeStamp || Date.now();
-      if(ahora - ult < 320){ ult = 0; if(e.s > 1){ e.s = 1; } else zoomEn(2.5, fue.px, fue.py); poner(); } else ult = ahora;
+      if(ahora - ult < 320){ ult = 0; clearTimeout(unToque); if(e.s > 1){ e.s = 1; } else zoomEn(2.5, fue.px, fue.py); poner(); }
+      else { ult = ahora; clearTimeout(unToque); unToque = setTimeout(() => { const v = $('#ct-visor'); if(v) v.classList.toggle('limpio'); }, 330); }   // un toque: esconde/enseña botones y nombre, como Fotos del iPhone
     }, { passive: true });
     poner();
   }
