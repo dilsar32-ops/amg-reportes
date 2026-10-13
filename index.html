@@ -2817,10 +2817,28 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
 .ct-hoja .firma .lab{font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:#5d6b7a; margin-top:4px;}
 .ct-hoja .firma .dat{font-size:12.5px; line-height:1.55;}
 .ct-hoja .leg{font-size:10.5px; color:#5d6b7a; line-height:1.45; margin-top:12px;}
-.ct-hoja .resu{display:flex; gap:10px; margin:10px 0 0; font-size:12.5px;}
+.ct-hoja .resu{display:flex; flex-wrap:wrap; gap:8px 10px; margin:10px 0 0; font-size:12.5px;}
 .ct-hoja .resu span{border:1px solid #cfd5db; border-radius:6px; padding:6px 10px;}
 .ct-hoja .resu b{font-size:15px; margin-right:4px;}
 .ct-hoja .borrador{position:absolute; left:0; right:0; top:46%; text-align:center; font:700 44px/1.1 'Chakra Petch',sans-serif; letter-spacing:.08em; color:rgba(192,57,43,.18); transform:rotate(-24deg); pointer-events:none;}
+/* La hoja en cuadrícula (13 oct 2026): 15 objetos, 3 x 5. */
+.ct-hoja.ct-grid3 .cab{margin-bottom:8px; padding-bottom:8px;}
+.ct-hoja.ct-grid3 .meta{grid-template-columns:1.1fr .7fr 1.6fr 1fr; gap:4px 14px; margin-bottom:10px; font-size:12px;}
+.ct-hoja .rej{display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;}
+.ct-hoja .tarj{height:168px; border:1px solid #d9dee4; border-radius:8px; padding:6px; box-sizing:border-box; overflow:hidden; display:flex; flex-direction:column; gap:4px; background:#fff;}
+.ct-hoja .tarj .foto{position:relative; height:106px; border-radius:5px; overflow:hidden; background:#e9ecef;}
+.ct-hoja .tarj .foto img{width:100%; height:100%; object-fit:cover; display:block;}
+.ct-hoja .tarj .foto .mas, .ct-hoja .tarj .foto .nt{position:absolute; bottom:4px; padding:1px 6px; border-radius:4px; background:rgba(0,0,0,.66); color:#fff; font-size:9.5px; font-weight:700;}
+.ct-hoja .tarj .foto .mas{left:4px;} .ct-hoja .tarj .foto .nt{right:4px;}
+.ct-hoja .tarj .tt{font-size:12.5px; font-weight:600; color:#1C2530; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.ct-hoja .tarj .tt b{font:700 12px/1 'IBM Plex Mono',monospace; margin-right:3px;}
+.ct-hoja .tarj .pl{display:flex; align-items:center; gap:6px; min-width:0;}
+.ct-hoja .tarj .sts{display:flex; gap:4px; flex:1; min-width:0; overflow:hidden;}
+.ct-hoja .tarj .st{font-size:10px; letter-spacing:.02em; padding:3px 8px;}
+.ct-hoja .tarj .cat{flex:none; border-left:1px solid #d9dee4; padding-left:6px; font-size:10px; color:#3a4552;}
+.ct-hoja .tarj .cat{background:#eef1f5; border:none; border-radius:5px; padding:3px 7px;}
+.ct-hoja .notas h2{font:700 13px/1.2 'Chakra Petch',sans-serif; text-transform:uppercase; letter-spacing:.06em; margin:4px 0 6px; border:none; padding:0;}
+.ct-hoja .notas p{font-size:11.5px; line-height:1.4; margin:0 0 4px;}
 .ct-pila{position:fixed; left:-9999px; top:0; width:760px; background:#fff;}
 .previa-impresa .ct-hoja, .prev-sheet .ct-hoja{margin:0 auto 14px; box-shadow:0 1px 6px rgba(0,0,0,.25);}
 /* --- la vista del manager --- */
@@ -8580,7 +8598,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-13-C';
+  const APP_BUILD = '2026-10-13-D';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -42255,6 +42273,44 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     if(!firmaAparte && ult.filas.length <= 3) ult.firma = true; else paginas.push({ filas: [], firma: true });
     return paginas;
   }
+  // LA HOJA EN CUADRÍCULA (13 oct 2026, su propuesta): 15 objetos por hoja, 3 columnas x 5 filas.
+  // Las notas no caben en la tarjeta: van completas, por número, antes de la autorización. La firma va
+  // en la última hoja si le quedan 2 filas o menos (<= 6 objetos) y no hay notas; si no, en hoja propia.
+  const CT_HOJA_POR = 15, CT_NOTAS_POR = 34;
+  function ctPaginarGrid(objetos, nNotas){
+    const paginas = [];
+    for(let i = 0; i < objetos.length; i += CT_HOJA_POR) paginas.push({ filas: objetos.slice(i, i + CT_HOJA_POR), notas: null, firma: false });
+    if(!paginas.length) paginas.push({ filas: [], notas: null, firma: false });
+    const notas = nNotas || 0;
+    if(notas){
+      const ult0 = paginas[paginas.length - 1];
+      if(ult0.filas.length <= 3 && notas <= 8){ ult0.notas = [0, notas]; ult0.firma = true; return paginas; }   // una fila de tarjetas + pocas notas + la firma caben juntas
+      for(let i = 0; i < notas; i += CT_NOTAS_POR) paginas.push({ filas: [], notas: [i, Math.min(notas, i + CT_NOTAS_POR)], firma: false });
+      const ult = paginas[paginas.length - 1];
+      if(ult.notas[1] - ult.notas[0] <= 14) ult.firma = true; else paginas.push({ filas: [], notas: null, firma: true });
+    } else {
+      const ult = paginas[paginas.length - 1];
+      if(ult.filas.length <= 6) ult.firma = true; else paginas.push({ filas: [], notas: null, firma: true });
+    }
+    return paginas;
+  }
+  // Para la hoja, la foto de cada objeto a 640 px (la miniatura de 320 sale borrosa en la tarjeta grande):
+  // la del teléfono si sigue ahí; si ya se soltó, la de la nube; si nada, la miniatura de siempre.
+  const ctVistasPdf = {};
+  async function ctPrecargarPdf(t){
+    for(const f of (t.fotos || [])){
+      if(f.rol && f.rol !== 'objeto') continue;
+      const key = t.id + '|' + f.k; if(ctVistasPdf[key]) continue;
+      let b = null;
+      if(f.archivo && !f.archivoBorrado){ try{ b = await ctLeerBlob(f.archivo); }catch(e){} }
+      if(!b && f.path && signedIn() && navigator.onLine !== false){ try{ b = await mcBlobDe(f.path); }catch(e){} }
+      if(!b) continue;
+      try{ const m = await ctAchicar(b, 640, 0.82); ctVistasPdf[key] = 'data:image/jpeg;base64,' + await blobToBase64(m); }catch(e){}
+    }
+  }
+  const CT_CAT_CORTO = { agua: 'Water', seco: 'Dry', moho: 'Mold', fuego: 'Fire' };
+  // La marca de las fotos extra en la tarjeta dice QUÉ son: "+ barcode", "+2 measurements".
+  function ctHojaExtrasTexto(xs){ const c = {}; xs.forEach(x => { const r = (CT_ROLES[x.rol] || CT_ROLES.detalle).en.toLowerCase(); c[r] = (c[r] || 0) + 1; }); return Object.keys(c).map(r => '+' + (c[r] > 1 ? c[r] + ' ' : ' ') + r).join(' · '); }
   // Las fotos extra de un objeto (codigo de barras, medidas, detalle) en su misma fila.
   function ctHojaExtras(t, o){
     const xs = Array.isArray(o.fotos) ? o.fotos : [];
@@ -42274,17 +42330,20 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // Secciones por carpeta (11 oct 2026): un encabezado cada vez que cambia la carpeta (y al abrir hoja).
     const conCarpetas = objetos.some(o => ctCarpetaDe(o));
     const ctHojaSeccion = o => { const c = CT_CARPETAS.find(x => x.k === ctCarpetaDe(o)); return '<tr class="sec"><td colspan="4">' + (c ? c.ico + ' ' + esc(c.titulo.toUpperCase()) + ' · ' + esc(c.en.toLowerCase()) : '&#128193; UNSORTED') + '</td></tr>'; };
-    const paginas = ctPaginar(objetos);
     const reg = String(t.id).slice(0, 8), r = s.resumen || ctResumen(t);
     const empHtml = '<div class="emp"><b>' + esc(empresa).replace(/Doctor/i, '<span class="doc">Doctor</span>') + '</b><br>Record ' + esc(reg) + '</div>';
     const metaHtml = '<div class="meta"><div><b>Client</b>' + esc(s.trabajo.cliente || '—') + (s.trabajo.telefono ? '<span style="display:block; color:#5d6b7a;">' + esc(s.trabajo.telefono) + '</span>' : '') + '</div><div><b>Date</b>' + esc(s.trabajo.fecha || '') + '</div><div><b>Address</b>' + esc(s.trabajo.direccion || '—') + '</div><div><b>Crew</b>' + esc(s.trabajo.cuadrilla || s.trabajo.lider || '—') + '</div></div>';
-    const fila = o => { const acs = ctAcciones(o); const img = ctVistas[t.id + '|' + o.k] || '';
-      const origen = !o.nombre ? 'no name given' : (o.nombre_fuente === 'persona' ? ('name typed by the crew' + (o.nombre_en && o.nombre_en_fuente === 'iphone' ? '; translated on the phone' : (o.nombre_en && o.nombre_en_fuente === 'diccionario' ? '; translated by the app' : (o.nombre_en ? '' : ' (no English name)')))) : (o.nombre_fuente === 'ia-confirmado' ? 'suggested by the app, reviewed by the crew' : 'name suggested by the app'));
-      // En la hoja va el nombre en INGLES cuando lo hay (el que sugirio la app y la cuadrilla acepto);
-      // un nombre escrito a mano se imprime tal cual: no se inventa una traduccion.
-      const enIngles = (o.nombre_en && (o.nombre_en_fuente || o.nombre_fuente === 'ia' || o.nombre_fuente === 'ia-confirmado')) ? o.nombre_en : '';
-      const principal = enIngles || o.nombre || '';
-      return '<tr><td class="n">' + o.n + '</td><td><div class="pf">' + (img ? '<img src="' + img + '" alt="">' : '') + '</div></td><td class="it"><b>' + (principal ? esc(principal) : '(unnamed)') + '</b>' + ctHojaExtras(t, o) + (o.nota_en ? '<span>Note: ' + esc(o.nota_en) + '</span>' : (o.nota ? '<span>Note (in Spanish, as written by the crew): ' + esc(o.nota) + '</span>' : '')) + '<i>' + origen + '</i></td><td>' + acs.filter(a => a.grupo !== 'cat').map(a => '<span class="st" style="background:' + a.color + ';">' + a.en.toUpperCase() + '</span>').join(' ') + '</td></tr>'; };
+    // En la hoja va el nombre en INGLES cuando lo hay (el que sugirio la app y la cuadrilla acepto);
+    // un nombre escrito a mano se imprime tal cual: no se inventa una traduccion.
+    const nombreHoja = o => { const enIngles = (o.nombre_en && (o.nombre_en_fuente || o.nombre_fuente === 'ia' || o.nombre_fuente === 'ia-confirmado')) ? o.nombre_en : ''; return enIngles || o.nombre || ''; };
+    const notaDe = o => o.nota_en ? o.nota_en : (o.nota ? o.nota + ' (in Spanish, as written by the crew)' : '');
+    const conNota = objetos.filter(o => notaDe(o));
+    const tarjeta = o => { const acs = ctAcciones(o); const img = ctVistasPdf[t.id + '|' + o.k] || ctVistas[t.id + '|' + o.k] || '';
+      const principal = nombreHoja(o), cat = ctCarpetaDe(o), xs = Array.isArray(o.fotos) ? o.fotos : [];
+      return '<div class="tarj"><div class="foto">' + (img ? '<img src="' + img + '" alt="">' : '') + (xs.length ? '<span class="mas">' + ctHojaExtrasTexto(xs) + '</span>' : '') + (notaDe(o) ? '<span class="nt">Note</span>' : '') + '</div>'
+        + '<div class="tt"><b>#' + String(o.n).padStart(2, '0') + '</b> ' + (principal ? esc(principal) : '(unnamed)') + '</div>'
+        + '<div class="pl"><span class="sts">' + acs.filter(a => a.grupo !== 'cat').map(a => '<span class="st" style="background:' + a.color + ';">' + esc(a.k === 'danado' ? 'Already damaged' : a.en) + '</span>').join('') + '</span>' + (cat ? '<span class="cat">' + CT_CAT_CORTO[cat] + '</span>' : '') + '</div></div>'; };
+    const notasHtml = (de, a) => '<div class="notas"><h2>Item notes</h2>' + conNota.slice(de, a).map(o => '<p><b>#' + String(o.n).padStart(2, '0') + ' ' + esc(nombreHoja(o) || '(unnamed)') + '</b> — ' + esc(notaDe(o)) + '</p>').join('') + '</div>';
     const firmaHtml = () => '<div class="resu"><span><b>' + r.total + '</b>items</span>' + ((r.fotos || 0) > r.total ? '<span><b>' + r.fotos + '</b>photos</span>' : '') + CT_ACCIONES.filter(a => r[a.k] > 0 || a.k === 'pendiente').map(a => '<span><b>' + r[a.k] + '</b>' + a.en.toLowerCase() + '</span>').join('') + '</div>'
       + '<div class="aut"><h2>Client authorization</h2><p>' + esc(txt.en) + '</p><p class="en">' + (remota ? 'The client opened a link sent by ' + esc(empresa) + ', reviewed every photo on their own device and read this authorization in English and in Spanish before signing; both versions are kept in the record.' : 'The client was shown this authorization in Spanish and in English on the phone before signing; both versions are kept in the record.') + '</p>'
       + '<div class="firma"><div><div class="caja">' + (firmado && t.firma && t.firma.png ? '<img src="' + t.firma.png + '" alt="">' : '') + '</div><div class="lab">Signature' + (firmado ? ' · ' + esc(s.firmante.nombre) + (s.firmante.relacion ? ' · ' + esc(ctRelacionEn(s.firmante.relacion)) : '') : ' · ____________________') + '</div></div>'
@@ -42292,12 +42351,14 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
           ? '<b>Signed:</b> ' + esc(ctFechaBonitaEn(t.firma.firmado_at)) + ' (server time)<br>' + (remota ? '<b>Signed from:</b> the client\'s own device, through a link sent by ' + esc(s.trabajo.lider || empresa) + '<br><b>Photos reviewed by the client:</b> ' + (s.revision ? s.revision.mostradas + ' of ' + s.revision.total : '') + ', one by one<br>' : '<b>Presented by:</b> ' + esc(s.trabajo.lider || '—') + '<br><b>Photos shown:</b> ' + (s.revision ? s.revision.mostradas + ' of ' + s.revision.total : '') + ', one by one<br>') + '<b>Record:</b> ' + esc(reg) + ' · <b>Fingerprint:</b> ' + esc(String(t.firma.huella || '').slice(0, 12)) + '…' + esc(String(t.firma.huella || '').slice(-6))
           : '<b>Not signed yet.</b><br>Record: ' + esc(reg)) + '</div></div>'
       + '<div class="leg">' + esc(txt.leyenda_en) + (firmado ? ' Each photo\'s digital fingerprint is stored with this record; any later change to a photo or to this list would not match it.' : '') + '</div></div>';
+    const paginas = ctPaginarGrid(objetos, conNota.length);
     const n = paginas.length;
-    pila.innerHTML = paginas.map((p, i) => '<div class="ct-hoja" data-hoja="' + (i + 1) + '">'
+    pila.innerHTML = paginas.map((p, i) => '<div class="ct-hoja ct-grid3" data-hoja="' + (i + 1) + '">'
       + (!firmado ? '<div class="borrador">DRAFT<br>NOT SIGNED</div>' : '')
-      + '<div class="cab"><h1>Contents Inventory<small>' + (i === 0 ? 'what was shown to the client and what happened to each item' : (p.filas.length ? 'continued' : 'client authorization')) + '</small></h1>' + empHtml + '</div>'
-      + (i === 0 || !p.filas.length ? metaHtml : '')
-      + (p.filas.length ? '<table><thead><tr><th>#</th><th>Photo</th><th>Item</th><th>Status</th></tr></thead><tbody>' + p.filas.map((o, i) => ((conCarpetas && (i === 0 || ctCarpetaDe(o) !== ctCarpetaDe(p.filas[i - 1]))) ? ctHojaSeccion(o) : '') + fila(o)).join('') + '</tbody></table>' : '')
+      + '<div class="cab"><h1>Contents Inventory<small>' + (p.filas.length ? (i === 0 ? 'what was shown to the client and what happened to each item' : 'continued') : (p.notas ? 'item notes' : 'client authorization')) + '</small></h1>' + empHtml + '</div>'
+      + metaHtml
+      + (p.filas.length ? '<div class="rej">' + p.filas.map(tarjeta).join('') + '</div>' : '')
+      + (p.notas ? notasHtml(p.notas[0], p.notas[1]) : '')
       + (p.firma ? firmaHtml() : '')
       + (t.reimpresion ? '<div class="pie" style="bottom:40px; border:none; color:#c0392b; font-weight:700;"><span>REPRINT generated ' + esc(new Date().toISOString().slice(0, 10)) + ' with version ' + esc(typeof APP_BUILD !== 'undefined' ? APP_BUILD : '') + ' from record ' + esc(reg) + ' · fingerprint ' + esc(String((t.firma && t.firma.huella) || '').slice(0, 16)) + '…</span></div>' : '')
       + '<div class="pie"><span>' + esc(empresa) + ' · Contents Inventory · ' + esc(s.trabajo.cliente || '') + (s.trabajo.direccion ? ' · ' + esc(s.trabajo.direccion) : '') + (t.anterior ? ' · ADDENDUM to record ' + esc(String(t.anterior).slice(0, 8)) : '') + '</span><span>Page ' + (i + 1) + ' of ' + n + ' · Record ' + esc(reg) + '</span></div></div>').join('');
@@ -42308,6 +42369,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // Cada hoja por separado (una imagen alta de varias hojas revienta el canvas del iPhone).
   async function ctHojasImagenes(t){
     await ctPrecargarVistas(t);
+    await ctPrecargarPdf(t);
     const pila = buildContenidosPrintout(t);
     try{
       const imagenes = [];
