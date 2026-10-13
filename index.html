@@ -8598,7 +8598,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-14-B';
+  const APP_BUILD = '2026-10-14-C';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -18591,7 +18591,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     'cuarto de tv':'TV Room', 'sala de tv':'TV Room', 'cuarto de television':'TV Room',
     'bodega':'Storage Room', 'cuarto de bodega':'Storage Room',
     'cuarto de maquinas':'Utility Room', 'cuarto de servicio':'Utility Room',
-    'escaleras':'Stairs', 'escalera':'Stairs', 'gimnasio':'Gym', 'despensa':'Pantry'
+    'escaleras':'Stairs', 'escalera':'Stairs', 'gimnasio':'Gym', 'despensa':'Pantry',
+    // Los que se dicen al escanear (13-oct): el plano sale en inglés.
+    'cuarto de juegos':'Game Room', 'sala de juegos':'Game Room', 'entrada':'Entry', 'recibidor':'Foyer',
+    'vestibulo':'Foyer', 'vestidor':'Walk-in Closet', 'bano de la recamara':'Master Bathroom',
+    'cocineta':'Kitchenette', 'patio':'Patio', 'terraza':'Deck', 'porche':'Porch', 'balcon':'Balcony',
+    'cuarto':'Room', 'lavado':'Laundry Room', 'clóset':'Closet', 'sala comedor':'Living / Dining Room',
+    'cuarto de la caldera':'Utility Room', 'cuarto del calentador':'Utility Room'
   };
   function medAInglesElCuarto(nombre){
     const crudo = String(nombre || '').trim();
@@ -18610,6 +18616,30 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // No se pudo traducir: se respeta lo que él escribió. El campo libre lo
     // acepta, y es preferible su nombre a perder el cuarto.
     return crudo;
+  }
+
+  // EL NOMBRE DICHO AL ESCANEAR SALE EN INGLÉS EN EL PLANO (su pedido del
+  // 13-oct). Primero se le quitan las muletillas del principio ("Sí, en la
+  // cocina" se había guardado como "Sí en la cocina"); después se traduce con
+  // la misma tabla que usa Medidas para el seguro. Lo que no está en la tabla
+  // se respeta tal cual, con mayúscula.
+  function fpNombreDeCuartoEnIngles(nombre){
+    const original = String(nombre || '').trim();
+    let t = original;
+    for(let i = 0; i < 5; i++){
+      const antes = t;
+      t = t.replace(/^[\s,.;:¡!¿?]+/, '')
+           .replace(/^(s[ií]|no|ok|okay|bueno|pues|ya|ahora|eh)(?=[\s,.]|$)[\s,.]*/i, '')
+           .replace(/^(ahora\s+)?(estoy|estamos)\s+en\s+((la|el)\s+)?/i, '')
+           .replace(/^(esto\s+es|es|vamos\s+a)\s+(la|el|al)\s+/i, '')
+           .replace(/^(en\s+)?(la|el)\s+/i, '');
+      if(t === antes) break;
+    }
+    t = t.replace(/[\s,.;:¡!¿?]+$/, '');
+    if(!t) return original;
+    const en = medAInglesElCuarto(t);
+    const out = en || t;
+    return out.charAt(0).toUpperCase() + out.slice(1);
   }
 
   // ============ EL PLANO Y LAS MEDIDAS, HABLANDO ENTRE ELLOS ============
@@ -22263,7 +22293,10 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     try{
       // La planta viaja a la cámara: la barra de arriba y la voz dicen "2do
       // Piso" en vez de "Nivel 1", que es lo mismo que va a leer en Medidas.
-      const result = await RoomScan.scan({ nivelBase: fpNivelBase || '' });
+      // Los niveles del proyecto viajan a la bandeja de la cámara; el que se
+      // escoja ahí es el que manda (puede cambiarlo sin salir).
+      const result = await RoomScan.scan({ nivelBase: fpNivelBase || '', niveles: FP_PLANTAS });
+      if(result && result.nivelBase) fpNivelBase = result.nivelBase;
       if(result.cancelled){
         if(result.error) alert(result.error);
         return;
@@ -22288,7 +22321,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       (result.rooms||[]).forEach(room => {
         if(room.voiceName && !fpEsOrdenDeCuarto(room.voiceName)){
           // El nombre dicho reemplaza al que hubiera (nunca un segundo rótulo) y se centra en el cuarto.
-          room.roomName = room.voiceName;
+          room.roomName = fpNombreDeCuartoEnIngles(room.voiceName);
           room._namedByVoice = true;
           delete room._labelOffsetPx;
         }else{
