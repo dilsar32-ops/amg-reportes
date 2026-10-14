@@ -8598,7 +8598,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-14-D';
+  const APP_BUILD = '2026-10-14-E';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12226,7 +12226,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         (Array.isArray(r.objects) ? r.objects : []).forEach(o => { if(o && typeof o === 'object'){ o.rotationDeg = +o.rotationDeg || 0; } });
       });
       floorplanAlignRooms(d);
-      if(!d._handEdited){ floorplanRectifyWalls(d); floorplanRefineGeometry(d); floorplanCloseCorners(d); }
+      if(!d._handEdited){ floorplanRectifyWalls(d); floorplanRefineGeometry(d); floorplanCloseCorners(d); try{ fpResolverParedesAjenas(d); }catch(e){ console.warn('paredes ajenas', e); } }
       fpCleanPhantomSpaceLabels(d);
       floorplanDetectSubAreas(d);
       tok.data = d;
@@ -21420,7 +21420,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     try{ localStorage.setItem(FLOORPLAN_DRAFT_KEY, e.id); }catch(e2){}
     fpResetUndoStack();
     floorplanAlignRooms(floorplanData);
-    if(!floorplanData._handEdited){ floorplanRectifyWalls(floorplanData); floorplanRefineGeometry(floorplanData); floorplanCloseCorners(floorplanData); }
+    if(!floorplanData._handEdited){ floorplanRectifyWalls(floorplanData); floorplanRefineGeometry(floorplanData); floorplanCloseCorners(floorplanData); try{ fpResolverParedesAjenas(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } }
     const goneNames = fpCleanPhantomSpaceLabels(floorplanData);
     if(goneNames && goneNames.length){ floorplanData._phantomLabelsRemoved = goneNames; saveFloorplanDraft(); }
     renderFloorplan(floorplanData);
@@ -22082,6 +22082,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
           floorplanRectifyWalls(floorplanData);
           floorplanRefineGeometry(floorplanData);
           floorplanCloseCorners(floorplanData);
+          try{ fpResolverParedesAjenas(floorplanData); }catch(e){ console.warn('paredes ajenas', e); }
         }
         const gone = fpCleanPhantomSpaceLabels(floorplanData);
         if(gone && gone.length){ floorplanData._phantomLabelsRemoved = gone; saveFloorplanDraft(); }
@@ -22318,6 +22319,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // Las esquinas chicas que no cerraron se cierran aquí, con aviso; las
       // grandes se proponen en Plan review (asistente de esquinas).
       floorplanCloseCorners(result);
+      // Las paredes del cuarto de al lado que se vieron por una abertura se
+      // le devuelven a su dueño (13-oct, el Hallway de Harold encima de la sala).
+      try{ fpResolverParedesAjenas(result); }catch(e){ console.warn('paredes ajenas', e); }
       (result.rooms||[]).forEach(room => {
         if(room.voiceName && !fpEsOrdenDeCuarto(room.voiceName)){
           // El nombre dicho reemplaza al que hubiera (nunca un segundo rótulo) y se centra en el cuarto.
@@ -28475,9 +28479,16 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // si entrara, el encadenado la cosería al anillo y la hoja imprimiría un
     // cuarto en ocho con piso y pared falsos - sin que nadie partiera nada.
     // Las particiones ya partidas (con _studPairId) sí son borde de su mitad.
-    const walls = (room.walls||[]).filter(w => w.start && w.end && !(w._studWall && !w._studPairId)
+    // _ajena: una pared que este cuarto solo VIO por una abertura (es del
+    // cuarto de al lado) no es su borde. _recorte: de una pared juntada de
+    // dos cuartos, solo el tramo que es de este. Ver fpResolverParedesAjenas.
+    const walls = (room.walls||[]).map(w => (w && w._recorte && w._recorte.start && w._recorte.end) ? Object.assign({}, w, { start: w._recorte.start, end: w._recorte.end }) : w).filter(w => w.start && w.end && !w._ajena && !(w._studWall && !w._studPairId)
       && Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) > 0.05);
-    if(walls.length < 3) return walls.map(w => w.start);
+    // Dos paredes ya forman un cuarto SOLO cuando lo demás eran paredes
+    // ajenas: un pasillo abierto en las dos puntas, al devolverle a la sala
+    // y al foyer lo que vio de ellos, se queda con sus dos paredes largas.
+    if(walls.length < 3 && !(walls.length === 2 && (room._sinAjenas || (room.walls||[]).some(w => w && w._ajena))))
+      return walls.map(w => w.start);
     const tol = 1.0;
     const used = new Array(walls.length).fill(false);
     const chains = [];
@@ -28576,6 +28587,430 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   //
   // Importa ahora porque el perimetro se volvio un numero que se cobra:
   // en el Bathroom la pared salia 334.8 pies cuadrados en vez de ~195.
+  // ---- PAREDES AJENAS (13-oct, el Hallway de Harold) ----
+  // RoomPlan le da a cada cuarto TODAS las paredes que vio, incluidas las
+  // del cuarto de al lado que se ven por una abertura. Un pasillo abierto a
+  // la sala "ve" la pared del fondo de la sala, y el encadenado del
+  // contorno se las cosía: el Hallway salía con 88 sq ft, 66 de ellos
+  // encima del Living Room, y su rótulo caía en la sala.
+  // Una pared que dos cuartos tienen es una de dos cosas: la pared que los
+  // separa (cada uno de un lado: se queda en los dos) o una pared que uno
+  // de ellos solo VIO (se queda en su dueño). Aquí se decide cuál, solo
+  // donde los dos cuartos se enciman, y se prueba cada combinación: gana
+  // la que deja a los dos cuartos sin encimarse, con sus puertas en su
+  // propio borde y con el contorno más cerrado. La pared no se borra:
+  // se marca _ajena y deja de contar para el contorno de ESE cuarto.
+  // La parte de la pared que cuenta para el contorno de SU cuarto: toda,
+  // o solo el pedazo que le queda si se le recortó la parte que es del
+  // cuarto de al lado (RoomPlan junta en una sola pared dos tramos derechos
+  // de dos cuartos distintos).
+  function fpTramoPropio(w){ return (w && w._recorte && w._recorte.start && w._recorte.end) ? w._recorte : w; }
+  function fpParedAjenaPar(a0, b0){
+    const a = fpTramoPropio(a0), b = fpTramoPropio(b0);
+    const ax = a.end.x-a.start.x, ay = a.end.y-a.start.y, la = Math.hypot(ax,ay);
+    const bx = b.end.x-b.start.x, by = b.end.y-b.start.y, lb = Math.hypot(bx,by);
+    if(la < 0.8 || lb < 0.8) return 0;
+    const ux = ax/la, uy = ay/la;
+    if(Math.abs(ux*bx/lb + uy*by/lb) < 0.995) return 0;
+    const nx = -uy, ny = ux;
+    const off = p => (p.x-a.start.x)*nx + (p.y-a.start.y)*ny;
+    if(Math.abs(off(b.start)) > 0.5 || Math.abs(off(b.end)) > 0.5) return 0;
+    const t = p => (p.x-a.start.x)*ux + (p.y-a.start.y)*uy;
+    const lo = Math.max(0, Math.min(t(b.start), t(b.end))), hi = Math.min(la, Math.max(t(b.start), t(b.end)));
+    const ov = hi - lo;
+    return ov >= Math.min(1.0, 0.5*Math.min(la, lb)) ? ov : 0;
+  }
+  // cambios: Map pared -> 'x' (no cuenta) o {start,end} (solo ese tramo).
+  function fpContornoSin(room, cambios){
+    const walls = [];
+    for(const w of (room.walls||[])){
+      if(w._ajena) continue;
+      const c = cambios && cambios.get(w);
+      if(c === 'x') continue;
+      const t = c || (w._recorte ? fpTramoPropio(w) : null);
+      walls.push(t ? Object.assign({}, w, { start: t.start, end: t.end, _recorte: undefined }) : w);
+    }
+    const gi = {};
+    const poly = fpOrderedRoomPolygon(Object.assign({}, room, { walls, _sinAjenas: walls.length < (room.walls||[]).length }), gi);
+    const puentes = (gi.bridges||[]).reduce((s,d) => s + d, 0);
+    return { poly, puentes, cruces: fpCrucesContorno(poly) };
+  }
+  function fpCajaPoly(p){
+    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+    for(const q of p){ if(q.x<x0)x0=q.x; if(q.y<y0)y0=q.y; if(q.x>x1)x1=q.x; if(q.y>y1)y1=q.y; }
+    return [x0,y0,x1,y1];
+  }
+  // Área común de dos contornos, contada en una rejilla de 0.3 ft.
+  function fpEncimeSqFt(A, B, paso){
+    if(!A || !B || A.length < 3 || B.length < 3) return 0;
+    const a = fpCajaPoly(A), b = fpCajaPoly(B);
+    const x0 = Math.max(a[0],b[0]), y0 = Math.max(a[1],b[1]), x1 = Math.min(a[2],b[2]), y1 = Math.min(a[3],b[3]);
+    if(x1 <= x0 || y1 <= y0) return 0;
+    const s = paso || 0.3; let n = 0;
+    for(let x = x0+s/2; x < x1; x += s) for(let y = y0+s/2; y < y1; y += s)
+      if(fpPointInPolygon({x,y}, A) && fpPointInPolygon({x,y}, B)) n++;
+    return n*s*s;
+  }
+  // Lados del contorno que se cruzan entre sí: un contorno de verdad no se
+  // cruza nunca, uno en ocho sí (y su área ya no significa nada).
+  function fpCrucesContorno(poly){
+    if(!poly || poly.length < 4) return 0;
+    const n = poly.length; let c = 0;
+    const cruza = (p1,p2,p3,p4) => {
+      const d = (a,b,q) => (b.x-a.x)*(q.y-a.y) - (b.y-a.y)*(q.x-a.x);
+      const d1 = d(p3,p4,p1), d2 = d(p3,p4,p2), d3 = d(p1,p2,p3), d4 = d(p1,p2,p4);
+      return ((d1 > 1e-9 && d2 < -1e-9) || (d1 < -1e-9 && d2 > 1e-9)) && ((d3 > 1e-9 && d4 < -1e-9) || (d3 < -1e-9 && d4 > 1e-9));
+    };
+    for(let i = 0; i < n; i++) for(let j = i+2; j < n; j++){
+      if(i === 0 && j === n-1) continue;
+      if(cruza(poly[i], poly[(i+1)%n], poly[j], poly[(j+1)%n])) c++;
+    }
+    return c;
+  }
+  function fpDistAlBorde(pt, poly){
+    let best = Infinity;
+    for(let i = 0; i < poly.length; i++){
+      const a = poly[i], b = poly[(i+1)%poly.length];
+      const dx = b.x-a.x, dy = b.y-a.y, L2 = dx*dx+dy*dy;
+      const t = L2 ? Math.max(0, Math.min(1, ((pt.x-a.x)*dx+(pt.y-a.y)*dy)/L2)) : 0;
+      best = Math.min(best, Math.hypot(pt.x-(a.x+t*dx), pt.y-(a.y+t*dy)));
+    }
+    return best;
+  }
+  // Puertas y aberturas del cuarto que NO quedan en su propio borde.
+  function fpPuertasFuera(room, poly){
+    if(!poly || poly.length < 3) return 99;
+    let n = 0;
+    for(const k of ['doors','openings']) for(const o of (room[k]||[])){
+      if(!o || !o.position || o._removed) continue;
+      if(fpDistAlBorde(o.position, poly) > 0.75) n++;
+    }
+    return n;
+  }
+  const K_HUECO = 0.5;
+  function fpResolverParedesAjenas(data){
+    const hechas = [];
+    if(!data || !Array.isArray(data.rooms) || data.merged === false) return hechas;
+    const vivos = data.rooms.filter(r => r && !r.deleted && Array.isArray(r.walls) && r.walls.length);
+    const nivel = r => r.level || 1;
+    const areaDe = p => (p && p.length >= 3) ? fpPolygonAreaSqFt(p) : 0;
+    let base = new Map();
+    // Una pared dibujada a mano o deducida por la app nunca se toca: esas
+    // las puso alguien a propósito.
+    const libre = w => w && w.start && w.end && !w._ajena && !w._added && !w._inferido;
+    // 1. Qué cuartos se enciman, y los grupos que forman (un pasillo entre
+    //    el foyer y la sala es UN grupo de tres: si se arregla de a dos, el
+    //    primero se queda con el pasillo).
+    for(let ronda = 0; ronda < 4; ronda++){
+    base = new Map(vivos.map(r => [r, fpContornoSin(r, null)]));
+    const antes = hechas.length;
+    const enc0 = new Map(), vecinos = new Map(vivos.map(r => [r, new Set()]));
+    const parejas = [];
+    for(let i = 0; i < vivos.length; i++) for(let j = i+1; j < vivos.length; j++){
+      const A = vivos[i], B = vivos[j];
+      if(nivel(A) !== nivel(B)) continue;
+      const pA = base.get(A).poly, pB = base.get(B).poly;
+      const e = fpEncimeSqFt(pA, pB);
+      if(e < Math.max(3, 0.05*Math.min(areaDe(pA), areaDe(pB)))) continue;
+      enc0.set(A.walls, e); vecinos.get(A).add(B); vecinos.get(B).add(A); parejas.push({ g: [A, B], e });
+    }
+    const visto = new Set(), grupos = [];
+    for(const r of vivos){
+      if(visto.has(r) || !vecinos.get(r).size) continue;
+      const g = [], cola = [r]; visto.add(r);
+      while(cola.length){ const x = cola.pop(); g.push(x); for(const y of vecinos.get(x)) if(!visto.has(y)){ visto.add(y); cola.push(y); } }
+      grupos.push(g);
+    }
+    // Grupos de hasta 3 cuartos se resuelven juntos; uno más grande, de a
+    // dos (de la pareja que más se encima a la que menos) y otra ronda.
+    const tareas = [];
+    for(const g0 of grupos){
+      if(g0.length <= 4) tareas.push(g0);
+      else parejas.filter(p => g0.includes(p.g[0])).sort((a, b) => b.e - a.e).forEach(p => tareas.push(p.g));
+    }
+    for(const g of tareas){
+      if(g.length === 2 && fpEncimeSqFt(fpContornoSin(g[0], null).poly, fpContornoSin(g[1], null).poly) < 3) continue;
+      for(const R of g) base.set(R, fpContornoSin(R, null));
+      // 2. Las paredes que dos cuartos del grupo tienen a la vez.
+      const pares = [];
+      for(let i = 0; i < g.length; i++) for(let j = i+1; j < g.length; j++)
+        for(const wa of g[i].walls) if(libre(wa)) for(const wb of g[j].walls) if(libre(wb)){
+          const ov = fpParedAjenaPar(wa, wb);
+          if(ov) pares.push({ A: g[i], wa, B: g[j], wb, ov });
+        }
+      // También contra los cuartos de afuera del grupo: esos no se tocan
+      // (conservan su copia), pero la copia de aquí puede ser prestada de ellos.
+      for(const R of g) for(const O of vivos){
+        if(g.includes(O) || nivel(O) !== nivel(R)) continue;
+        for(const wa of R.walls) if(libre(wa)) for(const wb of O.walls) if(libre(wb)){
+          const ov = fpParedAjenaPar(wa, wb);
+          if(ov) pares.push({ A: R, wa, B: O, wb, ov, afuera: true });
+        }
+      }
+      if(!pares.length) continue;
+      const largo = w => { const t = fpTramoPropio(w); return Math.hypot(t.end.x-t.start.x, t.end.y-t.start.y); };
+      const otros = vivos.filter(r => !g.includes(r) && g.some(x => nivel(x) === nivel(r)));
+      // Lo que se le puede hacer a cada pared en disputa: dejarla, quitarla,
+      // o -si el otro cuarto solo tiene una punta de ella- recortarla hasta
+      // donde empieza la copia del otro.
+      const opciones = (R, w) => {
+        const ops = ['', 'x'];
+        const t = fpTramoPropio(w);
+        const L = Math.hypot(t.end.x-t.start.x, t.end.y-t.start.y);
+        if(L < 2) return ops;
+        const ux = (t.end.x-t.start.x)/L, uy = (t.end.y-t.start.y)/L;
+        const en = s => ({ x: t.start.x + ux*s, y: t.start.y + uy*s });
+        const ya = new Set();
+        for(const p of pares){
+          const otra = p.wa === w ? p.wb : (p.wb === w ? p.wa : null);
+          if(!otra) continue;
+          const o = fpTramoPropio(otra);
+          const ss = [o.start, o.end].map(q => Math.max(0, Math.min(L, (q.x-t.start.x)*ux + (q.y-t.start.y)*uy)));
+          const s0 = Math.min(...ss), s1 = Math.max(...ss);
+          let op = null;
+          if(s0 <= 0.3 && L - s1 >= 1.0 && s1 >= 1.0) op = { start: en(s1), end: { x: t.end.x, y: t.end.y } };
+          else if(L - s1 <= 0.3 && s0 >= 1.0 && L - s0 >= 1.0) op = { start: { x: t.start.x, y: t.start.y }, end: en(s0) };
+          if(!op) continue;
+          const k = op.start.x.toFixed(1) + ',' + op.start.y.toFixed(1) + ',' + op.end.x.toFixed(1) + ',' + op.end.y.toFixed(1);
+          if(!ya.has(k)){ ya.add(k); ops.push(op); }
+        }
+        // También donde otra pared (de cualquier cuarto del grupo) llega en T:
+        // ahí es donde una pared juntada de dos cuartos se parte de verdad
+        // (el pedazo de tabique a los lados de un arco).
+        for(const C of g) for(const o of (C.walls||[])){
+          if(o === w || o._ajena || !o.start || !o.end) continue;
+          const to = fpTramoPropio(o);
+          for(const q of [to.start, to.end]){
+            const s = (q.x-t.start.x)*ux + (q.y-t.start.y)*uy;
+            if(s < 1.0 || s > L-1.0) continue;
+            if(Math.abs((q.x-t.start.x)*(-uy) + (q.y-t.start.y)*ux) > 0.35) continue;
+            for(const op of [{ start: { x: t.start.x, y: t.start.y }, end: en(s) }, { start: en(s), end: { x: t.end.x, y: t.end.y } }]){
+              const k = op.start.x.toFixed(1) + ',' + op.start.y.toFixed(1) + ',' + op.end.x.toFixed(1) + ',' + op.end.y.toFixed(1);
+              if(!ya.has(k) && ops.length < 8){ ya.add(k); ops.push(op); }
+            }
+          }
+        }
+        return ops;
+      };
+      // Una pared "completa" (pegada a otra pared del mismo cuarto en sus
+      // dos puntas) casi siempre es de ese cuarto; las que se ven por una
+      // abertura suelen quedar con una punta suelta o cortadas. Quitar una
+      // completa cuesta más.
+      const completa = (R, w) => {
+        const t = fpTramoPropio(w);
+        const pegada = q => (R.walls||[]).some(o => o !== w && !o._ajena && o.start && o.end && [fpTramoPropio(o).start, fpTramoPropio(o).end].some(e => Math.hypot(e.x-q.x, e.y-q.y) <= 0.5));
+        return pegada(t.start) && pegada(t.end);
+      };
+      // Semilla de cada cuarto: el pedazo de su contorno que NINGÚN otro
+      // cuarto del grupo reclama. Ese pedazo es suyo seguro; el contorno
+      // que se le elija lo tiene que contener, y el de los otros no.
+      const semilla = new Map();
+      // Solo si todos los contornos del grupo son contornos de verdad (sin
+      // cruzarse): uno cruzado no cubre su propio piso, y el pedazo que
+      // 'nadie más reclama' resulta ser el piso del cuarto roto.
+      if(g.every(R => !base.get(R).cruces)) for(const R of g){
+        const P = base.get(R).poly; if(!P || P.length < 3) continue;
+        const [x0, y0, x1, y1] = fpCajaPoly(P), s = 0.5, pts = [];
+        for(let x = x0+s/2; x < x1; x += s) for(let y = y0+s/2; y < y1; y += s){
+          const q = { x, y };
+          if(fpPointInPolygon(q, P) && !g.some(o => o !== R && nivel(o) === nivel(R) && fpPointInPolygon(q, base.get(o).poly))) pts.push(q);
+        }
+        if(pts.length*s*s < Math.max(6, 0.15*areaDe(P))) continue;
+        const cx = pts.reduce((a, q) => a + q.x, 0)/pts.length, cy = pts.reduce((a, q) => a + q.y, 0)/pts.length;
+        let best = pts[0], bd = Infinity;
+        for(const q of pts){ const dd = Math.hypot(q.x-cx, q.y-cy); if(dd < bd){ bd = dd; best = q; } }
+        semilla.set(R, best);
+      }
+      const castigoSemilla = (R, poly) => {
+        let c = 0;
+        for(const [S, q] of semilla){
+          if(nivel(S) !== nivel(R)) continue;
+          const dentro = fpPointInPolygon(q, poly);
+          if(S === R && !dentro) c += 60;
+          if(S !== R && dentro) c += 60;
+        }
+        return c;
+      };
+      // Cuánto cuesta quitarle una pared a un cuarto. La copia que el otro
+      // cuarto tiene MÁS LARGA y que la cubre entera es la buena: la corta
+      // es lo que se alcanzó a ver por la abertura (así pasa en todos los
+      // planos reales: el Hallway vio 11.7 ft de los 20 de la sala).
+      const cubre = (largaW, cortaW) => {
+        const a = fpTramoPropio(largaW), b = fpTramoPropio(cortaW);
+        const La = Math.hypot(a.end.x-a.start.x, a.end.y-a.start.y), Lb = Math.hypot(b.end.x-b.start.x, b.end.y-b.start.y);
+        if(La < Lb + 1) return false;
+        return fpParedAjenaPar(a, b) >= Lb - 0.5;
+      };
+      const costoQuitar = (R, w) => {
+        let c = completa(R, w) ? 3 : 0.5;
+        const socios = pares.filter(p => p.wa === w || p.wb === w).map(p => p.wa === w ? p.wb : p.wa);
+        if(socios.some(o => cubre(o, w))) c *= 0.3;
+        // Solo si ES la copia más larga: si otro cuarto tiene una igual de
+        // larga, esta también pudo ser vista entera desde afuera.
+        const L = largo(w);
+        if(socios.some(o => cubre(w, o)) && socios.every(o => largo(o) < L - 0.5)) c += 6;
+        return c;
+      };
+      // Piso que un cuarto suelta y que ningún otro cuarto reclama: eso no
+      // es devolver lo prestado, es abrirle un hueco al plano.
+      // (Los puntos que serían hueco se calculan una vez por cuarto; cada
+      // contorno candidato solo cuenta cuáles deja fuera.)
+      const puntosSolos = new Map();
+      const huecoNuevo = (R, poly) => {
+        if(!puntosSolos.has(R)){
+          const P = base.get(R).poly, pts = [];
+          if(P && P.length >= 3){
+            const [x0, y0, x1, y1] = fpCajaPoly(P), s = 0.6;
+            const otrosP = vivos.filter(o => o !== R && nivel(o) === nivel(R)).map(o => base.get(o).poly).filter(p => p && p.length >= 3).map(p => ({ p, c: fpCajaPoly(p) }));
+            for(let x = x0+s/2; x < x1; x += s) for(let y = y0+s/2; y < y1; y += s){
+              const q = { x, y };
+              if(!fpPointInPolygon(q, P)) continue;
+              if(otrosP.some(o => x >= o.c[0] && x <= o.c[2] && y >= o.c[1] && y <= o.c[3] && fpPointInPolygon(q, o.p))) continue;
+              pts.push(q);
+            }
+          }
+          puntosSolos.set(R, pts);
+        }
+        let n = 0;
+        for(const q of puntosSolos.get(R)) if(!fpPointInPolygon(q, poly)) n++;
+        return n*0.36;
+      };
+      // 3. Cada cuarto por separado: los contornos que puede tener quitando o
+      //    recortando sus paredes en disputa. Se quedan los mejores (puertas
+      //    en su borde, sin cruzarse, lo más cerrado).
+      const tope = g.length <= 2 ? 64 : (g.length === 3 ? 32 : 16);
+      const cand = new Map(), encBase = new Map();
+      for(const R of g){
+        const c0 = base.get(R);
+        let d = [...new Set(pares.flatMap(p => p.A === R ? [p.wa] : (p.B === R ? [p.wb] : [])))]
+          .sort((x, y) => largo(y) - largo(x)).slice(0, 10)
+          .map(w => ({ w, ops: opciones(R, w), cost: costoQuitar(R, w) }));
+        const total = () => d.reduce((p, x) => p * x.ops.length, 1);
+        while(total() > 4096) d = d.slice(0, -1);
+        // Un cuarto no se puede quedar con casi nada: eso no es resolver un
+        // encime, es regalarle el cuarto entero al otro.
+        const piso = Math.max(4, 0.15*areaDe(c0.poly));
+        const vistos = new Map();
+        const n = total();
+        for(let m = 0; m < n; m++){
+          const s = new Map(); let k = m, costo = 0;
+          for(const x of d){ const o = x.ops[k % x.ops.length]; k = Math.floor(k / x.ops.length); if(o){ s.set(x.w, o); costo += (o === 'x' ? x.cost : 1.5); } }
+          const c = s.size ? fpContornoSin(R, s) : c0;
+          if(areaDe(c.poly) < piso && s.size) continue;
+          const firma = c.poly.map(q => q.x.toFixed(1) + ',' + q.y.toFixed(1)).join(' ');
+          const fuera = fpPuertasFuera(R, c.poly);
+          const intr = 25*fuera + 40*c.cruces + c.puentes + costo + castigoSemilla(R, c.poly);
+          const prev = vistos.get(firma);
+          if(!prev || intr < prev.intr) vistos.set(firma, { s, poly: c.poly, cruces: c.cruces, fuera, intr, pc: c });
+        }
+        // El cuarto tal como está siempre entra (es contra lo que se compara).
+        const f0 = fpPuertasFuera(R, c0.poly);
+        const vacio = { s: new Map(), poly: c0.poly, cruces: c0.cruces, fuera: f0, intr: 25*f0 + 40*c0.cruces + c0.puentes + castigoSemilla(R, c0.poly), pc: c0 };
+        // El hueco cuesta medirlo: se mide solo en los que ya van mejor.
+        const pre = [...vistos.values()].filter(x => x.s.size).sort((x, y) => x.intr - y.intr).slice(0, tope*3);
+        for(const x of pre) x.intr += K_HUECO*huecoNuevo(R, x.poly);
+        const lista = [vacio].concat(pre.sort((x, y) => x.intr - y.intr).slice(0, tope));
+        for(const k of lista){
+          k.extra = 0;
+          if(k.s.size) for(const C of otros) if(nivel(C) === nivel(R)){ const pc = base.get(C).poly; const kk = R.roomName + '|' + C.roomName; if(!encBase.has(kk)) encBase.set(kk, fpEncimeSqFt(c0.poly, pc, 0.5)); k.extra += Math.max(0, fpEncimeSqFt(k.poly, pc, 0.5) - encBase.get(kk)); }
+        }
+        cand.set(R, lista);
+      }
+      // ¿El cuarto se quedó con el tramo que comparte con la otra copia?
+      const conservaMemo = new Map();
+      const conserva = (op, otra) => {
+        if(!op) return true;
+        if(op === 'x') return false;
+        let m = conservaMemo.get(op); if(!m){ m = new Map(); conservaMemo.set(op, m); }
+        if(!m.has(otra)){
+          const o = fpTramoPropio(otra);
+          m.set(otra, fpParedAjenaPar({ start: op.start, end: op.end }, o) > 0.5 || fpParedAjenaPar(o, { start: op.start, end: op.end }) > 0.5);
+        }
+        return m.get(otra);
+      };
+      // De qué cuarto del grupo es cada pared (las de afuera no se tocan).
+      const dueno = new Map();
+      g.forEach((R, i) => (R.walls||[]).forEach(w => dueno.set(w, i)));
+      const paresDentro = pares.filter(p => !p.afuera);
+      // 4. Todas las combinaciones del grupo: gana la que deja a los
+      //    cuartos sin encimarse, con sus puertas en su propio borde y con
+      //    el contorno más cerrado.
+      // Cada contorno candidato se pinta UNA vez en una rejilla común de
+      // medio pie; el encime de dos candidatos es contar las celdas que los
+      // dos pintaron (miles de combinaciones en una casa grande).
+      let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+      for(const R of g) for(const k of cand.get(R)){ const c = fpCajaPoly(k.poly); gx0 = Math.min(gx0, c[0]); gy0 = Math.min(gy0, c[1]); gx1 = Math.max(gx1, c[2]); gy1 = Math.max(gy1, c[3]); }
+      const PASO = 0.5, nx = Math.max(1, Math.ceil((gx1-gx0)/PASO)), ny = Math.max(1, Math.ceil((gy1-gy0)/PASO));
+      const mascara = poly => {
+        const m = new Uint8Array(nx*ny), c = fpCajaPoly(poly);
+        const i0 = Math.max(0, Math.floor((c[0]-gx0)/PASO)), i1 = Math.min(nx-1, Math.ceil((c[2]-gx0)/PASO));
+        const j0 = Math.max(0, Math.floor((c[1]-gy0)/PASO)), j1 = Math.min(ny-1, Math.ceil((c[3]-gy0)/PASO));
+        for(let i = i0; i <= i1; i++) for(let j = j0; j <= j1; j++)
+          if(fpPointInPolygon({ x: gx0 + (i+0.5)*PASO, y: gy0 + (j+0.5)*PASO }, poly)) m[j*nx + i] = 1;
+        return m;
+      };
+      for(const R of g) for(const k of cand.get(R)) k.m = mascara(k.poly);
+      const encCache = new Map();
+      const encEntre = (i, a, j, b) => {
+        const k = i + ':' + a + '|' + j + ':' + b;
+        if(!encCache.has(k)){
+          const ma = cand.get(g[i])[a].m, mb = cand.get(g[j])[b].m;
+          let n = 0; for(let t = 0; t < ma.length; t++) n += ma[t] & mb[t];
+          encCache.set(k, n*PASO*PASO);
+        }
+        return encCache.get(k);
+      };
+      const listas = g.map(R => cand.get(R));
+      const idx = new Array(g.length).fill(0);
+      let mejor = null, inicial = null;
+      const vacioIdx = listas.map(l => l.findIndex(x => !x.s.size));
+      const evaluar = sel => {
+        const elegido = sel.map((a, i) => listas[i][a]);
+        // Alguien se tiene que quedar con cada pared: si los dos de un par la
+        // sueltan, vale solo si un tercer cuarto conserva su copia.
+        const opDe = w => { const i = dueno.get(w); return i == null ? undefined : elegido[i].s.get(w); };
+        for(const p of paresDentro){
+          if(conserva(opDe(p.wa), p.wb) || conserva(opDe(p.wb), p.wa)) continue;
+          const tercero = pares.some(q => q !== p && ((q.wa === p.wa && q.B !== p.B && conserva(opDe(q.wb), p.wa)) || (q.wb === p.wa && q.A !== p.B && conserva(opDe(q.wa), p.wa)) || (q.wa === p.wb && q.B !== p.A && conserva(opDe(q.wb), p.wb)) || (q.wb === p.wb && q.A !== p.A && conserva(opDe(q.wa), p.wb))));
+          if(!tercero) return null;
+        }
+        let enc = 0, intr = 0, fuera = 0, cruces = 0;
+        for(let i = 0; i < g.length; i++){
+          intr += elegido[i].intr; enc += elegido[i].extra; fuera += elegido[i].fuera; cruces += elegido[i].cruces;
+          for(let j = i+1; j < g.length; j++) if(nivel(g[i]) === nivel(g[j])) enc += encEntre(i, sel[i], j, sel[j]);
+        }
+        return { sel: sel.slice(), enc, fuera, cruces, nota: 10*enc + intr };
+      };
+      // Ramificar y acotar: el encime nunca resta, así que si lo que va
+      // sumado de los cuartos ya elegidos más lo mínimo de los que faltan
+      // no le gana a la mejor, esa rama ni se mira.
+      const minIntr = listas.map(l => Math.min(...l.map(x => x.intr)));
+      const resto = minIntr.map((_, k) => minIntr.slice(k).reduce((a, b) => a + b, 0)).concat([0]);
+      const recorrer = (k, suma) => {
+        if(mejor && suma + resto[k] >= mejor.nota) return;
+        if(k === g.length){ const r = evaluar(idx); if(r && (!mejor || r.nota < mejor.nota)) mejor = r; return; }
+        for(let a = 0; a < listas[k].length; a++){ idx[k] = a; recorrer(k+1, suma + listas[k][a].intr); }
+      };
+      recorrer(0, 0);
+      if(vacioIdx.every(v => v >= 0)) inicial = evaluar(vacioIdx);
+      if(!mejor || !inicial) continue;
+      // Solo si de verdad arregla: el encime baja a la mitad o menos y
+      // ninguna puerta se queda fuera de su cuarto por el cambio.
+      if(!(mejor.nota < inicial.nota - 5 && mejor.enc <= inicial.enc*0.5 && mejor.fuera <= inicial.fuera && mejor.cruces <= inicial.cruces)) continue;
+      mejor.sel.forEach((a, i) => {
+        const R = g[i];
+        for(const [w, o] of listas[i][a].s){
+          if(o === 'x'){ w._ajena = true; delete w._recorte; }
+          else w._recorte = { start: { x: o.start.x, y: o.start.y }, end: { x: o.end.x, y: o.end.y } };
+          const p = pares.find(q => q.wa === w || q.wb === w);
+          hechas.push({ cuarto: R.roomName, de: p ? (p.wa === w ? p.B : p.A).roomName : '', pared: w.id, recorte: o !== 'x' });
+        }
+      });
+    }
+    if(hechas.length === antes) break;
+    }
+    return hechas;
+  }
   function fpPruneOutlineSpikes(poly){
     if(!poly || poly.length < 3) return poly;
     let pts = poly.slice(), changed = true, guard = 0;
@@ -29550,6 +29985,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // would risk reintroducing the original bug on real scan noise.
   function floorplanIsExteriorWall(wall, ownRoom, allRooms){
     if(!allRooms) return true; // unmerged/standalone view - every wall is its own room's exterior
+    // Una copia prestada (vista por una abertura) no es borde de este cuarto.
+    if(wall._ajena) return false;
     const dx = wall.end.x-wall.start.x, dy = wall.end.y-wall.start.y;
     const len = Math.hypot(dx,dy) || 1;
     const ux = dx/len, uy = dy/len;
@@ -29566,6 +30003,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       if(room === ownRoom) continue;
       const matchCentroid = floorplanLabelAnchor(room);
       for(const w of (room.walls||[])){
+        if(w._ajena) continue; // la copia que el otro cuarto solo vio no prueba que haya un cuarto del otro lado
         const wdx = w.end.x-w.start.x, wdy = w.end.y-w.start.y;
         const wlen = Math.hypot(wdx,wdy) || 1;
         const wux = wdx/wlen, wuy = wdy/wlen;
@@ -29620,7 +30058,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         : `<text x="${sx}" y="${sy + 11*k}" font-size="${(15*k).toFixed(1)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#5a6472" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpFeetInches(w)} x ${fpFeetInches(d)}</text>`)
       : '';
     return `<g class="${cls}" ${attrs} style="cursor:grab;">`
-      + `<text x="${sx}" y="${sy - 9*k}" font-size="${(17*k).toFixed(1)}" font-weight="700" letter-spacing="0.4" font-family="'IBM Plex Sans',sans-serif" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${esc(name).toUpperCase()}</text>`
+      + `<text x="${sx}" y="${sy - 9*k}" font-size="${(17*k).toFixed(1)}" font-weight="700" letter-spacing="0.4" font-family="'IBM Plex Sans',sans-serif" fill="${FP_AZUL_NOMBRE}" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${esc(name).toUpperCase()}</text>`
       + dim + `</g>`;
   }
   const FLOORPLAN_WALL_THICKNESS_FT = 0.65;
@@ -29735,6 +30173,97 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // upside-down) - the standard way real plans dimension partitions
   // without the full exterior-style offset line, which would crowd the
   // room interiors.
+  // LA MEDIDA DENTRO DE LA PARED (su diseño, 13-oct): el número en ROJO sobre el cuerpo negro de la pared, con
+  // dos puntitas a los lados (◀ 2' 4" ▶) que dicen "de aquí a aquí". Así no hay nada junto a la pared que choque
+  // con las flechitas del nombre ni con los muebles. Va en el tramo sólido más largo (no en el hueco de una
+  // puerta). Si no cabe ni con letra chica, devuelve '' y la medida va al lado de la pared, como antes.
+  const FP_ROJO_MEDIDA = '#ff3b30';
+  // Los NOMBRES de los cuartos (y de los rincones/espacios rotulados) van en azul (su pedido, 13-oct).
+  const FP_AZUL_NOMBRE = '#2563eb';
+  // Las medidas rojas ya puestas en esta hoja: la misma pared física la traen DOS cuartos (cada uno su copia,
+  // a veces de largo distinto) y salían dos números encimados en la misma línea. Una por pared, y nunca una
+  // encima de otra. Se limpia con fpCajasNombres.
+  let fpMedidasPuestas = [];
+  function fpMedidaEnLaPared(segments, X, Y, txt, scale, wall){
+    if(!segments || !segments.length) return '';
+    if(wall && wall.start && wall.end){
+      const dx0 = wall.end.x - wall.start.x, dy0 = wall.end.y - wall.start.y, L0 = Math.hypot(dx0, dy0) || 1;
+      const u0 = { x: dx0 / L0, y: dy0 / L0 };
+      for(const m of fpMedidasPuestas){
+        if(Math.abs(u0.x * m.u.x + u0.y * m.u.y) < 0.98) continue;
+        const off = Math.abs((m.a.x - wall.start.x) * -u0.y + (m.a.y - wall.start.y) * u0.x);
+        if(off > 0.7) continue;
+        const ta = (m.a.x - wall.start.x) * u0.x + (m.a.y - wall.start.y) * u0.y, tb = (m.b.x - wall.start.x) * u0.x + (m.b.y - wall.start.y) * u0.y;
+        const lo = Math.max(0, Math.min(ta, tb)), hi = Math.min(L0, Math.max(ta, tb));
+        if(hi - lo > 0.5 * Math.min(L0, m.L)) return '';   // esa pared ya tiene su número
+      }
+    }
+    let seg = null, Lmax = 0;
+    for(const g of segments){ const L = Math.hypot(g.end.x - g.start.x, g.end.y - g.start.y); if(L > Lmax){ Lmax = L; seg = g; } }
+    if(!seg) return '';
+    const Lpx = Lmax * scale, grueso = FLOORPLAN_WALL_THICKNESS_FT * scale;
+    const chars = String(txt).length;
+    let fs = Math.min(18, grueso * 0.6);   // baja hasta 10 si el tramo es corto
+    const largo = f => 0.58 * f * chars;
+    while(fs > 10 && largo(fs) + 8 > Lpx) fs -= 1;
+    if(largo(fs) + 8 > Lpx) return '';
+    const dx = seg.end.x - seg.start.x, dy = seg.end.y - seg.start.y, L = Math.hypot(dx, dy) || 1;
+    let ux = dx / L, uy = dy / L;
+    let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    if(angle > 90){ angle -= 180; ux = -ux; uy = -uy; }
+    else if(angle < -90){ angle += 180; ux = -ux; uy = -uy; }
+    const cx = X((seg.start.x + seg.end.x) / 2), cy = Y((seg.start.y + seg.end.y) / 2);
+    const medio = largo(fs) / 2 + 4;
+    for(const m of fpMedidasPuestas){
+      if(Math.abs(ux * m.su.x + uy * m.su.y) < 0.98) continue;
+      const rx = cx - m.cx, ry = cy - m.cy;
+      if(Math.abs(rx * -uy + ry * ux) < fs && Math.abs(rx * ux + ry * uy) < medio + m.medio + 6) return '';
+    }
+    if(wall) fpMedidasPuestas.push({ a: wall.start, b: wall.end, L: Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y),
+      u: { x: (wall.end.x - wall.start.x) / (Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y) || 1), y: (wall.end.y - wall.start.y) / (Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y) || 1) },
+      cx, cy, su: { x: ux, y: uy }, medio });
+    let out = `<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" transform="rotate(${angle.toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})" dominant-baseline="central" font-size="${fs}" font-weight="700" font-family="'IBM Plex Sans',sans-serif" fill="${FP_ROJO_MEDIDA}" text-anchor="middle">${txt}</text>`;
+    // Las dos puntitas, solo si hay lugar en el tramo para ellas.
+    const a = Math.max(5, fs * 0.42), sep = largo(fs) / 2 + 5;
+    if(Lpx >= 2 * (sep + a) + 6){
+      const vx = -uy, vy = ux;
+      const punta = (sg) => {
+        const bx = cx + ux * sg * sep, by = cy + uy * sg * sep, tx = bx + ux * sg * a, ty = by + uy * sg * a;
+        return `<polygon points="${tx.toFixed(1)},${ty.toFixed(1)} ${(bx + vx * a * 0.6).toFixed(1)},${(by + vy * a * 0.6).toFixed(1)} ${(bx - vx * a * 0.6).toFixed(1)},${(by - vy * a * 0.6).toFixed(1)}" fill="${FP_ROJO_MEDIDA}"/>`;
+      };
+      out += punta(-1) + punta(1);
+    }
+    return `<g class="fp-medida-pared" style="pointer-events:none;">${out}</g>`;
+  }
+  // En la hoja con el estilo de la vista las paredes son gruesas: una medida encima de la pared no se lee. Va a
+  // un lado, dentro del cuarto (hacia el punto del nombre), a la par de la pared y sin tocarla.
+  function fpMedidaAdentroVista(wall, X, Y, txt, hacia, scale, cajaNombre){
+    const dx = wall.end.x - wall.start.x, dy = wall.end.y - wall.start.y, L = Math.hypot(dx, dy) || 1;
+    let nx = -dy / L, ny = dx / L;
+    const mx = (wall.start.x + wall.end.x) / 2, my = (wall.start.y + wall.end.y) / 2;
+    if(hacia && (hacia.x - mx) * nx + (hacia.y - my) * ny < 0){ nx = -nx; ny = -ny; }
+    const fs = 16, off = (FLOORPLAN_WALL_THICKNESS_FT / 2) * scale + fs * 0.8;
+    // Las puntitas de flecha del nombre caen en la pared a la altura del nombre: la medida se corre a lo largo
+    // de la pared, al lado con más lugar, para no quedar encima de la flecha.
+    const ux = dx / L, uy = dy / L, Lpx = L * scale, largoTxt = 0.56 * fs * String(txt).length;
+    let t = 0;   // px desde el centro de la pared
+    if(hacia){
+      // La flecha cae donde quedó el nombre de verdad (el bloque se centra de pared a pared).
+      const tf = cajaNombre ? (((cajaNombre.x0 + cajaNombre.x1) / 2 - X(mx)) * ux + ((cajaNombre.y0 + cajaNombre.y1) / 2 - Y(my)) * uy)
+                            : ((hacia.x - mx) * ux + (hacia.y - my) * uy) * scale;   // dónde cae la flecha
+      const hueco = largoTxt / 2 + 22;
+      if(Math.abs(tf) < hueco){
+        const lado = tf > 0 ? -1 : 1, tn = tf + lado * hueco;
+        if(Math.abs(tn) + largoTxt / 2 <= Lpx / 2 - 6) t = tn;
+        else if(Math.abs(tf - lado * hueco) + largoTxt / 2 <= Lpx / 2 - 6) t = tf - lado * hueco;
+      }
+    }
+    const px = X(mx) + nx * off + ux * t, py = Y(my) + ny * off + uy * t;
+    let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    if(angle > 90) angle -= 180;
+    if(angle < -90) angle += 180;
+    return `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" transform="rotate(${angle.toFixed(1)} ${px.toFixed(1)} ${py.toFixed(1)})" dominant-baseline="middle" font-size="${fs}" font-weight="600" font-family="'IBM Plex Sans',sans-serif" fill="#2c3540" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${txt}</text>`;
+  }
   function fpInteriorDimension(wall, X, Y, dimTxt){
     const midX = (wall.start.x+wall.end.x)/2, midY = (wall.start.y+wall.end.y)/2;
     const dx = wall.end.x-wall.start.x, dy = wall.end.y-wall.start.y;
@@ -29883,10 +30412,18 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const M = {x:X(mid.x), y:Y(mid.y)}, OA = {x:X(oA.x), y:Y(oA.y)}, OB = {x:X(oB.x), y:Y(oB.y)};
       const r2 = Math.hypot(OA.x-A.x, OA.y-A.y);
       if(!(r2 > 0.5)) return '';
-      return `<line x1="${A.x}" y1="${A.y}" x2="${OA.x}" y2="${OA.y}" stroke="#1C2530" stroke-width="1.6"/>`
-        + `<path d="M ${M.x} ${M.y} A ${r2} ${r2} 0 0 1 ${OA.x} ${OA.y}" fill="none" stroke="#1C2530" stroke-width="1"/>`
-        + `<line x1="${B.x}" y1="${B.y}" x2="${OB.x}" y2="${OB.y}" stroke="#1C2530" stroke-width="1.6"/>`
-        + `<path d="M ${M.x} ${M.y} A ${r2} ${r2} 0 0 0 ${OB.x} ${OB.y}" fill="none" stroke="#1C2530" stroke-width="1"/>`;
+      // Cada hoja, entreabierta si su arco pisa un nombre.
+      const nP = { x: (OA.x-A.x)/r2, y: (OA.y-A.y)/r2 };
+      const uA = { x: (M.x-A.x)/r2, y: (M.y-A.y)/r2 }, uB = { x: -uA.x, y: -uA.y };
+      const hoja = (J, uu, sw0) => {
+        const a = fpAnguloDePuerta(J, uu, nP, r2, ftPx), c = Math.cos(a.g), sn = Math.sin(a.g);
+        const nn = a.alReves ? { x: -nP.x, y: -nP.y } : nP, sw = a.alReves ? 1 - sw0 : sw0;
+        const T = { x: J.x + (uu.x*c + nn.x*sn)*r2, y: J.y + (uu.y*c + nn.y*sn)*r2 };
+        const Mj = { x: J.x + uu.x*r2, y: J.y + uu.y*r2 };
+        // Solo la hoja, sin el arco (su pedido, 13-oct: "esa línea que se curvea no es necesaria").
+        return `<line x1="${J.x}" y1="${J.y}" x2="${T.x}" y2="${T.y}" stroke="#1C2530" stroke-width="2.4" stroke-linecap="round"/>`;
+      };
+      return hoja(A, uA, 1) + hoja(B, uB, 0);
     }
     const hinge = jambA, frame = jambB;
     const open = { x: hinge.x + nx*w, y: hinge.y + ny*w };
@@ -29894,8 +30431,14 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const r = Math.hypot(O.x-H.x, O.y-H.y);
     if(!(r > 0.5)) return '';
     const sweep = ((ux * ny - uy * nx) > 0) ? 1 : 0;
-    return `<line x1="${H.x}" y1="${H.y}" x2="${O.x}" y2="${O.y}" stroke="#1C2530" stroke-width="1.6"/>`
-      + `<path d="M ${F.x} ${F.y} A ${r} ${r} 0 0 ${sweep} ${O.x} ${O.y}" fill="none" stroke="#1C2530" stroke-width="1"/>`;
+    // Entreabierta si abierta del todo pisaría el nombre de un cuarto (su pedido, 13-oct).
+    const uP = { x: (F.x-H.x)/r, y: (F.y-H.y)/r }, nP = { x: (O.x-H.x)/r, y: (O.y-H.y)/r };
+    const a = fpAnguloDePuerta(H, uP, nP, r, ftPx, !!door._entrada), g = a.g;
+    const nU = a.alReves ? { x: -nP.x, y: -nP.y } : nP, sw = a.alReves ? 1 - sweep : sweep;
+    const Og = { x: H.x + (uP.x*Math.cos(g) + nU.x*Math.sin(g))*r, y: H.y + (uP.y*Math.cos(g) + nU.y*Math.sin(g))*r };
+    // Solo la hoja, un poco más gruesa (2.4). Sin el arco: su pedido, 13-oct, "esa línea que se curvea no es
+    // necesaria" - la hoja entreabierta ya dice que es una puerta.
+    return `<line x1="${H.x}" y1="${H.y}" x2="${Og.x}" y2="${Og.y}" stroke="#1C2530" stroke-width="2.4" stroke-linecap="round"/>`;
   }
 
   // A door/window's size label sits just INSIDE the room (the negation of
@@ -30887,11 +31430,17 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const midX = (wall.start.x+wall.end.x)/2, midY = (wall.start.y+wall.end.y)/2;
       // A genuinely zero-length wall exists in the real scan (Hallway
       // wall 4, start === end) and printed "0'-0"" on the plan.
-      if(!fpVista() && effLen >= 0.25 && !seenNear('dim', midX, midY)){
+      // La HOJA QUE SE MANDA (el PDF de Field Reports y la imagen que exporta Scanova) lleva también las medidas
+      // de las paredes de ADENTRO (su pregunta, 13-oct: "¿a dónde se fueron?"). Se habían ido el día que el PDF
+      // tomó el estilo de la vista, que en la pantalla las deja fuera a propósito. La pantalla sigue limpia; las
+      // de afuera en la vista ya van en las cadenas (fpCadenasCotas), así que aquí solo se agregan las de adentro.
+      const hojaQueSeManda = fpVista() && (fpSheetExport || fpConTablaMedidas);
+      if((!fpVista() || hojaQueSeManda) && !wall._ajena && effLen >= 0.25 && !seenNear('dim', midX, midY)){
         if(floorplanIsExteriorWall(wall, room, allRooms)){
-          dims.push(fpDimensionLine(wall, dimCentroid, X, Y, dimTxt));
+          if(!fpVista()) dims.push(fpDimensionLine(wall, dimCentroid, X, Y, dimTxt));
         } else if(effLen >= 2 && fpMeasurePrefs.interior){
-          dims.push(fpInteriorDimension(wall, X, Y, dimTxt));
+          if(fpVista()){ const mp = fpMedidaEnLaPared(segments, X, Y, fpPiesPulg(effLen), scale, wall); if(mp) dims.push(mp); }
+          else dims.push(fpInteriorDimension(wall, X, Y, dimTxt));
         }
       }
     });
@@ -30915,7 +31464,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       if(seenNear('doorway', d.position.x, d.position.y)) return;
       // La puerta de un clóset se dibuja corrediza (su pedido, 14-oct: "se ve más limpio" que el arco). Solo
       // cuando nadie escogió el tipo a mano (_doorStyle).
-      const dDib = (!d._doorStyle && fpEsPuertaDeCloset(d, room, allRooms)) ? Object.assign({}, d, { _doorStyle: 'sliding' }) : d;
+      let dDib = (!d._doorStyle && fpEsPuertaDeCloset(d, room, allRooms)) ? Object.assign({}, d, { _doorStyle: 'sliding' }) : d;
+      // La puerta de la ENTRADA (en una pared de afuera, abriendo a un cuarto grande) tiene más espacio: se
+      // dibuja más abierta que las de adentro (su pedido, 13-oct, con la entrada de la sala marcada).
+      const wEnt = wallsById[d.wallId];
+      if(wEnt && !d._swingAcross && fpRoomDisplayAreaSqFt(room) >= 100 && floorplanIsExteriorWall(wEnt, room, allRooms)) dDib = Object.assign({}, dDib, { _entrada: true });
       s += fpDoorSwingMarkup(dDib, wallsById[d.wallId], centroid, X, Y);
       const cx = X(d.position.x), cy = Y(d.position.y);
       const dId = esc(String(d.id != null ? d.id : di));
@@ -30995,6 +31548,22 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       if(seenNear(`obj:${o.category}`, o.center.x, o.center.y)) return;
       const ow = (o.widthFt||1)*scale, od = (o.depthFt||1)*scale;
       const cx = X(o.center.x), cy = Y(o.center.y);
+      // Un mueble que cae debajo del nombre o de sus medidas no se dibuja: primero se lee el cuarto (la taza o
+      // la tina debajo de BATHROOM). El mueble sigue en la lista y en el editor; solo no se pinta aquí.
+      if(fpCajasNombres.length){
+        const rad = (o.rotationDeg||0) * Math.PI/180, cr = Math.cos(rad), sr = Math.sin(rad);
+        let pisa = false;
+        for(let i = 0; i <= 4 && !pisa; i++) for(let j = 0; j <= 4 && !pisa; j++){
+          const lx = (i/4 - 0.5)*ow, ly = (j/4 - 0.5)*od;
+          if(fpPuntoEnNombre(cx + lx*cr - ly*sr, cy + lx*sr + ly*cr, 2)) pisa = true;
+        }
+        // y una caja de nombre que queda entera adentro del mueble (un mueble grande)
+        if(!pisa) pisa = fpCajasNombres.some(c => [[c.x0,c.y0],[c.x1,c.y0],[c.x0,c.y1],[c.x1,c.y1],[(c.x0+c.x1)/2,(c.y0+c.y1)/2]].some(([px, py]) => {
+          const dx = px - cx, dy = py - cy, lx = dx*cr + dy*sr, ly = -dx*sr + dy*cr;
+          return Math.abs(lx) <= ow/2 && Math.abs(ly) <= od/2;
+        }));
+        if(pisa) return;
+      }
       const objId = esc(String(o.id != null ? o.id : idx));
       // Secondary/low-information categories (RoomPlan's own generic
       // "storage"/"unknown" buckets, when the tech hasn't typed a more
@@ -31203,6 +31772,43 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // ¿Esta puerta es de un clóset? Su cuarto se llama clóset, o da a un cuarto llamado clóset (a menos de
   // ~1 ft de su contorno), o a un rincón detectado como clóset.
   let fpEspaciosDelPlano = [];
+  // Cajas (en px del plano) de los nombres de cuarto con sus medidas. Lo que cae encima -el arco de una
+  // puerta, un mueble- cede: el nombre y las medidas se leen siempre (su pedido, 13-oct: el Hallway de Harold
+  // no se leía por las puertas, y en un baño la taza o la tina quedaban debajo del nombre).
+  let fpCajasNombres = [];
+  function fpPuntoEnNombre(x, y, holgura){
+    const h = holgura == null ? 4 : holgura;
+    return fpCajasNombres.some(c => x >= c.x0 - h && x <= c.x1 + h && y >= c.y0 - h && y <= c.y1 + h);
+  }
+  // ¿Una hoja de puerta abierta en este ángulo (y su arco) pisa un nombre? Todo en px.
+  function fpHojaPisaNombre(H, u, n, r, ang){
+    if(!fpCajasNombres.length) return false;
+    for(let i = 0; i <= 8; i++){
+      const t = ang * i / 8, c = Math.cos(t), sn = Math.sin(t);
+      // el arco (de la orilla cerrada a la abierta) y la hoja (de la bisagra a la punta)
+      if(fpPuntoEnNombre(H.x + (u.x*c + n.x*sn)*r, H.y + (u.y*c + n.y*sn)*r)) return true;
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      if(fpPuntoEnNombre(H.x + (u.x*ca + n.x*sa)*r*i/8, H.y + (u.y*ca + n.y*sa)*r*i/8)) return true;
+    }
+    return false;
+  }
+  // Todas las puertas se dibujan ENTREABIERTAS (su pedido con el plano marcado, 13-oct) y TODAS con la
+  // MISMA abertura: lo que se ve es la distancia de la punta de la hoja a la pared, así que se fija esa
+  // distancia (1.1 ft) y no el ángulo -con un ángulo fijo, la puerta ancha del pasillo se veía muy abierta
+  // y la angosta muy cerrada-. Si así pisa el nombre de un cuarto, la misma abertura hacia el OTRO cuarto
+  // ("meter la puerta dentro del cuarto"); solo si tampoco cabe, más cerrada. Siempre hoja + arco.
+  const FP_PUERTA_ABERTURA_FT = 1.1;
+  function fpAnguloDePuerta(H, u, n, r, ftPx, entrada){
+    const nn = { x: -n.x, y: -n.y };
+    const ang = d => Math.asin(Math.min(0.85, (d * (ftPx || 1)) / r));
+    // La entrada principal: 45°, más abierta que las de adentro.
+    const g0 = entrada ? Math.PI/4 : ang(FP_PUERTA_ABERTURA_FT), g1 = ang(FP_PUERTA_ABERTURA_FT * 0.6), g2 = ang(FP_PUERTA_ABERTURA_FT * 0.35);
+    if(!fpHojaPisaNombre(H, u, n, r, g0)) return { g: g0, alReves: false };
+    if(!fpHojaPisaNombre(H, u, nn, r, g0)) return { g: g0, alReves: true };
+    if(!fpHojaPisaNombre(H, u, n, r, g1)) return { g: g1, alReves: false };
+    if(!fpHojaPisaNombre(H, u, nn, r, g1)) return { g: g1, alReves: true };
+    return { g: g2, alReves: false };
+  }
   function fpEsPuertaDeCloset(d, room, todos){
     if(!d || !d.position) return false;
     const esCloset = n => /closet|closset|clóset/.test(String(n || '').toLowerCase());
@@ -31299,7 +31905,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     let fs = Math.max(0.34 * scale, mejor.fit) * Math.max(0.6, Math.min(2.2, escala || 1));
     const f2 = fs * 0.74, y0 = labelY - fs * 0.6;
     const t = (y, size, peso, color, txt, ls) => `<text x="${px.toFixed(1)}" y="${y.toFixed(1)}" font-size="${size.toFixed(1)}" font-weight="${peso}"${ls ? ` letter-spacing="${ls}"` : ''} font-family="'IBM Plex Sans',sans-serif" fill="${color}" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${(size * 0.16).toFixed(1)}">${txt}</text>`;
-    const svg = t(y0, fs, 700, '#1C2530', label, '0.6') + t(y0 + fs * 1.02, f2, 600, '#1C2530', dimTxt) + t(y0 + fs * 1.92, f2, 400, '#2c3642', areaTxt);
+    const svg = t(y0, fs, 700, FP_AZUL_NOMBRE, label, '0.6') + t(y0 + fs * 1.02, f2, 600, '#1C2530', dimTxt) + t(y0 + fs * 1.92, f2, 400, '#2c3642', areaTxt);
     // 4. puntitas de flecha, solo si hay lugar entre el bloque y la pared
     const a = Math.max(9, Math.min(15, 0.26 * scale)), dentro = T / 2 + 0.12;
     const tri = (x, y, dir) => {
@@ -31314,7 +31920,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // la flecha va en la pared; solo hace falta que entre el bloque y la pared quede aire
     if(sp.h && Math.min(px - X(sp.h[0] + dentro), X(sp.h[1] - dentro) - px) > anchoTxt / 2 + a + 10) flechas += tri(X(sp.h[0] + dentro), labelY, 'l') + tri(X(sp.h[1] - dentro), labelY, 'r');
     if(sp.v && Math.min(labelY - Y(sp.v[0] + dentro), Y(sp.v[1] - dentro) - labelY) > fs * 1.6 + a + 10) flechas += tri(px, Y(sp.v[0] + dentro), 'u') + tri(px, Y(sp.v[1] - dentro), 'd');
-    return { svg, flechas };
+    return { svg, flechas, caja: { x0: px - anchoTxt/2, x1: px + anchoTxt/2, y0: y0 - fs*0.85, y1: y0 + fs*1.92 + f2*0.3 } };
   }
 
   function fpEtiquetaVista(label, areaTxt, rb, scale, x, y, escala, libre){
@@ -31330,7 +31936,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     }
     fs = Math.max(0.36 * scale, fs) * Math.max(0.6, Math.min(2.2, escala || 1));
     const fa = fs * 0.8;
-    return `<text x="${x}" y="${(y - fs * 0.18).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="700" letter-spacing="0.6" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${(fs * 0.16).toFixed(1)}">${label}</text>`
+    return `<text x="${x}" y="${(y - fs * 0.18).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="700" letter-spacing="0.6" font-family="'IBM Plex Sans',sans-serif" fill="${FP_AZUL_NOMBRE}" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${(fs * 0.16).toFixed(1)}">${label}</text>`
       + `<text x="${x}" y="${(y + fs * 0.98).toFixed(1)}" font-size="${fa.toFixed(1)}" font-weight="400" font-family="'IBM Plex Sans',sans-serif" fill="#2c3642" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${(fa * 0.16).toFixed(1)}">${areaTxt}</text>`;
   }
 
@@ -31606,9 +32212,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const capaMuebles = [];
     let paredes = '';
     fpEspaciosDelPlano = (data._spaceLabels || []).filter(sp => level == null || (sp.level || 1) === level);
+    // Los nombres de TODOS los cuartos se arman antes que las puertas y los muebles: así lo que cae encima
+    // del nombre de cualquier cuarto (aunque sea de otro cuarto) se puede quitar o cerrar.
+    const nombres = new Map();
+    fpCajasNombres = []; fpMedidasPuestas = [];
     (data.rooms||[]).forEach((room, idx) => {
       if(!(room.walls||[]).length || !onLevel(room) || room.deleted) return;
-      paredes += buildFloorplanRoomContent(room, idx, X, Y, scale, rooms, buildingCentroid, overlays, drawnObjectKeys, true, capaMuebles);
+      const pre = [];
       // A manually-positioned label anchors at the PLAIN geometric
       // center plus its own saved offset - the learned bias only steers
       // rooms with no manual override (applying it under an override
@@ -31674,7 +32284,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
           const xPx = X(c.x);
           gArr += tri(xPx, Y(span.v[0] + inset), 'u') + tri(xPx, Y(span.v[1] - inset), 'd');
         }
-        if(gArr) overlays.push(`<g class="fp-extent" style="pointer-events:none;">${gArr}</g>`);
+        if(gArr) pre.push(`<g class="fp-extent" style="pointer-events:none;">${gArr}</g>`);
       }
       // Stack order per explicit instruction: room name, then the room's
       // DIMENSIONS, then the square footage under them. Pushed to the
@@ -31682,13 +32292,30 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const hueco = vista ? fpHuecoDelNombre(room, c, rooms) : null;
       if(hueco){ hueco.correr = !offVale; hueco.xPx = X(hueco.xC); }   // un nombre movido a mano no se corre
       const bloque = vista ? fpBloqueVista(room, label, areaTxt, rb, scale, X, Y, labelX, labelY, room._labelScale || 1, hueco, rooms, minX, minY, offVale) : null;
-      if(bloque && bloque.flechas) overlays.push(`<g class="fp-extent" style="pointer-events:none;">${bloque.flechas}</g>`);
+      if(bloque && bloque.flechas) pre.push(`<g class="fp-extent" style="pointer-events:none;">${bloque.flechas}</g>`);
       const labelLines = vista ? bloque.svg : fpMeasurePrefs.roomArea
-        ? `<text x="${labelX}" y="${labelY-48*k}" font-size="${f(30)}" font-weight="700" letter-spacing="0.5" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${label}</text>`
+        ? `<text x="${labelX}" y="${labelY-48*k}" font-size="${f(30)}" font-weight="700" letter-spacing="0.5" font-family="'IBM Plex Sans',sans-serif" fill="${FP_AZUL_NOMBRE}" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${label}</text>`
           + `<text x="${labelX}" y="${labelY-14*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${dimTxt}</text>`
           + `<text x="${labelX}" y="${labelY+18*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${areaTxt}</text>`
-        : `<text x="${labelX}" y="${labelY}" font-size="${f(30)}" font-weight="700" letter-spacing="0.5" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${label}</text>`;
-      overlays.push(`<g class="fp-roomlabel" data-room-idx="${idx}" style="cursor:grab;">${labelLines}</g>`);
+        : `<text x="${labelX}" y="${labelY}" font-size="${f(30)}" font-weight="700" letter-spacing="0.5" font-family="'IBM Plex Sans',sans-serif" fill="${FP_AZUL_NOMBRE}" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${label}</text>`;
+      // La caja del nombre (en px): lo que cae debajo -un mueble, el arco de una puerta- se quita o se cierra
+      // para que el nombre y las medidas se lean siempre (su pedido, 13-oct).
+      let caja = vista ? bloque.caja : null;
+      if(!caja){
+        const lenL = String(label).replace(/&[a-z#0-9]+;/g, 'x').length;
+        const anchoN = fpMeasurePrefs.roomArea ? Math.max(0.64*30*k*lenL, 0.62*23*k*Math.max(dimTxt.length, areaTxt.length)) : 0.64*30*k*lenL;
+        caja = fpMeasurePrefs.roomArea
+          ? { x0: labelX - anchoN/2, x1: labelX + anchoN/2, y0: labelY - 48*k - 26*k, y1: labelY + 18*k + 7*k }
+          : { x0: labelX - anchoN/2, x1: labelX + anchoN/2, y0: labelY - 26*k, y1: labelY + 7*k };
+      }
+      pre.push(`<g class="fp-roomlabel" data-room-idx="${idx}" style="cursor:grab;">${labelLines}</g>`);
+      nombres.set(room, pre);
+      if(caja) fpCajasNombres.push(Object.assign({ room }, caja));
+    });
+    (data.rooms||[]).forEach((room, idx) => {
+      if(!(room.walls||[]).length || !onLevel(room) || room.deleted) return;
+      paredes += buildFloorplanRoomContent(room, idx, X, Y, scale, rooms, buildingCentroid, overlays, drawnObjectKeys, true, capaMuebles);
+      overlays.push(...(nombres.get(room) || []));
       // Auto-detected sub-areas (closet/laundry alcoves): name + own
       // dimensions, the way a pro plan annotates them. Tappable to
       // rename in Edit Plan.
@@ -31702,6 +32329,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       });
     });
     s += capaMuebles.join('') + paredes;
+    fpCajasNombres = []; fpMedidasPuestas = [];
     // Hand-named open spaces (AI Fix asks, the human answers): a label
     // with dimensions on an area no scanned room claims - annotation
     // only, honest that no geometry was invented there.
