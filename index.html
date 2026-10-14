@@ -8598,7 +8598,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-14-C';
+  const APP_BUILD = '2026-10-14-D';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -22329,6 +22329,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
           if(suggestion){ room.roomName = suggestion.name; room._suggestedConfidence = suggestion.confidence; }
         }
       });
+      // Los cuartos sin acceso que las paredes ya dibujan (un clóset, el
+      // laundry): se deducen solos, nombrados por su puerta (13-oct).
+      try{ fpAutoCompletarEspacios(result); }catch(e){ console.warn('autocompletar', e); }
       floorplanData = result;
       floorplanId = null;          // escaneo nuevo = plano nuevo, no pisa al que estaba abierto
       fpResetUndoStack();
@@ -27505,6 +27508,159 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       if(!already) voids.push(sp);
     }
     return voids;
+  }
+
+  // LOS CUARTOS QUE NO SE PUDIERON ESCANEAR, DEDUCIDOS (13-oct, su pedido:
+  // "todas estas cosas ya debería de saberlo la aplicación"). Caso real de
+  // Harold: un clóset del master y el laundry, sin acceso. La app ve:
+  //   1. la pared de afuera de la cocina y la del master en la MISMA línea,
+  //      con un hueco de 2.4 ft que nadie escaneó -> la pared sigue derecha;
+  //   2. con eso queda un espacio cerrado que ningún cuarto reclama;
+  //   3. una pared (la de la cocina) que apunta hacia adentro de ese espacio
+  //      y, si se sigue, lo parte en dos, cada uno con su puerta;
+  //   4. cada parte se nombra por su puerta: la que abre desde una recámara
+  //      es Closet (puerta corrediza); la del pasillo junto a la cocina,
+  //      Laundry; la de la cocina, Pantry; las demás, Closet.
+  // Se vuelven cuartos de verdad, marcados `_inferido` (no escaneados), con
+  // sus paredes sobre las paredes de los vecinos. Sin espacio cerrado, o con
+  // dudas, no se inventa nada.
+  function fpAutoCompletarEspacios(data){
+    const hecho = [];
+    if(!data || data.merged === false || !(data.rooms || []).length) return hecho;
+    const niveles = floorplanLevels(data);
+    const nivelAntes = floorplanSelectedLevel;
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const distSeg = (p, a, b) => {
+      const dx = b.x - a.x, dy = b.y - a.y, L2 = dx*dx + dy*dy;
+      if(L2 < 1e-9) return dist(p, a);
+      const t = Math.max(0, Math.min(1, ((p.x - a.x)*dx + (p.y - a.y)*dy) / L2));
+      return Math.hypot(p.x - (a.x + dx*t), p.y - (a.y + dy*t));
+    };
+    // Corte de un rayo p + t*u con el segmento ab (t > 0), o null.
+    const corte = (p, u, a, b) => {
+      const ex = b.x - a.x, ey = b.y - a.y, den = u.x*ey - u.y*ex;
+      if(Math.abs(den) < 1e-9) return null;
+      const t = ((a.x - p.x)*ey - (a.y - p.y)*ex) / den;
+      const s = ((a.x - p.x)*u.y - (a.y - p.y)*u.x) / den;
+      return (t > 0.3 && s >= -0.02 && s <= 1.02) ? t : null;
+    };
+    try{
+      for(const lvl of niveles){
+        floorplanSelectedLevel = lvl;
+        const cuartos = data.rooms.filter(r => !r.deleted && (r.walls || []).length && (r.level || 1) === lvl);
+        if(cuartos.length < 2) continue;
+        const paredes = [];
+        cuartos.forEach(r => (r.walls || []).forEach(w => { if(w.start && w.end) paredes.push({ w, r }); }));
+        // 1. La pared de afuera sigue derecha: dos paredes exteriores de cuartos
+        //    distintos en la misma línea, con un hueco corto que nadie escaneó.
+        const puentes = [];
+        for(let i = 0; i < paredes.length; i++) for(let j = i + 1; j < paredes.length; j++){
+          const A = paredes[i], B = paredes[j];
+          if(A.r === B.r) continue;
+          const a1 = A.w.start, a2 = A.w.end, b1 = B.w.start, b2 = B.w.end;
+          const ua = { x: a2.x - a1.x, y: a2.y - a1.y }, la = Math.hypot(ua.x, ua.y);
+          const ub = { x: b2.x - b1.x, y: b2.y - b1.y }, lb = Math.hypot(ub.x, ub.y);
+          if(la < 2 || lb < 2) continue;
+          if(Math.abs((ua.x*ub.x + ua.y*ub.y) / (la*lb)) < 0.995) continue;
+          const lejos = Math.abs((b1.x - a1.x)*ua.y - (b1.y - a1.y)*ua.x) / la;
+          if(lejos > 0.4) continue;
+          // las dos puntas más cercanas
+          let par = null;
+          for(const p of [a1, a2]) for(const q of [b1, b2]){
+            const d = dist(p, q);
+            if(!par || d < par.d) par = { p, q, d };
+          }
+          if(!par || par.d < 0.8 || par.d > 6) continue;
+          const m = { x: (par.p.x + par.q.x)/2, y: (par.p.y + par.q.y)/2 };
+          // que el hueco sea de verdad un hueco: sin pared, sin puerta, y afuera de todo cuarto
+          if(paredes.some(o => o !== A && o !== B && distSeg(m, o.w.start, o.w.end) < 0.5)) continue;
+          if(cuartos.some(r => ['doors','windows','openings'].some(k => (r[k] || []).some(o => o.position && dist(o.position, m) < 2)))) continue;
+          if(cuartos.some(r => { const pg = fpOrderedRoomPolygon(r); return pg && pg.length >= 3 && fpPointInPolygon(m, pg); })) continue;
+          if(!floorplanIsExteriorWall(A.w, A.r, cuartos) || !floorplanIsExteriorWall(B.w, B.r, cuartos)) continue;
+          puentes.push({ a: { x: par.p.x, y: par.p.y }, b: { x: par.q.x, y: par.q.y } });
+        }
+        // 2. Los espacios cerrados que ningún cuarto reclama (con los puentes puestos).
+        const conPuentes = extra => {
+          const w = JSON.parse(JSON.stringify(data));
+          w.rooms.push({ level: lvl, walls: puentes.concat(extra || []).map((s, k) => ({ id: 'tmp' + k, start: s.a, end: s.b })),
+                         doors: [], windows: [], openings: [], objects: [] });
+          return w;
+        };
+        const huecos = fpAiFindVoids(conPuentes());
+        if(!huecos.length) continue;
+        const puertas = [];
+        cuartos.forEach(r => ['doors','openings'].forEach(k => (r[k] || []).forEach(o => {
+          if(o.position && !o._removed) puertas.push({ p: o.position, w: o.widthFt || 2.5, r });
+        })));
+        const puertasDe = h => puertas.filter(d => Math.abs(d.p.x - h.cx) <= h.w/2 + 1.0 && Math.abs(d.p.y - h.cy) <= h.d/2 + 1.0);
+        const dentro = (p, h) => Math.abs(p.x - h.cx) <= h.w/2 + 0.3 && Math.abs(p.y - h.cy) <= h.d/2 + 0.3;
+        for(const h of huecos){
+          // 3. ¿Una pared apunta hacia adentro y, si se sigue, lo parte en dos
+          //    (cada parte con su puerta)? Se queda la partición más "cuadrada".
+          let mejor = null;
+          for(const { w } of paredes){
+            for(const [p, o] of [[w.start, w.end], [w.end, w.start]]){
+              if(!dentro(p, h)) continue;
+              const L = dist(p, o); if(L < 1) continue;
+              const u = { x: (p.x - o.x)/L, y: (p.y - o.y)/L };
+              let t = Infinity;
+              for(const q of paredes){ if(q.w === w) continue; const c = corte(p, u, q.w.start, q.w.end); if(c != null && c < t) t = c; }
+              for(const s of puentes){ const c = corte(p, u, s.a, s.b); if(c != null && c < t) t = c; }
+              if(!isFinite(t) || t > 20) continue;
+              const fin = { x: p.x + u.x*t, y: p.y + u.y*t };
+              const partes = fpAiFindVoids(conPuentes([{ a: p, b: fin }])).filter(v => dentro({ x: v.cx, y: v.cy }, h));
+              if(partes.length !== 2) continue;
+              if(Math.abs(partes[0].area + partes[1].area - h.area) > h.area * 0.3) continue;
+              if(partes.some(v => !puertasDe(v).length)) continue;
+              const relleno = Math.min(...partes.map(v => v.area / Math.max(0.1, (v.w - 0.9) * (v.d - 0.9))));
+              if(!mejor || relleno > mejor.relleno) mejor = { partes, relleno, seg: { a: p, b: fin } };
+            }
+          }
+          const partes = mejor ? mejor.partes : [h];
+          // 4. Cada parte, un cuarto deducido, nombrado por su puerta.
+          const lineas = paredes.map(x => [x.w.start, x.w.end]).concat(puentes.map(s => [s.a, s.b])).concat(mejor ? [[mejor.seg.a, mejor.seg.b]] : []);
+          const pegar = (v, eje) => {
+            // el borde se pega a la pared paralela más cercana (a menos de 0.8 ft)
+            let mejorD = 0.8, val = v;
+            for(const [a, b] of lineas){
+              if(eje === 'x' && Math.abs(a.x - b.x) < 0.3){ const d = Math.abs((a.x + b.x)/2 - v); if(d < mejorD){ mejorD = d; val = (a.x + b.x)/2; } }
+              if(eje === 'y' && Math.abs(a.y - b.y) < 0.3){ const d = Math.abs((a.y + b.y)/2 - v); if(d < mejorD){ mejorD = d; val = (a.y + b.y)/2; } }
+            }
+            return val;
+          };
+          for(const v of partes){
+            const x0 = pegar(v.cx - v.w/2, 'x'), x1 = pegar(v.cx + v.w/2, 'x');
+            const y0 = pegar(v.cy - v.d/2, 'y'), y1 = pegar(v.cy + v.d/2, 'y');
+            if(x1 - x0 < 1.2 || y1 - y0 < 1.2) continue;
+            const deQuien = puertasDe(v).map(d => String(d.r.roomName || d.r.voiceName || ''));
+            const junto = re => cuartos.some(r => re.test(String(r.roomName || r.voiceName || '')) && (() => {
+              const b = floorplanRoomBounds(r);
+              return b && x0 <= b.maxX + 1 && x1 >= b.minX - 1 && y0 <= b.maxY + 1 && y1 >= b.minY - 1;
+            })());
+            let nombre;
+            if(deQuien.some(n => FP_ES_RECAMARA.test(n))) nombre = 'Closet';
+            else if(deQuien.some(n => /kitchen|cocina/i.test(n))) nombre = 'Pantry';
+            else if(deQuien.some(n => FP_ES_PASILLO.test(n)) && junto(/kitchen|cocina/i)) nombre = 'Laundry Room';
+            else nombre = 'Closet';
+            // La altura no se inventa: la que el escáner midió en las paredes vecinas (la más común).
+            const alturas = paredes.map(x => x.w.heightFt).filter(v => v > 0).map(v => Math.round(v * 10) / 10);
+            const cuenta = {}; alturas.forEach(v => { cuenta[v] = (cuenta[v] || 0) + 1; });
+            const altura = alturas.length ? Number(Object.keys(cuenta).sort((m, n) => cuenta[n] - cuenta[m])[0]) : null;
+            const pa = (a, b) => ({ id: fpNewId(), start: a, end: b, lengthFt: Math.round(dist(a, b)*100)/100,
+                                    ...(altura ? { heightFt: altura } : {}), _added: true, _inferido: true });
+            const c = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+            data.rooms.push({ roomName: nombre, level: lvl, _inferido: true, _auto: true,
+              walls: [pa(c[0], c[1]), pa(c[1], c[2]), pa(c[2], c[3]), pa(c[3], c[0])],
+              doors: [], windows: [], openings: [], objects: [] });
+            hecho.push(nombre + ' ' + fpFeetInches(x1 - x0) + ' x ' + fpFeetInches(y1 - y0) + ' (no escaneado: deducido)');
+          }
+        }
+      }
+    }finally{
+      floorplanSelectedLevel = nivelAntes;
+    }
+    if(hecho.length) data._autoCompletado = hecho;
+    return hecho;
   }
   // RECOVERY PASS for outline breaks: search the data we already have
   // before proposing anything - if ANY same-floor wall already runs
