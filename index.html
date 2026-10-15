@@ -8598,7 +8598,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-14-E';
+  const APP_BUILD = '2026-10-14-F';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12226,7 +12226,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         (Array.isArray(r.objects) ? r.objects : []).forEach(o => { if(o && typeof o === 'object'){ o.rotationDeg = +o.rotationDeg || 0; } });
       });
       floorplanAlignRooms(d);
-      if(!d._handEdited){ floorplanRectifyWalls(d); floorplanRefineGeometry(d); floorplanCloseCorners(d); try{ fpResolverParedesAjenas(d); }catch(e){ console.warn('paredes ajenas', e); } }
+      if(!d._handEdited){ try{ fpValidarParches(d); }catch(e){ console.warn('parches', e); } floorplanRectifyWalls(d); floorplanRefineGeometry(d); floorplanCloseCorners(d); try{ fpResolverParedesAjenas(d); }catch(e){ console.warn('paredes ajenas', e); } }
       fpCleanPhantomSpaceLabels(d);
       floorplanDetectSubAreas(d);
       tok.data = d;
@@ -18698,6 +18698,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // se sabe cuál es.
   function fpPlantaDeNivel(data, lvl){
     const n = Math.max(1, +lvl || 1);
+    // El nombre del nivel que el personal escogió en la cámara (Scanova: los
+    // niveles del proyecto, p. ej. "Third Floor") manda. Field Reports no
+    // llena nombresDeNivel en sus plantas estándar, así que ahí no cambia.
+    const nom = data && data.inspection && data.inspection.nombresDeNivel;
+    if(nom && nom[String(n)]) return String(nom[String(n)]);
     const base = (data && data._nivelBase) || '';
     const i0 = FP_PLANTAS.indexOf(base);
     // SIN PLANTA DE PARTIDA NO SE INVENTA NINGUNA (18 sep 2026).
@@ -21420,7 +21425,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     try{ localStorage.setItem(FLOORPLAN_DRAFT_KEY, e.id); }catch(e2){}
     fpResetUndoStack();
     floorplanAlignRooms(floorplanData);
-    if(!floorplanData._handEdited){ floorplanRectifyWalls(floorplanData); floorplanRefineGeometry(floorplanData); floorplanCloseCorners(floorplanData); try{ fpResolverParedesAjenas(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } }
+    if(!floorplanData._handEdited){ try{ fpValidarParches(floorplanData); }catch(e){ console.warn('parches', e); } floorplanRectifyWalls(floorplanData); floorplanRefineGeometry(floorplanData); floorplanCloseCorners(floorplanData); try{ fpResolverParedesAjenas(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } }
     const goneNames = fpCleanPhantomSpaceLabels(floorplanData);
     if(goneNames && goneNames.length){ floorplanData._phantomLabelsRemoved = goneNames; saveFloorplanDraft(); }
     renderFloorplan(floorplanData);
@@ -21765,8 +21770,15 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       });
     });
     ((data && data.rooms) || []).forEach(room => {
-      const poly = fpOrderedRoomPolygon(room);
+      const giSub = {};
+      const poly = fpOrderedRoomPolygon(room, giSub);
       const found = [];
+      // Un lado que es el PUENTE con que la app cerró el contorno (línea
+      // punteada) no es pared: un rincón con un lado así no es un clóset
+      // (14-oct, el Hallway de harold_otros salía con 'CLOSET').
+      const esPuente = (P, Q) => (giSub.bridgeSegs || []).some(b => b && b.d > 0.5 &&
+        ((Math.hypot(b.a.x-P.x, b.a.y-P.y) < 0.3 && Math.hypot(b.b.x-Q.x, b.b.y-Q.y) < 0.3) ||
+         (Math.hypot(b.a.x-Q.x, b.a.y-Q.y) < 0.3 && Math.hypot(b.b.x-P.x, b.b.y-P.y) < 0.3)));
       if(poly && poly.length >= 5){
         const roomArea = fpPolygonAreaSqFt(poly) || 1;
         const n = poly.length;
@@ -21775,6 +21787,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
           const ab = {x: B.x-A.x, y: B.y-A.y}, bc = {x: C.x-B.x, y: C.y-B.y}, cd = {x: D.x-C.x, y: D.y-C.y};
           const lab = Math.hypot(ab.x, ab.y), lbc = Math.hypot(bc.x, bc.y), lcd = Math.hypot(cd.x, cd.y);
           if(lab < 1.2 || lbc < 1.8 || lcd < 1.2) continue;
+          if(esPuente(A, B) || esPuente(B, C) || esPuente(C, D)) continue;
           // AB perpendicular to BC, CD perpendicular to BC, AB opposite CD.
           const dotAbBc = (ab.x*bc.x + ab.y*bc.y)/(lab*lbc);
           const dotAbCd = (ab.x*cd.x + ab.y*cd.y)/(lab*lcd);
@@ -22079,6 +22092,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         // scan-noise cleanup (straightening/reconciliation) must never
         // re-snap what a person deliberately placed.
         if(!floorplanData._handEdited){
+          try{ fpValidarParches(floorplanData); }catch(e){ console.warn('parches', e); }
           floorplanRectifyWalls(floorplanData);
           floorplanRefineGeometry(floorplanData);
           floorplanCloseCorners(floorplanData);
@@ -22314,6 +22328,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       fpMemRememberScan(result);
       fpApplyVoiceSurfaceAnswers(result);
       floorplanAlignRooms(result);
+      // El parche de "Completar escaneo" que cayó fuera de lo que faltaba se aparta (14-oct, Harold).
+      try{ fpValidarParches(result); }catch(e){ console.warn('parches', e); }
       floorplanRectifyWalls(result);
       floorplanRefineGeometry(result);
       // Las esquinas chicas que no cerraron se cierran aquí, con aviso; las
@@ -25599,7 +25615,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const memRow = mem.names ? `<div class="line"><span>Lo que la app aprendi\u00f3</span><span style="text-align:right; font-size:12px;">${mem.names} nombre${mem.names===1?'':'s'} suyo${mem.names===1?'':'s'} &middot; ${mem.scans} escaneo${mem.scans===1?'':'s'} <button type="button" id="fpMemForgetBtn" class="btn btn-ink" style="padding:2px 8px; font-size:11px; margin-left:6px;">Olvidar</button></span></div>` : '';
     $('#floorplanSummary').innerHTML = `
       <div class="line"><span>Total Area</span><span>${fpDisplayTotalAreaSqFt(data).toFixed(1)} sq ft</span></div>
-      <div class="line"><span>Rooms</span><span>${b.roomCount||rooms.filter(r => !r.deleted).length}</span></div>
+      <div class="line"><span>Rooms</span><span>${rooms.filter(r => !r.deleted).length}</span></div>
       ${levelsRow}
       <div class="line"><span>Walls / Doors / Windows</span><span>${wallCount} / ${doorCount} / ${windowCount}</span></div>
       <div class="line"><span>Objects</span><span style="text-align:right; font-size:12px;">${groupLine}</span></div>
@@ -25735,7 +25751,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const roomName = room.roomName || `Room ${idx + 1}`;
       // Dónde estaba: los puntos a los que la cámara les apuntaba en esas
       // fotos, con la posición de la cámara (x, z del mundo = x, y del plano).
-      const propuesta = fpStudLineaPropuesta(data, idx, fotos.filter(k => isFinite(k.hitX) && isFinite(k.hitY))
+      // Solo si las fotos están en el marco del plano: si no, la partición
+      // propuesta caería en otro lugar.
+      const propuesta = fpStudLineaPropuesta(data, idx, fotos.filter(k => fpInspeccionUbicada(data) && isFinite(k.hitX) && isFinite(k.hitY))
         .map(k => ({ x: k.hitX, y: k.hitY, yaw: k.yaw, cx: k.x, cy: k.z })));
       salida.push({ kind: 'studs', room: idx, kfId: fotos[0].id, ack: '_studReviewed', fotos: fotos.length, propuesta,
         text: `${esc(roomName)}: ${fotos.length} walkthrough photos show wall framing with the drywall off (studs). Was there a wall here that was torn out to the studs? `
@@ -27616,6 +27634,19 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
               if(partes.length !== 2) continue;
               if(Math.abs(partes[0].area + partes[1].area - h.area) > h.area * 0.3) continue;
               if(partes.some(v => !puertasDe(v).length)) continue;
+              // Partir solo si las dos partes se abren a cuartos DISTINTOS: dos
+              // entradas del mismo pasillo son UN espacio, no dos (Hamilton:
+              // una pared inventada de 3'8" y dos "Laundry Room").
+              // (Solo cuentan las puertas que caen EN el borde de la parte, no
+              // las de un cuarto vecino que quedan cerca de una esquina.)
+              const enBorde = (pt, v) => {
+                const dx = Math.max(Math.abs(pt.x - v.cx) - v.w/2, 0), dy = Math.max(Math.abs(pt.y - v.cy) - v.d/2, 0);
+                const fuera = Math.hypot(dx, dy), adentro = Math.min(v.w/2 - Math.abs(pt.x - v.cx), v.d/2 - Math.abs(pt.y - v.cy));
+                return fuera > 0 ? fuera <= 0.75 : adentro <= 0.75;
+              };
+              const duenos = partes.map(v => new Set(puertasDe(v).filter(d => enBorde(d.p, v)).map(d => d.r)));
+              const todos = new Set([...duenos[0], ...duenos[1]]);
+              if(todos.size === 1) continue;
               const relleno = Math.min(...partes.map(v => v.area / Math.max(0.1, (v.w - 0.9) * (v.d - 0.9))));
               if(!mejor || relleno > mejor.relleno) mejor = { partes, relleno, seg: { a: p, b: fin } };
             }
@@ -27646,6 +27677,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
             else if(deQuien.some(n => /kitchen|cocina/i.test(n))) nombre = 'Pantry';
             else if(deQuien.some(n => FP_ES_PASILLO.test(n)) && junto(/kitchen|cocina/i)) nombre = 'Laundry Room';
             else nombre = 'Closet';
+            // Un nombre deducido no se repite en el mismo nivel: la segunda
+            // lavandería de un piso es otra cosa (un clóset o una bodega).
+            if(nombre !== 'Closet' && data.rooms.some(r => r && r._inferido && (r.level || 1) === lvl && r.roomName === nombre)) nombre = 'Storage';
             // La altura no se inventa: la que el escáner midió en las paredes vecinas (la más común).
             const alturas = paredes.map(x => x.w.heightFt).filter(v => v > 0).map(v => Math.round(v * 10) / 10);
             const cuenta = {}; alturas.forEach(v => { cuenta[v] = (cuenta[v] || 0) + 1; });
@@ -27653,9 +27687,16 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
             const pa = (a, b) => ({ id: fpNewId(), start: a, end: b, lengthFt: Math.round(dist(a, b)*100)/100,
                                     ...(altura ? { heightFt: altura } : {}), _added: true, _inferido: true });
             const c = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+            const paredesNuevas = [pa(c[0], c[1]), pa(c[1], c[2]), pa(c[2], c[3]), pa(c[3], c[0])];
+            // La puerta que lo nombró también es SUYA (en su borde): así su
+            // rodapié la descuenta. Es una copia; el dibujo junta las dos.
+            const suPuerta = puertasDe(v).filter(dp => paredesNuevas.some(w => distSeg(dp.p, w.start, w.end) <= 1.0)).map(dp => {
+              const cerca = paredesNuevas.reduce((m, w) => { const dd = distSeg(dp.p, w.start, w.end); return !m || dd < m.d ? { w, d: dd } : m; }, null);
+              return { id: fpNewId(), wallId: cerca.w.id, position: { x: dp.p.x, y: dp.p.y }, widthFt: dp.w, heightFt: 6.8, _inferido: true };
+            });
             data.rooms.push({ roomName: nombre, level: lvl, _inferido: true, _auto: true,
-              walls: [pa(c[0], c[1]), pa(c[1], c[2]), pa(c[2], c[3]), pa(c[3], c[0])],
-              doors: [], windows: [], openings: [], objects: [] });
+              walls: paredesNuevas,
+              doors: suPuerta, windows: [], openings: [], objects: [] });
             hecho.push(nombre + ' ' + fpFeetInches(x1 - x0) + ' x ' + fpFeetInches(y1 - y0) + ' (no escaneado: deducido)');
           }
         }
@@ -28474,104 +28515,150 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // BRIDGING doorway-sized gaps, into one closed outline. Validated on
   // the real house: every room's label anchor lands inside its true
   // space and every area comes out plausible.
+  // CONTORNO EN OCHO (14-oct, la cocina de Hamilton salía con 17.1 sq ft en
+  // vez de unos 329). Un muñón de pared corto que nace en una esquina hace
+  // que el encadenado pase DOS VECES por el mismo punto, y la fórmula del
+  // área resta un lóbulo del otro. Si el contorno sale así, se prueba sin
+  // cada pared corta (menos de 3 ft; no se borra del dibujo, solo deja de
+  // contar para el borde) y se queda el contorno SANO de mayor área. Un
+  // contorno sano no entra aquí: los planos buenos no cambian. Un contorno
+  // que solo se cruza por un puente se deja como está (probado en el plano
+  // real: "arreglarlo" le metía al pasillo piso de la sala), pero se avisa
+  // en gapInfo.roto para que nadie publique su perímetro como medida.
+  // Todo vive aquí adentro a propósito: las pruebas sacan esta función sola.
   function fpOrderedRoomPolygon(room, gapInfo){
-    // Una pared de solo studs DIBUJADA Y NO PARTIDA (sin pareja) no es borde:
-    // si entrara, el encadenado la cosería al anillo y la hoja imprimiría un
-    // cuarto en ocho con piso y pared falsos - sin que nadie partiera nada.
-    // Las particiones ya partidas (con _studPairId) sí son borde de su mitad.
-    // _ajena: una pared que este cuarto solo VIO por una abertura (es del
-    // cuarto de al lado) no es su borde. _recorte: de una pared juntada de
-    // dos cuartos, solo el tramo que es de este. Ver fpResolverParedesAjenas.
-    const walls = (room.walls||[]).map(w => (w && w._recorte && w._recorte.start && w._recorte.end) ? Object.assign({}, w, { start: w._recorte.start, end: w._recorte.end }) : w).filter(w => w.start && w.end && !w._ajena && !(w._studWall && !w._studPairId)
-      && Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) > 0.05);
-    // Dos paredes ya forman un cuarto SOLO cuando lo demás eran paredes
-    // ajenas: un pasillo abierto en las dos puntas, al devolverle a la sala
-    // y al foyer lo que vio de ellos, se queda con sus dos paredes largas.
-    if(walls.length < 3 && !(walls.length === 2 && (room._sinAjenas || (room.walls||[]).some(w => w && w._ajena))))
-      return walls.map(w => w.start);
-    const tol = 1.0;
-    const used = new Array(walls.length).fill(false);
-    const chains = [];
-    for(let s=0; s<walls.length; s++){
-      if(used[s]) continue;
-      used[s] = true;
-      const chain = [{x:walls[s].start.x,y:walls[s].start.y},{x:walls[s].end.x,y:walls[s].end.y}];
-      let extended = true;
-      while(extended){
-        extended = false;
-        const head = chain[0], tail = chain[chain.length-1];
-        let best = null;
-        for(let i=0; i<walls.length; i++){
-          if(used[i]) continue;
-          const cands = [
-            {d:Math.hypot(walls[i].start.x-tail.x,walls[i].start.y-tail.y), far:walls[i].end, atTail:true, i},
-            {d:Math.hypot(walls[i].end.x-tail.x,walls[i].end.y-tail.y), far:walls[i].start, atTail:true, i},
-            {d:Math.hypot(walls[i].start.x-head.x,walls[i].start.y-head.y), far:walls[i].end, atTail:false, i},
-            {d:Math.hypot(walls[i].end.x-head.x,walls[i].end.y-head.y), far:walls[i].start, atTail:false, i},
-          ];
-          for(const c of cands) if(!best || c.d < best.d) best = c;
+    const cadena = (room, gapInfo) => {
+      // Una pared de solo studs DIBUJADA Y NO PARTIDA (sin pareja) no es borde:
+      // si entrara, el encadenado la cosería al anillo y la hoja imprimiría un
+      // cuarto en ocho con piso y pared falsos - sin que nadie partiera nada.
+      // Las particiones ya partidas (con _studPairId) sí son borde de su mitad.
+      // _ajena: una pared que este cuarto solo VIO por una abertura (es del
+      // cuarto de al lado) no es su borde. _recorte: de una pared juntada de
+      // dos cuartos, solo el tramo que es de este. Ver fpResolverParedesAjenas.
+      const walls = (room.walls||[]).map(w => (w && w._recorte && w._recorte.start && w._recorte.end) ? Object.assign({}, w, { start: w._recorte.start, end: w._recorte.end }) : w).filter(w => w.start && w.end && !w._ajena && !(w._studWall && !w._studPairId)
+        && Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) > 0.05);
+      // Dos paredes ya forman un cuarto SOLO cuando lo demás eran paredes
+      // ajenas: un pasillo abierto en las dos puntas, al devolverle a la sala
+      // y al foyer lo que vio de ellos, se queda con sus dos paredes largas.
+      if(walls.length < 3 && !(walls.length === 2 && (room._sinAjenas || (room.walls||[]).some(w => w && w._ajena))))
+        return walls.map(w => w.start);
+      const tol = 1.0;
+      const used = new Array(walls.length).fill(false);
+      const chains = [];
+      for(let s=0; s<walls.length; s++){
+        if(used[s]) continue;
+        used[s] = true;
+        const chain = [{x:walls[s].start.x,y:walls[s].start.y},{x:walls[s].end.x,y:walls[s].end.y}];
+        let extended = true;
+        while(extended){
+          extended = false;
+          const head = chain[0], tail = chain[chain.length-1];
+          let best = null;
+          for(let i=0; i<walls.length; i++){
+            if(used[i]) continue;
+            const cands = [
+              {d:Math.hypot(walls[i].start.x-tail.x,walls[i].start.y-tail.y), far:walls[i].end, atTail:true, i},
+              {d:Math.hypot(walls[i].end.x-tail.x,walls[i].end.y-tail.y), far:walls[i].start, atTail:true, i},
+              {d:Math.hypot(walls[i].start.x-head.x,walls[i].start.y-head.y), far:walls[i].end, atTail:false, i},
+              {d:Math.hypot(walls[i].end.x-head.x,walls[i].end.y-head.y), far:walls[i].start, atTail:false, i},
+            ];
+            for(const c of cands) if(!best || c.d < best.d) best = c;
+          }
+          if(best && best.d <= tol){
+            used[best.i] = true;
+            if(best.atTail) chain.push({x:best.far.x,y:best.far.y});
+            else chain.unshift({x:best.far.x,y:best.far.y});
+            extended = true;
+          }
         }
-        if(best && best.d <= tol){
-          used[best.i] = true;
-          if(best.atTail) chain.push({x:best.far.x,y:best.far.y});
-          else chain.unshift({x:best.far.x,y:best.far.y});
-          extended = true;
+        chains.push(chain);
+      }
+      const chainLen = c => c.reduce((a,p,i)=> i ? a+Math.hypot(p.x-c[i-1].x,p.y-c[i-1].y) : 0, 0);
+      let kept = chains.filter(c => chainLen(c) >= 2.5);
+      if(!kept.length) kept = chains;
+      kept.sort((a,b) => chainLen(b)-chainLen(a));
+      const poly = kept[0].map(p => ({x:p.x,y:p.y}));
+      const rest = kept.slice(1);
+      while(rest.length){
+        // THE root cause of the "grey shadows" and of the app asking the
+        // tech to name his own bedroom. If what has been chained so far
+        // ALREADY closes, it is the room's outline - full stop. Whatever
+        // chain is left over is an INTERIOR wall of that room, not a piece
+        // of its boundary, and bridging back out to it draws a figure
+        // eight across the room's own floor. On the real Master Bedroom the
+        // ring closed cleanly at 8 walls and the loop then bridged 15.5 ft
+        // back to the closet's mouth wall and 19.2 ft home again, which
+        // made an even-odd point test answer "outside" for most of the
+        // bedroom. A leftover is NOT a gap - it is reported separately so
+        // AI Fix never proposes a wall to close something that is closed.
+        if(poly.length >= 3 &&
+           Math.hypot(poly[0].x-poly[poly.length-1].x, poly[0].y-poly[poly.length-1].y) <= tol){
+          if(gapInfo) gapInfo.leftovers = rest.map(c => c.map(pt => ({x:pt.x, y:pt.y})));
+          break;
         }
+        const tail = poly[poly.length-1];
+        let bi=-1, bflip=false, bd=Infinity;
+        rest.forEach((c,i) => {
+          const dS = Math.hypot(c[0].x-tail.x, c[0].y-tail.y);
+          const dE = Math.hypot(c[c.length-1].x-tail.x, c[c.length-1].y-tail.y);
+          if(dS < bd){ bd=dS; bi=i; bflip=false; }
+          if(dE < bd){ bd=dE; bi=i; bflip=true; }
+        });
+        const c = rest.splice(bi,1)[0];
+        const seg = bflip ? c.slice().reverse() : c;
+        // Bridged distances are reported to the caller (validation uses
+        // them: a doorway-sized bridge is normal, a huge one means a wall
+        // the scan probably missed). The bridge's actual endpoints ride
+        // along so the review panel can OFFER the missing wall instead of
+        // only describing it.
+        if(gapInfo && bd > tol){
+          gapInfo.bridges = (gapInfo.bridges||[]).concat(bd);
+          (gapInfo.bridgeSegs = gapInfo.bridgeSegs||[]).push({ a:{x:tail.x,y:tail.y}, b:{x:seg[0].x,y:seg[0].y}, d:bd });
+        }
+        seg.forEach((p,i) => { if(i===0 && bd<=tol) return; poly.push({x:p.x,y:p.y}); });
       }
-      chains.push(chain);
-    }
-    const chainLen = c => c.reduce((a,p,i)=> i ? a+Math.hypot(p.x-c[i-1].x,p.y-c[i-1].y) : 0, 0);
-    let kept = chains.filter(c => chainLen(c) >= 2.5);
-    if(!kept.length) kept = chains;
-    kept.sort((a,b) => chainLen(b)-chainLen(a));
-    const poly = kept[0].map(p => ({x:p.x,y:p.y}));
-    const rest = kept.slice(1);
-    while(rest.length){
-      // THE root cause of the "grey shadows" and of the app asking the
-      // tech to name his own bedroom. If what has been chained so far
-      // ALREADY closes, it is the room's outline - full stop. Whatever
-      // chain is left over is an INTERIOR wall of that room, not a piece
-      // of its boundary, and bridging back out to it draws a figure
-      // eight across the room's own floor. On the real Master Bedroom the
-      // ring closed cleanly at 8 walls and the loop then bridged 15.5 ft
-      // back to the closet's mouth wall and 19.2 ft home again, which
-      // made an even-odd point test answer "outside" for most of the
-      // bedroom. A leftover is NOT a gap - it is reported separately so
-      // AI Fix never proposes a wall to close something that is closed.
-      if(poly.length >= 3 &&
-         Math.hypot(poly[0].x-poly[poly.length-1].x, poly[0].y-poly[poly.length-1].y) <= tol){
-        if(gapInfo) gapInfo.leftovers = rest.map(c => c.map(pt => ({x:pt.x, y:pt.y})));
-        break;
+      const closeDist = Math.hypot(poly[0].x-poly[poly.length-1].x, poly[0].y-poly[poly.length-1].y);
+      if(gapInfo && closeDist > tol){
+        gapInfo.bridges = (gapInfo.bridges||[]).concat(closeDist);
+        (gapInfo.bridgeSegs = gapInfo.bridgeSegs||[]).push({ a:{x:poly[poly.length-1].x,y:poly[poly.length-1].y}, b:{x:poly[0].x,y:poly[0].y}, d:closeDist });
       }
-      const tail = poly[poly.length-1];
-      let bi=-1, bflip=false, bd=Infinity;
-      rest.forEach((c,i) => {
-        const dS = Math.hypot(c[0].x-tail.x, c[0].y-tail.y);
-        const dE = Math.hypot(c[c.length-1].x-tail.x, c[c.length-1].y-tail.y);
-        if(dS < bd){ bd=dS; bi=i; bflip=false; }
-        if(dE < bd){ bd=dE; bi=i; bflip=true; }
-      });
-      const c = rest.splice(bi,1)[0];
-      const seg = bflip ? c.slice().reverse() : c;
-      // Bridged distances are reported to the caller (validation uses
-      // them: a doorway-sized bridge is normal, a huge one means a wall
-      // the scan probably missed). The bridge's actual endpoints ride
-      // along so the review panel can OFFER the missing wall instead of
-      // only describing it.
-      if(gapInfo && bd > tol){
-        gapInfo.bridges = (gapInfo.bridges||[]).concat(bd);
-        (gapInfo.bridgeSegs = gapInfo.bridgeSegs||[]).push({ a:{x:tail.x,y:tail.y}, b:{x:seg[0].x,y:seg[0].y}, d:bd });
+      if(poly.length>3 && closeDist <= tol) poly.pop();
+      if(poly.length>=3) return fpPruneOutlineSpikes(poly);
+      return walls.map(w=>w.start);
+    };
+    const repetido = poly => {
+      if(!poly || poly.length < 3) return false;
+      for(let i = 0; i < poly.length; i++) for(let j = i + 1; j < poly.length; j++)
+        if(Math.hypot(poly[i].x - poly[j].x, poly[i].y - poly[j].y) < 0.05) return true;
+      return false;
+    };
+    const cruces = poly => {
+      const n = poly ? poly.length : 0; let k = 0;
+      const o = (a, b, q) => (b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x);
+      for(let i = 0; i < n; i++) for(let j = i + 2; j < n; j++){
+        if(i === 0 && j === n - 1) continue;
+        const a = poly[i], b = poly[(i + 1) % n], c = poly[j], d = poly[(j + 1) % n];
+        if(o(c, d, a) * o(c, d, b) < -1e-9 && o(a, b, c) * o(a, b, d) < -1e-9) k++;
       }
-      seg.forEach((p,i) => { if(i===0 && bd<=tol) return; poly.push({x:p.x,y:p.y}); });
-    }
-    const closeDist = Math.hypot(poly[0].x-poly[poly.length-1].x, poly[0].y-poly[poly.length-1].y);
-    if(gapInfo && closeDist > tol){
-      gapInfo.bridges = (gapInfo.bridges||[]).concat(closeDist);
-      (gapInfo.bridgeSegs = gapInfo.bridgeSegs||[]).push({ a:{x:poly[poly.length-1].x,y:poly[poly.length-1].y}, b:{x:poly[0].x,y:poly[0].y}, d:closeDist });
-    }
-    if(poly.length>3 && closeDist <= tol) poly.pop();
-    if(poly.length>=3) return fpPruneOutlineSpikes(poly);
-    return walls.map(w=>w.start);
+      return k;
+    };
+    const area = poly => { let t = 0; for(let i = 0, j = poly.length - 1; i < poly.length; j = i++) t += poly[j].x * poly[i].y - poly[i].x * poly[j].y; return Math.abs(t) / 2; };
+    const roto = poly => !poly || poly.length < 3 || repetido(poly) || cruces(poly) > 0;
+    const gi = gapInfo ? {} : null;
+    const p0 = cadena(room, gi);
+    const pasar = (g, p) => { if(gapInfo){ if(g) Object.assign(gapInfo, g); if(roto(p)) gapInfo.roto = true; } };
+    if(!repetido(p0) || !room || !Array.isArray(room.walls)) { pasar(gi, p0); return p0; }
+    let mejor = null;
+    room.walls.forEach(w => {
+      if(!w || !w.start || !w.end || Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) >= 3) return;
+      const g2 = gapInfo ? {} : null;
+      const p2 = cadena(Object.assign({}, room, { walls: room.walls.filter(x => x !== w) }), g2);
+      if(roto(p2)) return;
+      const a = area(p2);
+      if(!mejor || a > mejor.a) mejor = { p: p2, g: g2, a };
+    });
+    if(mejor){ pasar(mejor.g, mejor.p); return mejor.p; }
+    pasar(gi, p0); return p0;
   }
   // ESPINAS DEL CONTORNO. El encadenado consume paredes ENTERAS y no
   // puede partir una, asi que cuando una pared se extiende mas alla del
@@ -28686,6 +28773,91 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       if(fpDistAlBorde(o.position, poly) > 0.75) n++;
     }
     return n;
+  }
+  // EL PARCHE QUE NO CAE DONDE FALTABA (14-oct, la casa de Harold: "puso un cuarto encima de la cocina").
+  // "Completar escaneo" escanea aparte lo que le faltó a un cuarto y el iPhone se lo pega con paredes
+  // `_parche`. Si esa captura vio OTRO espacio (o no se alineó), sus paredes atraviesan los cuartos de al
+  // lado o el piso del mismo cuarto: en Harold fue una caja de 13 x 14 ft encima de la cocina y el clóset.
+  // Una pared del parche se queda solo si cae donde al cuarto le falta pared: no puede pasar por dentro de
+  // otro cuarto (a más de 0.75 ft de su borde) ni por en medio del piso del suyo (a más de 1.5 ft). Si la
+  // mayor parte del parche no pasa, el parche entero quedó mal puesto y se aparta todo. Nada se borra: lo
+  // apartado queda en room._parcheApartado (y sus puertas y ventanas con él).
+  function fpValidarParches(data){
+    const apartadas = [];
+    if(!data || !Array.isArray(data.rooms)) return apartadas;
+    // Sin merge (14-oct) los cuartos no comparten coordenadas: no se compara
+    // con los otros, pero el parche que cruza el piso de SU cuarto se aparta
+    // igual (el iPhone también los pega en ese caso).
+    const sinMerge = data.merged === false;
+    const vivos = data.rooms.filter(r => r && !r.deleted && Array.isArray(r.walls));
+    const sinParche = r => Object.assign({}, r, { walls: (r.walls||[]).filter(w => w && !w._parche) });
+    const nivel = r => r.level || 1;
+    const largo = w => Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
+    vivos.forEach(room => {
+      const parche = room.walls.filter(w => w && w._parche && w.start && w.end && largo(w) > 0.05);
+      if(!parche.length) return;
+      const propio = fpOrderedRoomPolygon(sinParche(room));
+      const otros = sinMerge ? [] : vivos.filter(r => r !== room && nivel(r) === nivel(room)).map(r => fpOrderedRoomPolygon(sinParche(r))).filter(p => p && p.length >= 3);
+      const dentro = (p, poly, m) => poly && poly.length >= 3 && fpPointInPolygon(p, poly) && fpDistAlBorde(p, poly) >= m;
+      let total = 0, malo = 0;
+      const malas = new Set();
+      parche.forEach(w => {
+        const L = largo(w), n = Math.max(4, Math.ceil(L / 0.5));
+        let mal = 0;
+        for(let k = 0; k <= n; k++){
+          const t = k / n, p = { x: w.start.x + (w.end.x - w.start.x) * t, y: w.start.y + (w.end.y - w.start.y) * t };
+          if(otros.some(o => dentro(p, o, 0.75)) || dentro(p, propio, 1.5)) mal++;
+        }
+        total += L;
+        if(mal / (n + 1) >= 0.3){ malas.add(w); malo += L; }
+      });
+      // EL PISO QUE EL PARCHE AGREGA (14-oct). Muestrear solo la pared no ve
+      // una pared que cae afuera de todo cuarto: el contorno del cuarto da la
+      // vuelta para alcanzarla y se mete en el piso de los vecinos. Se compara
+      // el contorno con y sin el parche: si el piso nuevo cae en otro cuarto
+      // más de max(3 sq ft, 10% de lo agregado), se aparta la pared que más
+      // encime agrega, y se repite.
+      if(otros.length){
+        const encimeCon = ws => {
+          const poly = fpOrderedRoomPolygon(Object.assign({}, room, { walls: ws }));
+          return { e: otros.reduce((t, o) => t + fpEncimeSqFt(poly, o), 0), a: poly && poly.length >= 3 ? fpPolygonAreaSqFt(poly) : 0 };
+        };
+        const base = encimeCon(room.walls.filter(w => w && !w._parche));
+        for(let vuelta = 0; vuelta < parche.length; vuelta++){
+          const quedan = parche.filter(w => !malas.has(w));
+          if(!quedan.length) break;
+          const con = encimeCon(room.walls.filter(w => w && (!w._parche || !malas.has(w))));
+          const agregado = Math.max(0, con.a - base.a);
+          if(con.e - base.e <= Math.max(3, 0.1 * agregado)) break;
+          let peor = null;
+          quedan.forEach(w => {
+            const sin = encimeCon(room.walls.filter(x => x && (!x._parche || (!malas.has(x) && x !== w))));
+            const baja = con.e - sin.e;
+            if(!peor || baja > peor.baja) peor = { w, baja };
+          });
+          if(!peor || peor.baja <= 0) break;
+          malas.add(peor.w); malo += largo(peor.w);
+        }
+      }
+      const todo = total > 0 && malo / total > 0.5;
+      const fuera = todo ? new Set(parche) : malas;
+      if(!fuera.size) return;
+      const ids = new Set([...fuera].map(w => w.id));
+      const ap = room._parcheApartado || (room._parcheApartado = { walls: [], doors: [], windows: [], openings: [] });
+      ap.motivo = todo ? 'el parche entero cae fuera de lo que faltaba' : 'paredes del parche fuera de lo que faltaba';
+      fuera.forEach(w => ap.walls.push(w));
+      room.walls = room.walls.filter(w => !fuera.has(w));
+      ['doors', 'windows', 'openings'].forEach(k => {
+        const lista = room[k] || [];
+        const se = lista.filter(o => o && o._parche && (todo || ids.has(o.wallId)));
+        if(!se.length) return;
+        se.forEach(o => ap[k].push(o));
+        room[k] = lista.filter(o => !se.includes(o));
+      });
+      apartadas.push({ room: room.roomName || room.voiceName || '', paredes: fuera.size, todo });
+    });
+    if(apartadas.length) data._parchesApartados = (data._parchesApartados || 0) + apartadas.reduce((s, a) => s + a.paredes, 0);
+    return apartadas;
   }
   const K_HUECO = 0.5;
   function fpResolverParedesAjenas(data){
@@ -28988,11 +29160,18 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const resto = minIntr.map((_, k) => minIntr.slice(k).reduce((a, b) => a + b, 0)).concat([0]);
       const recorrer = (k, suma) => {
         if(mejor && suma + resto[k] >= mejor.nota) return;
-        if(k === g.length){ const r = evaluar(idx); if(r && (!mejor || r.nota < mejor.nota)) mejor = r; return; }
+        if(k === g.length){
+          const r = evaluar(idx);
+          // Las rejas se aplican DENTRO de la búsqueda (14-oct, Hamilton): el
+          // mejor por nota a veces deja una puerta fuera de su cuarto, y antes
+          // se rendía aunque otra combinación cumpliera todo y quitara el encime.
+          if(r && (!inicial || (r.fuera <= inicial.fuera && r.cruces <= inicial.cruces)) && (!mejor || r.nota < mejor.nota)) mejor = r;
+          return;
+        }
         for(let a = 0; a < listas[k].length; a++){ idx[k] = a; recorrer(k+1, suma + listas[k][a].intr); }
       };
-      recorrer(0, 0);
       if(vacioIdx.every(v => v >= 0)) inicial = evaluar(vacioIdx);
+      recorrer(0, 0);
       if(!mejor || !inicial) continue;
       // Solo si de verdad arregla: el encime baja a la mitad o menos y
       // ninguna puerta se queda fuera de su cuarto por el cambio.
@@ -29111,8 +29290,10 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const poly = fpOrderedRoomPolygon(room, gi);
     // Con menos de 3 vertices no hay contorno: el lazo de abajo recorreria
     // los mismos 2 puntos de ida y vuelta y publicaria el DOBLE de una
-    // pared como si fuera el perimetro del cuarto.
-    const outlineOk = poly.length >= 3;
+    // pared como si fuera el perimetro del cuarto. Un contorno que se cruza
+    // consigo mismo (o pasa dos veces por un punto) tampoco es un borde: su
+    // perimetro y su pared serian numeros inventados (14-oct).
+    const outlineOk = poly.length >= 3 && !gi.roto;
     let perimeterFt = 0;
     for(let i = 0, j = poly.length - 1; i < poly.length; j = i++)
       perimeterFt += Math.hypot(poly[i].x - poly[j].x, poly[i].y - poly[j].y);
@@ -29176,7 +29357,10 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // Pies del borde que la app cerro sola. Todo lo que se calcula
       // sobre ese tramo -- perimetro, pared, rodapie -- hereda la duda,
       // asi que viaja con el resultado en vez de perderse.
-      guessedFt: (gi.bridgeSegs||[]).reduce((t, b) => t + (b && b.d > 1 ? b.d : 0), 0)
+      // Un cuarto DEDUCIDO (nunca escaneado, fpAutoCompletarEspacios) tiene
+      // TODO su borde puesto por la app: sale con la misma marca que un tramo
+      // cerrado por la app, nunca como medida exacta (14-oct).
+      guessedFt: room && room._inferido ? perimeterFt : (gi.bridgeSegs||[]).reduce((t, b) => t + (b && b.d > 1 ? b.d : 0), 0)
     };
   }
   // ============ LA PARED DE SOLO MADERAS: PARTIR EL CUARTO QUE EL LiDAR JUNTÓ ============
@@ -29644,7 +29828,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     });
     const tt = `${td} font-weight:700; color:${ink}; border-top:2px solid ${ink};`;
     if(withTotal) html += `<tr><td style="${tt} text-align:left;">TOTAL</td>`
-      + `<td style="${tt}">${n1(t.floorSqFt)}</td><td style="${tt}">${n1(t.netWallSqFt)}${t.noHeight.length ? '<span style="color:#8a6d1a;">&dagger;</span>' : ''}</td>`
+      + `<td style="${tt}">${n1(t.floorSqFt)}${(() => { try{ const ov = fpRoomsOverlapSqFt(data, onLevel); return ov && ov.sqFt >= 4 ? '<span style="color:#8a6d1a;">&Dagger;</span>' : ''; }catch(e){ return ''; } })()}</td><td style="${tt}">${n1(t.netWallSqFt)}${t.noHeight.length ? '<span style="color:#8a6d1a;">&dagger;</span>' : ''}</td>`
       + `<td style="${tt}">${n1(t.ceilingSqFt)}</td><td style="${tt}">${n1(t.perimeterFt)}</td>`
       + `<td style="${tt}">${n1(t.baseboardFt)}</td><td style="${tt}">&nbsp;</td></tr>`;
     html += `</tbody></table></div>`;
@@ -29657,6 +29841,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       if(t.guessedRooms) bits.push(`&dagger; part of the boundary was closed by the app, not measured (${n1(t.guessedFt)} ft in ${t.guessedRooms} room${t.guessedRooms>1?'s':''})`);
       if(t.noHeight.length) bits.push(`&dagger; ${t.noHeight.length} room${t.noHeight.length>1?'s have':' has'} no wall height, so ${t.noHeight.length>1?'they are':'it is'} left out of the Wall SF total`);
       if(t.noOutline.length) bits.push(`${t.noOutline.length} room${t.noOutline.length>1?'s':''} could not be outlined`);
+      // El mismo piso contado dos veces: es un número que se factura, así
+      // que también va en la hoja corta (con su marca en el TOTAL).
+      try{ const ov = fpRoomsOverlapSqFt(data, onLevel); if(ov && ov.sqFt >= 4) bits.push(`&Dagger; two rooms claim the same ${n1(ov.sqFt)} sq ft of floor; the floor total counts it twice`); }catch(e){}
       // La partición de solo studs TIENE que ir aquí adentro: la hoja del plano
       // usa la rama compacta en toda casa normal, y esta rama sale antes de
       // las notas largas. Afuera, no se imprimiría nunca.
@@ -30563,7 +30750,12 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // to say which part was measured and which part was closed for it.
   function fpGuessedBoundaryFt(room){
     const gi = {};
-    fpOrderedRoomPolygon(room, gi);
+    const poly = fpOrderedRoomPolygon(room, gi);
+    // Un cuarto deducido: todo su borde lo puso la app ("approx." en la hoja).
+    if(room && room._inferido && poly && poly.length >= 3){
+      let p = 0; for(let i = 0, j = poly.length - 1; i < poly.length; j = i++) p += Math.hypot(poly[i].x - poly[j].x, poly[i].y - poly[j].y);
+      return p;
+    }
     return (gi.bridgeSegs || []).reduce((t, b) => t + (b && b.d > 1 ? b.d : 0), 0);
   }
   function fpPlanHasGuessedBoundary(data, onLevel){
@@ -30873,7 +31065,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     };
     // Lo que el teléfono avisó al cerrar ese cuarto ("flagged on site"):
     // viaja en la inspección, por índice del cuarto entregado.
-    const scan = ((data && data.inspection && data.inspection.scanCorners) || {})[String(ri)] || [];
+    const scan = fpInspeccionUbicada(data) ? (((data && data.inspection && data.inspection.scanCorners) || {})[String(ri)] || []) : [];
     const delEscaneo = c => scan.some(s => s && isFinite(s.x) && isFinite(s.y) && D(s, c) <= 0.5);
     const out = [];
 
@@ -31108,9 +31300,26 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     if(data) data._corners = { closed: 0, squared: 0, trimmed: 0, maxMoveFt: 0, reopened: n };
     return n;
   }
+  // ¿El camino, las fotos y las esquinas del escaneo están en el mismo marco
+  // que el plano? Desde el 14-oct el iPhone los manda ya en el plano juntado
+  // (inspection.frame === 'plano'). Antes venían en el marco de CADA captura
+  // de RoomPlan (cada una arranca con su propio origen, se midió en la casa
+  // de Harold): con una sola captura da lo mismo, con dos o más (otro cuarto,
+  // un "Repetir" o un "Completar") caían en otro lugar. Esos datos viejos no
+  // se usan para decidir nada; sin merge ('cuarto'), cada cuarto está en el
+  // suyo y tampoco se cruzan.
+  function fpInspeccionUbicada(data){
+    const insp = data && data.inspection;
+    if(!insp) return false;
+    if(insp.frame === 'plano') return data.merged !== false;
+    if(insp.frame) return false;
+    const rooms = (data.rooms || []).filter(Boolean);
+    const conParche = rooms.some(r => (r.walls || []).some(w => w && w._parche)) || !!(insp.parches && Object.keys(insp.parches).length);
+    return rooms.length <= 1 && !conParche;
+  }
   function fpWalkedPath(data, level){
     const raw = data && data.inspection && data.inspection.path;
-    if(!Array.isArray(raw)) return [];
+    if(!Array.isArray(raw) || !fpInspeccionUbicada(data)) return [];
     return raw.filter(q => q && isFinite(q.x) && isFinite(q.y) &&
                            (level == null || (q.l || 1) === level));
   }
@@ -31669,7 +31878,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const company = esc(($('#companyName') && $('#companyName').value) || 'Restoration Doctor');
     const b = data.buildingSummary || {};
     const levels = floorplanLevels(data);
-    const roomCount = b.roomCount || (data.rooms||[]).length;
+    // Los cuartos que hay HOY (la web agrega deducidos y borra): el número
+    // que mandó el iPhone al escanear se queda viejo.
+    const roomCount = (data.rooms||[]).filter(r => r && !r.deleted).length;
     const job = (data && data.job) || fpJobInfo();
     const dateTxt = job.date
       ? new Date(job.date + 'T12:00:00').toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'})
@@ -32025,6 +32236,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // Field Reports"). Mismos números que fpMeasurementTable (fpRoomMeasurements / fpPlanMeasurements); va en SVG
   // porque Scanova exporta una imagen, no una hoja HTML.
   function fpAltoTablaMedidas(nCuartos, u){ return u * (2.4 + 2.0 + 1.75 * nCuartos + 2.0 + 2.0); }
+  // El nombre del nivel si se sabe (el que se escogió en la cámara, o la
+  // planta de partida); null si solo se sabe su número.
+  function fpNombreDelNivelConocido(data, floorNum){
+    const nom = data && data.inspection && data.inspection.nombresDeNivel;
+    if((nom && nom[String(floorNum)]) || (data && data._nivelBase)) return fpPlantaDeNivel(data, floorNum) || null;
+    return null;
+  }
   function fpTablaMedidasSvg(data, floorNum, x0, y0, w, u){
     const enPiso = r => (r.level || 1) === floorNum;
     const cuartos = ((data && data.rooms) || []).map((r, i) => ({ r, i })).filter(x => !x.r.deleted && (x.r.walls || []).length && enPiso(x.r));
@@ -32039,8 +32257,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       : `<text x="${xs[i] - u * 0.2}" y="${y}" font-size="${fs.toFixed(1)}" font-weight="${peso || 400}" fill="${color || '#3A4552'}" text-anchor="end">${txt}</text>`;
     let y = y0 + u * 1.7, o = `<g class="fp-tabla" font-family="'IBM Plex Sans',sans-serif" style="pointer-events:none;">`;
     o += `<line x1="${x0}" y1="${y0}" x2="${x0 + w}" y2="${y0}" stroke="#1C2530" stroke-width="2"/>`;
-    o += `<text x="${x0 + u * 0.2}" y="${y}" font-size="${(u * 1.25).toFixed(1)}" font-weight="700" fill="#1C2530">Total Area: ${n1(fpDisplayTotalAreaSqFt(data))} sq ft &#160;&#160; Rooms: ${cuartos.length}</text>`;
-    o += `<text x="${x0 + w - u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="1" fill="#1C2530" text-anchor="end">LEVEL ${floorNum}</text>`;
+    // El total del encabezado es el del MISMO nivel que la tabla (la fila
+    // TOTAL): con dos niveles, el de toda la casa no cuadraba con la fila.
+    const encima = fpRoomsOverlapSqFt(data, enPiso);
+    const marcaEnc = encima && encima.sqFt >= 4 ? '\u2021' : '';
+    o += `<text x="${x0 + u * 0.2}" y="${y}" font-size="${(u * 1.25).toFixed(1)}" font-weight="700" fill="#1C2530">Total Area: ${n1(t.floorSqFt)}${marcaEnc} sq ft &#160;&#160; Rooms: ${cuartos.length}</text>`;
+    const nomNivel = fpNombreDelNivelConocido(data, floorNum);
+    o += `<text x="${x0 + w - u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="1" fill="#1C2530" text-anchor="end">${nomNivel ? esc(nomNivel).toUpperCase() : 'LEVEL ' + floorNum}</text>`;
     y += u * 2.0;
     ['ROOM', 'FLOOR SF', 'WALL SF', 'CEILING SF', 'PERIMETER LF', 'BASEBOARD LF', 'CEILING HT'].forEach((h, i) => {
       o += i === 0 ? `<text x="${x0 + u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="0.8" fill="#5a6472">${h}</text>`
@@ -32062,13 +32285,17 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     y += u * 0.7;
     o += `<line x1="${x0}" y1="${y}" x2="${x0 + w}" y2="${y}" stroke="#1C2530" stroke-width="1.6"/>`;
     y += u * 1.35;
-    o += celda(0, y, 'TOTAL', 700, '#1C2530') + celda(1, y, n1(t.floorSqFt), 700, '#1C2530')
+    o += celda(0, y, 'TOTAL', 700, '#1C2530') + celda(1, y, n1(t.floorSqFt) + marcaEnc, 700, '#1C2530')
       + celda(2, y, n1(t.netWallSqFt) + (t.noHeight.length ? '\u2020' : ''), 700, '#1C2530') + celda(3, y, n1(t.ceilingSqFt), 700, '#1C2530')
       + celda(4, y, n1(t.perimeterFt), 700, '#1C2530') + celda(5, y, n1(t.baseboardFt), 700, '#1C2530');
     const notas = [];
     if(t.guessedRooms) notas.push(`\u2020 part of the boundary was closed by the app, not measured (${n1(t.guessedFt)} ft in ${t.guessedRooms} room${t.guessedRooms > 1 ? 's' : ''})`);
     if(t.noHeight.length) notas.push(`\u2020 ${t.noHeight.length} room${t.noHeight.length > 1 ? 's have' : ' has'} no wall height, so ${t.noHeight.length > 1 ? 'they are' : 'it is'} left out of the Wall SF total`);
     if(t.noOutline.length) notas.push(`${t.noOutline.length} room${t.noOutline.length > 1 ? 's' : ''} could not be outlined`);
+    // Dos cuartos que reclaman el mismo piso: el total lo cuenta dos veces.
+    // No se resta en silencio (de ese número se factura y el defecto está en
+    // el contorno), pero la hoja que se entrega lo tiene que decir.
+    if(marcaEnc) notas.push(`\u2021 two rooms claim the same ${n1(encima.sqFt)} sq ft of floor; this total counts it twice`);
     if(notas.length) o += `<text x="${x0 + u * 0.2}" y="${y + u * 1.5}" font-size="${(u * 0.78).toFixed(1)}" fill="#5a6472">${notas.join(' \u00b7 ')}</text>`;
     return o + '</g>';
   }
@@ -32084,7 +32311,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const letra = esMarca360 ? "'Plus Jakarta Sans',-apple-system,'Helvetica Neue',Arial,sans-serif" : "'IBM Plex Sans',sans-serif";
     const lv = floorplanLevels(data);
     const iNivel = Math.max(0, lv.indexOf(floorNum));
-    const nombreNivel = (data && data._nivelBase) ? (fpPlantaDeNivel(data, floorNum) || ('Floor ' + floorNum)) : ('Floor ' + floorNum);
+    const nombreNivel = fpNombreDelNivelConocido(data, floorNum) || ('Floor ' + floorNum);
     const hayDudosas = (data.rooms || []).some(r => !r.deleted && (r.level || 1) === floorNum && (r.walls || []).some(w => w.confidence === 'low'));
     let o = `<g class="fp-marco" style="pointer-events:none;" font-family="${letra}">`;
     o += `<rect x="${m}" y="${m}" width="${svgW - 2*m}" height="${svgH - 2*m}" rx="${(u * 0.3).toFixed(1)}" fill="none" stroke="#d3dce8" stroke-width="1.4"/>`;
@@ -32123,7 +32350,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       `<tspan fill="#4a5462">Units:</tspan> <tspan font-weight="700">ft / in</tspan>`,
       `<tspan fill="#4a5462">Scale:</tspan> <tspan font-weight="700">Not to scale</tspan>`,
       null,
-      `Page <tspan font-weight="700">${iNivel + 1}</tspan> of <tspan font-weight="700">${Math.max(1, lv.length)}</tspan>`,
+      // Un plano guardado por nivel (Scanova parte los escaneos de dos niveles
+      // en una hoja por nivel) es una hoja sola.
+      (data && data._nivel != null)
+        ? `Page <tspan font-weight="700">1</tspan> of <tspan font-weight="700">1</tspan>`
+        : `Page <tspan font-weight="700">${iNivel + 1}</tspan> of <tspan font-weight="700">${Math.max(1, lv.length)}</tspan>`,
     ];
     let x = m;
     cols.forEach((c, i) => {
@@ -32131,8 +32362,14 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       if(i) o += `<line x1="${x}" y1="${yT + hF * 0.22}" x2="${x}" y2="${yT + hF * 0.82}" stroke="#d3dce8" stroke-width="1"/>`;
       if(celdas[i]) o += `<text x="${x + u * 0.9}" y="${yTxt}" font-size="${(u * 0.82).toFixed(1)}" fill="#1C2530">${celdas[i]}</text>`;
       else {
-        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.42}" font-size="${(u * 0.62).toFixed(1)}" fill="#3a4452">Measurements from the LiDAR scan; verify before final export.</text>`;
-        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.74}" font-size="${(u * 0.62).toFixed(1)}" fill="#3a4452">${hayDudosas ? 'Red dashed wall = verify measurement.' : 'Dimensions are wall-to-wall at the wall center.'}</text>`;
+        // La nota cabe en SU casilla: en un plano angosto se le baja la letra
+        // (antes se salía y se metía en "Page 1 of 1").
+        const t1 = 'Measurements from the LiDAR scan; verify before final export.';
+        const t2 = hayDudosas ? 'Red dashed wall = verify measurement.' : 'Dimensions are wall-to-wall at the wall center.';
+        const cabe = (w - u * 1.4) / (Math.max(t1.length, t2.length) * 0.56);
+        const fsN = Math.max(u * 0.3, Math.min(u * 0.62, cabe));
+        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.42}" font-size="${fsN.toFixed(1)}" fill="#3a4452">${t1}</text>`;
+        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.74}" font-size="${fsN.toFixed(1)}" fill="#3a4452">${t2}</text>`;
       }
       x += w;
     });
@@ -32237,8 +32474,12 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // "approx." after the unit, not inside the number - a room whose
       // boundary the app had to close for itself must not print a bare
       // figure on a document someone bills from.
-      const areaTxt = fpRoomDisplayAreaSqFt(room).toFixed(1) + ' sq ft'
-        + (fpGuessedBoundaryFt(room) > 1 ? ' approx.' : '');
+      // En un cuarto chico (un clóset deducido) la palabra no cabe junto a
+      // las medidas de adentro: ahí va "~" antes del número, que dice lo
+      // mismo sin chocar (14-oct).
+      const aprox = fpGuessedBoundaryFt(room) > 1, chico = fpRoomDisplayAreaSqFt(room) < 45;
+      const areaTxt = (aprox && chico ? '~' : '') + fpRoomDisplayAreaSqFt(room).toFixed(1) + ' sq ft'
+        + (aprox && !chico ? ' approx.' : '');
       // Overall room dimensions (width x depth), not just area - the
       // bounding box of its own walls, which is exactly the room's real
       // width/depth for a rectangular room now that the whole plan is
