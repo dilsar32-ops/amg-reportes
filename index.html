@@ -2572,6 +2572,7 @@ body.fija main{ padding-bottom:14px; }
 .ct-pill.on.agua{border-color:#3a8ddb; color:#7cc1ff; background:rgba(31,111,181,.18);}
 .ct-pill.on.moho{border-color:#7da33a; color:#b5d96a; background:rgba(91,125,42,.18);}
 .ct-pill.on.fuego{border-color:#e0602f; color:#ff9a6b; background:rgba(179,64,31,.18);}
+.ct-pill.on.estructural{border-color:#a08c74; color:#cdb89c; background:rgba(122,106,88,.20);}
 .ct-grupo{font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-soft); margin-top:9px;}
 .ct-grupo + .ct-pills{margin-top:4px;}
 .ct-cond{display:grid; grid-template-columns:1fr auto; gap:6px; margin:0; align-items:stretch;}
@@ -2594,6 +2595,7 @@ body.fija main{ padding-bottom:14px; }
 .ct-cab-carpeta.seco, .ct-carpeta.seco{border-left-color:#c9a43a;}
 .ct-cab-carpeta.moho, .ct-carpeta.moho{border-left-color:#7da33a;}
 .ct-cab-carpeta.fuego, .ct-carpeta.fuego{border-left-color:#e0602f;}
+.ct-cab-carpeta.estructural, .ct-carpeta.estructural{border-left-color:#a08c74;}
 .ct-carpetas[hidden], .ct-carpeta-actual[hidden], .ct-grid[hidden], .ct-carpeta-pie[hidden]{display:none !important;}
 .ct-carpeta-pie{margin-top:12px;}
 .ct-guardarBtn{margin-top:12px; border:1px dashed var(--line); color:var(--ink-soft);}
@@ -8603,7 +8605,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-18-A';
+  const APP_BUILD = '2026-10-18-B';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -23247,7 +23249,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const mv = o => { if(!o || typeof o.x !== 'number' || typeof o.y !== 'number') return;
                       const n = P(o.x, o.y); o.x = n.x; o.y = n.y; };
     (data.rooms || []).forEach(r => {
-      (r.walls || []).forEach(w => { mv(w.start); mv(w.end); });
+      // (18-oct, ambas apps) El tramo propio de una pared compartida (_recorte)
+      // gira con ella: sin girar quedaba una pared fantasma que cortaba el piso
+      // (el contorno y el dibujo lo usan en lugar de start/end).
+      (r.walls || []).forEach(w => { mv(w.start); mv(w.end); if(w._recorte){ mv(w._recorte.start); mv(w._recorte.end); } });
+      // El punto del rotulo del cuarto (editor de Scanova: a que cara pertenece
+      // cada cuarto) gira con el plano; sin girar, los nombres saltaban de cuarto.
+      mv(r._rotulo);
       // _swingAcross y _hingeFlip NO se tocan. Son banderas RELATIVAS: el
       // dibujante saca "u" de la pared ya transformada y reorienta "n" contra el
       // centro del cuarto (fpDoorSwingMarkup 14174-14182), asi que el lado se
@@ -23594,7 +23602,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       if(hint){ hint.hidden = false; hint.textContent = snap ? 'Attached to the existing wall. Now tap where the wall ENDS.' : 'Now tap where the wall ENDS.'; }
       return;
     }
-    const a = fpPendingWallStart.pt;
+    const a = { x: fpPendingWallStart.pt.x, y: fpPendingWallStart.pt.y };
     const startSnap = fpPendingWallStart.snap;
     let bx = pt.x, by = pt.y;
     if(!snap){
@@ -23604,6 +23612,36 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const ang = Math.abs(Math.atan2(by-a.y, bx-a.x)) * 180/Math.PI;
       if(ang <= 10 || ang >= 170) by = a.y;
       else if(Math.abs(ang-90) <= 10) bx = a.x;
+    }
+    // (18-oct, ambas apps) Casi derecha (3 grados) con una punta pegada: se
+    // endereza a horizontal / vertical como las paredes del escaner. Se corre la
+    // punta de salida si va suelta; si no, la que va pegada a MEDIA pared (se
+    // desliza sobre esa pared); y si las dos van en esquinas, la del final, solo
+    // hasta 0.3 ft (sigue cerrando el cuarto). Una inclinada de 1-2 px al tocar
+    // la misma x dos veces ya no queda chueca.
+    if(snap){
+      const dx0 = bx-a.x, dy0 = by-a.y;
+      const ang0 = Math.atan2(Math.abs(dy0), Math.abs(dx0)) * 180/Math.PI;
+      const eje = ang0 <= 3 ? 'h' : ang0 >= 87 ? 'v' : null;
+      const desliza = (s0, p) => {
+        if(!s0 || s0.endKey || !s0.wall) return false;
+        const w0 = s0.wall, wl = Math.hypot(w0.end.x-w0.start.x, w0.end.y-w0.start.y) || 1;
+        const wx = (w0.end.x-w0.start.x)/wl, wy = (w0.end.y-w0.start.y)/wl;
+        const k = eje === 'v' ? 'x' : 'y', meta = eje === 'v' ? (p === a ? bx : a.x) : (p === a ? by : a.y);
+        const comp = k === 'x' ? wx : wy; if(Math.abs(comp) < 0.3) return false;
+        const t = (meta - (p === a ? a : { x: bx, y: by })[k]) / comp;
+        const q = { x: (p === a ? a.x : bx) + wx*t, y: (p === a ? a.y : by) + wy*t };
+        const tq = ((q.x-w0.start.x)*wx + (q.y-w0.start.y)*wy);
+        if(tq < -0.05 || tq > wl + 0.05 || Math.hypot(q.x-(p === a ? a.x : bx), q.y-(p === a ? a.y : by)) > 0.5) return false;
+        if(p === a){ a.x = q.x; a.y = q.y; } else { bx = q.x; by = q.y; }
+        return true;
+      };
+      if(eje){
+        if(!startSnap){ if(eje === 'v') a.x = bx; else a.y = by; }
+        else if(desliza(snap, 'b')){}
+        else if(desliza(startSnap, a)){}
+        else if(Math.abs(eje === 'v' ? dx0 : dy0) <= 0.3){ if(eje === 'v') bx = a.x; else by = a.y; }
+      }
     }
     const len = Math.hypot(bx-a.x, by-a.y);
     if(len < 1){
@@ -23625,7 +23663,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // ONE measurement ("all the measurements become one wall"). The
     // extended wall carries the moved-by-hand asterisk like any hand
     // correction.
-    const tryExtend = (endSnap, farX, farY) => {
+    // (18-oct, el dueño; igual en Scanova) Only when the new piece runs
+    // in the SAME line (2 degrees) - and the end slides along the wall's
+    // own line, so an existing wall is never re-angled. An end attached
+    // to a corner / wall that is not on that line (0.1 ft) is a NEW wall:
+    // extending re-aimed the whole Living Room wall into a slanted one
+    // with a kink and the room swallowed floor.
+    const tryExtend = (endSnap, farX, farY, farSnap) => {
       if(!endSnap || !endSnap.endKey) return false;
       const w = endSnap.wall;
       const E = w[endSnap.endKey];
@@ -23634,13 +23678,16 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const ex = (E.x-O.x)/eLen, ey = (E.y-O.y)/eLen;
       const nLen = Math.hypot(farX-E.x, farY-E.y) || 1;
       const ux = (farX-E.x)/nLen, uy = (farY-E.y)/nLen;
-      if(ux*ex + uy*ey < 0.995) return false; // not the same line, same direction
+      if(ux*ex + uy*ey < 0.9994) return false; // not the same line, same direction
+      const tP = (farX-E.x)*ex + (farY-E.y)*ey, px = E.x + ex*tP, py = E.y + ey*tP;
+      if(farSnap && Math.hypot(px-farX, py-farY) > 0.1) return false; // attached off the line: new wall
+      farX = px; farY = py; // along its own line, never re-angled
       const ri = endSnap.roomIdx;
       const wallsArr = (floorplanData.rooms[ri].walls)||[];
       const wid = w.id != null ? w.id : wallsArr.indexOf(w);
       fpPushUndo();
       fpCommitEdit(() => {
-        E.x = FP_QUANT(farX); E.y = FP_QUANT(farY);
+        E.x = farX; E.y = farY; // (no FP_QUANT: rounding the end off the line re-angled the wall)
         w.lengthFt = Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y);
         delete w._lengthOverrideFt;
         w._geomEdited = true;
@@ -23654,8 +23701,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     };
     fpPendingWallStart = null;
     fpRemoveGhost();
-    if(tryExtend(startSnap, bx, by)) return;
-    if(snap && snap.endKey && tryExtend(snap, a.x, a.y)) return;
+    if(tryExtend(startSnap, bx, by, snap)) return;
+    if(snap && snap.endKey && tryExtend(snap, a.x, a.y, startSnap)) return;
     // Owning room: the one containing the midpoint (merged), or this
     // svg's. A wall closing an UNSCANNED gap sits outside every room
     // polygon - the wall it attached to knows its room better than the
@@ -23792,7 +23839,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       if(room.deleted) return;
       (room.walls||[]).forEach(w => {
         if(w._studWall && w._studPairId) studPairs.add(w._studPairId);
-        else if(w._added) wallsAdded++;
+        // (18-oct, ambas apps) Una pared que el escaner/la app infirio (_inferido:
+        // el closet encontrado) no la dibujo nadie a mano.
+        else if(w._added && !w._inferido) wallsAdded++;
         else if(w._movedByHand) wallsMoved++;
         else if(w._geomEdited) cornersAdj++;
       });
@@ -32326,9 +32375,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y, L = Math.hypot(dx, dy);
       if(L < 0.4 || !floorplanIsExteriorWall(w, room, rooms)) return;
       const mx = (w.start.x + w.end.x) / 2, my = (w.start.y + w.end.y) / 2;
-      if(Math.abs(dy) <= L * 0.035){
+      // (18-oct, ambas apps) Hasta 5 grados de inclinacion la pared va en la
+      // cadena de su lado (medida a lo largo del lado); antes, de 2 a 5 grados
+      // salia como cota suelta inclinada DENTRO de la columna de la cadena y la
+      // linea cruzaba el numero.
+      if(Math.abs(dy) <= L * 0.0875){
         (my < centro.y ? lados.top : lados.bottom).push([Math.min(w.start.x, w.end.x), Math.max(w.start.x, w.end.x)]);
-      } else if(Math.abs(dx) <= L * 0.035){
+      } else if(Math.abs(dx) <= L * 0.0875){
         (mx < centro.x ? lados.left : lados.right).push([Math.min(w.start.y, w.end.y), Math.max(w.start.y, w.end.y)]);
       } else {
         const k = mx.toFixed(1) + ',' + my.toFixed(1);
@@ -32341,9 +32394,17 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     Object.keys(lados).forEach(lado => {
       const iv = lados[lado]; if(!iv.length) return;
       // Cortes: todas las puntas; un tramo se mide si alguna pared lo cubre.
-      const pts = []; iv.forEach(([a, c]) => { pts.push(a, c); });
-      pts.sort((p, q) => p - q);
-      const cortes = []; pts.forEach(v => { if(!cortes.length || v - cortes[cortes.length - 1] > 0.15) cortes.push(v); });
+      const pts = []; iv.forEach(([a, c]) => { pts.push({ v: a, l: c - a }, { v: c, l: c - a }); });
+      pts.sort((p, q) => p.v - q.v);
+      // (18-oct, ambas apps) Puntas a menos de 0.15 ft son el mismo corte: vale la
+      // punta de la pared MAS LARGA del grupo (empate: el promedio), no la primera.
+      // Con la primera, el corte dependia del sentido (al girar el plano el orden
+      // se invierte) y una cota cambiaba 1": 8'10" / 7'4" salia 8'11" / 7'3".
+      const cortes = []; let grupo = [];
+      const cierraGrupo = () => { if(!grupo.length) return; const mx = Math.max(...grupo.map(p => p.l));
+        const top = grupo.filter(p => p.l >= mx - 1e-6); cortes.push(top.reduce((t, p) => t + p.v, 0) / top.length); grupo = []; };
+      pts.forEach(p => { if(grupo.length && p.v - grupo[grupo.length - 1].v > 0.15) cierraGrupo(); grupo.push(p); });
+      cierraGrupo();
       const tramos = [];
       for(let i = 0; i + 1 < cortes.length; i++){
         const a = cortes[i], c = cortes[i + 1], m = (a + c) / 2;
@@ -42363,6 +42424,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     { k: 'seco',      grupo: 'cat',   titulo: 'Dry Contents',  es: 'Seco',               pl: 'secos',               en: 'Dry',             css: 'seco', color: '#9a7a1f', ico: '&#9728;&#65039;' },
     { k: 'moho',      grupo: 'cat',   titulo: 'Mold Contents', es: 'Con moho',           pl: 'con moho',            en: 'Mold',            css: 'moho', color: '#5b7d2a', ico: '&#129440;' },
     { k: 'fuego',     grupo: 'cat',   titulo: 'Fire Damage',   es: 'Dañado por el fuego', pl: 'dañados por el fuego', en: 'Fire damage',   css: 'fuego', color: '#b3401f', ico: '&#128293;' },
+    // La quinta carpeta (18 oct 2026, techo/cielo raso caído: cosas rotas, insulación encima). Igual que Water/Fire.
+    { k: 'estructural', grupo: 'cat', titulo: 'Structural Damage', es: 'Con daño estructural', pl: 'con daño estructural', en: 'Structural damage', css: 'estructural', color: '#7a6a58', ico: '&#127962;&#65039;' },
     // 'Ya estaba dañado', no 'Dañado' (11 oct 2026): a secas no dice si el daño lo hizo la cuadrilla o ya venia.
     { k: 'danado',    grupo: 'cond',  corto: 'Dañado', es: 'Ya estaba dañado',   pl: 'ya estaban dañados',  en: 'Already damaged', css: 'dan',  color: '#c2520a', ico: '&#9888;&#65039;' },
     { k: 'limpiado',  grupo: 'hecho', es: 'Limpiado',  en: 'Cleaned',   css: 'lim', color: '#1e8449', ico: '&#10024;' },
@@ -42378,9 +42441,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // CT_ORDEN: el destino, si lo hay) para los registros firmados antes y los lectores que
   // solo conocen una. CT_ORDEN es el orden de lectura: condicion, tratamiento, destino
   // ("Damaged + Cleaned + Packed").
-  const CT_ORDEN = ['agua', 'seco', 'moho', 'fuego', 'danado', 'limpiado', 'empacado', 'devuelto', 'tirado'];
+  const CT_ORDEN = ['agua', 'seco', 'moho', 'fuego', 'estructural', 'danado', 'limpiado', 'empacado', 'devuelto', 'tirado'];
   const CT_HECHO = ['limpiado', 'empacado', 'devuelto', 'tirado'];   // lo que se HIZO; sin ninguno = pendiente; la principal sale solo de aqui
-  const CT_EXCLUYE = { tirado: ['empacado', 'devuelto'], empacado: ['tirado'], devuelto: ['tirado'], agua: ['seco', 'moho', 'fuego'], seco: ['agua', 'moho', 'fuego'], moho: ['agua', 'seco', 'fuego'], fuego: ['agua', 'seco', 'moho'] };
+  const CT_EXCLUYE = { tirado: ['empacado', 'devuelto'], empacado: ['tirado'], devuelto: ['tirado'], agua: ['seco', 'moho', 'fuego', 'estructural'], seco: ['agua', 'moho', 'fuego', 'estructural'], moho: ['agua', 'seco', 'fuego', 'estructural'], fuego: ['agua', 'seco', 'moho', 'estructural'], estructural: ['agua', 'seco', 'moho', 'fuego'] };
   function ctEstados(o){ const a = (o && Array.isArray(o.estados) && o.estados.length) ? o.estados : ((o && o.estado) ? [o.estado] : []); return CT_ORDEN.filter(k => a.includes(k)); }
   const ctEsPendiente = o => !ctEstados(o).some(k => CT_HECHO.includes(k));
   const ctEstadoPrincipal = o => { const a = ctEstados(o).filter(k => CT_HECHO.includes(k)); return a[a.length - 1] || 'pendiente'; };
@@ -42418,11 +42481,12 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   });
   // El texto que firma el cliente. Va DENTRO del snapshot: un registro viejo
   // imprime el texto que leyo ese dia aunque esta constante cambie despues.
+  // v9 (18 oct 2026): la quinta carpeta, STRUCTURAL DAMAGE, con su frase [[estructural|...]] (solo sale si tiene objetos).
   // v8 (13 oct 2026, él lo pidió): la frase de una carpeta va entre [[carpeta|...]] y solo sale si esa carpeta
   // tiene objetos (antes decía "The 0 items in the FIRE DAMAGE folder..."). Lo firmado con v7 se imprime igual que ese día.
-  const CT_FIRMA_TEXTO = { version: 8,
-    es: 'Yo, {nombre}, confirmo que personal de {empresa} me mostró, una por una, las {F} fotografías de los {N} objetos que aparecen en este documento, numerados del 1 al {N}, y que revisé el estado marcado en cada uno. Un objeto puede llevar más de una marca (por ejemplo, LIMPIADO y EMPACADO); cada marca se cuenta por separado. Autorizo a {empresa} a desechar (tirar) los {tirado} objetos marcados como TIRADO, y entiendo que no se podrán recuperar. Confirmo que los {devuelto} objetos marcados como DEVUELTO me fueron entregados. Los {limpiado} objetos marcados como LIMPIADO fueron tratados por {empresa}. Los {empacado} objetos marcados como EMPACADO fueron empacados por {empresa} para guardarlos o trasladarlos. Los {danado} objetos marcados como YA ESTABA DAÑADO ya tenían ese daño antes de que {empresa} los manipulara, como se ve en su fotografía. [[agua|Los {agua} objetos de la carpeta WATER DAMAGE (dañado por el agua) presentaban daño causado por el agua, como se ve en su fotografía.]] [[seco|Los {seco} objetos de la carpeta DRY CONTENTS (contenido seco) no estaban mojados.]] [[moho|Los {moho} objetos de la carpeta MOLD CONTENTS (con moho) presentaban moho o crecimiento microbiano.]] [[fuego|Los {fuego} objetos de la carpeta FIRE DAMAGE (dañado por el fuego) presentaban daño por fuego, humo u hollín, como se ve en su fotografía.]] Los {pendiente} objetos marcados como PENDIENTE quedan sin decisión en este documento. Los nombres de los objetos son solo una referencia; la fotografía es lo que identifica a cada objeto.',
-    en: 'I, {nombre}, confirm that {empresa} staff showed me, one by one, the {F} photographs of the {N} items listed in this document, numbered 1 through {N}, and that I reviewed the status marked on each one. An item may carry more than one mark (for example, CLEANED and PACKED); each mark is counted separately. I authorize {empresa} to dispose of (discard) the {tirado} items marked DISCARDED, and I understand they cannot be recovered. I confirm that the {devuelto} items marked RETURNED were handed back to me. The {limpiado} items marked CLEANED were treated by {empresa}. The {empacado} items marked PACKED were packed by {empresa} for storage or transport. The {danado} items marked ALREADY DAMAGED already had that damage before {empresa} handled them, as seen in their photographs. [[agua|The {agua} items in the WATER DAMAGE folder showed damage caused by water, as seen in their photographs.]] [[seco|The {seco} items in the DRY CONTENTS folder were not wet.]] [[moho|The {moho} items in the MOLD CONTENTS folder showed mold or microbial growth.]] [[fuego|The {fuego} items in the FIRE DAMAGE folder showed fire, smoke or soot damage, as seen in their photographs.]] The {pendiente} items marked PENDING remain undecided in this document. Item names are for reference only; the photograph is what identifies each item.',
+  const CT_FIRMA_TEXTO = { version: 9,
+    es: 'Yo, {nombre}, confirmo que personal de {empresa} me mostró, una por una, las {F} fotografías de los {N} objetos que aparecen en este documento, numerados del 1 al {N}, y que revisé el estado marcado en cada uno. Un objeto puede llevar más de una marca (por ejemplo, LIMPIADO y EMPACADO); cada marca se cuenta por separado. Autorizo a {empresa} a desechar (tirar) los {tirado} objetos marcados como TIRADO, y entiendo que no se podrán recuperar. Confirmo que los {devuelto} objetos marcados como DEVUELTO me fueron entregados. Los {limpiado} objetos marcados como LIMPIADO fueron tratados por {empresa}. Los {empacado} objetos marcados como EMPACADO fueron empacados por {empresa} para guardarlos o trasladarlos. Los {danado} objetos marcados como YA ESTABA DAÑADO ya tenían ese daño antes de que {empresa} los manipulara, como se ve en su fotografía. [[agua|Los {agua} objetos de la carpeta WATER DAMAGE (dañado por el agua) presentaban daño causado por el agua, como se ve en su fotografía.]] [[seco|Los {seco} objetos de la carpeta DRY CONTENTS (contenido seco) no estaban mojados.]] [[moho|Los {moho} objetos de la carpeta MOLD CONTENTS (con moho) presentaban moho o crecimiento microbiano.]] [[fuego|Los {fuego} objetos de la carpeta FIRE DAMAGE (dañado por el fuego) presentaban daño por fuego, humo u hollín, como se ve en su fotografía.]] [[estructural|Los {estructural} objetos de la carpeta STRUCTURAL DAMAGE (daño estructural) presentaban daño causado por una falla de la estructura (por ejemplo, la caída del techo o del cielo raso, escombros o insulación), como se ve en su fotografía.]] Los {pendiente} objetos marcados como PENDIENTE quedan sin decisión en este documento. Los nombres de los objetos son solo una referencia; la fotografía es lo que identifica a cada objeto.',
+    en: 'I, {nombre}, confirm that {empresa} staff showed me, one by one, the {F} photographs of the {N} items listed in this document, numbered 1 through {N}, and that I reviewed the status marked on each one. An item may carry more than one mark (for example, CLEANED and PACKED); each mark is counted separately. I authorize {empresa} to dispose of (discard) the {tirado} items marked DISCARDED, and I understand they cannot be recovered. I confirm that the {devuelto} items marked RETURNED were handed back to me. The {limpiado} items marked CLEANED were treated by {empresa}. The {empacado} items marked PACKED were packed by {empresa} for storage or transport. The {danado} items marked ALREADY DAMAGED already had that damage before {empresa} handled them, as seen in their photographs. [[agua|The {agua} items in the WATER DAMAGE folder showed damage caused by water, as seen in their photographs.]] [[seco|The {seco} items in the DRY CONTENTS folder were not wet.]] [[moho|The {moho} items in the MOLD CONTENTS folder showed mold or microbial growth.]] [[fuego|The {fuego} items in the FIRE DAMAGE folder showed fire, smoke or soot damage, as seen in their photographs.]] [[estructural|The {estructural} items in the STRUCTURAL DAMAGE folder showed damage caused by a structural failure (for example, a roof or ceiling collapse, falling debris or insulation), as seen in their photographs.]] The {pendiente} items marked PENDING remain undecided in this document. Item names are for reference only; the photograph is what identifies each item.',
     leyenda_es: 'Los nombres fueron sugeridos automáticamente a partir de cada fotografía y revisados por la cuadrilla donde se indica; no son una verificación. La fotografía es la prueba.',
     leyenda_en: 'Item names were suggested automatically from each photograph and reviewed by the crew where indicated; they are not a verification. The photograph is the evidence.'
   };
@@ -44160,7 +44224,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       try{ const m = await ctAchicar(b, 640, 0.82); ctVistasPdf[key] = 'data:image/jpeg;base64,' + await blobToBase64(m); }catch(e){}
     }
   }
-  const CT_CAT_CORTO = { agua: 'Water', seco: 'Dry', moho: 'Mold', fuego: 'Fire' };
+  const CT_CAT_CORTO = { agua: 'Water', seco: 'Dry', moho: 'Mold', fuego: 'Fire', estructural: 'Structural' };
   // La marca de las fotos extra en la tarjeta dice QUÉ son: "+ barcode", "+2 measurements".
   function ctHojaExtrasTexto(xs){ const c = {}; xs.forEach(x => { const r = (CT_ROLES[x.rol] || CT_ROLES.detalle).en.toLowerCase(); c[r] = (c[r] || 0) + 1; }); return Object.keys(c).map(r => '+' + (c[r] > 1 ? c[r] + ' ' : ' ') + r).join(' · '); }
   // Las fotos extra de un objeto (codigo de barras, medidas, detalle) en su misma fila.
