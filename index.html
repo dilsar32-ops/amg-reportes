@@ -8605,7 +8605,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-18-B';
+  const APP_BUILD = '2026-10-18-C';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -23604,7 +23604,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     }
     const a = { x: fpPendingWallStart.pt.x, y: fpPendingWallStart.pt.y };
     const startSnap = fpPendingWallStart.snap;
-    let bx = pt.x, by = pt.y;
+    let bx = pt.x, by = pt.y, jog = null;
     if(!snap){
       // Axis snap only for a FREE end: within 10 degrees of
       // horizontal/vertical snaps square. A snapped end is authoritative -
@@ -23641,6 +23641,68 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         else if(desliza(snap, 'b')){}
         else if(desliza(startSnap, a)){}
         else if(Math.abs(eje === 'v' ? dx0 : dy0) <= 0.3){ if(eje === 'v') bx = a.x; else by = a.y; }
+      }
+      // (18-oct, ambas apps) Las dos puntas en esquinas que no se alinean
+      // (hasta 6 grados y 1 ft): una pared de afuera va DERECHA. Sale derecha de
+      // la punta de salida y termina en la linea de la pared que llega a la
+      // esquina destino (su prolongacion); un tramo corto la une a la esquina,
+      // asi el cuarto cierra con un escalon en lugar de una pared inclinada.
+      const eje6 = ang0 <= 6 ? 'h' : ang0 >= 84 ? 'v' : null;
+      const off6 = eje6 === 'v' ? bx - a.x : by - a.y;
+      if(eje6 && startSnap && startSnap.endKey && snap.endKey && Math.abs(off6) > 0.05 && Math.abs(off6) <= 1.0){
+        // Cual pierna va derecha (revision 18-oct): (1) desde la salida, si llega
+        // ENCIMA de una pared (una T, sin escalon); (2) desde la llegada, si sale de
+        // una pared; (3) desde la salida con escalon a la esquina, si el escalon no
+        // pisa una pared; (4) desde la llegada con escalon en la salida, igual.
+        // Un escalon encima de una pared contaba el tramo dos veces y el cuarto no cerraba.
+        const muros = []; (floorplanData.rooms || []).forEach(r => { if(!r.deleted) (r.walls || []).forEach(w => { if(w.start && w.end && !w._cierre && !w._ajena) muros.push(w); }); });
+        const enMuro = p => muros.some(w => { const dx = w.end.x-w.start.x, dy = w.end.y-w.start.y, L2 = dx*dx + dy*dy; if(L2 < 1e-9) return false;
+          const t = ((p.x-w.start.x)*dx + (p.y-w.start.y)*dy) / L2; if(t < -0.005 || t > 1.005) return false;
+          return Math.hypot(p.x-(w.start.x+t*dx), p.y-(w.start.y+t*dy)) <= 0.05; });
+        const pisa = (p, q) => { const L0 = Math.hypot(q.x-p.x, q.y-p.y); if(L0 < 0.05) return false; const ux = (q.x-p.x)/L0, uy = (q.y-p.y)/L0;
+          return muros.some(w => { const d1 = Math.abs((w.start.x-p.x)*-uy + (w.start.y-p.y)*ux), d2 = Math.abs((w.end.x-p.x)*-uy + (w.end.y-p.y)*ux); if(d1 > 0.05 || d2 > 0.05) return false;
+            const t1 = (w.start.x-p.x)*ux + (w.start.y-p.y)*uy, t2 = (w.end.x-p.x)*ux + (w.end.y-p.y)*uy; return Math.min(L0, Math.max(t1, t2)) - Math.max(0, Math.min(t1, t2)) > 0.05; }); };
+        const recibeEn = esq => muros.some(w => {
+          const toca = Math.hypot(w.start.x-esq.x, w.start.y-esq.y) < 0.05 || Math.hypot(w.end.x-esq.x, w.end.y-esq.y) < 0.05;
+          const wl = Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) || 1;
+          return toca && (eje6 === 'v' ? Math.abs(w.end.y-w.start.y) / wl < 0.1 : Math.abs(w.end.x-w.start.x) / wl < 0.1); });
+        const A0 = { x: a.x, y: a.y }, B0 = { x: bx, y: by };
+        const Ep = eje6 === 'v' ? { x: a.x, y: by } : { x: bx, y: a.y };     // derecha desde la salida
+        const Ap = eje6 === 'v' ? { x: bx, y: a.y } : { x: a.x, y: by };     // derecha desde la llegada
+        // (18-oct, decision del dueno) Primero la linea de AFUERA (la mas lejos del centro
+        // del plano: la pared de la casa), asi no queda una tira fuera de la casa ni
+        // cambian las cotas de afuera; en esa linea, T si llega encima de una pared,
+        // si no, con escalon que no pise pared. Si no se puede, la otra linea.
+        let cx0 = 0, cy0 = 0; { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+          muros.forEach(w => [w.start, w.end].forEach(p => { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }));
+          cx0 = (x0 + x1) / 2; cy0 = (y0 + y1) / 2; }
+        const lejos = p => eje6 === 'v' ? Math.abs(p.x - cx0) : Math.abs(p.y - cy0);
+        const desdeSalida = () => { if(enMuro(Ep)){ bx = Ep.x; by = Ep.y; jog = { a: Ep, b: Ep }; return true; }
+          if(recibeEn(B0) && !pisa(Ep, B0)){ jog = { a: Ep, b: B0 }; bx = Ep.x; by = Ep.y; return true; } return false; };
+        const desdeLlegada = () => { if(enMuro(Ap)){ a.x = Ap.x; a.y = Ap.y; jog = { a: Ap, b: Ap }; return true; }
+          if(recibeEn(A0) && !pisa(A0, Ap)){ jog = { a: A0, b: Ap }; a.x = Ap.x; a.y = Ap.y; return true; } return false; };
+        const orden = lejos(A0) >= lejos(B0) ? [desdeSalida, desdeLlegada] : [desdeLlegada, desdeSalida];
+        orden.some(f => f());
+      }
+      // (18-oct, ambas apps) Una pared derecha a pocas pulgadas (0.3 ft) de la
+      // LINEA de una pared que ya esta (la continua o la toca) se pone en esa
+      // linea: sin eso quedaba 0.4" fuera y los cuartos de al lado se inclinaban.
+      if(!jog && (Math.abs(bx-a.x) < 1e-9 || Math.abs(by-a.y) < 1e-9)){
+        const vert = Math.abs(bx-a.x) < 1e-9, k = vert ? 'x' : 'y', o = vert ? 'y' : 'x';
+        const lo = Math.min(a[o], vert ? by : bx), hi = Math.max(a[o], vert ? by : bx), cur = a[k];
+        let mejor = null;
+        (floorplanData.rooms || []).forEach(r => { if(r.deleted) return; (r.walls || []).forEach(w => {
+          if(!w.start || !w.end || w._ajena) return;
+          const wl = Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y); if(wl < 0.5) return;
+          if(Math.abs(w.end[k]-w.start[k]) / wl > 0.02) return;   // paralela (1 grado)
+          const lin = [w.start, w.end].reduce((p, q) => (Math.min(Math.abs(q[o]-lo), Math.abs(q[o]-hi)) < Math.min(Math.abs(p[o]-lo), Math.abs(p[o]-hi)) ? q : p))[k];
+          const wlo = Math.min(w.start[o], w.end[o]), whi = Math.max(w.start[o], w.end[o]);
+          if(wlo > hi + 0.5 || whi < lo - 0.5) return;               // la toca o la continua
+          const dd = Math.abs(lin - cur); if(dd < 1e-6 || dd > 0.3) return;
+          if(!mejor || dd < mejor.dd) mejor = { dd, lin };
+        }); });
+        const fija = (s0, p) => s0 && s0.endKey && Math.abs(p[k] - (mejor ? mejor.lin : p[k])) > 0.05;
+        if(mejor && !fija(startSnap, a) && !fija(snap, vert ? { x: bx, y: by } : { x: bx, y: by })){ a[k] = mejor.lin; if(vert) bx = mejor.lin; else by = mejor.lin; }
       }
     }
     const len = Math.hypot(bx-a.x, by-a.y);
@@ -23680,7 +23742,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const ux = (farX-E.x)/nLen, uy = (farY-E.y)/nLen;
       if(ux*ex + uy*ey < 0.9994) return false; // not the same line, same direction
       const tP = (farX-E.x)*ex + (farY-E.y)*ey, px = E.x + ex*tP, py = E.y + ey*tP;
-      if(farSnap && Math.hypot(px-farX, py-farY) > 0.1) return false; // attached off the line: new wall
+      if(farSnap && Math.hypot(px-farSnap.x, py-farSnap.y) > 0.1) return false; // attached off the line (where it really attached): new wall
       farX = px; farY = py; // along its own line, never re-angled
       const ri = endSnap.roomIdx;
       const wallsArr = (floorplanData.rooms[ri].walls)||[];
@@ -23701,8 +23763,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     };
     fpPendingWallStart = null;
     fpRemoveGhost();
-    if(tryExtend(startSnap, bx, by, snap)) return;
-    if(snap && snap.endKey && tryExtend(snap, a.x, a.y, startSnap)) return;
+    if(!jog && tryExtend(startSnap, bx, by, snap)) return;
+    if(!jog && snap && snap.endKey && tryExtend(snap, a.x, a.y, startSnap)) return;
     // Owning room: the one containing the midpoint (merged), or this
     // svg's. A wall closing an UNSCANNED gap sits outside every room
     // polygon - the wall it attached to knows its room better than the
@@ -23727,23 +23789,34 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     }
     const room = (floorplanData.rooms||[])[roomIdx];
     if(!room) return;
+    // (18-oct, ambas apps) Una punta pegada se queda EXACTA en la pared donde
+    // se pego: redondear a la pulgada la sacaba hasta 1/2" de esa linea.
+    // Derecha se queda derecha: la coordenada que comparten las dos puntas es la misma.
+    // (revision 18-oct) la coordenada que comparten sale de la punta PEGADA (una suelta no le gana a la pegada).
+    const q = (v, exacta) => exacta ? v : FP_QUANT(v);
+    const vx = Math.abs(bx-a.x) < 1e-9, hy = Math.abs(by-a.y) < 1e-9;
+    const sx = startSnap ? a.x : (vx && snap ? bx : FP_QUANT(a.x)), sy = startSnap ? a.y : (hy && snap ? by : FP_QUANT(a.y));
     const entry = {
       id: fpNewId(),
-      start: { x: FP_QUANT(a.x), y: FP_QUANT(a.y) },
-      end: { x: FP_QUANT(bx), y: FP_QUANT(by) },
+      start: { x: sx, y: sy },
+      end: { x: vx ? sx : q(bx, !!snap), y: hy ? sy : q(by, !!snap) },
       lengthFt: Math.round(len*100)/100,
       _added: true
     };
+    const jogEntry = jog && Math.hypot(jog.b.x-jog.a.x, jog.b.y-jog.a.y) > 0.05 ? {
+      id: fpNewId(), start: { x: jog.a.x, y: jog.a.y }, end: { x: jog.b.x, y: jog.b.y },
+      lengthFt: Math.round(Math.hypot(jog.b.x-jog.a.x, jog.b.y-jog.a.y)*100)/100, _added: true } : null;
     // El alto es el del cuarto, MEDIDO, no un 8 clavado: un 8 en un cuarto de
     // 9 pies era un pie de pared que no se cobraba. Y si el cuarto no tiene
     // alto conocido, la pared queda SIN alto, para que la hoja lo declare en
     // vez de heredar un número inventado.
     const hDueno = fpAltoParaParedNueva(room);
     if(hDueno) entry.heightFt = hDueno;
+    if(jogEntry && hDueno) jogEntry.heightFt = hDueno;
     fpPendingWallStart = null;
     fpRemoveGhost();
     fpPushUndo();
-    fpCommitEdit(() => { room.walls = room.walls||[]; room.walls.push(entry); }, [roomIdx]);
+    fpCommitEdit(() => { room.walls = room.walls||[]; room.walls.push(entry); if(jogEntry) room.walls.push(jogEntry); }, [roomIdx]);
     fpSetTool('select');
     openFloorplanWallDetail(roomIdx, entry.id);
   }
@@ -30502,7 +30575,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   let fpConTablaMedidas = false;
   // 14-oct (su "sí, que el PDF también lleve ese estilo"): el estilo vale también para la hoja que se manda.
   // Lo único que la hoja no lleva es el MARCO (la hoja ya trae su encabezado, sus totales y su tabla).
-  function fpVista(){ return fpEstiloVista && fpRenderMode !== 'moisture'; }
+  function fpVista(){ return fpEstiloVista; }   // (18-oct) Moisture Map: el mapa de humedad tambien va con el estilo nuevo (decision del dueno)
   // 6' 8" (con espacio, como su diseño), no 6'-8".
   function fpPiesPulg(ft){ const t = Math.round((+ft || 0) * 12); return `${Math.floor(t / 12)}' ${t % 12}"`; }
   function fpFeetInches(decimalFeet){
@@ -32265,12 +32338,33 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   function fpNombreClave(n){ return String(n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
   // banda (pies): además de la línea, mide arriba y abajo de ella — para saber cuánto cabe el bloque de
   // letras, que tiene alto (una pared que termina justo arriba de la línea también estorba).
+  // (18-oct, ambas apps) Una pared SUELTA puesta a mano (una punta que no llega a ninguna otra pared) o una
+  // pared vista (_ajena) no es borde: el largo x ancho del cuarto no se corta en ella (una pared corta suelta en el
+  // Bedroom lo hacia decir 7'0" x 13'9" con 184.2 sq ft). Para que quepa el texto (banda) si cuenta.
+  const fpSueltasCache = new WeakMap();
+  function fpParedesSueltas(todos){
+    if(!todos) return new Set();
+    if(fpSueltasCache.has(todos)) return fpSueltasCache.get(todos);
+    const ws = []; todos.forEach(r => { if(r && !r.deleted) (r.walls || []).forEach(w => { if(w && w.start && w.end && !w._cierre) ws.push(w); }); });
+    const toca = (p, w0) => ws.some(o => { if(o === w0) return false;
+      const dx = o.end.x - o.start.x, dy = o.end.y - o.start.y, L2 = dx*dx + dy*dy; if(L2 < 1e-9) return false;
+      const t = Math.max(0, Math.min(1, ((p.x - o.start.x) * dx + (p.y - o.start.y) * dy) / L2));
+      return Math.hypot(p.x - (o.start.x + t*dx), p.y - (o.start.y + t*dy)) <= 0.3; });
+    // solo las puestas a mano (_added): un tramo del escaner con una punta libre es parte del cuarto abierto
+    const out = new Set(ws.filter(w => w._added && (!toca(w.start, w) || !toca(w.end, w))));
+    fpSueltasCache.set(todos, out);
+    return out;
+  }
   function fpSpanEnLinea(room, P, todos, banda){
-    const sp = fpRoomSpanAt(fpOrderedRoomPolygon(room), P) || {};
+    const sueltas = banda ? null : fpParedesSueltas(todos);
+    // el contorno del cuarto sin sus paredes sueltas (si no, el contorno pasaba por la suelta y el largo salia cortado)
+    const propias = sueltas ? (room.walls || []).filter(w => !sueltas.has(w)) : null;
+    const sp = fpRoomSpanAt(fpOrderedRoomPolygon(propias && propias.length !== (room.walls || []).length && propias.length >= 3 ? Object.assign({}, room, { walls: propias }) : room), P) || {};
     let h = sp.h ? sp.h.slice() : null, v = sp.v ? sp.v.slice() : null;
     const ys = [P.y]; if(banda) for(let k = 0.5; k <= banda + 1e-9; k += 0.5){ ys.push(P.y - k, P.y + k); }
     (todos || []).forEach(r2 => (r2.walls || []).forEach(w => {
       if(!w || !w.start || !w.end) return;
+      if(sueltas && (w._ajena || sueltas.has(w))) return;
       const ax = w.start.x, ay = w.start.y, bx = w.end.x, by = w.end.y;
       if(h) ys.forEach(yy => { if((ay - yy) * (by - yy) <= 0 && Math.abs(by - ay) > 1e-6){
         const x = ax + (yy - ay) * (bx - ax) / (by - ay);
@@ -32324,9 +32418,23 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const px = X(P.x); labelY = Y(P.y);
     // 2. tamaño: que quepan las tres líneas adentro, de pared a pared
     let fs = Math.max(0.34 * scale, mejor.fit) * Math.max(0.6, Math.min(2.2, escala || 1));
-    const f2 = fs * 0.74, y0 = labelY - fs * 0.6;
+    // (18-oct, ambas apps) El piso de 0.34 hacia que en un cuarto ANGOSTO (el Laundry de 2'9" ya girado) el
+    // nombre saliera mas ancho que el cuarto. Si no cabe: el nombre va en DOS renglones (cortado en el
+    // espacio que deja los renglones mas parejos) y, si aun no cabe, la letra baja lo justo (tope 0.22).
+    const largoTxt = x => String(x).replace(/&[a-z#0-9]+;/g, 'x').length;
+    const anchoDe = (lns, size) => Math.max(0.66 * Math.max(4, ...lns.map(largoTxt)) * size, 0.6 * 0.74 * dimTxt.length * size, 0.6 * 0.74 * largoTxt(areaTxt) * size);
+    let lineas = [label];
+    if(anchoDe(lineas, fs) > libreW * 0.95){
+      const pal = String(label).trim().split(/\s+/);
+      if(pal.length > 1){ let corte = 1, mx = Infinity;
+        for(let i = 1; i < pal.length; i++){ const m = Math.max(largoTxt(pal.slice(0, i).join(' ')), largoTxt(pal.slice(i).join(' '))); if(m < mx){ mx = m; corte = i; } }
+        lineas = [pal.slice(0, corte).join(' '), pal.slice(corte).join(' ')]; }
+      if(anchoDe(lineas, fs) > libreW * 0.95) fs = Math.max(0.22 * scale, fs * (libreW * 0.95) / anchoDe(lineas, fs));
+    }
+    const extra = (lineas.length - 1) * fs * 1.0;
+    const f2 = fs * 0.74, y0 = labelY - fs * 0.6 - extra / 2;
     const t = (y, size, peso, color, txt, ls) => `<text x="${px.toFixed(1)}" y="${y.toFixed(1)}" font-size="${size.toFixed(1)}" font-weight="${peso}"${ls ? ` letter-spacing="${ls}"` : ''} font-family="'IBM Plex Sans',sans-serif" fill="${color}" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${(size * 0.16).toFixed(1)}">${txt}</text>`;
-    const svg = t(y0, fs, 700, FP_AZUL_NOMBRE, label, '0.6') + t(y0 + fs * 1.02, f2, 600, '#1C2530', dimTxt) + t(y0 + fs * 1.92, f2, 400, '#2c3642', areaTxt);
+    const svg = lineas.map((ln, i) => t(y0 + i * fs * 1.0, fs, 700, FP_AZUL_NOMBRE, ln, '0.6')).join('') + t(y0 + extra + fs * 1.02, f2, 600, '#1C2530', dimTxt) + t(y0 + extra + fs * 1.92, f2, 400, '#2c3642', areaTxt);
     // 4. puntitas de flecha, solo si hay lugar entre el bloque y la pared
     const a = Math.max(9, Math.min(15, 0.26 * scale)), dentro = T / 2 + 0.12;
     const tri = (x, y, dir) => {
@@ -32336,12 +32444,12 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         : `${x},${y} ${x - a * 0.5},${y - a} ${x + a * 0.5},${y - a}`;
       return `<polygon points="${pts}" fill="#1C2530"/>`;
     };
-    const anchoTxt = Math.max(0.66 * letras * fs, 0.6 * dimTxt.length * f2);
+    const anchoTxt = Math.max(0.66 * Math.max(4, ...lineas.map(largoTxt)) * fs, 0.6 * dimTxt.length * f2);
     let flechas = '';
     // la flecha va en la pared; solo hace falta que entre el bloque y la pared quede aire
     if(sp.h && Math.min(px - X(sp.h[0] + dentro), X(sp.h[1] - dentro) - px) > anchoTxt / 2 + a + 10) flechas += tri(X(sp.h[0] + dentro), labelY, 'l') + tri(X(sp.h[1] - dentro), labelY, 'r');
     if(sp.v && Math.min(labelY - Y(sp.v[0] + dentro), Y(sp.v[1] - dentro) - labelY) > fs * 1.6 + a + 10) flechas += tri(px, Y(sp.v[0] + dentro), 'u') + tri(px, Y(sp.v[1] - dentro), 'd');
-    return { svg, flechas, caja: { x0: px - anchoTxt/2, x1: px + anchoTxt/2, y0: y0 - fs*0.85, y1: y0 + fs*1.92 + f2*0.3 } };
+    return { svg, flechas, caja: { x0: px - anchoTxt/2, x1: px + anchoTxt/2, y0: y0 - fs*0.85, y1: y0 + extra + fs*1.92 + f2*0.3 } };
   }
 
   function fpEtiquetaVista(label, areaTxt, rb, scale, x, y, escala, libre){
@@ -43087,7 +43195,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         if(!f.nombre){ f.nombre = e.es; f.fuente = 'ia'; }
         f.ia = { estado: 'hecho', en: e.en, conf: e.conf, modelo: 'apple-vision', id: e.id, valor: Math.round(e.valor * 100) / 100 };
       } else {
-        f.ia = { estado: 'hecho', en: '', conf: 'baja', modelo: 'apple-vision', id: '', valor: 0 };   // nada claro: lo escribe la cuadrilla
+        // Nada claro (18 oct 2026): se queda 'pendiente', sube asi y la nube la nombra (nombrar-objetos).
+        // Si la cuadrilla escribe el nombre antes, la nube no la toca (nombre_fuente = 'persona').
+        f.ia = { estado: 'pendiente' };
       }
       f.dirty = true; return !!e;
     }catch(err){ console.warn('contenidos: clasificar en el telefono', err); return false; }
@@ -43642,8 +43752,15 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const b = e.target.closest && e.target.closest('[data-ctv]'); if(!b) return;
     const a = b.dataset.ctv; if(a === 'cerrar') ctVisorCerrar(); else if(a === 'ant') ctVisorMover(-1); else if(a === 'sig') ctVisorMover(1); else if(a === 'guardar') ctVisorGuardar();
   });
+  // (18 oct 2026) Mientras la cuadrilla escribe un nombre (una casilla .ct-nombre con el foco), NADIE repinta la
+  // lista (la cola, los nombres de la nube, la traduccion): repintar borraria lo que va tecleando. Queda
+  // pendiente y se repinta al soltar la casilla (focusout en ctCablear).
+  let ctListaPendiente = false;
+  function ctEscribiendoNombre(){ const a = document.activeElement; return !!(a && a.classList && a.classList.contains('ct-nombre')); }
   function ctPintarLista(){
     const t = ctActual(); const lista = $('#ct-lista'); if(!t || !lista) return;
+    if(ctEscribiendoNombre()){ ctListaPendiente = true; return; }
+    ctListaPendiente = false;
     const r = ctResumen(t), abierto = t.estado === 'abierto';
     ctNotaStash();                                                   // lo escrito en el editor de la nota sobrevive al repintado
     $('#ct-resumen').innerHTML = ctResumenHtml(r);
@@ -44057,16 +44174,20 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   async function ctSubirFilaFoto(t, f){
     const body = { trabajo_id: t.id, k: f.k, path: f.path, sha256: f.sha256, md5: f.md5 || null, bytes: f.bytes || null, tomada_at: f.tomada || null, n: f.n, estado_objeto: ctEstadoPrincipal(f), estados: ctEstados(f), nota: f.nota || null, nota_en: f.nota_en || null, nota_en_fuente: f.nota_en ? (f.nota_en_fuente || 'persona') : null, rol: f.rol || 'objeto', de_k: ctEsObjeto(f) ? null : (f.de || null) };
     if(!ctEsObjeto(f)) body.ia_estado = 'hecho';                         // las fotos extra no se nombran
-    body.nombre_en = ctNombreEn(f) || null; body.nombre_en_fuente = ctNombreEnFuente(f) || null;
+    // (18 oct 2026) El ingles solo viaja con un nombre: si el telefono aun no lo tiene (lo puso la nube y la
+    // respuesta no llego), mandar null borraria el ingles que la nube ya guardo.
+    if(f.nombre){ body.nombre_en = ctNombreEn(f) || null; body.nombre_en_fuente = ctNombreEnFuente(f) || null; }
     // El nombre solo viaja si lo puso una persona o lo saco el iPhone (apple-vision): si no,
     // el servidor conserva el que haya sugerido el mismo.
-    const localVision = !!(f.ia && f.ia.modelo === 'apple-vision');
+    // Solo cuenta como "lo nombro el iPhone" si de verdad saco un nombre (f.ia.en): una foto que el
+    // iPhone no reconocio (o de antes de esta version) sube SIN ia_estado -> nace 'pendiente' (el
+    // default de la tabla) y la nombra la nube; al resubirla no se toca lo que la nube ya hizo.
+    const localVision = !!(f.ia && f.ia.modelo === 'apple-vision' && f.ia.en);
     if(f.fuente === 'persona' || f.fuente === 'ia-confirmado' || (localVision && f.fuente === 'ia')){ body.nombre = f.nombre || null; body.nombre_fuente = f.nombre ? f.fuente : null; }
     if(localVision){
       body.ia_estado = 'hecho'; body.ia_modelo = 'apple-vision'; body.ia_at = f.tomada || new Date().toISOString();
       body.nombre_ia = (f.fuente === 'ia' || f.fuente === 'ia-confirmado') ? (f.nombre || null) : null;
       body.nombre_ia_en = f.ia.en || null; body.ia_confianza = f.ia.en ? (f.ia.conf || null) : null;
-      if(!f.ia.en) body.ia_error = 'el iPhone no reconocio el objeto';
     }
     const res = await authFetch('/rest/v1/contenidos_fotos?on_conflict=trabajo_id,k', { method: 'POST', headers: ctCabeceras({ Prefer: 'resolution=merge-duplicates,return=representation' }), body: JSON.stringify(body) });
     const j = await res.json().catch(() => null);
@@ -44138,33 +44259,74 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   function ctReintentar(){ Object.values(CT.trabajos).forEach(t => t.fotos.forEach(f => { if(f.subida === 'error'){ f.subida = 'tel'; f.intentos = 0; } })); ctEscribir(); ctPintarFotos(); ctProcesarCola(); }
 
   // ---- los nombres (la inteligencia nombra en el servidor, con las fotos ya subidas) ----
-  let ctNombrando = false, ctNombrarDesde = 0;
+  let ctNombrando = false, ctNombrarDesde = 0, ctNombrarFallos = 0, ctNombrarEspera = 0, ctNombrarTm = null;
+  // (18 oct 2026) La nube contesta 503 {error:'config'} cuando la llave del modelo no sirve (sin workspace, mala, sin
+  // permiso): las fotos se quedan pendientes en la nube sin gastar intentos. Aqui: CALLADO para la cuadrilla (sin aviso,
+  // nada en fallo) y se vuelve a pedir en 30 min, por si ya se arreglo la llave.
+  const CT_NOMBRAR_CONFIG_MS = 30 * 60 * 1000;
+  // Lo que llega de la nube (respuesta de nombrar-objetos o lectura de las filas), con las mismas reglas:
+  // nunca encima de lo escrito a mano ni de lo revisado; solo llena un nombre vacio.
+  function ctAplicarNombres(t, filas){
+    let cambio = false;
+    (filas || []).forEach(it => {
+      const f = t.fotos.find(x => x.k === it.k); if(!f || !it.ia_estado) return;
+      f.ia = { estado: it.ia_estado, en: it.nombre_ia_en || '', conf: it.ia_confianza || '' }; cambio = true;
+      const nom = it.nombre || it.nombre_ia;
+      if(nom && !f.nombre && !(f.fuente === 'persona' || f.fuente === 'ia-confirmado')){ f.nombre = nom; f.fuente = it.nombre ? (it.nombre_fuente || 'ia') : 'ia'; }
+    });
+    return cambio;
+  }
+  // (18 oct 2026) Si una respuesta se perdio, la nube ya nombro pero el telefono no se entero: se leen esas filas.
+  async function ctTraerNombres(t, ks){
+    if(!ks.length) return false;
+    const res = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(t.id) + '&k=in.(' + ks.join(',') + ')&select=k,ia_estado,nombre,nombre_fuente,nombre_ia,nombre_ia_en,ia_confianza', { headers: ctCabeceras() });
+    if(!res.ok) return false;
+    const filas = await res.json().catch(() => null);
+    return Array.isArray(filas) && ctAplicarNombres(t, filas);
+  }
+  // Error pasajero (sin señal, 429, 5xx): se vuelve a pedir a los 30 s y despues a los 60 s; el aviso sale
+  // solo desde el segundo fallo seguido. La nube corta cada foto a los 3 intentos (queda 'fallo').
+  function ctNombrarOtraVez(){
+    ctNombrarFallos++;
+    const ms = ctNombrarFallos === 1 ? 30000 : 60000;
+    ctNombrarEspera = Date.now() + ms;
+    clearTimeout(ctNombrarTm); ctNombrarTm = setTimeout(() => { ctNombrarEspera = 0; ctPedirNombres(); }, ms);
+    return ctNombrarFallos >= 2;
+  }
   async function ctPedirNombres(){
     const t = ctActual();
     if(!t || t.estado !== 'abierto' || ctNombrando || !signedIn() || navigator.onLine === false || ctFaltaSql) return;
-    if(!t.fotos.some(f => f.enNube && !f.nombre && (!f.ia || f.ia.estado === 'pendiente' || f.ia.estado === 'procesando'))) return;
-    if(Date.now() - ctNombrarDesde < 1500) return;
+    const faltan = () => t.fotos.filter(f => f.enNube && !f.nombre && (!f.ia || f.ia.estado === 'pendiente' || f.ia.estado === 'procesando'));
+    if(!faltan().length) return;
+    if(Date.now() - ctNombrarDesde < 1500 || Date.now() < ctNombrarEspera) return;
     ctNombrando = true; ctNombrarDesde = Date.now();
+    let seguir = false;
     try{
       const res = await authFetch('/functions/v1/nombrar-objetos', { method: 'POST', headers: ctCabeceras(), body: JSON.stringify({ job_id: t.id }) });
       if(res.status === 404){ ctNombresAviso = 'Los nombres automáticos no están instalados en el servidor. Escriba los nombres a mano en el paso 3.'; ctPintarNombresAviso(); return; }
       const j = await res.json().catch(() => null);
+      // Lo que la nube ya nombro llega aunque la respuesta traiga error (p. ej. 502 despues de un lote bueno).
+      const llego = ctAplicarNombres(t, j && j.items);
       if(!res.ok || !j || !j.ok){
-        ctNombresAviso = (res.status === 503 && j && j.error === 'sin_llave')
-          ? 'Los nombres automáticos todavía no están activos (falta la llave en el servidor). Escriba los nombres a mano en el paso 3.'
-          : 'No se pudieron pedir los nombres automáticos (' + ((j && j.error) || res.status) + '). Escríbalos a mano en el paso 3.';
-        ctPintarNombresAviso(); return;
+        const pasajero = res.status === 429 || res.status >= 500 || !!(j && j.reintentar);
+        if(res.status === 503 && j && j.error === 'config'){
+          console.warn('contenidos: nombres de la nube apagados (configuracion):', j.detalle || '');
+          ctNombrarEspera = Date.now() + CT_NOMBRAR_CONFIG_MS;
+          clearTimeout(ctNombrarTm); ctNombrarTm = setTimeout(() => { ctNombrarEspera = 0; ctPedirNombres(); }, CT_NOMBRAR_CONFIG_MS);
+        }
+        else if(res.status === 503 && j && j.error === 'sin_llave'){ ctNombresAviso = 'Los nombres automáticos todavía no están activos (falta la llave en el servidor). Escriba los nombres a mano en el paso 3.'; ctPintarNombresAviso(); }
+        else if(!pasajero || ctNombrarOtraVez()){ ctNombresAviso = 'No se pudieron pedir los nombres automáticos (' + ((j && j.error) || res.status) + '). Escríbalos a mano en el paso 3.'; ctPintarNombresAviso(); }
+        if(llego){ ctEscribir(); ctPintar(); }
+        return;
       }
-      ctNombresAviso = ''; ctPintarNombresAviso();
-      (j.items || []).forEach(it => {
-        const f = t.fotos.find(x => x.k === it.k); if(!f) return;
-        f.ia = { estado: it.ia_estado || 'hecho', en: it.nombre_ia_en || '', conf: it.ia_confianza || '' };
-        if(it.nombre_ia && !f.nombre && !(f.fuente === 'persona' || f.fuente === 'ia-confirmado')){ f.nombre = it.nombre_ia; f.fuente = 'ia'; }
-      });
-      ctEscribir(); ctPintar();
-      if(j.quedan > 0) setTimeout(() => { ctNombrando = false; ctPedirNombres(); }, 2000);
-    }catch(e){ /* sin señal: se vuelve a pedir en la siguiente vuelta */ }
+      ctNombrarFallos = 0; ctNombresAviso = ''; ctPintarNombresAviso();
+      // Nada nuevo y nada en la fila, pero el telefono sigue con fotos sin nombre: se leen sus filas.
+      if(!(j.items || []).length && !(j.quedan > 0)) await ctTraerNombres(t, faltan().map(f => f.k)).catch(() => false);
+      ctEscribir(); ctPintar();              // ctPintarLista no repinta mientras escriben un nombre (ver ctListaPendiente)
+      seguir = j.quedan > 0;
+    }catch(e){ ctNombrarOtraVez(); }        // sin señal o la respuesta se perdio: otra vez en 30 s / 60 s, sin aviso
     finally { ctNombrando = false; }
+    if(seguir) setTimeout(() => ctPedirNombres(), 2000);
   }
 
   // ---- el PDF: una pila de hojas (nunca se parte una fila) ----
@@ -44540,6 +44702,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         ctNotaEditando = { k, fase: 'escribir', es: f.nota || '' }; ctPintarLista();
         const ta = document.querySelector('.ct-nota-es'); if(ta) ta.focus(); return;
       }
+    });
+    // Al soltar una casilla de nombre: el repintado que quedo pendiente (si ya no hay otra con el foco).
+    panel.addEventListener('focusout', e => {
+      if(!e.target.closest || !e.target.closest('.ct-nombre')) return;
+      setTimeout(() => { if(ctListaPendiente && !ctEscribiendoNombre()) ctPintarLista(); }, 0);
     });
     // El nombre: lo escrito a mano manda. Se guarda al soltar la casilla.
     panel.addEventListener('change', e => {
