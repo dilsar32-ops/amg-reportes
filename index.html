@@ -8603,7 +8603,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-15-C';
+  const APP_BUILD = '2026-10-18-A';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -37378,9 +37378,39 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const f = toMin(($('.s-from', c) || {}).value), t0 = toMin(($('.s-to', c) || {}).value);
       if(f == null || t0 == null) return;                 // a medio llenar: no se adivina
       // Un turno que pasa la medianoche termina al día siguiente.
-      fuera.push({ n: i + 1, ini: f, fin: t0 < f ? t0 + 1440 : t0 });
+      // 18 oct 2026 (Anderson, 17-oct): las personas del turno, para que el
+      // encime solo cuente cuando la MISMA persona sale en los dos turnos.
+      const gente = String(($('.s-names', c) || {}).value || '')
+        .split(/[,\n;\/&]|\sy\s|\sand\s/i)
+        // Misma limpieza que finNorm (sin acentos, minusculas) + sin puntos.
+        .map(x => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+                   .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      fuera.push({ n: i + 1, ini: f, fin: t0 < f ? t0 + 1440 : t0, gente });
     });
+    // DESPUES DE MEDIANOCHE (18 oct 2026). "Turno 4 3 PM-2 AM" y luego "Turno 6
+    // 12:30-1 AM": el 6 es de la MADRUGADA SIGUIENTE, no de las 12:30 AM de la
+    // manana del mismo dia. Regla conservadora: un turno se pasa al dia
+    // siguiente solo si un turno ANTERIOR de la lista cruza la medianoche, el
+    // nuevo empieza antes que ese, y empieza a mas tardar 3 h despues de que ese
+    // terminara en la madrugada. Un turno normal de la manana (7 AM tras uno
+    // que acabo a las 2 AM) se queda en la manana.
+    for(let i = 0; i < fuera.length; i++){
+      const T = fuera[i];
+      const cruza = fuera.slice(0, i).some(P => P.fin > 1440 && T.ini < P.ini && T.ini <= (P.fin - 1440) + 180);
+      if(cruza){ T.ini += 1440; T.fin += 1440; }
+    }
     return fuera.sort((a, b) => a.ini - b.ini);
+  }
+  // ¿La misma persona? Igual exacto, o uno es el primer nombre / el comienzo
+  // del otro ("juan" = "juan c" = "juan perez"). Ante la duda se toma como la
+  // misma: es preferible que se revise a cobrar dos veces.
+  function laborMismaPersona(a, b){
+    if(a === b) return true;
+    const pa = a.split(' '), pb = b.split(' ');
+    if(pa[0] !== pb[0]) return false;
+    const corto = pa.length <= pb.length ? pa : pb, largo = corto === pa ? pb : pa;
+    return corto.every((w, k) => largo[k] === w || (k > 0 && largo[k].startsWith(w)));
   }
   const minAHora = m => fmtTime12(String(Math.floor((m % 1440) / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'));
   const minEnPalabras = m => {
@@ -37394,14 +37424,32 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   const HUECO_MINIMO = 3;
   function laborHuecos(){
     const t = laborTurnosEnLinea(), avisos = [];
+    // El hueco se mide desde el turno que termina MAS TARDE hasta aqui, no
+    // desde el de junto: con dos cuadrillas a la vez, un turno corto en medio
+    // de uno largo no deja un hueco (18 oct 2026).
+    let antes = t[0];
     for(let i = 1; i < t.length; i++){
-      const antes = t[i - 1], ahora = t[i];
+      const ahora = t[i];
       const d = ahora.ini - antes.fin;
       if(d >= HUECO_MINIMO){
         avisos.push({ tipo: 'hueco', minutos: d, desde: antes.fin, hasta: ahora.ini, a: antes.n, b: ahora.n });
-      } else if(d < 0){
-        avisos.push({ tipo: 'encima', minutos: -d, desde: ahora.ini, hasta: antes.fin, a: antes.n, b: ahora.n });
       }
+      if(ahora.fin > antes.fin) antes = ahora;
+    }
+    // ENCIME = la MISMA persona en dos turnos a la misma hora (18 oct 2026).
+    // Caso real, Anderson 17-oct: Turno 4 3 PM-12 AM "Anderson, Ariel" y Turno 5
+    // 3-5 PM "Juan". Son personas distintas a la misma hora: eso SI se puede.
+    // Se comparan TODOS los pares, no solo los vecinos: con dos cuadrillas a la
+    // vez, el turno encimado de la misma persona puede no ser el de junto.
+    // Un turno sin nombres todavia cuenta como encime (no se adivina quien es).
+    for(let i = 0; i < t.length; i++) for(let j = i + 1; j < t.length; j++){
+      const A = t[i], B = t[j];
+      const ini = Math.max(A.ini, B.ini), fin = Math.min(A.fin, B.fin);
+      if(fin <= ini) continue;
+      const ga = A.gente || [], gb = B.gente || [];
+      const alguien = !ga.length || !gb.length || ga.some(x => gb.some(y => laborMismaPersona(x, y)));
+      if(!alguien) continue;
+      avisos.push({ tipo: 'encima', minutos: fin - ini, desde: ini, hasta: fin, a: A.n, b: B.n });
     }
     return avisos;
   }
