@@ -8605,7 +8605,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-18-C';
+  const APP_BUILD = '2026-10-18-D';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -37512,9 +37512,6 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     }, 50);
   }
 
-  // Send the labor log to the manager: a locked PDF with all the math already done.
-  // The crew cannot open it - only the manager has the password.
-  const MGR_PDF_PW = 'AMG2026';
 
   // ¿Ya corrio supabase-amg-labor-logs.sql? La prueba es que my_labor_log_days
   // devuelva work_kind. Sin filas en el rango no se puede desmentir: se acepta.
@@ -37847,56 +37844,6 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         : 'Sin internet. Se guardó y se manda solo cuando haya señal.');
       return;
     }
-    showOverlay('Preparando… / Preparing…');
-    setTimeout(() => {
-      const leader = ($('#l-leader').value || '').trim();
-      const date   = $('#l-date').value || '';
-      const code   = buildCode();
-      window.__forcePriced = true;              // build the PRICED version
-      let node;
-      try { node = buildFor('labor'); }
-      finally { window.__forcePriced = false; }
-
-      html2canvas(node, { scale: 2, useCORS: true }).then(canvas => {
-        document.body.removeChild(node);
-        const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF({ orientation:'p', unit:'pt', format:'a4',
-          encryption: { userPassword: MGR_PDF_PW, ownerPassword: MGR_PDF_PW } });
-        const pageWidth = pdf.internal.pageSize.getWidth();
-        const pageHeight = pdf.internal.pageSize.getHeight();
-        const imgWidth = pageWidth;
-        const imgHeight = canvas.height * imgWidth / canvas.width;
-        const imgData = canvas.toDataURL('image/jpeg', 0.92);
-        let heightLeft = imgHeight, position = 0;
-        pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-        while (heightLeft > 0) {
-          position = heightLeft - imgHeight;
-          pdf.addPage();
-          pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-          heightLeft -= pageHeight;
-        }
-        const filename = filenameBase('labor') + '.pdf';
-        const msg = (leader ? leader : 'El crew') + ' mandó un nuevo labor log'
-                  + (date ? ' — ' + date : '') + '.\n'
-                  + 'Ya está convertido y con todos los cálculos hechos.\n\n' + code;
-        if(isNative()){
-          saveAndShareNative(pdf.output('blob'), filename, msg).then(hideOverlay).catch(err => {
-            console.error(err); hideOverlay();
-            alert('No se pudo enviar. Intente de nuevo.');
-          });
-        } else {
-          pdf.save(filename);
-          navigator.clipboard?.writeText(msg).catch(()=>{});
-          hideOverlay();
-          alert('PDF guardado y mensaje copiado.');
-        }
-      }).catch(err => {
-        console.error(err); hideOverlay();
-        if(node && document.body.contains(node)) document.body.removeChild(node);
-        alert('No se pudo preparar el reporte.');
-      });
-    }, 50);
   }
 
   $('#sendMgrBtn').addEventListener('click', sendToManager);
