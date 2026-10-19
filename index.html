@@ -8605,7 +8605,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-18-D';
+  const APP_BUILD = '2026-10-18-E';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -42724,6 +42724,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     ctPintar();
     ctProcesarCola();
     ctPedirNombres();
+    ctRefrescarNombresNube(t);                   // (19 oct 2026) lo que la nube tiene pendiente aunque el telefono crea 'hecho'
     if(t.enlace && t.estado === 'abierto') ctEnlaceRevisar(t, true);
     ctRefrescarEnvios().then(() => { const p = document.querySelector('.tab-panel[data-tab="contenidos"]'); if(p && p.classList.contains('active')){ ctPintarOtros(); if(ctActual()) ctPintarFirma(); } });
     ctLiberarAuto();
@@ -44207,6 +44208,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
 
   // ---- los nombres (la inteligencia nombra en el servidor, con las fotos ya subidas) ----
   let ctNombrando = false, ctNombrarDesde = 0, ctNombrarFallos = 0, ctNombrarEspera = 0, ctNombrarTm = null;
+  let ctNombrarDeNuevo = false, ctRefrescoNombres = {};   // (19 oct 2026) ver ctRefrescarNombresNube
   // (18 oct 2026) La nube contesta 503 {error:'config'} cuando la llave del modelo no sirve (sin workspace, mala, sin
   // permiso): las fotos se quedan pendientes en la nube sin gastar intentos. Aqui: CALLADO para la cuadrilla (sin aviso,
   // nada en fallo) y se vuelve a pedir en 30 min, por si ya se arreglo la llave.
@@ -44224,12 +44226,40 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     return cambio;
   }
   // (18 oct 2026) Si una respuesta se perdio, la nube ya nombro pero el telefono no se entero: se leen esas filas.
+  // (19 oct 2026) De 150 en 150 (un trabajo grande trae cientos sin nombre y la direccion no puede ser eterna);
+  // un pedazo que falla corta la lectura con error, lo ya leido se queda.
   async function ctTraerNombres(t, ks){
+    let cambio = false;
+    for(let i = 0; i < ks.length; i += 150){
+      const res = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(t.id) + '&k=in.(' + ks.slice(i, i + 150).join(',') + ')&select=k,ia_estado,nombre,nombre_fuente,nombre_ia,nombre_ia_en,ia_confianza', { headers: ctCabeceras() });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const filas = await res.json().catch(() => null);
+      if(Array.isArray(filas) && ctAplicarNombres(t, filas)) cambio = true;
+    }
+    return cambio;
+  }
+  function ctFaltanNombre(t){ return t.fotos.filter(f => f.enNube && !f.nombre && (!f.ia || f.ia.estado === 'pendiente' || f.ia.estado === 'procesando')); }
+  function ctContenidosAbierto(){ const p = document.querySelector('.tab-panel[data-tab="contenidos"]'); return !!(p && p.classList.contains('active')) && document.visibilityState !== 'hidden'; }
+  // (19 oct 2026) LA NUBE MANDA EN EL ESTADO DE LOS NOMBRES. Una foto que el telefono cree 'hecho' (una version vieja
+  // la marco hecho/apple-vision sin nombre) puede estar 'pendiente' en la nube (se puso en fila desde el panel): sin
+  // leerla, ctPedirNombres nunca llamaba. Al abrir Contents (o escoger un trabajo) se leen UNA vez las filas de los
+  // objetos subidos sin nombre (no las de persona ni las revisadas) y se juntan con ctAplicarNombres; si alguna esta
+  // pendiente arranca la fila de nombres. Nada pendiente = ninguna llamada mas. Una lectura por trabajo cada 30 s como
+  // mucho (ir y venir de pestaña no la repite); si falla, la siguiente vez que se abra se intenta otra vez.
+  async function ctRefrescarNombresNube(t){
+    if(!t || t.estado !== 'abierto' || !signedIn() || navigator.onLine === false || ctFaltaSql) return false;
+    const ks = t.fotos.filter(f => f.enNube && ctEsObjeto(f) && !f.nombre && f.fuente !== 'persona' && f.fuente !== 'ia-confirmado').map(f => f.k);
     if(!ks.length) return false;
-    const res = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(t.id) + '&k=in.(' + ks.join(',') + ')&select=k,ia_estado,nombre,nombre_fuente,nombre_ia,nombre_ia_en,ia_confianza', { headers: ctCabeceras() });
-    if(!res.ok) return false;
-    const filas = await res.json().catch(() => null);
-    return Array.isArray(filas) && ctAplicarNombres(t, filas);
+    const antes = ctRefrescoNombres[t.id] || 0;
+    if(antes === -1 || Date.now() - antes < 30000) return false;              // -1 = leyendo ahora mismo
+    ctRefrescoNombres[t.id] = -1;
+    let cambio = false, leido = false;
+    try{ cambio = await ctTraerNombres(t, ks); leido = true; }
+    catch(e){ console.warn('contenidos: no se pudieron leer los nombres de la nube', (e && e.message) || e); }
+    finally { ctRefrescoNombres[t.id] = leido ? Date.now() : 0; }
+    if(cambio){ ctEscribir(); if(ctActual() === t && ctContenidosAbierto()) ctPintar(); }   // ctPintarLista respeta lo que se va escribiendo
+    if(ctActual() === t && ctFaltanNombre(t).length){ if(ctNombrando) ctNombrarDeNuevo = true; else ctPedirNombres(); }
+    return cambio;
   }
   // Error pasajero (sin señal, 429, 5xx): se vuelve a pedir a los 30 s y despues a los 60 s; el aviso sale
   // solo desde el segundo fallo seguido. La nube corta cada foto a los 3 intentos (queda 'fallo').
@@ -44243,11 +44273,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   async function ctPedirNombres(){
     const t = ctActual();
     if(!t || t.estado !== 'abierto' || ctNombrando || !signedIn() || navigator.onLine === false || ctFaltaSql) return;
-    const faltan = () => t.fotos.filter(f => f.enNube && !f.nombre && (!f.ia || f.ia.estado === 'pendiente' || f.ia.estado === 'procesando'));
+    const faltan = () => ctFaltanNombre(t);
     if(!faltan().length) return;
     if(Date.now() - ctNombrarDesde < 1500 || Date.now() < ctNombrarEspera) return;
     ctNombrando = true; ctNombrarDesde = Date.now();
-    let seguir = false;
+    let seguir = false, nada = false;
     try{
       const res = await authFetch('/functions/v1/nombrar-objetos', { method: 'POST', headers: ctCabeceras(), body: JSON.stringify({ job_id: t.id }) });
       if(res.status === 404){ ctNombresAviso = 'Los nombres automáticos no están instalados en el servidor. Escriba los nombres a mano en el paso 3.'; ctPintarNombresAviso(); return; }
@@ -44270,10 +44300,17 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // Nada nuevo y nada en la fila, pero el telefono sigue con fotos sin nombre: se leen sus filas.
       if(!(j.items || []).length && !(j.quedan > 0)) await ctTraerNombres(t, faltan().map(f => f.k)).catch(() => false);
       ctEscribir(); ctPintar();              // ctPintarLista no repinta mientras escriben un nombre (ver ctListaPendiente)
-      seguir = j.quedan > 0;
+      seguir = j.quedan > 0; nada = !(j.items || []).length;
     }catch(e){ ctNombrarOtraVez(); }        // sin señal o la respuesta se perdio: otra vez en 30 s / 60 s, sin aviso
     finally { ctNombrando = false; }
-    if(seguir) setTimeout(() => ctPedirNombres(), 2000);
+    // (19 oct 2026) Sigue pidiendo mientras la nube diga que quedan Y la pantalla de Contents este abierta (al cerrarla
+    // se para; al volver a abrirla sigue). Un solo reloj (ctNombrarTm), nunca dos cadenas. Si quedan pero esta vez no
+    // vino nada (otro telefono las esta nombrando), se espera 20 s en vez de 2.
+    const otra = ctNombrarDeNuevo; ctNombrarDeNuevo = false;
+    if((seguir || otra) && Date.now() >= ctNombrarEspera && ctContenidosAbierto()){   // en espera por un error manda su reloj
+      clearTimeout(ctNombrarTm);
+      ctNombrarTm = setTimeout(() => { if(ctContenidosAbierto()) ctPedirNombres(); }, (seguir && nada) ? 20000 : 2000);
+    }
   }
 
   // ---- el PDF: una pila de hojas (nunca se parte una fila) ----
@@ -44604,7 +44641,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const re = e.target.closest('[data-ct-reanudar]');
       if(re){ ctAvisoReanudar[t.id] = true; if(re.dataset.ctReanudar === 'otro'){ resetContenidos(); ctNuevo(); ctCargarFormulario(ctActual()); ctPintar(); } else { $('#ct-reanudar').hidden = true; } return; }
       const ab = e.target.closest('[data-ct-abrir]');
-      if(ab){ CT.actual = ab.dataset.ctAbrir; ctEscribir(); ctCargarFormulario(ctActual()); ctPintar(); goStep('contenidos', 0); return; }
+      if(ab){ CT.actual = ab.dataset.ctAbrir; ctEscribir(); ctCargarFormulario(ctActual()); ctPintar(); goStep('contenidos', 0); ctPedirNombres(); ctRefrescarNombresNube(ctActual()); return; }
       if(e.target.closest('[data-ct-nuevo]')){ ctEmpezarOtro(true); return; }
       const bo = e.target.closest('[data-ct-borrartrabajo]');
       if(bo){ ctBorrarTrabajoAbierto(bo.dataset.ctBorrartrabajo); return; }
@@ -44668,7 +44705,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     });
   }
   window.addEventListener('online', () => ctProcesarCola());
+  // (19 oct 2026) Volvio la señal con Contents abierto: la lectura de la nube que no se pudo hacer al abrir, y la fila de nombres.
+  window.addEventListener('online', () => { if(ctContenidosAbierto()){ ctPedirNombres(); ctRefrescarNombresNube(ctActual()); } });
   document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') ctProcesarCola(); });
+  // (19 oct 2026) De vuelta al app con Contents abierto: sigue la fila de nombres (al irse se paro; ver ctPedirNombres).
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && ctContenidosAbierto()) ctPedirNombres(); });
   document.addEventListener('visibilitychange', () => { if(document.visibilityState !== 'visible') return; const t = ctActual(); if(t && t.enlace && t.estado === 'abierto'){ ctEnlaceRevisar(t, true); ctEnlaceVigilar(t); } });
   setInterval(() => { if(ctTrabajosPendientes().length) ctProcesarCola(); }, 60000);
   setTimeout(() => ctProcesarCola(), 7000);
