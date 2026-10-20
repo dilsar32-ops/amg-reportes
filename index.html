@@ -1317,7 +1317,8 @@
     overflow:hidden; background:#0d1520; touch-action:none; cursor:grab;}
   .prev-stage:active{cursor:grabbing;}
   .prev-sheet{position:absolute; top:0; left:0; width:760px; transform-origin:0 0;
-    background:#fff; border-radius:6px; box-shadow:0 2px 14px rgba(0,0,0,.45);}
+    /* (20-oct) letra oscura: sin esto se colaba la letra clara de la app y la vista previa de Medidas salía blanco sobre blanco */
+    color:#1C2530; background:#fff; border-radius:6px; box-shadow:0 2px 14px rgba(0,0,0,.45);}
   .prev-sheet .previa-impresa{width:760px; overflow:visible; padding:0;}
   .prev-zoom{position:absolute; right:10px; bottom:10px; display:flex; gap:6px; z-index:2;}
   .prev-zoom button{width:44px; height:44px; display:flex; align-items:center; justify-content:center;
@@ -8607,7 +8608,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-19-B';
+  const APP_BUILD = '2026-10-20-A';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12235,7 +12236,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         (Array.isArray(r.objects) ? r.objects : []).forEach(o => { if(o && typeof o === 'object'){ o.rotationDeg = +o.rotationDeg || 0; } });
       });
       floorplanAlignRooms(d);
-      if(!d._handEdited){ try{ fpValidarParches(d); }catch(e){ console.warn('parches', e); } floorplanRectifyWalls(d); floorplanRefineGeometry(d); floorplanCloseCorners(d); try{ fpResolverParedesAjenas(d); }catch(e){ console.warn('paredes ajenas', e); } }
+      if(!d._handEdited){ try{ fpValidarParches(d); }catch(e){ console.warn('parches', e); } floorplanRectifyWalls(d); floorplanRefineGeometry(d); floorplanCloseCorners(d); try{ fpResolverParedesAjenas(d); }catch(e){ console.warn('paredes ajenas', e); } } else { try{ fpResolverParedesAjenasEditado(d); }catch(e){ console.warn('paredes ajenas', e); } }
       fpCleanPhantomSpaceLabels(d);
       floorplanDetectSubAreas(d);
       tok.data = d;
@@ -12351,7 +12352,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         const medida = c.a && c.b ? n2(c.a) + ' × ' + n2(c.b) : c.a ? n2(c.a) : '—';
         // Un inodoro se CUENTA (15 oct 2026): "2 piezas", nunca "2 pies lin.".
         const res = c.sqft ? n2(c.sqft) + ' pies²' : c.linear ? n2(c.linear) + ' pies lin.' : c.piezas ? piezasTexto(c.piezas) : '—';
-        html += `<tr${c.completo ? '' : ' style="color:var(--danger);"'}><td style="${td}">${esc(c.seccionNombre)}</td><td style="${td}">${esc(c.material || 'Sin material')}</td>`
+        html += `<tr${c.completo ? '' : ' style="color:var(--danger);"'}><td style="${td}">${esc(c.seccionNombre)}</td><td style="${td}">${esc(c.material ? medNombre(c.material) : 'Sin material')}</td>`
           + `<td style="${td} text-align:right; white-space:nowrap;">${medida}</td><td style="${td} text-align:right; white-space:nowrap;">${res}</td></tr>`;
       });
       html += '</table></div>';
@@ -17741,20 +17742,27 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   ]);
   // 'EA' | 'LF' | 'SF', o null si es un material escrito a mano (no se le inventa una unidad:
   // sigue la regla de antes, con ancho = área y sin ancho = tramo).
-  function medUnidad(v){
+  // (20-oct) seccion: en una tarjeta de PARED lo escrito a mano ("Other": "Wood paneling") también es largo × alto,
+  // su regla de siempre; antes caía en la regla vieja y 12 de largo salía 12 LF. Sin seccion, como antes.
+  function medUnidad(v, seccion){
     const m = medNombre(v);          // (18-oct) los nombres viejos tienen la unidad del nuevo
     if(!m) return null;
     if(MEASURE_POR_PIEZA.has(m)) return 'EA';
     if(MEASURE_LINEAL.has(m)) return 'LF';
     if(Object.values(MEASURE_SECTIONS).some(sec => sec.options.some(o => o.value === m && m !== 'Other'))
        || Object.values(MATERIAL_COMPANION).some(c => c.value === m)) return 'SF';
-    return null;
+    return seccion === 'wall' ? 'SF' : null;
+  }
+  // La sección de la tarjeta de un corte ('wall', 'floor'...), para medUnidad / medCalcular.
+  function medSeccionDeCorte(cut){
+    const card = cut && cut.closest ? cut.closest('.measure-card') : null;
+    return card ? (card.dataset.section || '') : '';
   }
   // LA cuenta de un corte, en UN solo lugar (la usan la tarjeta, el total, el papel,
   // la nube y la pantalla de revisar). faltaAlto: es de superficie y solo trae el
   // largo; no se cobra hasta que le pongan su segunda medida.
-  function medCalcular(material, a, b){
-    const aOk = a > 0, bOk = b > 0, u = medUnidad(material);
+  function medCalcular(material, a, b, seccion){
+    const aOk = a > 0, bOk = b > 0, u = medUnidad(material, seccion);
     const r2 = v => Math.round(v * 100) / 100;
     if(u === 'EA') return { sqft: 0, linear: 0, piezas: aOk ? Math.round(a) : 0, faltaAlto: false };
     if(u === 'LF') return { sqft: 0, linear: aOk ? r2(a) : 0, piezas: 0, faltaAlto: false };
@@ -17901,7 +17909,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     }
     // La unidad la dice el material (15-oct-2026): la pared sin alto NO se vuelve pie lineal.
     const mat = sel ? (sel.value === 'Other' ? (($('.meas-material-other', cut) || {}).value || '') : sel.value) : '';
-    const r = medCalcular(mat, a, b), enPared = !!cut.closest('.measure-card[data-section="wall"]');
+    const r = medCalcular(mat, a, b, medSeccionDeCorte(cut)), enPared = !!cut.closest('.measure-card[data-section="wall"]');
     if(r.faltaAlto) out.textContent = enPared ? 'Falta el alto: la pared va largo × alto / Missing height' : 'Falta el ancho: va largo × ancho / Missing width';
     else if(r.sqft) out.textContent = '= ' + r.sqft + ' sq ft';
     else if(r.linear) out.textContent = '= ' + r.linear + ' linear ft';
@@ -17925,10 +17933,12 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       const sel = $('.meas-material', cut);
       const v = sel ? sel.value : '';
       const nombre = String(v === 'Other' ? (($('.meas-material-other', cut) || {}).value || '') : (v || '')).trim() || '— Material —';
-      const t = porMaterial.get(nombre) || { sqft: 0, linear: 0, piezas: 0, falta: 0 };
-      const r = medCalcular(v === 'Other' ? nombre : v, a, b);
+      // (20-oct) El nombre viejo ("6 mil containment plastic") suma en el renglón del nuevo, igual que Revisar y el PDF.
+      const clave = medNombre(nombre);
+      const t = porMaterial.get(clave) || { sqft: 0, linear: 0, piezas: 0, falta: 0 };
+      const r = medCalcular(v === 'Other' ? nombre : v, a, b, (card.dataset || {}).section);
       t.piezas += r.piezas; t.sqft += r.sqft; t.linear += r.linear; if(r.faltaAlto) t.falta++;
-      porMaterial.set(nombre, t);
+      porMaterial.set(clave, t);
     });
     // Un corte sin alto no suma, pero tampoco se calla: el total dice cuántos faltan.
     const sinAlto = n => n === 1 ? '1 sin alto / 1 missing height' : n + ' sin alto / ' + n + ' missing height';
@@ -17952,7 +17962,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const pieza = esPorPieza(sel.value);
     // Lo de pie lineal tampoco lleva segunda medida (15-oct-2026): zócalo, molduras, gabinetes, vanity…
     // Se esconde sin borrar lo que ya tuviera escrito (un trabajo viejo no pierde su número).
-    const unidad = medUnidad(sel.value), lineal = unidad === 'LF', enPared = !!cut.closest('.measure-card[data-section="wall"]');
+    const unidad = medUnidad(sel.value, medSeccionDeCorte(cut)), lineal = unidad === 'LF', enPared = !!cut.closest('.measure-card[data-section="wall"]');
     const wrap = $('.meas-dims-wrap', cut), lab = $('.meas-dims-label', cut);
     const b = $('.meas-dimB', cut), x = $('.dims-x', cut), a = $('.meas-dimA', cut);
     if(lab) lab.innerHTML = pieza
@@ -18249,6 +18259,10 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       sel.appendChild(o);
     }
     opciones.forEach(op => {
+      // (20-oct) Lo ESCONDIDO (el zipper, que va en Equipo, y los 3 nombres viejos) no se ofrece aquí, igual
+      // que en la tarjeta: escoger el zipper en Revisar lo cobraba dos veces. Solo se queda si ya es el de la
+      // fila (un trabajo viejo se sigue viendo como está).
+      if(op.oculto && op.value !== valor) return;
       const o = document.createElement('option');
       o.value = op.value; o.textContent = op.label;
       sel.appendChild(o);
@@ -18292,13 +18306,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   function medAjustarFila(cut, b, x, res){
     const sel = $('.meas-material', cut), v = sel ? sel.value : '';
     const mat = v === 'Other' ? (($('.meas-material-other', cut) || {}).value || '') : v;
-    const u = esPorPieza(v) ? 'EA' : medUnidad(mat);
+    const u = esPorPieza(v) ? 'EA' : medUnidad(mat, medSeccionDeCorte(cut));
     const sola = u === 'LF' || u === 'EA';
     if(b){ b.hidden = sola; b.placeholder = u === 'SF' ? (cut.closest('.measure-card[data-section="wall"]') ? 'H' : 'W') : 'W'; }
     if(x) x.hidden = sola;
     if(res){
       const a = parseFloat($('.meas-dimA', cut).value), bb = parseFloat($('.meas-dimB', cut).value);
-      res.classList.toggle('falta', !sola && medCalcular(mat, a, bb).faltaAlto);
+      res.classList.toggle('falta', !sola && medCalcular(mat, a, bb, medSeccionDeCorte(cut)).faltaAlto);
     }
   }
   function medTextoDeCorte(cut){
@@ -18307,7 +18321,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const sel = $('.meas-material', cut);
     if(sel && esPorPieza(sel.value)) return a > 0 ? Math.round(a) + ' EA' : '—';
     const mat = sel ? (sel.value === 'Other' ? (($('.meas-material-other', cut) || {}).value || '') : sel.value) : '';
-    const r = medCalcular(mat, a, b);
+    const r = medCalcular(mat, a, b, medSeccionDeCorte(cut));
     if(r.faltaAlto) return cut.closest('.measure-card[data-section="wall"]') ? 'falta el alto' : 'falta el ancho';
     if(r.sqft) return med2(r.sqft) + ' sq ft';
     if(r.linear) return med2(r.linear) + ' linear ft';
@@ -18934,6 +18948,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   const MED_MARCAS_UNIDAD = ['apt','apto','apartment','apartamento','unit','unidad',
                              'ste','suite','depto','dpto','dept','lote','lot'];
   function medUnidadDe(t){
+    // (20-oct) "123 Test St #2": el "#número" es la unidad, pero medPelar borra el "#" y quedaba un 2 suelto que
+    // nadie leía como apartamento ("123 Test St" casaba con el plano del #2). Se lee ANTES de limpiar. Un "#" al
+    // principio ("#5 Elm St") es el número de la casa, no una unidad.
+    const gato = String(t == null ? '' : t).match(/\S\s*#\s*([A-Za-z0-9]+)/);
+    if(gato) return medPelar(gato[1]);
     const ps = medPalabras(t);
     for(let i = 0; i < ps.length; i++){
       if(MED_MARCAS_UNIDAD.indexOf(ps[i]) >= 0 && ps[i + 1]) return ps[i + 1];
@@ -19970,8 +19989,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
             a: aOk ? a : 0, b: bOk ? b : 0,
             // La unidad la dice el material (15-oct-2026, medCalcular): pie lineal solo lo que no
             // tiene alto; la pared sin alto queda faltaAlto y no se cobra hasta completarla.
-            sqft:   medCalcular(material, a, b).sqft,
-            faltaAlto: medCalcular(material, a, b).faltaAlto,
+            sqft:   medCalcular(material, a, b, seccion).sqft,
+            faltaAlto: medCalcular(material, a, b, seccion).faltaAlto,
             // EL TRAMO ES EL LARGO, Y REDONDEADO IGUAL QUE EL ÁREA.
             //
             // Aquí decía `: a`, con la `a` CRUDA. Con la casilla del largo
@@ -19987,8 +20006,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
             // numero viaja en el mismo campo del largo, pero aqui se separa a
             // su propia cuenta para que NADA lo sume con los pies lineales -
             // son unidades distintas y mezclarlas es cobrar mal.
-            piezas: medCalcular(material, a, b).piezas,
-            linear: medCalcular(material, a, b).linear
+            piezas: medCalcular(material, a, b, seccion).piezas,
+            linear: medCalcular(material, a, b, seccion).linear
           });
         });
       });
@@ -21023,7 +21042,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
           if(!material && !aOk && !bOk) continue;
           // POR PIEZA, igual que medRecogerCortes: un inodoro "2" son 2 EA, no
           // 2 pies lineales. Sin esto la nube sumaba las piezas al `lineal`.
-          const r = medCalcular(material, a, b);
+          const r = medCalcular(material, a, b, sec);
           salida.push({ seccion: sec, seccionNombre: nombre, nivel, cuarto, material,
             a: aOk ? a : 0, b: bOk ? b : 0,
             sqft: r.sqft, piezas: r.piezas, linear: r.linear, faltaAlto: r.faltaAlto,
@@ -21609,7 +21628,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     try{ localStorage.setItem(FLOORPLAN_DRAFT_KEY, e.id); }catch(e2){}
     fpResetUndoStack();
     floorplanAlignRooms(floorplanData);
-    if(!floorplanData._handEdited){ try{ fpValidarParches(floorplanData); }catch(e){ console.warn('parches', e); } floorplanRectifyWalls(floorplanData); floorplanRefineGeometry(floorplanData); floorplanCloseCorners(floorplanData); try{ fpResolverParedesAjenas(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } }
+    if(!floorplanData._handEdited){ try{ fpValidarParches(floorplanData); }catch(e){ console.warn('parches', e); } floorplanRectifyWalls(floorplanData); floorplanRefineGeometry(floorplanData); floorplanCloseCorners(floorplanData); try{ fpResolverParedesAjenas(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } } else { try{ fpResolverParedesAjenasEditado(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } }
     const goneNames = fpCleanPhantomSpaceLabels(floorplanData);
     if(goneNames && goneNames.length){ floorplanData._phantomLabelsRemoved = goneNames; saveFloorplanDraft(); }
     renderFloorplan(floorplanData);
@@ -22281,6 +22300,9 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
           floorplanRefineGeometry(floorplanData);
           floorplanCloseCorners(floorplanData);
           try{ fpResolverParedesAjenas(floorplanData); }catch(e){ console.warn('paredes ajenas', e); }
+        } else {
+          // (20-oct) editado a mano: el mismo arreglo de paredes ajenas, con las rejas de fpResolverParedesAjenasEditado.
+          try{ fpResolverParedesAjenasEditado(floorplanData); }catch(e){ console.warn('paredes ajenas', e); }
         }
         const gone = fpCleanPhantomSpaceLabels(floorplanData);
         if(gone && gone.length){ floorplanData._phantomLabelsRemoved = gone; saveFloorplanDraft(); }
@@ -23349,6 +23371,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   function fpCommitEdit(mutate, affectedRoomIdxs){
     if(!floorplanData) return;
     mutate();
+    // (20-oct) Un tramo recortado que ya no está sobre su pared (la movieron) no se guarda.
+    fpLimpiarRecortesViejos(floorplanData);
     (affectedRoomIdxs||[]).forEach(ri => {
       const room = (floorplanData.rooms||[])[ri];
       if(room) recomputeRoomPerimeter(room);
@@ -26865,7 +26889,14 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     if(!room) return;
     fpSelectedRoomPanelIdx = roomIdx;
     const rb = floorplanRoomBounds(room);
-    $('#fpRoomDetailStats').textContent = `${fpFeetInches(rb.maxX-rb.minX)} x ${fpFeetInches(rb.maxY-rb.minY)} · ${fpRoomDisplayAreaSqFt(room).toFixed(1)} sq ft`;
+    let medida = `${fpFeetInches(rb.maxX-rb.minX)} x ${fpFeetInches(rb.maxY-rb.minY)}`;
+    // (20-oct) El panel decía otro tamaño que el plano (Living 25'-6" x 18'-9" contra 17' 5" x 18' 9"): la caja
+    // de floorplanRoomBounds cuenta también las paredes prestadas y los muebles. Ahora dice lo MISMO que el
+    // bloque del cuarto en el plano (su renglón L x W); sin ese renglón, la cuenta de antes.
+    const gNombre = document.querySelector(`#floorplanSvgWrap .fp-roomlabel[data-room-idx="${roomIdx}"]`);
+    const lineaDim = gNombre && [...gNombre.querySelectorAll('text')].find(t => /\d+'[^x]*x\s*\d+'/.test(t.textContent || ''));
+    if(lineaDim) medida = lineaDim.textContent.trim();
+    $('#fpRoomDetailStats').textContent = `${medida} · ${fpRoomDisplayAreaSqFt(room).toFixed(1)} sq ft`;
     $('#fpRoomName2').value = room.roomName || '';
     $('#fpRoomName2').placeholder = room.roomName ? 'Room name' : 'No name yet - type one';
     closeFloorplanObjDetail();
@@ -27096,7 +27127,26 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     fpFlashHint(`${name} removed - Undo brings it back.`);
   });
 
-  $('#floorplanSvgWrap').addEventListener('click', (e) => {
+  // (20-oct, revisión de FR) EL CLIC CON MOUSE EN LA COMPUTADORA. El pointerdown
+  // de #fpStage se queda con el puntero (setPointerCapture); con mouse el
+  // navegador manda entonces el click a #fpStage mismo (el que tiene la
+  // captura), no a la pared que está debajo, y este manejador -que escucha en
+  // #floorplanSvgWrap, ADENTRO del stage- nunca lo oía: en la compu el clic a
+  // paredes, puertas, ventanas, muebles y piso vacío no hacía nada (en el
+  // teléfono sí, porque el toque de iOS llega al elemento de debajo del dedo).
+  // Ahora el click que cae en el stage se manda aquí con el elemento que de
+  // verdad está debajo del puntero (document.elementFromPoint).
+  $('#floorplanSvgWrap').addEventListener('click', fpWrapClick);
+  $('#fpStage').addEventListener('click', e => {
+    const wrap = $('#floorplanSvgWrap');
+    if(!wrap || wrap.contains(e.target)) return;       // ya le llegó al plano: lo atendió fpWrapClick
+    if(e.target.closest && e.target.closest('.fpv-zoomcontrols, .fpv-popout')) return;   // sus botones, normales
+    const bajo = document.elementFromPoint(e.clientX, e.clientY);
+    if(bajo && wrap.contains(bajo)){ fpWrapClick({ target: bajo, clientX: e.clientX, clientY: e.clientY }); return; }
+    // Soltó fuera del dibujo: el "no abras nada" de un arrastre no se queda guardado para el clic siguiente.
+    fpSuppressNextClick = false;
+  });
+  function fpWrapClick(e){
     // A pinch/pan gesture on the full view's stage still ends in a normal
     // synthetic click (touch-action:none means the browser has no native
     // gesture to attribute it to instead) - fpEndPointer sets this flag
@@ -27180,7 +27230,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         if(ri != null){ openFloorplanRoomDetail(ri); fpEnsureAboveSheet(e.clientY); return; }
       }
     }
-  });
+  }
 
   $('#fpObjConfirm').addEventListener('click', () => {
     const o = findFloorplanObject(fpSelectedRoomIdx, fpSelectedObjId);
@@ -28839,7 +28889,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // _ajena: una pared que este cuarto solo VIO por una abertura (es del
       // cuarto de al lado) no es su borde. _recorte: de una pared juntada de
       // dos cuartos, solo el tramo que es de este. Ver fpResolverParedesAjenas.
-      const walls = (room.walls||[]).map(w => (w && w._recorte && w._recorte.start && w._recorte.end) ? Object.assign({}, w, { start: w._recorte.start, end: w._recorte.end }) : w).filter(w => w.start && w.end && !w._ajena && !(w._studWall && !w._studPairId)
+      const walls = (room.walls||[]).map(w => fpRecorteVigente(w) ? Object.assign({}, w, { start: w._recorte.start, end: w._recorte.end }) : w).filter(w => w.start && w.end && !w._ajena && !(w._studWall && !w._studPairId)
         && Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) > 0.05);
       // Dos paredes ya forman un cuarto SOLO cuando lo demás eran paredes
       // ajenas: un pasillo abierto en las dos puntas, al devolverle a la sala
@@ -28995,7 +29045,26 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // o solo el pedazo que le queda si se le recortó la parte que es del
   // cuarto de al lado (RoomPlan junta en una sola pared dos tramos derechos
   // de dos cuartos distintos).
-  function fpTramoPropio(w){ return (w && w._recorte && w._recorte.start && w._recorte.end) ? w._recorte : w; }
+  function fpTramoPropio(w){ return fpRecorteVigente(w) || w; }
+  // (20-oct, revisión) El tramo recortado vale solo mientras siga SOBRE la pared. Si alguien movió la pared a
+  // mano (arrastrarla, cambiar su largo), el _recorte guardado se quedaba en el lugar viejo y el cuarto ya no
+  // seguía a la pared: el piso que va al seguro no cambiaba. Fuera de la línea de la pared, se ignora (cuenta
+  // la pared entera) y fpLimpiarRecortesViejos lo borra al confirmar la edición.
+  function fpRecorteVigente(w){
+    const r = w && w._recorte;
+    if(!r || !r.start || !r.end || !w.start || !w.end) return null;
+    const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y, L2 = dx*dx + dy*dy;
+    if(L2 < 1e-6) return null;
+    const L = Math.sqrt(L2);
+    const sobre = q => { const t = ((q.x - w.start.x)*dx + (q.y - w.start.y)*dy) / L2, d = Math.abs((q.x - w.start.x)*dy - (q.y - w.start.y)*dx) / L;
+      return d <= 0.15 && t >= -0.02 && t <= 1.02; };
+    return sobre(r.start) && sobre(r.end) ? r : null;
+  }
+  function fpLimpiarRecortesViejos(data){
+    let n = 0;
+    ((data && data.rooms) || []).forEach(r => (r && r.walls || []).forEach(w => { if(w && w._recorte && !fpRecorteVigente(w)){ delete w._recorte; n++; } }));
+    return n;
+  }
   function fpParedAjenaPar(a0, b0){
     const a = fpTramoPropio(a0), b = fpTramoPropio(b0);
     const ax = a.end.x-a.start.x, ay = a.end.y-a.start.y, la = Math.hypot(ax,ay);
@@ -29173,7 +29242,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     let base = new Map();
     // Una pared dibujada a mano o deducida por la app nunca se toca: esas
     // las puso alguien a propósito.
-    const libre = w => w && w.start && w.end && !w._ajena && !w._added && !w._inferido;
+    const libre = w => w && w.start && w.end && !w._ajena && !w._added && !w._inferido && !w._cierre;   // _cierre: la que Scanova cerró en escuadra (cerrarAbiertos)
     // 1. Qué cuartos se enciman, y los grupos que forman (un pasillo entre
     //    el foyer y la sala es UN grupo de tres: si se arregla de a dos, el
     //    primero se queda con el pasillo).
@@ -29493,6 +29562,42 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     if(hechas.length === antes) break;
     }
     return hechas;
+  }
+  // PLANOS EDITADOS A MANO (20-oct, revisión de FR, B5). Antes un plano con _handEdited se saltaba el
+  // arreglo de paredes ajenas, y un cuarto seguía contando el piso del vecino: en la casa de Amilcar el
+  // Hallway salía de 68.1 sq ft, 49.7 encima de la Living, y el total del seguro 674.2 en vez de 624.2.
+  // Aquí corre el MISMO arreglo, pero con las rejas de un plano que alguien ya tocó:
+  //   - solo marca paredes (_ajena / _recorte); nunca endereza ni mueve nada (eso sigue apagado);
+  //   - un cuarto que con el arreglo CRECE se queda como estaba (devolver lo prestado nunca agranda;
+  //     en live_plan_closet el Hallway pasaba de 31.2 a 43.5);
+  //   - la pared que la persona movió se queda donde la dejó: marcar la copia prestada no mueve nada, y la
+  //     del dueño (su gemela, que se movió con ella) sigue igual; una pared DIBUJADA a mano (_added) nunca se
+  //     marca (el arreglo ya las salta);
+  //   - si al final el encime no baja, no se queda nada.
+  function fpResolverParedesAjenasEditado(data){
+    if(!data || !Array.isArray(data.rooms) || data.merged === false) return [];
+    const vivos = data.rooms.filter(r => r && !r.deleted && Array.isArray(r.walls) && r.walls.length);
+    const nivel = r => r.level || 1;
+    const area = r => { const p = fpOrderedRoomPolygon(r); return p && p.length >= 3 ? fpPolygonAreaSqFt(p) : 0; };
+    const encime = () => { let t = 0;
+      for(let i = 0; i < vivos.length; i++) for(let j = i + 1; j < vivos.length; j++)
+        if(nivel(vivos[i]) === nivel(vivos[j])) t += fpEncimeSqFt(fpOrderedRoomPolygon(vivos[i]), fpOrderedRoomPolygon(vivos[j]));
+      return t; };
+    const e0 = encime();
+    if(e0 < 3) return [];
+    const foto = new Map(vivos.map(r => [r, r.walls.map(w => [w, w ? w._ajena : undefined, w ? w._recorte : undefined])]));
+    const a0 = new Map(vivos.map(r => [r, area(r)]));
+    const volver = r => foto.get(r).forEach(([w, aj, rc]) => { if(!w) return;
+      if(aj === undefined) delete w._ajena; else w._ajena = aj;
+      if(rc === undefined) delete w._recorte; else w._recorte = rc; });
+    const hechas = fpResolverParedesAjenas(data);
+    if(!hechas.length) return hechas;
+    const tocada = ([w, aj, rc]) => w && (w._ajena !== aj || w._recorte !== rc);
+    const fuera = vivos.filter(r => foto.get(r).some(tocada) && area(r) > a0.get(r) + 0.5);
+    fuera.forEach(volver);
+    const quedan = hechas.filter(h => !fuera.some(r => r.roomName === h.cuarto));
+    if(!quedan.length || !(encime() < e0 - 1) || vivos.some(r => area(r) > a0.get(r) + 0.5)){ vivos.forEach(volver); return []; }
+    return quedan;
   }
   function fpPruneOutlineSpikes(poly){
     if(!poly || poly.length < 3) return poly;
