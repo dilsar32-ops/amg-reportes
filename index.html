@@ -8607,7 +8607,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-19-A';
+  const APP_BUILD = '2026-10-19-B';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12344,8 +12344,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       html += `<h3 style="margin:14px 0 4px; font-size:14px;">${esc(k)}</h3><div style="overflow-x:auto; overflow-y:hidden; touch-action:pan-x pan-y;"><table style="width:100%; border-collapse:collapse;">`;
       lista.forEach(c => {
         if(c.completo){
-          const kp = (c.material || '') + '|' + (c.seccion || '');
-          const pt = partidas.get(kp) || { material: c.material || 'Sin material', seccion: c.seccionNombre || c.seccion || '', sq: 0, li: 0, pz: 0 };
+          const kp = medNombre(c.material) + '|' + (c.seccion || '');   // (19 oct) el nombre viejo suma en el renglón del nuevo
+          const pt = partidas.get(kp) || { material: c.material ? medNombre(c.material) : 'Sin material', seccion: c.seccionNombre || c.seccion || '', sq: 0, li: 0, pz: 0 };
           pt.sq += c.sqft || 0; pt.li += c.linear || 0; pt.pz += c.piezas || 0; partidas.set(kp, pt);
         } else faltan++;
         const medida = c.a && c.b ? n2(c.a) + ' × ' + n2(c.b) : c.a ? n2(c.a) : '—';
@@ -17680,9 +17680,17 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     // sheeting (cover)". El `value` no se toca: ese sigue en inglés para el
     // PDF, esto es solo el orden de las dos mitades de `label`.
     materiales: { labelEn:'Material', labelEs:'Material', options: [
-      {value:'Plastic sheeting (cover)', label:'Nailo, plástico para cubrir / Plastic sheeting (cover)'},
-      {value:'6 mil containment plastic', label:'Plástico 6 mil de contención / 6 mil containment plastic'},
-      {value:'Floor protection', label:'Protección de piso / Floor protection'},
+      // (18-oct) cámara materiales: los nombres que el seguro ya aceptó (Xactimate, factura Malik) y el zipper de la contención
+      // (por pieza; su decisión del 18-oct: la cámara pregunta "¿Lleva zipper?" al guardar la contención). El español sigue primero
+      // en esta sección (su regla del 13-sep). Los tres viejos se QUEDAN escondidos (hidden): un trabajo o un borrador guardado con ellos se sigue abriendo
+      // igual (no se reescribe nada); en el papel y en los totales salen con el nombre nuevo (MED_NOMBRE_NUEVO).
+      {value:'Containment Barrier/Airlock/Decon. Chamber', label:'Plástico de contención / Containment Barrier/Airlock/Decon. Chamber', forma:'contencion'},
+      {value:'Floor protection - cardboard and tape', label:'Cartón y cinta, protección de piso / Floor protection - cardboard and tape', forma:'piso'},
+      {value:'Cover / mask with plastic sheeting', label:'Nailo, plástico encima / Cover / mask with plastic sheeting', forma:'rectangulo'},
+      {value:'Peel & seal zipper', label:'Zipper de la contención / Peel & seal zipper', forma:'zipper', oculto:true},   // (19 oct) ESCONDIDO en Field Reports: aquí la cámara no tiene el modo Materiales y "Zippers" se anota en Equipo (regla del 13-sep: no va en materiales de Medidas); así no se cobra dos veces
+      {value:'Plastic sheeting (cover)', label:'Nailo, plástico para cubrir / Plastic sheeting (cover)', oculto:true},
+      {value:'6 mil containment plastic', label:'Plástico 6 mil de contención / 6 mil containment plastic', oculto:true},
+      {value:'Floor protection', label:'Protección de piso / Floor protection', oculto:true},
       {value:'Other', label:'Otro / Other'}
     ]}
   };
@@ -17709,9 +17717,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     'Toilet', 'Bathtub', 'Shower Pan', 'Shower Surround', 'Shower Door',
     'Medicine Cabinet', 'Exhaust Fan', 'Towel Bar', 'Shower Drain',
     // Cocina - ya venía mal desde que se armó: una estufa tampoco se mide
-    'Stove / Range', 'Refrigerator', 'Sink', 'Dishwasher', 'Range Hood / Microwave'
+    'Stove / Range', 'Refrigerator', 'Sink', 'Dishwasher', 'Range Hood / Microwave',
+    'Peel & seal zipper'   // (18-oct) el zipper de la contención
   ]);
-  const esPorPieza = v => MEASURE_POR_PIEZA.has(String(v || '').trim());
+  // (18-oct) cámara materiales: el nombre viejo de lo ya guardado -> el de Xactimate (la base no se toca; se lee con el nuevo).
+  const MED_NOMBRE_NUEVO = { '6 mil containment plastic': 'Containment Barrier/Airlock/Decon. Chamber', 'Plastic sheeting (cover)': 'Cover / mask with plastic sheeting', 'Floor protection': 'Floor protection - cardboard and tape' };
+  const medNombre = v => { const t = String(v == null ? '' : v).trim(); return MED_NOMBRE_NUEVO[t] || t; };
+  const esPorPieza = v => MEASURE_POR_PIEZA.has(medNombre(v));
   // ============ CADA MATERIAL CON SU UNIDAD (15 oct 2026) ============
   //
   // Sus reglas, con la investigación de cómo cobra Xactimate cada cosa:
@@ -17730,7 +17742,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   // 'EA' | 'LF' | 'SF', o null si es un material escrito a mano (no se le inventa una unidad:
   // sigue la regla de antes, con ancho = área y sin ancho = tramo).
   function medUnidad(v){
-    const m = String(v || '').trim();
+    const m = medNombre(v);          // (18-oct) los nombres viejos tienen la unidad del nuevo
     if(!m) return null;
     if(MEASURE_POR_PIEZA.has(m)) return 'EA';
     if(MEASURE_LINEAL.has(m)) return 'LF';
@@ -17778,7 +17790,8 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   };
 
   function optionsHtml(opts){
-    return opts.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+    // (18-oct) cámara materiales: un nombre viejo se queda como opción ESCONDIDA (lo guardado se abre igual; no se escoge para lo nuevo).
+    return opts.map(o => `<option value="${esc(o.value)}"${o.oculto ? ' hidden disabled' : ''}>${esc(o.label)}</option>`).join('');   // (19 oct) + disabled: la rueda del iPhone puede no respetar hidden; así no se escoge
   }
   // Una lista que ARRANCA VACIA, solo para el nivel y el cuarto de las
   // tarjetas de medida.
@@ -19553,10 +19566,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const secciones = {};
     Object.keys(MEASURE_SECTIONS).forEach(k => {
       secciones[k] = MEASURE_SECTIONS[k].options
-        .filter(o => o.value !== 'Other')
+        .filter(o => o.value !== 'Other' && !o.oculto)      // (18-oct) los nombres viejos no van a la cámara
         // porPieza: lo que se cuenta en vez de medirse (27 sep 2026). Sin esto
         // la camara le pedia esquinas a un inodoro.
         .map(o => ({ value: o.value, label: o.label,
+                     ...(o.forma ? { forma: o.forma } : {}),      // (18-oct) cámara materiales: cómo se mide (la cámara no depende del nombre)
                      companion: MATERIAL_COMPANION[o.value] || null,
                      porPieza: esPorPieza(o.value),
                      // La unidad de cada material viaja a la cámara (15-oct-2026): la pared siempre largo × alto.
@@ -19706,10 +19720,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // not a blanket per-section guess.
       const section = card.dataset.section;
       const materials = MEASURE_SECTIONS[section].options
-        .filter(o => o.value !== 'Other')
+        .filter(o => o.value !== 'Other' && !o.oculto)      // (18-oct) los nombres viejos no van a la cámara
         // porPieza: lo que se cuenta en vez de medirse (27 sep 2026). Sin esto
         // la camara le pedia esquinas a un inodoro.
         .map(o => ({ value: o.value, label: o.label,
+                     ...(o.forma ? { forma: o.forma } : {}),      // (18-oct) cámara materiales: cómo se mide (la cámara no depende del nombre)
                      companion: MATERIAL_COMPANION[o.value] || null,
                      porPieza: esPorPieza(o.value),
                      // La unidad de cada material viaja a la cámara (15-oct-2026): la pared siempre largo × alto.
@@ -20040,10 +20055,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
                sqft:0, linear:0, cuartos: new Map() };
         niveles.set(claveNivel, nv);
       }
-      const claveCuarto = c.cuarto || '';
+      // (18-oct) cámara materiales: un material del trabajo de un nivel SIN cuarto (entrada, escalera, otro piso) es "Whole level":
+      // su propio renglón por nivel, aparte de los cuartos. Lo demás sin cuarto sigue siendo "Room not specified".
+      const todoNivel = !c.cuarto && !!claveNivel && c.seccion === 'materiales' && !!c.todoNivel;   // (19 oct) solo lo que la cámara marcó "Todo el nivel"; lo escrito a mano sin cuarto sigue "Room not specified"
+      const claveCuarto = todoNivel ? '\u0000todo-el-nivel' : (c.cuarto || '');
       let ct = nv.cuartos.get(claveCuarto);
       if(!ct){
-        ct = { cuarto: claveCuarto, titulo: claveCuarto || 'Room not specified',
+        ct = { cuarto: todoNivel ? '' : claveCuarto, titulo: todoNivel ? 'Whole level' : (claveCuarto || 'Room not specified'),
                orden: nv.cuartos.size, sqft:0, linear:0, materiales: new Map() };
         nv.cuartos.set(claveCuarto, ct);
       }
@@ -20052,12 +20070,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
       // veían idénticas. La superficie va en la clave y además impresa.
       // Sin material todavía, la clave usa el corte mismo: dos cortes vacíos
       // del mismo cuarto son dos renglones que él tiene que terminar, no uno.
+      // (18-oct) cámara materiales: el nombre viejo suma en el renglón del nuevo (y sale con el nuevo).
       const claveMat = c.material
-        ? (c.material + '|' + c.seccion)
+        ? (medNombre(c.material) + '|' + c.seccion)
         : ('\u0000sin-material|' + c.seccion + '|' + (ct.materiales.size + 1));
       let mt = ct.materiales.get(claveMat);
       if(!mt){
-        mt = { material: c.material, superficie: c.superficie, seccion: c.seccion,
+        mt = { material: c.material ? medNombre(c.material) : c.material, superficie: c.superficie, seccion: c.seccion,
                sinMaterial: !c.material,
                orden: ct.materiales.size, n:0, sqft:0, linear:0, cortes: [] };
         ct.materiales.set(claveMat, mt);
@@ -43139,7 +43158,11 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
   async function ctClasificarLocal(f){
     const C = ctPluginClasificar(); if(!C || !f || !ctEsObjeto(f)) return false;
     try{
-      const r = await Promise.race([C.imagen({ path: f.archivo, maximo: 12 }), new Promise((_, rej) => setTimeout(() => rej(new Error('el reconocedor tardó demasiado')), 6000))]);
+      // (19 oct 2026) EL OBJETO DE ENFRENTE: Apple Vision mira el RECORTE del objeto que hizo la cámara del iPhone (no el
+      // cuarto de fondo); si no hay recorte o falla, la foto como siempre.
+      const ver = (path) => Promise.race([C.imagen({ path, maximo: 12 }), new Promise((_, rej) => setTimeout(() => rej(new Error('el reconocedor tardó demasiado')), 6000))]);
+      let r = null; if(f.recorte){ try{ r = await ver(f.recorte); }catch(e){ r = null; } }
+      if(!r) r = await ver(f.archivo);
       const e = ctEscogerEtiqueta(r && r.etiquetas);
       if(e){
         if(!f.nombre){ f.nombre = e.es; f.fuente = 'ia'; }
@@ -43385,15 +43408,25 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     const fl = c.capa.querySelector('.flash'); if(fl){ fl.classList.add('on'); setTimeout(() => fl.classList.remove('on'), 70); }
     if(rol !== 'objeto' && !c.objetivo) c.rol = 'objeto';         // la que sigue vuelve a ser un objeto nuevo
     c.esperando++; if(rol === 'objeto') c.esperandoObj++; ctCamPintarControles();
-    const p = c.nativa.disparar({ luz: c.luz });                    // la foto sale ya; el orden se respeta abajo
+    const p = c.nativa.disparar({ luz: c.luz, recortar: rol === 'objeto' });   // la foto sale ya; el orden se respeta abajo
     c.cadena = c.cadena.then(async () => {
+      let r = null, guardada = false;
       try{
-        const r = await p;
+        r = await p;
         const b = await ctLeerBlob(r.path);
-        c.pendientes.push({ file: new File([b], 'foto-' + Date.now() + '.jpg', { type: 'image/jpeg' }), rol, de, tmp: r.path });
+        const file = new File([b], 'foto-' + Date.now() + '.jpg', { type: 'image/jpeg' });
+        // (19 oct 2026) el recorte del objeto (para nombrarlo): solo uno de camara-tmp; si no se puede leer, sin él.
+        const tmpRec = (typeof r.recorte === 'string' && /^camara-tmp\/rec-[0-9A-Fa-f-]{36}\.jpg$/.test(r.recorte)) ? r.recorte : null;
+        if(tmpRec){ try{ file.recorte = await ctLeerBlob(tmpRec); }catch(e){} }
+        c.pendientes.push({ file, rol, de, tmp: r.path, tmpRec }); guardada = true;
         const last = c.capa.querySelector('[data-cam-last]');
         if(last){ const u = URL.createObjectURL(b); last.innerHTML = '<img alt="">' + (rol !== 'objeto' ? '<small>' + esc(CT_ROLES[rol].corto) + '</small>' : ''); const im = last.querySelector('img'); im.onload = () => URL.revokeObjectURL(u); im.src = u; }
-      }catch(e){ console.warn('contenidos: foto de la cámara del iPhone', e); alert('No se pudo tomar esa foto. Tómela otra vez.'); }
+      }catch(e){
+        console.warn('contenidos: foto de la cámara del iPhone', e);
+        // (19 oct 2026) la foto no se guardó: sus archivos de paso (la foto y el recorte) no se quedan en camara-tmp
+        if(r && !guardada){ for(const x of [r.path, r.recorte]){ if(typeof x === 'string' && /^camara-tmp\//.test(x)){ try{ await ctBorrarArchivo(x); }catch(_){} } } }
+        alert('No se pudo tomar esa foto. Tómela otra vez.');
+      }
       finally{ c.esperando--; if(rol === 'objeto') c.esperandoObj--; ctCamPintarControles(); ctCamProcesar(c); }
     });
   }
@@ -43408,7 +43441,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
         while(c.pendientes.length && c.pendientes[0].rol === primero.rol && c.pendientes[0].de === primero.de) lote.push(c.pendientes.shift());
         c.enProceso = lote.length; c.enProcesoObj = primero.rol === 'objeto' ? lote.length : 0; ctCamPintarControles();
         await ctTomarFotos(lote.map(p => p.file), { rol: primero.rol, de: primero.de });
-        for(const p of lote){ if(p.tmp){ try{ await ctBorrarArchivo(p.tmp); }catch(e){} } }
+        for(const p of lote){ if(p.tmp){ try{ await ctBorrarArchivo(p.tmp); }catch(e){} } if(p.tmpRec){ try{ await ctBorrarArchivo(p.tmpRec); }catch(e){} } }
         c.enProceso = 0; c.enProcesoObj = 0; ctCamPintarControles();
       }
     } finally { c.procesando = false; c.enProceso = 0; c.enProcesoObj = 0; ctCamPintarControles(); }
@@ -43478,10 +43511,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
           const sha256 = await ctSha256(grande);
           let vbytes = 0;
           try{ const chica = await ctAchicar(grande, 320, 0.7); vbytes = chica.size; await ctEscribirArchivo(vista, chica); }catch(e){}
+          // (19 oct 2026) el recorte del objeto que hizo la cámara del iPhone: solo para nombrarlo (la foto del inventario es la completa).
+          let recorte = null;
+          if(rol === 'objeto' && f.recorte && f.recorte.size){ try{ recorte = CT_CARPETA + '/' + t.id + '/foto-' + k + '-r.jpg'; await ctEscribirArchivo(recorte, f.recorte); }catch(e){ recorte = null; } }
           let md5 = null;
           try{ const S = (typeof ccPlugin === 'function') ? ccPlugin() : null; if(S && S.md5) md5 = (await S.md5({ path: archivo })).md5 || null; }catch(e){}
           const foto = { k, archivo, vista, sha256, md5, bytes: grande.size, vbytes, tomada: new Date().toISOString(), n: 0, nombre: '', fuente: '', ia: { estado: rol === 'objeto' ? 'pendiente' : 'hecho' },
-                         rol, de: rol === 'objeto' ? null : de, estado: 'pendiente', estados: (rol === 'objeto' && t.cat && CT_CARPETAS.some(c => c.k === t.cat)) ? [t.cat] : [], nota: '', subida: 'tel', enNube: false, dirty: true, intentos: 0, error: '' };
+                         rol, de: rol === 'objeto' ? null : de, estado: 'pendiente', estados: (rol === 'objeto' && t.cat && CT_CARPETAS.some(c => c.k === t.cat)) ? [t.cat] : [], nota: '', subida: 'tel', enNube: false, dirty: true, intentos: 0, error: '', recorte };
           t.fotos.push(foto);
           if(rol === 'objeto') await ctClasificarLocal(foto);              // el nombre, aqui mismo, con el iPhone
           ctRenumerar(t); ctEscribir(); ctPintarFotos();
@@ -43502,7 +43538,7 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     t.fotos = t.fotos.filter(x => !ks.includes(x.k));
     fuera.forEach(x => { if(x.enNube && x.path) t.borradas.push({ k: x.k, path: x.path }); });
     ctRenumerar(t); ctEscribir();
-    for(const x of fuera){ await ctBorrarArchivo(x.archivo); await ctBorrarArchivo(x.vista); delete ctVistas[t.id + '|' + x.k]; }
+    for(const x of fuera){ await ctBorrarArchivo(x.archivo); await ctBorrarArchivo(x.vista); if(x.recorte) await ctBorrarArchivo(x.recorte); delete ctVistas[t.id + '|' + x.k]; }
     ctPintar(); ctProcesarCola();
   }
   const ctPuntos = { nube: 'nube', subiendo: 'sube', tel: 'tel', error: 'err' };
@@ -44149,10 +44185,13 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
     f.ia = Object.assign({}, f.ia || {}, { estado: fila.ia_estado || 'pendiente', en: fila.nombre_ia_en || (f.ia && f.ia.en) || '', conf: fila.ia_confianza || (f.ia && f.ia.conf) || '' });
     return fila;
   }
+  // (19 oct 2026) donde va el recorte del objeto en la nube: junto a la foto (la misma regla en nombrar-objetos).
+  const ctRutaRecorte = (path) => String(path || '').replace(/\.jpg$/, '-r.jpg');
   async function ctBorrarEnNube(t, b){
     const res = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(t.id) + '&k=eq.' + b.k, { method: 'DELETE', headers: ctCabeceras() });
     if(!res.ok && res.status !== 404){ const e = new Error('HTTP ' + res.status); e.permanente = res.status >= 400 && res.status < 500 && ![408, 429].includes(res.status); throw e; }
     try{ await authFetch('/storage/v1/object/contenidos/' + b.path, { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){}
+    if(/\.jpg$/.test(b.path || '')){ try{ await authFetch('/storage/v1/object/contenidos/' + ctRutaRecorte(b.path), { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){} }
   }
   function ctTrabajosPendientes(){
     return Object.values(CT.trabajos).filter(t => (t.estado === 'abierto' && (!t.fila || t.cambios || (t.borradas || []).length || t.fotos.some(f => (!f.enNube || f.dirty) && !(f.subida === 'error' && f.intentos >= 6))))
@@ -44184,7 +44223,10 @@ html.cam-nativa body > *:not(.ct-cam){visibility:hidden !important;}
           try{
             if(!f.path) f.path = SES.company_id + '/' + t.id + '/' + String(f.k).padStart(3, '0') + '.jpg';
             if(!f.enNube) await ctSubirArchivo(f.path, await ctLeerBlob(f.archivo), 'image/jpeg');
+            // (19 oct 2026) el recorte del objeto, junto a la foto (<path>-r.jpg): la nube lo nombra con él. Nunca detiene la foto.
+            if(!f.enNube && f.recorte && !f.nombre){ try{ await ctSubirArchivo(ctRutaRecorte(f.path), await ctLeerBlob(f.recorte), 'image/jpeg'); }catch(e){ console.warn('contenidos: recorte', e); } }
             await ctSubirFilaFoto(t, f);
+            if(f.recorte){ try{ await ctBorrarArchivo(f.recorte); }catch(e){} f.recorte = null; }
             f.enNube = true; f.dirty = false; f.subida = 'nube'; f.error = ''; f.intentos = 0;
             await ctSoltarGrande(f);                                    // LA NUBE LA GUARDA: la grande sale del telefono
             ctEscribir(); ctPintarEstadoFoto(f);
