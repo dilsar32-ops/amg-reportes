@@ -8779,7 +8779,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-20-D';
+  const APP_BUILD = '2026-10-20-E';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -12623,7 +12623,24 @@ body.med-pp-abierto{overflow:hidden;}
         + '&or=(accepted.is.null,accepted.eq.false)&limit=1000',
         { headers: cloudHeaders() });
       if(!res.ok) return;   // supabase-payment-response.sql not run yet - badges just stay hidden
-      const rows = await res.json();
+      let rows = await res.json();
+      // Un "no" que ya se corrigio (el reenvio tuvo un si) ya no es pendiente.
+      // Para saberlo hace falta el libro de esas personas (pocas: las del "no").
+      const conNo = [...new Set(rows.filter(p => p.accepted === false).map(p => p.user_id).filter(Boolean))];
+      if(conNo.length){
+        try{
+          const r2 = await pedirPagosConCorrige(con => '/rest/v1/crew_payments?select=id,user_id,amount,kind,hours,accepted,responded_at,settlement,resolved_accepted'
+            + (AUTO_OK_READY ? ',auto_ok_at,confirm_sent_at' : '') + (con ? ',corrige_id' : '')
+            + '&user_id=in.(' + conNo.map(encodeURIComponent).join(',') + ')&limit=5000', { headers: cloudHeaders() });
+          if(r2.ok){
+            const todos = await r2.json(), corregidos = new Set();
+            conNo.forEach(u => correccionesDe(todos.filter(p => p.user_id === u)).forEach((c, rid) => {
+              if(c.accepted === true || c.auto_ok_at) corregidos.add(rid);
+            }));
+            rows = rows.filter(p => !(p.accepted === false && corregidos.has(String(p.id))));
+          }
+        }catch(e){}
+      }
       // A dispute the manager proposed a resolution for still needs
       // attention until the crew member actually confirms it - his tap
       // alone doesn't clear it.
@@ -12806,6 +12823,20 @@ body.med-pp-abierto{overflow:hidden;}
   let PAGO_DATOS_READY = true;
   // Igual con supabase-auto-ok.sql (la aprobacion sola a los 3 dias).
   let AUTO_OK_READY = true;
+  // Igual con supabase-pago-corrige.sql (la columna corrige_id: el pago nuevo de
+  // "Corregir y reenviar" dice A CUAL pago rechazado corrige). Sin ella la app
+  // sigue igual y reconoce la correccion por ser el gemelo exacto del rechazado.
+  let CORRIGE_READY = true;
+  // Pide los pagos con corrige_id; si la columna todavia no existe (400), se
+  // apaga sola y vuelve a pedir sin ella. build(con) arma la direccion.
+  async function pedirPagosConCorrige(build, opts){
+    if(CORRIGE_READY){
+      const r = await authFetch(build(true), opts);
+      if(r.ok || r.status !== 400) return r;
+      CORRIGE_READY = false;
+    }
+    return authFetch(build(false), opts);
+  }
   // Cuantos dias espera la app antes de aprobar sola. 0 = apagado.
   let AUTO_OK_DAYS = 0;
   // Un pago aprobado por silencio NUNCA dice "el confirmo": dice quien lo aprobo.
@@ -37405,9 +37436,9 @@ body.med-pp-abierto{overflow:hidden;}
   async function loadMyPayments(){
     if(!cloudOn() || !signedIn()) return;
     try{
-      const res = await authFetch(
-        '/rest/v1/crew_payments?select=id,hours,amount,kind,note,balance_after,accepted,settlement,credit_consumed,resolved_at,resolved_accepted,resolved_responded_at,created_at'
-        + (AUTO_OK_READY ? ',auto_ok_at' : '')
+      const res = await pedirPagosConCorrige(con =>
+        '/rest/v1/crew_payments?select=id,hours,amount,kind,note,balance_after,accepted,responded_at,settlement,credit_consumed,resolved_at,resolved_accepted,resolved_responded_at,created_at'
+        + (AUTO_OK_READY ? ',auto_ok_at,confirm_sent_at' : '') + (con ? ',corrige_id' : '')
         + '&user_id=eq.' + SES.user_id + '&order=created_at.desc&limit=500',
         { headers: cloudHeaders() });
       const card = $('#myPaymentsCard'), box = $('#myPayments');
@@ -37417,8 +37448,12 @@ body.med-pp-abierto{overflow:hidden;}
       card.dataset.hasrows = rows.length ? '1' : '';
       card.hidden = !rows.length || (MY_PAYS_FOLDED && !MY_PAYS_OPEN);
       if(!rows.length) return;
+      const corrMias = correccionesDe(rows);
       box.innerHTML = rows.map(p => {
         const bal = +p.balance_after;
+        const corrTxt = lineaCorreccion(p, corrMias, rows, 'crew');
+        const corrOk = p.accepted === false && corrMias.has(String(p.id))
+          && (corrMias.get(String(p.id)).accepted === true || !!corrMias.get(String(p.id)).auto_ok_at);
         const balLine = bal > 0.005 ? 'Le falta ' + money(bal)
                        : bal < -0.005 ? 'Crédito a su favor: ' + money(-bal)
                        : 'Al día';
@@ -37440,8 +37475,11 @@ body.med-pp-abierto{overflow:hidden;}
           ? '<span class="telock" style="color:var(--ink-soft);">' + autoOkTxt() + '</span>'
           : p.accepted === true
           ? '<span class="telock">&#10003; Usted confirmó</span>'
+          : p.accepted === false && corrOk
+            ? '<span class="telock">&#10003; Corregido</span><br><span class="clockhint" style="margin:2px 0 0;">' + esc(corrTxt) + '</span>'
           : p.accepted === false
             ? '<span class="telock" style="color:var(--danger);">&#10007; Usted dijo que no</span>' + resolution
+              + (corrTxt ? '<br><span class="clockhint" style="margin:2px 0 0; color:#e0a83e;">' + esc(corrTxt) + '</span>' : '')
             : `<div style="display:flex; gap:8px; margin-top:6px;">
                  <button type="button" class="btn btn-ink payYes" data-id="${esc(p.id)}" style="flex:1; padding:8px;">Sí, es correcto</button>
                  <button type="button" class="btn btn-outline payNo" data-id="${esc(p.id)}" style="flex:1; padding:8px;">No es correcto</button>
@@ -37457,7 +37495,7 @@ body.med-pp-abierto{overflow:hidden;}
             <span class="clockhint" style="margin:0;">${balLine}</span>
           </span>
         </div>
-        <div style="padding:0 2px 12px;">${respond}</div>`;
+        <div style="padding:0 2px 12px;">${respond}${(corrTxt && p.accepted !== false) ? '<br><span class="clockhint" style="margin:2px 0 0;">' + esc(corrTxt) + '</span>' : ''}</div>`;
       }).join('') + myPaysFooter(rows);
     }catch(e){}
   }
@@ -37729,10 +37767,104 @@ body.med-pp-abierto{overflow:hidden;}
   // showing its real remaining amount instead of the full original advance
   // after some of it gets folded into a "Marcar como pagado".
   const personPaymentsSum = () => {
-    const open     = personPayments.filter(p => !p.settlement && p.accepted !== false).reduce((s,p)=>s+(+p.amount||0), 0);
+    const corr     = correccionesDe(personPayments);
+    const open     = personPayments.filter(p => pagoCuenta(p, corr)).reduce((s,p)=>s+(+p.amount||0), 0);
     const consumed = personPayments.filter(p => p.settlement).reduce((s,p)=>s+(+p.credit_consumed||0), 0);
     return Math.round((open - consumed)*100)/100;
   };
+
+  // ---- UN PAGO RECHAZADO Y SU CORRECCION (20 oct 2026, caso Aníbal) --------
+  //
+  // Aníbal dijo que no a un pago de $2,000. El manager le mando una devolucion
+  // de $600, marco el pago "resuelto" y Aníbal confirmo... pero el saldo seguia
+  // sin contar los $2,000 (un "no" no se sumaba NUNCA, resuelto o no). Despues
+  // el manager uso "Corregir y reenviar": el pago nuevo si conto, pero el viejo
+  // seguia diciendo "Dijo que no" como si nada, y con el boton para reenviarlo
+  // OTRA vez. Nada unia al pago nuevo con el que corregia.
+  //
+  // Ahora:
+  //   - La correccion se reconoce: por corrige_id (lo guarda "Corregir y
+  //     reenviar") o, en renglones de antes de esa columna, por ser el gemelo
+  //     exacto (mismo tipo, monto y horas) mandado DESPUES de que el dijo que no.
+  //   - Un rechazado con correccion NO cuenta (cuenta la correccion, una vez).
+  //   - Un rechazado SIN correccion cuyo arreglo el trabajador confirmo
+  //     ("resuelto y confirmado") SI cuenta: los dos dijeron que quedo bien.
+  //   - Un rechazado sin nada de eso no cuenta, y la ficha y el PDF avisan
+  //     "No pague todavia".
+  //
+  // Devuelve Map(id del rechazado -> renglon que lo corrige). Una correccion
+  // que el tambien rechazo no corrige nada: ella misma queda como rechazo.
+  function correccionesDe(list){
+    const out = new Map(), usados = new Set();
+    const vivos = (list || []).filter(p => p && !p.deleted_at);
+    const rechazados = vivos.filter(p => !p.settlement && p.accepted === false);
+    const sirve = c => !c.settlement && c.accepted !== false && !usados.has(String(c.id));
+    rechazados.forEach(r => {
+      const c = vivos.find(x => x.corrige_id != null && String(x.corrige_id) === String(r.id) && sirve(x));
+      if(c){ out.set(String(r.id), c); usados.add(String(c.id)); }
+    });
+    const igual = (a, b) => Math.abs((+a || 0) - (+b || 0)) < 0.005;
+    const sinHoras = h => h === null || h === undefined || h === '';
+    const mismasHoras = (a, b) => sinHoras(a) ? sinHoras(b) : (!sinHoras(b) && igual(a, b));
+    const t = v => { const d = Date.parse(v || ''); return isNaN(d) ? null : d; };
+    rechazados.forEach(r => {
+      if(out.has(String(r.id))) return;
+      const dijoNo = t(r.responded_at);
+      if(dijoNo === null) return;   // sin saber cuando dijo que no, no se adivina
+      const c = vivos.find(x => String(x.id) !== String(r.id) && x.corrige_id == null && sirve(x)
+        && (x.kind || 'pago') === (r.kind || 'pago') && igual(x.amount, r.amount) && mismasHoras(x.hours, r.hours)
+        && t(x.confirm_sent_at) !== null && t(x.confirm_sent_at) > dijoNo);
+      if(c){ out.set(String(r.id), c); usados.add(String(c.id)); }
+    });
+    return out;
+  }
+  // Si este renglon entra en la cuenta del dinero. corr = correccionesDe(...).
+  function pagoCuenta(p, corr){
+    if(!p || p.settlement || p.deleted_at) return false;
+    if(p.accepted !== false) return true;
+    return p.resolved_accepted === true && !(corr && corr.has(String(p.id)));
+  }
+  // Los rechazos que siguen abiertos: ni corregidos con un si, ni resueltos con
+  // un si. [{ p, c }] - c es la correccion que todavia espera respuesta, si hay.
+  function rechazosAbiertos(list){
+    const corr = correccionesDe(list);
+    return (list || []).filter(p => p && !p.deleted_at && !p.settlement && p.accepted === false
+        && p.resolved_accepted !== true)
+      .map(p => ({ p, c: corr.get(String(p.id)) || null }))
+      .filter(x => !(x.c && (x.c.accepted === true || x.c.auto_ok_at)));
+  }
+  // Que se dice de un rechazado con correccion, o de la correccion misma.
+  // quien: 'manager' | 'crew'. Texto plano (el que lo pinta lo escapa).
+  function lineaCorreccion(p, corr, list, quien){
+    if(!p || !corr) return '';
+    if(p.accepted === false){
+      const c = corr.get(String(p.id));
+      if(!c) return '';
+      const ok = c.accepted === true || !!c.auto_ok_at, dia = dayOf(c.created_at);
+      if(quien === 'crew') return ok
+        ? 'Se lo volvieron a mandar (pago del ' + dia + ') y usted lo aceptó. Este renglón ya no cuenta.'
+        : 'Se lo volvieron a mandar: conteste en el pago del ' + dia + '.';
+      return ok
+        ? 'Antes dijo que no; se reenvió como el pago del ' + dia + ' y lo aceptó. Este renglón ya no cuenta.'
+        : 'Reenviado como el pago del ' + dia + ': esperando su respuesta.';
+    }
+    for(const [rid, c] of corr){
+      if(String(c.id) !== String(p.id)) continue;
+      const r = (list || []).find(x => String(x.id) === rid);
+      return 'Corrige el pago rechazado del ' + (r ? dayOf(r.created_at) : '') + '.';
+    }
+    return '';
+  }
+  function avisoRechazos(list){
+    const abiertos = rechazosAbiertos(list);
+    if(!abiertos.length) return '';
+    const total = abiertos.reduce((s, x) => s + Math.abs(+x.p.amount || 0), 0);
+    const esperan = abiertos.filter(x => x.c).length;
+    return 'No pague todavía: hay ' + (abiertos.length === 1 ? 'un pago rechazado' : abiertos.length + ' pagos rechazados')
+      + ' de ' + money(total) + ' (' + abiertos.map(x => dayOf(x.p.created_at)).join(', ') + ')'
+      + (esperan === abiertos.length ? ' y el reenvío todavía espera su respuesta.'
+         : ' sin resolver. Use "Corregir y reenviar" o "Marcar resuelto".');
+  }
 
   const hm      = t => String(t||'').slice(0,5);
   // paid_at is stored in UTC. Slicing the text off it showed tomorrow's
@@ -37873,11 +38005,16 @@ body.med-pp-abierto{overflow:hidden;}
   }
   // Misma cuenta que personPaymentsSum, pero para toda la compania de una vez.
   function teamGivenFrom(payments){
-    const open = {}, consumed = {};
-    (payments || []).forEach(p => {
-      const k = p.user_id; if(!k) return;
-      if(p.settlement) consumed[k] = (consumed[k] || 0) + (+p.credit_consumed || 0);
-      else if(p.accepted !== false) open[k] = (open[k] || 0) + (+p.amount || 0);
+    const open = {}, consumed = {}, porPersona = {};
+    (payments || []).forEach(p => { if(p.user_id) (porPersona[p.user_id] = porPersona[p.user_id] || []).push(p); });
+    // Con la misma regla de la ficha (pagoCuenta): un rechazado corregido no
+    // cuenta, uno resuelto y confirmado si. La correccion se busca por persona.
+    Object.keys(porPersona).forEach(k => {
+      const corr = correccionesDe(porPersona[k]);
+      porPersona[k].forEach(p => {
+        if(p.settlement) consumed[k] = (consumed[k] || 0) + (+p.credit_consumed || 0);
+        else if(pagoCuenta(p, corr)) open[k] = (open[k] || 0) + (+p.amount || 0);
+      });
     });
     const out = {};
     new Set([...Object.keys(open), ...Object.keys(consumed)]).forEach(k => {
@@ -37892,7 +38029,10 @@ body.med-pp-abierto{overflow:hidden;}
   async function crewPaymentsFor(filter){
     let all = [], off = 0;
     for(let guard = 0; guard < 200; guard++){
-      const r = await authFetch('/rest/v1/crew_payments?select=id,user_id,amount,accepted,settlement,credit_consumed'
+      // kind/hours/resolved_accepted/responded_at/confirm_sent_at (+corrige_id)
+      // hacen falta para reconocer un rechazado corregido o resuelto (pagoCuenta).
+      const r = await pedirPagosConCorrige(con => '/rest/v1/crew_payments?select=id,user_id,amount,kind,hours,accepted,settlement,credit_consumed,resolved_accepted,responded_at'
+        + (AUTO_OK_READY ? ',auto_ok_at,confirm_sent_at' : '') + (con ? ',corrige_id' : '')
         + filter + '&order=id.asc&limit=1000&offset=' + off, { headers: cloudHeaders() });
       if(!r.ok) return null;
       const page = await r.json();
@@ -38153,6 +38293,7 @@ body.med-pp-abierto{overflow:hidden;}
     ['#ppAmount','#ppNote','#ppHours'].forEach(sel => { const e = $(sel); if(e) e.value = ''; });
     if($('#ppKind')) $('#ppKind').value = 'pago';
     if($('#ppDate')) $('#ppDate').value = todayStr();
+    ppCorrigeId = null;
     renderPpHint();
     renderPerson();
     loadPersonPayments(key);
@@ -38406,9 +38547,9 @@ body.med-pp-abierto{overflow:hidden;}
   async function loadPersonPayments(key){
     if(!cloudOn() || !isManager()) return;
     try{
-      const pedir = conMetodo => authFetch(
-        '/rest/v1/crew_payments?select=id,hours,amount,kind,note,balance_after,accepted,settlement,credit_consumed,resolved_at,resolved_accepted,resolved_responded_at,created_at'
-        + (AUTO_OK_READY ? ',auto_ok_at' : '') + (conMetodo ? ',metodo' : '')
+      const pedir = conMetodo => pedirPagosConCorrige(con =>
+        '/rest/v1/crew_payments?select=id,hours,amount,kind,note,balance_after,accepted,responded_at,settlement,credit_consumed,resolved_at,resolved_accepted,resolved_responded_at,created_at'
+        + (AUTO_OK_READY ? ',auto_ok_at,confirm_sent_at' : '') + (conMetodo ? ',metodo' : '') + (con ? ',corrige_id' : '')
         + '&user_id=eq.' + encodeURIComponent(key) + '&order=created_at.desc&limit=500',
         { headers: cloudHeaders() });
       let res = await pedir(PAGO_DATOS_READY);
@@ -38626,6 +38767,12 @@ body.med-pp-abierto{overflow:hidden;}
                ? `<div class="grand" style="color:var(--green);"><span>CRÉDITO A SU FAVOR</span><span>${money(-balance)}</span></div>`
                : `<div class="grand" style="color:var(--green);"><span>AL DÍA</span><span>$0.00</span></div>`}`
          : `<div class="grand"><span>A PAGAR</span><span>${money(pay.amount)}</span></div>`}`;
+    // Un "no" sin corregir ni resolver: el saldo de arriba NO lo cuenta, asi
+    // que si le paga ahora puede pagarle de mas (o de menos). Se dice encima
+    // del numero, donde lo va a ver antes de pagar.
+    const aviso = pay.wasPaid ? '' : avisoRechazos(personPayments);
+    if(aviso) $('#personPay').insertAdjacentHTML('afterbegin',
+      '<div class="line" style="color:var(--danger); font-weight:700; display:block; margin-bottom:6px;">&#9888; ' + esc(aviso) + '</div>');
 
     $('#payMark').style.display = (personPaidView || !PAID_READY) ? 'none' : '';
     // Never disabled. Without a rate it explains why instead of doing nothing -
@@ -38652,6 +38799,7 @@ body.med-pp-abierto{overflow:hidden;}
     box.style.display = '';
     const hist = $('#ppHistory');
     if(!hist) return;
+    const corr = correccionesDe(personPayments);
     hist.innerHTML = personPayments.length
       ? '<p class="clockhint" style="margin-bottom:4px;"><b>Historial de pagos parciales</b></p>'
         + personPayments.map(p => {
@@ -38660,34 +38808,46 @@ body.med-pp-abierto{overflow:hidden;}
             // be marked resolved though - that's a manager note on top, not a
             // change to what was actually said.
             const disputed = p.accepted === false;
+            // La correccion que el manager mando con "Corregir y reenviar" (o su
+            // gemelo exacto, en renglones viejos). Con un si a la correccion, este
+            // renglon ya no es un "no" pendiente: se dice CORREGIDO, y no cuenta.
+            const fix = disputed ? corr.get(String(p.id)) : null;
+            const fixOk = !!fix && (fix.accepted === true || !!fix.auto_ok_at);
+            const corrTxt = lineaCorreccion(p, corr, personPayments, 'manager');
             // Proposing a resolution isn't the same as it being resolved -
             // that only happens once the crew member also taps yes on it.
             const resolveNote = !p.resolved_at ? ''
               : p.resolved_accepted === true
-                ? ' &middot; <span style="color:var(--green);">resuelto y confirmado ' + esc(dayOf(p.resolved_responded_at || p.resolved_at)) + '</span>'
+                ? ' &middot; <span style="color:var(--green);">resuelto y confirmado ' + esc(dayOf(p.resolved_responded_at || p.resolved_at))
+                  + (fix ? '' : ' &middot; cuenta en el saldo') + '</span>'
                 : p.resolved_accepted === false
                   ? ' &middot; <span style="color:var(--danger);">dijo que no está resuelto</span>'
                   : ' &middot; <span style="color:#e0a83e;">esperando que confirme la resolución</span>';
-            const status = p.auto_ok_at ? '<span class="telock" style="color:var(--ink-soft);">' + autoOkTxt() + '</span>'
+            const corrLine = corrTxt ? '<br><span class="clockhint" style="margin:2px 0 0;' + (disputed && !fixOk ? ' color:#e0a83e;' : '') + '">' + esc(corrTxt) + '</span>' : '';
+            const status = (p.auto_ok_at ? '<span class="telock" style="color:var(--ink-soft);">' + autoOkTxt() + '</span>'
                          : p.accepted === true ? '<span class="telock">&#10003; Aceptado</span>'
+                         : fixOk ? '<span class="telock">&#10003; Corregido y aceptado</span>'
                          : disputed
                            ? '<span class="telock" style="color:var(--danger);">&#10007; Dijo que no</span>' + resolveNote
-                           : '<span class="clockhint" style="margin:0;">Esperando respuesta</span>';
+                           : '<span class="clockhint" style="margin:0;">Esperando respuesta</span>') + corrLine;
             // Let him try again if the crew member said the resolution wasn't
-            // real, or if he hasn't proposed one at all yet.
-            const canPropose = disputed && (!p.resolved_at || p.resolved_accepted === false);
+            // real, or if he hasn't proposed one at all yet. Ya corregido (o con
+            // la correccion esperando respuesta) no se ofrece nada: reenviarlo
+            // otra vez seria pagarle dos veces.
+            const canPropose = disputed && !fix && (!p.resolved_at || p.resolved_accepted === false);
+            const canResend  = disputed && !fix;
             return `
           <div class="entryrow" data-pid="${esc(p.id)}">
             <span><span class="who">${esc(PP_KINDS[p.kind] || 'Pago')}</span><br>
               <span class="when">${esc(dayOf(p.created_at))}</span>${(p.note || p.metodo) ? '<br><span class="clockhint" style="margin:2px 0 0;">' + esc([p.note, metodoTxt(p.metodo)].filter(Boolean).join(' · ')) + '</span>' : ''}<br>${status}</span>
             <span style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-              <span class="hrs"${(+p.amount || 0) < 0 ? ' style="color:#3ddc84;"' : ''}>${
+              <span class="hrs"${(!p.settlement && !pagoCuenta(p, corr)) ? ' style="text-decoration:line-through; opacity:.55;"' : (+p.amount || 0) < 0 ? ' style="color:#3ddc84;"' : ''}>${
                 (+p.amount || 0) < 0 ? '+' + money(-(+p.amount)) : money(p.amount)
               }${p.hours ? ' &middot; ' + h1(p.hours) + ' h' : ''}</span>
               <span style="display:flex;gap:8px;">
                 ${(p.accepted === null && !p.settlement) ? '<button type="button" class="teedit ppDel">Borrar</button>' : ''}
                 ${canPropose ? '<button type="button" class="teedit ppResolve">' + (p.resolved_at ? 'Proponer de nuevo' : 'Marcar resuelto') + '</button>' : ''}
-                ${disputed ? '<button type="button" class="teedit ppResend">Corregir y reenviar</button>' : ''}
+                ${canResend ? '<button type="button" class="teedit ppResend">Corregir y reenviar</button>' : ''}
               </span>
             </span>
           </div>`;
@@ -38697,6 +38857,9 @@ body.med-pp-abierto{overflow:hidden;}
 
   // Que significa cada tipo, y para donde va el signo. Igual que en temporales:
   // positivo BAJA lo que le debemos, negativo lo SUBE.
+  // Si el formulario de pago parcial lo abrio "Corregir y reenviar", el id del
+  // pago rechazado que corrige. Se guarda en corrige_id del renglon nuevo.
+  let ppCorrigeId = null;
   const PP_KINDS = { pago:'Pago', adelanto:'Adelanto', descuento:'Descuento',
                      extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste' };
   const ppNegative = k => (k === 'extra' || k === 'devolucion');
@@ -38742,8 +38905,11 @@ body.med-pp-abierto{overflow:hidden;}
     const btn = $('#ppSave'); btn.disabled = true; const old = btn.textContent;
     btn.textContent = 'Guardando…';
     const key = personKey;
+    // Solo si el rechazado es de ESTA persona (pudo cambiar de ficha a medio camino).
+    const corrige = (ppCorrigeId && personPayments.some(pp => String(pp.id) === String(ppCorrigeId) && pp.accepted === false))
+      ? ppCorrigeId : null;
     try{
-      const res = await authFetch('/rest/v1/crew_payments', {
+      const mandar = conCorrige => authFetch('/rest/v1/crew_payments', {
         method:'POST',
         headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
         body: JSON.stringify({
@@ -38751,11 +38917,17 @@ body.med-pp-abierto{overflow:hidden;}
           hours: hoursVal >= 0 ? hoursVal : null,
           amount, kind, note: note || null,
           ...(metodo ? { metodo } : {}),
+          ...(conCorrige ? { corrige_id: corrige } : {}),
           created_at: isNaN(createdAt) ? undefined : createdAt.toISOString(),
           balance_after: balanceAfter, created_by: SES.user_id
         })
       });
+      let res = await mandar(!!corrige && CORRIGE_READY);
+      // Sin la columna (supabase-pago-corrige.sql sin correr) se manda igual:
+      // la ficha la reconoce como el gemelo del rechazado.
+      if(!res.ok && res.status === 400 && corrige && CORRIGE_READY){ CORRIGE_READY = false; res = await mandar(false); }
       if(!res.ok) throw new Error('HTTP '+res.status);
+      ppCorrigeId = null;
       const saved = await res.json();
       if(!Array.isArray(saved) || !saved.length) throw new Error('no se guardo');
       // Si mientras se guardaba toco a otra persona, el renglon es de la
@@ -38799,7 +38971,10 @@ body.med-pp-abierto{overflow:hidden;}
   // (even on a first-time proposal it's already null) is what lets him
   // propose again if they said no the first time.
   async function resolvePayment(id){
-    if(!confirm('¿Decirle a la persona que este pago ya se resolvió? Le va a aparecer para que confirme que está de acuerdo.')) return;
+    const pr = personPayments.find(pp => String(pp.id) === String(id));
+    if(!confirm('¿Decirle a la persona que este pago ya se resolvió? Le va a aparecer para que confirme que está de acuerdo.'
+      + (pr ? '\n\nCuando diga que sí, este pago de ' + money(Math.abs(+pr.amount || 0)) + ' CUENTA como entregado en el saldo.'
+            + ' Si el dinero no le llegó o era otra cantidad, mejor use "Corregir y reenviar".' : ''))) return;
     try{
       const res = await authFetch('/rest/v1/crew_payments?id=eq.' + encodeURIComponent(id), {
         method:'PATCH', headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
@@ -38839,6 +39014,11 @@ body.med-pp-abierto{overflow:hidden;}
     if($('#ppKind')) $('#ppKind').value = p.kind || 'pago';
     $('#ppAmount').value = p.amount != null ? Math.abs(+p.amount) : '';
     $('#ppNote').value = p.note ? String(p.note) : 'Corrección';
+    // El MISMO dia del pago que corrige. Antes se quedaba el dia que hubiera en
+    // la casilla: el reenvio de Aníbal quedo con fecha 2026-09-03 en vez del
+    // 2026-10-03, hasta abajo del historial, y parecia que no estaba.
+    if($('#ppDate')) $('#ppDate').value = dayOf(p.created_at);
+    ppCorrigeId = p.id;
     if(typeof renderPpHint === 'function') renderPpHint();
     const box = $('#partialPayBox');
     if(box) box.scrollIntoView({ block:'start' });
@@ -39071,17 +39251,29 @@ body.med-pp-abierto{overflow:hidden;}
       pdf.setLineWidth(0.7); pdf.line(L, y, 548, y); y += 14;
       pdf.setFont('helvetica','normal');
       let given = 0, favor = 0;
+      const corrPdf = correccionesDe(personPayments);
       ledger.forEach(p => {
         if(y > 760){ pdf.addPage(); y = 60; }
         const a = +p.amount || 0;
-        // Un renglon rechazado NO se suma - se imprime para que se vea que
-        // existe y que esta en discusion, no para cuadrar con el.
-        const dead = p.accepted === false;
+        // Un rechazado sin arreglo NO se suma - se imprime para que se vea que
+        // existe y que esta en discusion. Uno corregido tampoco (se suma su
+        // correccion). Uno resuelto y confirmado si se suma (pagoCuenta).
+        const fix = p.accepted === false ? corrPdf.get(String(p.id)) : null;
+        const dead = p.settlement ? false : !pagoCuenta(p, corrPdf);
         if(!dead){ if(a > 0) given += a; else favor += -a; }
+        // La columna QUE es angosta: la etiqueta va corta y lo demas a la nota.
+        const esCorreccion = !fix && [...corrPdf.values()].some(c => String(c.id) === String(p.id));
+        const tag = esCorreccion ? ' (re-sent)'
+          : p.accepted !== false ? ''
+          : (p.resolved_accepted === true && !fix) ? ' (resolved)' : ' (rejected)';
+        const nota = fix ? ((fix.accepted === true || fix.auto_ok_at) ? 'Replaced by ' + dayOf(fix.created_at) : 'Re-sent, waiting')
+                         : String((p.note || '') + (p.metodo ? ' (' + metodoTxt(p.metodo) + ')' : '')).trim();
         pdf.text(dayOf(p.created_at), L, y);
-        pdf.text(String(KIND[p.kind] || p.kind || 'Pago') + (dead ? ' (rejected)' : ''), L+90, y);
-        pdf.text(String((p.note || '') + (p.metodo ? ' (' + metodoTxt(p.metodo) + ')' : '')).trim().slice(0, pay.wasPaid ? 34 : 26), L+250, y);
-        pdf.text((a < 0 ? '+' : '-') + money(Math.abs(a)).replace('$',''), 460, y);
+        pdf.text(String(KIND[p.kind] || p.kind || 'Pago') + tag, L+90, y);
+        pdf.text(nota.slice(0, pay.wasPaid ? 34 : 26), L+250, y);
+        // Lo que no se suma va entre parentesis: se ve, pero se ve que no cuenta.
+        const monto = (a < 0 ? '+' : '-') + money(Math.abs(a)).replace('$','');
+        pdf.text(dead ? '(' + monto + ')' : monto, 460, y);
         y += 15;
       });
       y += 6; pdf.line(L, y, 548, y); y += 18;
@@ -39095,6 +39287,16 @@ body.med-pp-abierto{overflow:hidden;}
       y += 8;
     }
 
+    // Un pago rechazado sin arreglo: el saldo de abajo no lo cuenta. Se dice en
+    // el papel, en rojo, antes del numero.
+    const avisoPdf = pay.wasPaid ? '' : avisoRechazos(personPayments);
+    if(avisoPdf){
+      if(y > 700){ pdf.addPage(); y = 60; }
+      pdf.setFont('helvetica','bold'); pdf.setFontSize(11); pdf.setTextColor(200, 30, 30);
+      const lineas = pdf.splitTextToSize('WARNING / AVISO: ' + avisoPdf, 500);
+      pdf.text(lineas, L, y); y += 14 * lineas.length + 8;
+      pdf.setTextColor(0, 0, 0);
+    }
     if(y > 720){ pdf.addPage(); y = 60; }
     pdf.setFont('helvetica','bold'); pdf.setFontSize(16);
     if(rate === null && !pay.wasPaid){
@@ -39210,6 +39412,7 @@ body.med-pp-abierto{overflow:hidden;}
               + (open ? '⚠ ' + open + ' turno(s) todavía SIN CONFIRMAR. Esa persona '
                       + 'todavía no ha dicho que sus horas están bien.\n\n' : '')
               + (skipped ? '⚠ ' + skipped + ' turno(s) de AMG NO se cierran porque falta la tarifa de AMG. Quedan pendientes.\n\n' : '')
+              + (avisoRechazos(personPayments) ? '⚠ ' + avisoRechazos(personPayments) + '\n\n' : '')
               + 'Esas horas desaparecen del teléfono de esa persona. Usted las sigue viendo en el historial.')) return;
 
     const btn = $('#payMark'); btn.disabled = true; const old = btn.textContent;
@@ -39252,8 +39455,11 @@ body.med-pp-abierto{overflow:hidden;}
         // forever after. That surviving amount needs a permanent offset here or
         // it gets counted as credit twice; the part that actually got deleted
         // needs none, since it simply stops appearing in "open" on its own.
+        // Contestado = no se borra. Incluye un rechazado "resuelto y confirmado",
+        // que cuenta (pagoCuenta) y tampoco se borra nunca.
+        const corrCierre = correccionesDe(personPayments);
         const survivingOldCredit = personPayments
-          .filter(p => !p.settlement && p.accepted === true)
+          .filter(p => !p.settlement && (p.accepted === true || p.accepted === false) && pagoCuenta(p, corrCierre))
           .reduce((s,p)=>s+(+p.amount||0), 0);
         // ...MENOS lo que los cierres anteriores YA compensaron. Sin esta resta,
         // cada cierre nuevo volvia a consumir el adelanto viejo: al tercer cierre
