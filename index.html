@@ -3921,6 +3921,9 @@ body.med-pp-abierto{overflow:hidden;}
     <button type="button" class="btn btn-outline" id="medHelpBtn" style="width:100%; margin-bottom:12px;">
       &#10067; ¿Cómo se usa esta pantalla?
     </button>
+    <!-- (20-oct, cámara nueva fase 2) Lo que la cámara dejó guardado en el teléfono y nunca llegó a las tarjetas (la app se
+         cerró, se cayó o se acabó la batería con la cámara abierta). Sale en cualquier paso de Medidas. -->
+    <div id="medBorradorCamara" hidden></div>
     <section class="card" data-step="job">
       <h2><span class="num">1</span>Información del Trabajo<span class="en"> / Job Info</span></h2>
       <div class="row2">
@@ -7504,7 +7507,11 @@ body.med-pp-abierto{overflow:hidden;}
       // Si el ultimo plano se vencio con la app abierta, la pastilla se quedaba
       // visible y abria una ventana vacia.
       if(typeof paintFpSaved === 'function') paintFpSaved();
+      // (20-oct, fase 2) Un escaneo que el escáner dejó en el teléfono y nunca llegó: se guarda ahora.
+      if(typeof fpRecogerEscaneos === 'function') fpRecogerEscaneos();
     }
+    // (20-oct, fase 2) Lo que la cámara de medir dejó en el teléfono sin llegar a las tarjetas: su tarjeta de Recuperar.
+    if(tab === 'measurements' && typeof medRecogerBorradorCamara === 'function') medRecogerBorradorCamara();
     if(tab === 'amgclientes'){
       const mgr = isManager() && document.body.classList.contains('mgr');   // por la puerta AMG (aunque entre el manager) es la pantalla del trabajador
       AC_MGR = mgr;
@@ -8667,7 +8674,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-20-B';
+  const APP_BUILD = '2026-10-20-C';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -17747,7 +17754,7 @@ body.med-pp-abierto{overflow:hidden;}
       {value:'Containment Barrier/Airlock/Decon. Chamber', label:'Plástico de contención / Containment Barrier/Airlock/Decon. Chamber', forma:'contencion'},
       {value:'Floor protection - cardboard and tape', label:'Cartón y cinta, protección de piso / Floor protection - cardboard and tape', forma:'piso'},
       {value:'Cover / mask with plastic sheeting', label:'Nailo, plástico encima / Cover / mask with plastic sheeting', forma:'rectangulo'},
-      {value:'Peel & seal zipper', label:'Zipper de la contención / Peel & seal zipper', forma:'zipper', oculto:true},   // (19 oct) ESCONDIDO en Field Reports: aquí la cámara no tiene el modo Materiales y "Zippers" se anota en Equipo (regla del 13-sep: no va en materiales de Medidas); así no se cobra dos veces
+      {value:'Peel & seal zipper', label:'Zipper de la contención / Peel & seal zipper', forma:'zipper', oculto:true},   // (19 oct) ESCONDIDO en Field Reports (20-oct: sigue así con la cámara nueva, su decisión): "Zippers" se anota en Equipo (regla del 13-sep: no va en materiales de Medidas); así no se cobra dos veces
       {value:'Plastic sheeting (cover)', label:'Nailo, plástico para cubrir / Plastic sheeting (cover)', oculto:true},
       {value:'6 mil containment plastic', label:'Plástico 6 mil de contención / 6 mil containment plastic', oculto:true},
       {value:'Floor protection', label:'Protección de piso / Floor protection', oculto:true},
@@ -17920,6 +17927,9 @@ body.med-pp-abierto{overflow:hidden;}
     // nada: una tarjeta a medio llenar es justo la que hay que encontrar.
     if(!partes.length) return cfg.labelEs + ' — falta el nivel y el cuarto';
     if(!nivel) return cuarto + ' — falta el nivel';
+    // (20-oct) Los materiales de TODO EL NIVEL (marcados por la cámara) no tienen cuarto a propósito: no "falta".
+    if(!cuarto && secc === 'materiales' && $$('.meas-cut', card).length
+       && $$('.meas-cut', card).every(c => String(($('.meas-todo-nivel', c) || {}).value || '') === '1')) return nivel + '  ·  Todo el nivel';
     if(!cuarto) return nivel + ' — falta el cuarto';
     return partes.join('  ·  ');
   }
@@ -18114,6 +18124,7 @@ body.med-pp-abierto{overflow:hidden;}
           </div>
         </div>
       </div>
+      <input type="hidden" class="meas-todo-nivel" value="">
     `;
     cutsBox.appendChild(el);
     return el;
@@ -18228,6 +18239,11 @@ body.med-pp-abierto{overflow:hidden;}
     // (20-oct, B12) La pared entera de la cámara trae lo que restó de sus puertas y ventanas (menos / menosQue): antes se
     // perdía aquí y el PDF cobraba la pared entera. Entra MARCADA: la cámara ya lo midió.
     if(typeof m.menos === 'number' && m.menos > 0) medPonerResta(cut, m.menos, m.menosQue || '', true);
+    // (20-oct, cámara nueva) Un material del trabajo de TODO EL NIVEL (sin cuarto: la entrada, la escalera): la marca
+    // escondida hace que Revisar y el PDF digan "Whole level" y no "Room not specified". Va al FINAL del corte (no le corre
+    // la posición a ninguna casilla) y vacía no entra en medFirma (los PDF guardados siguen al día).
+    const tn = $('.meas-todo-nivel', cut);
+    if(tn && m.todoNivel) tn.value = '1';
   }
   // A camera session can hand back several measurements at once - a crew
   // member cutting a one-foot flood line here, a six-foot removal there,
@@ -18572,8 +18588,9 @@ body.med-pp-abierto{overflow:hidden;}
           cuartoBox.dataset.cuarto = ct.cuarto || '';
           // ---- encabezado del cuarto, con el lápiz para cambiar de sitio ----
           const cab = medNodo('div', 'med-cuarto-tit');
-          const nombre = medNodo('b', ct.cuarto ? '' : 'med-falta',
-                                 ct.cuarto || 'FALTA EL CUARTO');
+          // (20-oct) "Todo el nivel" (materiales que la cámara marcó así) no tiene cuarto a propósito: no se pinta como falta.
+          const nombre = medNodo('b', (ct.cuarto || ct.todoNivel) ? '' : 'med-falta',
+                                 ct.cuarto || (ct.todoNivel ? 'Todo el nivel / Whole level' : 'FALTA EL CUARTO'));
           const lapiz = medNodo('button', 'icon-btn', '✏️ Nivel y cuarto');
           lapiz.type = 'button';
           cab.appendChild(nombre); cab.appendChild(lapiz);
@@ -19121,7 +19138,21 @@ body.med-pp-abierto{overflow:hidden;}
   // escanear), pero se devuelven TODOS los que casan, del más reciente al más
   // viejo y con el abierto primero. `medPlanoDelTrabajo` sigue devolviendo el
   // primero para quien necesita uno solo.
+  // (20-oct, fase 4) Y DETRÁS, los planos de esta casa que escaneó OTRO teléfono del equipo (solo para verlos; los
+  // baja medBajarPlanosEquipo). Los de este teléfono siempre primero: en cada planta manda el primero que la tenga.
   function medPlanosDelTrabajo(){
+    const propios = medPlanosDelTrabajoPropios();
+    let equipo = [];
+    try{ equipo = medPlanosDelEquipo(); }catch(e){ equipo = []; }
+    if(!equipo.length) return propios;
+    // (revisión) Un plano del equipo que casa por DIRECCIÓN es esta casa: el plano sin nombre de este teléfono (o el
+    // abierto que no casa con nada) ya no se pone delante, porque podría ser de otra casa.
+    const porDir = equipo.some(p => p && p.casoPor === 'direccion');
+    const mios = porDir ? propios.filter(p => p && p.casoPor !== 'sinNombre' && p.casoPor !== 'abierto') : propios;
+    const ya = new Set(mios.map(p => p && p.id));
+    return mios.concat(equipo.filter(p => p && !ya.has(p.id)));
+  }
+  function medPlanosDelTrabajoPropios(){
     const cliente = (($('#x-client') || {}).value || '').trim();
     const direccion = (($('#x-address') || {}).value || '').trim();
     const abierto = (floorplanData && Array.isArray(floorplanData.rooms))
@@ -19244,7 +19275,8 @@ body.med-pp-abierto{overflow:hidden;}
       const partes = todos.map(x => {
         const rooms = (x.data.rooms || []).filter(r => !r.deleted);
         const plantas = Array.from(new Set(rooms.map(r => fpPlantaSupuesta(x.data, r.level || 1)))).filter(Boolean);
-        return (plantas.join('+') || '?') + ' (' + rooms.length + (rooms.length === 1 ? ' cuarto' : ' cuartos') + ')';
+        return (plantas.join('+') || '?') + ' (' + rooms.length + (rooms.length === 1 ? ' cuarto' : ' cuartos') + ')'
+          + (x.equipo ? ' de ' + (x.autor || 'otro del equipo') + ', solo para ver' : '');     // (20-oct, fase 4)
       });
       return '📐 Usando ' + todos.length + ' planos de ' + quien0 + ': ' + partes.join(' · ');
     }
@@ -19260,10 +19292,12 @@ body.med-pp-abierto{overflow:hidden;}
     // hace visible que la dirección salvó un nombre mal escrito - le pasó a
     // Reccy el 12 de septiembre: el plano decía "Kate Janich" y en Medidas
     // escribió "Janich Kate".
-    const por = p.casoPor === 'direccion' ? ' · casó por la dirección'
+    const por = (p.casoPor === 'direccion' ? ' · casó por la dirección'
               : p.casoPor === 'cliente'   ? ' · casó por el nombre'
               : p.casoPor === 'sinNombre' ? ' · es el que acaba de escanear'
-              : '';
+              : '')
+              // (20-oct, fase 4) El plano de otro teléfono: se dice de quién es, y que aquí solo se ve.
+              + (p.equipo ? ' · lo escaneó ' + (p.autor || 'otro del equipo') + ' (solo para ver)' : '');
     return '📐 Usando el plano de ' + quien + ' — ' + cuartos + (cuartos === 1 ? ' cuarto' : ' cuartos')
          + (plantas.length ? ' (' + plantas.join(', ') + ')' : '') + por;
   }
@@ -19944,6 +19978,10 @@ body.med-pp-abierto{overflow:hidden;}
       el.style.borderLeftColor = 'var(--accent)';
     }
     el.hidden = false;
+    // (20-oct, fase 4) Si otro teléfono del equipo escaneó esta casa, se baja (sin estorbar) y el aviso se vuelve a pintar.
+    if(!p || !p.equipo){
+      try{ medBajarPlanosEquipo().then(llego => { if(llego) medPintarPlanoAviso(); }); }catch(e){}
+    }
   }
 
   // TODOS los cuartos del plano, agrupados por planta. Es lo que hace falta
@@ -20247,6 +20285,477 @@ body.med-pp-abierto{overflow:hidden;}
     };
   }
 
+  // ============ LA CÁMARA DE SCANOVA EN FIELD REPORTS (20-oct, fases 1, 2 y 4) ============
+  //
+  // Su pedido del 20-oct: que Field Reports mida con el sistema de Scanova. La cámara (Swift) ya es la MISMA en las dos
+  // apps desde la app 15 (aparato 2026-10-24); faltaba que esta página le mandara lo que Scanova le manda:
+  //   - experiencia 'nueva' + porMovimiento: la pantalla nueva, MEDIR PRIMERO y el botón Materiales.
+  //   - planoPorCuarto + paredesPorCuarto: la forma de cada cuarto del plano de ESE nivel. Con eso la cámara se ubica en
+  //     el plano con el LiDAR (minimapa, pared completa, piso completo) y sugiere la insulación por pared.
+  //   - trabajo: la llave de la casa (el plano casado, o la dirección limpia). La cámara guarda con ella las 3 preguntas
+  //     del nivel y el alto, y el borrador.
+  //   - borrador: lo medido queda en el teléfono AL MOMENTO (BorradorCamara.swift). Si la app se cierra, aquí se recupera.
+  //   - cuartosConParedes / partesGuardadas: lo ya medido de esta casa, para no ofrecer otra vez "completo" lo completo.
+  // Para TODOS a la vez (su decisión del 20-oct), pero solo con el aparato 2026-10-24 o más nuevo: uno más viejo abre la
+  // cámara de siempre, sin errores. NATIVE_MIN NO se sube: congelaría la web de los teléfonos viejos.
+  // El zipper NO viaja (se anota en Equipo, su decisión): sigue `oculto` y la cámara nunca pregunta "¿Lleva zipper?".
+  // `tema` NO se manda: Field Reports se queda con los colores de su cámara. Y nunca se escucha `bitacora` (es de Scanova).
+  const MED_CAMARA_NUEVA_DESDE = '2026-10-24';
+  function medEsAparatoNuevo(nativo){
+    const v = String(nativo || '').trim();
+    return /^\d{4}-\d{2}-\d{2}/.test(v) && v >= MED_CAMARA_NUEVA_DESDE;
+  }
+  // Una promesa con tiempo límite: sin señal (o un plugin que no contesta) la pantalla nunca se queda trabada.
+  function medConTiempo(promesa, ms){
+    return new Promise((ok, no) => {
+      const t = setTimeout(() => no(new Error('tiempo')), ms);
+      Promise.resolve(promesa).then(v => { clearTimeout(t); ok(v); }, e => { clearTimeout(t); no(e); });
+    });
+  }
+  // La versión del aparato instalado (Actualizador.estado().nativo). '' si no se sabe: entonces, la cámara de siempre.
+  let MED_NATIVO = null;
+  async function medNativoInstalado(){
+    if(MED_NATIVO !== null) return MED_NATIVO;
+    const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Actualizador;
+    if(!A || !A.estado){ MED_NATIVO = ''; return ''; }
+    try{
+      const e = await medConTiempo(A.estado(), 2500);
+      MED_NATIVO = (e && e.nativo) ? String(e.nativo) : '';
+    }catch(err){ return ''; }        // no contestó a tiempo: esta vez la de siempre, la próxima se vuelve a preguntar
+    return MED_NATIVO;
+  }
+
+  // ---- LA FORMA DEL PLANO PARA LA CÁMARA (copiado de Scanova, docs/planos.js: senaParaCamara y formasDelPlano) ----
+  // Una puerta, ventana o paso del plano como lo lee la cámara: [x, y, ventana (1/0), ancho, abajo (-1 = no se sabe), alto],
+  // y un 7o número 1 si es un paso sin puerta (arco). Lo corregido en el plano manda; lo quitado no va.
+  function medSenaParaCamara(x, k){
+    if(!x || !x.position || x._removed) return null;
+    const tipo = k === 'openings' ? (x._kindOverride || 'opening') : (k === 'windows' ? 'window' : 'door');
+    const r2 = v => Math.round(v * 100) / 100;
+    const an = Number(x._widthOverrideFt || x.widthFt) || 0, al = Number(x._heightOverrideFt || x.heightFt) || 0, ab = x.bottomFt == null ? -1 : Number(x.bottomFt);
+    const s = [r2(x.position.x), r2(x.position.y), tipo === 'window' ? 1 : 0, r2(an), r2(ab), r2(al)];
+    if(tipo === 'opening') s.push(1);
+    return s;
+  }
+  // { paredes, formas } de UN nivel de un plano de Field Reports. Diferencia con Scanova: aquí un plano puede traer VARIOS
+  // niveles, así que se toman solo los cuartos de `nivelPlano` (el número de nivel del plano, de fpNivelDeLaPlanta). Los
+  // nombres van como los propone Medidas (medAInglesElCuarto): son los mismos que la cámara ofrece y devuelve.
+  // (revisión) Dos cuartos con el MISMO nombre en un nivel (dos clósets) eran uno solo para la cámara: el segundo tapaba
+  // al primero y la cámara no podía ubicarse en él. Cada uno lleva su nombre: "Closet", "Closet 2" (o el siguiente número
+  // libre si el plano ya tiene un "Closet 2" escrito). Mismo orden del plano siempre: el resultado no cambia de una vez a
+  // otra. Devuelve Map(índice en d.rooms -> nombre).
+  function medNombresDelNivel(d, nivelPlano){
+    const out = new Map();
+    if(!d || !Array.isArray(d.rooms)) return out;
+    const lista = [];
+    d.rooms.forEach((r, i) => {
+      if(!r || r.deleted || (r.level || 1) !== nivelPlano) return;
+      const crudo = String(r.roomName || '').trim(); if(!crudo) return;
+      lista.push({ i, n: medAInglesElCuarto(crudo) || crudo });
+    });
+    const usados = new Set(), k = s => String(s).trim().toLowerCase();
+    lista.forEach(x => {
+      let nombre = x.n;
+      if(usados.has(k(nombre))){ let j = 2; while(usados.has(k(x.n + ' ' + j)) || lista.some(y => y !== x && k(y.n) === k(x.n + ' ' + j))) j++; nombre = x.n + ' ' + j; }
+      usados.add(k(nombre)); out.set(x.i, nombre);
+    });
+    return out;
+  }
+  function medFormasDelPlano(d, nivelPlano){
+    const out = {}, formas = {};
+    if(!d || !Array.isArray(d.rooms)) return { paredes: out, formas };
+    const rooms = d.rooms.filter(x => x && !x.deleted && (x.walls || []).length && (x.level || 1) === nivelPlano);
+    const todos = d.merged === false ? null : rooms;
+    const r2 = v => Math.round(v * 100) / 100;
+    const nombres = medNombresDelNivel(d, nivelPlano);
+    rooms.forEach(room => {
+      const nombre = nombres.get(d.rooms.indexOf(room)); if(!nombre) return;
+      const paredes = (room.walls || []).filter(w => w && w.start && w.end && !w._ajena && !w._cierre)
+        .map(w => ({ largo: r2(Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y)),
+                     exterior: !!floorplanIsExteriorWall(w, room, todos) }))
+        .filter(x => x.largo >= 1);
+      if(paredes.length) out[nombre] = (out[nombre] || []).concat(paredes);
+      // marco: en qué dibujo está el cuarto. Un plano juntado tiene todos sus cuartos en las mismas coordenadas (0).
+      const forma = { paredes: [], senas: [], marco: d.merged === false ? d.rooms.indexOf(room) : 0 };
+      (room.walls || []).forEach(w => {
+        if(!w || !w.start || !w.end || w._ajena || w._cierre) return;
+        if(Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) < 1) return;
+        forma.paredes.push([r2(w.start.x), r2(w.start.y), r2(w.end.x), r2(w.end.y), floorplanIsExteriorWall(w, room, todos) ? 1 : 0, r2(Number(w.heightFt) || 0)]);
+      });
+      ['windows', 'doors', 'openings'].forEach(k => (room[k] || []).forEach(x => { if(x && x._cierre) return; const s = medSenaParaCamara(x, k); if(s) forma.senas.push(s); }));
+      // El piso completo [área, largo, ancho, aproximado] y su contorno (para el mapita). Con el contorno roto no va.
+      try{
+        const mm = fpRoomMeasurements(room), poly = fpOrderedRoomPolygon(room) || [];
+        if(mm && mm.outlineOk && mm.floorSqFt > 1 && poly.length >= 3){
+          const xs = poly.map(q => q.x), ys = poly.map(q => q.y);
+          const a = Math.max(...xs) - Math.min(...xs), b = Math.max(...ys) - Math.min(...ys);
+          forma.piso = [r2(mm.floorSqFt), r2(Math.max(a, b)), r2(Math.min(a, b)), (mm.guessedFt || 0) > 1 ? 1 : 0];
+          forma.contorno = poly.map(q => [r2(q.x), r2(q.y)]);
+        }
+      }catch(e){}
+      if(forma.paredes.length >= 3) formas[nombre] = forma;
+    });
+    return { paredes: out, formas };
+  }
+  const medPlanoTieneParedes = d => !!(d && Array.isArray(d.rooms) && d.rooms.some(r => r && !r.deleted && Array.isArray(r.walls) && r.walls.length));
+  // La forma del plano de ESA planta ('1st Floor'...). El índice del teléfono guarda solo el resumen de cada plano (sin
+  // paredes): el plano entero se lee de su archivo. Sin plano de esa planta, o sin poder leerlo: vacío (la cámara mide
+  // igual, sin ubicarse). `plan` = el plano que se usó (para la llave del trabajo).
+  async function medFormasParaCamara(planta){
+    const vacio = { paredes: {}, formas: {}, plan: null };
+    if(!planta) return vacio;
+    const p = medPlanoDeLaPlanta(planta);
+    if(!p) return vacio;
+    let data = p.data;
+    if(!medPlanoTieneParedes(data) && p.id){
+      try{ const e = await medConTiempo(fpLeerPlano(p.id), 5000); data = e && e.data; }catch(err){ data = null; }
+    }
+    if(!medPlanoTieneParedes(data)) return Object.assign(vacio, { plan: p });
+    const nv = fpNivelDeLaPlanta(data, planta);
+    if(!nv) return Object.assign(vacio, { plan: p });
+    const f = medFormasDelPlano(data, nv);
+    return { paredes: f.paredes, formas: f.formas, plan: p };
+  }
+
+  // ---- LA LLAVE DEL TRABAJO ----
+  // Field Reports no tiene id de proyecto. La llave sale del plano casado (el de ese nivel), o de la dirección limpia, o
+  // del cliente. Sin nada de eso, la de esta pantalla de Medidas (así el borrador funciona igual, pero las respuestas del
+  // nivel no se le pasan a otra casa sin nombre). Solo letras, números y guiones: así la escribe el teléfono.
+  const medLimpioLlave = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 70);
+  function medLlaveCamara(plan, cliente, dir){
+    const id = plan && plan.id ? medLimpioLlave(plan.id) : '';
+    if(id) return 'fr-plano-' + id;
+    const d = medLimpioLlave(medPelar(dir)); if(d) return 'fr-dir-' + d;
+    const c = medLimpioLlave(medPelar(cliente)); if(c) return 'fr-cli-' + c;
+    return '';
+  }
+  let MED_LLAVE_HOJA = '';
+  function medLlaveRespaldo(){
+    if(typeof medPantalla !== 'undefined' && medPantalla && medPantalla.id) return 'fr-med-' + medLimpioLlave(medPantalla.id);
+    if(!MED_LLAVE_HOJA) MED_LLAVE_HOJA = 'fr-hoja-' + Date.now().toString(36);
+    return MED_LLAVE_HOJA;
+  }
+
+  // ---- LO YA MEDIDO DE ESTA CASA (copiado de Scanova, medidas.js: cuartosConParedes y partesYaGuardadas) ----
+  // Lo que va PARADO en la pared aunque se guarde en Kitchen o Bathroom; un nombre escrito a mano que no está en ninguna
+  // lista también cuenta (contarlo de más solo calla a la cámara: el lado seguro).
+  const MED_DE_PARED = new Set(['Shower Tile', 'Shower Surround', 'Cement Board', 'Greenboard', 'Vapor Barrier', 'Backsplash']);
+  const medEsDePared = f => f.seccion === 'wall' || ((f.seccion === 'bathroom' || f.seccion === 'kitchen')
+    && (MED_DE_PARED.has(String(f.material || '').trim()) || !medUnidad(f.material, f.seccion)));
+  const medNormNombre = s => String(s || '').trim().toLowerCase();
+  // { nivel: [cuarto, …] } de lo que ya tiene paredes: ahí la cámara no dice "falta una pared".
+  function medCuartosConParedes(cortes){
+    const r = {};
+    (cortes || []).forEach(f => {
+      if(!f || !medEsDePared(f)) return;
+      const c = String(f.cuarto || '').trim(); if(!c) return;
+      const nv = String(f.nivel || '').trim(), l = r[nv] || (r[nv] = []);
+      if(!l.some(x => medNormNombre(x) === medNormNombre(c))) l.push(c);
+    });
+    return r;
+  }
+  // Lo de pies² de piso, pared y techo ya medido: la cámara solo lo LEE para no ofrecer otra vez completo lo completo.
+  function medPartesYaGuardadas(cortes){
+    return (cortes || []).filter(f => f && (f.seccion === 'floor' || f.seccion === 'wall' || f.seccion === 'ceiling') && +f.a > 0 && +f.b > 0
+      && medUnidad(f.material, f.seccion) !== 'LF' && medUnidad(f.material, f.seccion) !== 'EA')
+      .map(f => ({ nivel: String(f.nivel || '').trim(), cuarto: String(f.cuarto || '').trim(), parte: f.seccion,
+                   material: String(f.material || '').trim(), largo: +f.a, alto: +f.b }));
+  }
+  // Lo de esta pantalla MÁS lo guardado de la misma casa (una casa de varios niveles lleva un trabajo por nivel, y el
+  // segundo día se empieza otra hoja): sin eso la cámara ofrecería completa una pared que ya se cobró ayer.
+  function medYaMedidoDeLaCasa(cliente, dir){
+    let cortes = [];
+    try{ cortes = medRecogerCortes(false).slice(); }catch(e){}
+    if(!cliente && !dir) return cortes;
+    const casa = t => (dir && t.dir) ? medMismaDireccion(dir, t.dir) : (cliente && t.cliente && !dir ? medMismoCliente(cliente, t.cliente) : false);
+    try{ medLeerGuardadas().forEach(t => { if(t && casa(t)) cortes = cortes.concat(medCortesDeTrabajo(t).filter(c => c.completo)); }); }catch(e){}
+    return cortes;
+  }
+
+  // ---- LAS LLAVES QUE YA SE USARON EN ESTE TELÉFONO (para recuperar el borrador de cualquiera) ----
+  const MED_CAMARA_LLAVES_KEY = 'medCamaraLlaves:v1';      // [{k, cliente, dir, nivel, at}]
+  const MED_CAMARA_VOLCADAS_KEY = 'medCamaraVolcadas:v1';  // [sesion] ya puestas en tarjetas (nunca dos veces)
+  function medCamaraLlaves(){
+    const l = nubeLeerJSON(MED_CAMARA_LLAVES_KEY, []);
+    const limite = Date.now() - 30 * 86400000;              // el teléfono borra sus borradores a los 30 días
+    return Array.isArray(l) ? l.filter(x => x && x.k && (+x.at || 0) > limite) : [];
+  }
+  function medAnotarLlave(k, cliente, dir, nivel){
+    if(!k) return;
+    const l = medCamaraLlaves().filter(x => x.k !== k);
+    l.unshift({ k, cliente: cliente || '', dir: dir || '', nivel: nivel || '', at: Date.now() });
+    nubeEscribirJSON(MED_CAMARA_LLAVES_KEY, l.slice(0, 40));
+  }
+  const medSesionesVolcadas = () => { const v = nubeLeerJSON(MED_CAMARA_VOLCADAS_KEY, []); return Array.isArray(v) ? v : []; };
+  // Puestas en tarjetas pero SIN poder guardar (memoria llena): no se vuelven a ofrecer mientras la app siga abierta, y
+  // tampoco se borran del teléfono (si la app se cierra antes de guardar, vuelven a salir: mejor repetida que perdida).
+  const MED_VOLCADAS_AQUI = new Set();
+  // Recuperadas o descartadas en esta página (una lectura del teléfono que venía en camino no las vuelve a ofrecer).
+  const MED_SESIONES_CERRADAS = new Set();
+  function medAnotarVolcadas(sesiones){
+    const l = medSesionesVolcadas().filter(s => sesiones.indexOf(s) < 0).concat(sesiones.filter(Boolean));
+    nubeEscribirJSON(MED_CAMARA_VOLCADAS_KEY, l.slice(-200));
+  }
+  function medSoltarBorradorNativo(k, sesiones){
+    const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ARMeasure;
+    sesiones = (sesiones || []).filter(Boolean);
+    if(!k || !sesiones.length || !A || !A.soltarBorrador) return;
+    try{ Promise.resolve(A.soltarBorrador({ trabajo: k, sesiones })).catch(() => {}); }catch(e){}
+  }
+
+  // ---- FASE 2: LO QUE LA CÁMARA DEJÓ EN EL TELÉFONO Y NUNCA LLEGÓ A LAS TARJETAS ----
+  // La app se cerró, se cayó o se acabó la batería con la cámara abierta: lo medido quedó en el teléfono. Al entrar a
+  // Medidas (o al volver a la app) se busca y sale una tarjeta "N medidas de la cámara no se guardaron" con Recuperar y
+  // Descartar (igual que Scanova). Recuperar las pone en tarjetas, guarda, y solo entonces se borran del teléfono.
+  let MED_CAMARA_ABIERTA = false;          // la cámara abierta (o su resultado volcándose): no se recoge nada
+  let MED_BORRADOR_PEND = [];              // [{k, cliente, dir, nivel, sesiones:[{sesion, orden, medidas}]}]
+  let MED_RECOGIENDO = null;
+  // Se llama también desde el arranque (onTabChange): la primera línea va en un microtask, para no tocar los `let` de
+  // aquí antes de que la app termine de cargar (zona muerta, builds T y AG).
+  function medRecogerBorradorCamara(){ return Promise.resolve().then(medRecogerBorradorYa); }
+  function medRecogerBorradorYa(){
+    if(MED_RECOGIENDO) return MED_RECOGIENDO;
+    MED_RECOGIENDO = medRecogerBorrador().catch(e => { console.warn('borrador de la cámara', e); }).finally(() => { MED_RECOGIENDO = null; });
+    return MED_RECOGIENDO;
+  }
+  async function medRecogerBorrador(){
+    const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ARMeasure;
+    if(!isNative() || !A || !A.borrador || MED_CAMARA_ABIERTA) return;
+    const volcadas = medSesionesVolcadas(), grupos = [];
+    // (revisión) Las llaves apuntadas MÁS las de lo escrito ahora en Medidas: si la memoria estaba llena y la llave no se
+    // pudo apuntar, la de la casa en pantalla todavía se encuentra.
+    const llaves = medCamaraLlaves();
+    try{
+      const cli = (($('#x-client') || {}).value || '').trim(), dir = (($('#x-address') || {}).value || '').trim();
+      const extra = [medLlaveCamara(null, cli, dir)].concat(medPlanosDelTrabajo().map(p => medLlaveCamara(p, '', '')));
+      if(typeof medPantalla !== 'undefined' && medPantalla && medPantalla.id) extra.push('fr-med-' + medLimpioLlave(medPantalla.id));
+      extra.filter(Boolean).forEach(k => { if(!llaves.some(x => x.k === k)) llaves.push({ k, cliente: cli, dir, nivel: '', at: Date.now() }); });
+    }catch(e){}
+    for(const e of llaves){
+      let r; try{ r = await medConTiempo(A.borrador({ trabajo: e.k }), 4000); }catch(err){ continue; }
+      if(MED_CAMARA_ABIERTA) return;
+      const ses = ((r && r.sesiones) || []).filter(s => s && s.sesion && Array.isArray(s.medidas) && s.medidas.length);
+      // Ya puestas en tarjetas (la app se cerró entre guardar y soltar): solo se sueltan.
+      const ya = ses.filter(s => volcadas.indexOf(s.sesion) >= 0).map(s => s.sesion);
+      if(ya.length) medSoltarBorradorNativo(e.k, ya);
+      const quedan = ses.filter(s => volcadas.indexOf(s.sesion) < 0 && !MED_VOLCADAS_AQUI.has(s.sesion)).sort((a, b) => (+a.orden || 0) - (+b.orden || 0));
+      if(quedan.length) grupos.push(Object.assign({}, e, { sesiones: quedan }));
+    }
+    // (revisión) Mientras se leía el teléfono pudo tocarse Recuperar o Descartar: lo que ya se cerró en esta página (o
+    // quedó apuntado como puesto) no vuelve a salir.
+    const ahoraVolcadas = medSesionesVolcadas();
+    MED_BORRADOR_PEND = grupos.map(g => Object.assign({}, g, { sesiones: g.sesiones.filter(x => !MED_SESIONES_CERRADAS.has(x.sesion)
+      && !MED_VOLCADAS_AQUI.has(x.sesion) && ahoraVolcadas.indexOf(x.sesion) < 0) })).filter(g => g.sesiones.length);
+    medPintarBorradorCamara();
+  }
+  const medCuantasDe = g => g.sesiones.reduce((t, s) => t + s.medidas.length, 0);
+  const medCasaDe = g => g.dir || g.cliente || 'un trabajo sin nombre';
+  function medPintarBorradorCamara(){
+    const caja = document.getElementById('medBorradorCamara');
+    if(!caja) return;
+    if(!MED_BORRADOR_PEND.length){ caja.hidden = true; caja.innerHTML = ''; return; }
+    caja.innerHTML = MED_BORRADOR_PEND.map(g => {
+      const n = medCuantasDe(g);
+      return '<div class="card" style="border-left:4px solid var(--accent); margin-bottom:12px;">'
+        + '<h2 style="margin:0 0 6px;">&#128247; Medidas de la cámara sin guardar<span class="en"> / Camera measurements not saved</span></h2>'
+        + '<p class="hint" style="margin:0 0 10px;"><b>' + n + (n === 1 ? ' medida' : ' medidas') + '</b> de <b>' + esc(medCasaDe(g)) + '</b>'
+        + (g.nivel ? ' (' + esc(g.nivel) + ')' : '') + ' no se ' + (n === 1 ? 'guardó' : 'guardaron') + '.</p>'
+        + '<div class="row2"><button type="button" class="btn btn-outline" data-medbc="descartar" data-k="' + esc(g.k) + '" style="width:100%; margin:0;">Descartar<span class="en"> / Discard</span></button>'
+        + '<button type="button" class="btn btn-accent" data-medbc="recuperar" data-k="' + esc(g.k) + '" style="width:100%; margin:0;">Recuperar<span class="en"> / Recover</span></button></div>'
+        + '</div>';
+    }).join('');
+    caja.hidden = false;
+  }
+  // ¿El trabajo abierto en Medidas es la misma casa que la de estas medidas? Sin nombre en un lado, no se puede decir que no.
+  function medEsLaMismaCasa(g, cliente, dir){
+    if(!cliente && !dir) return true;
+    if(!g.cliente && !g.dir) return true;
+    if(dir && g.dir) return medMismaDireccion(dir, g.dir);
+    if(cliente && g.cliente) return medMismoCliente(cliente, g.cliente) || medMismoCliente(g.cliente, cliente);
+    return true;
+  }
+  function medRecuperarBorrador(k){
+    if(MED_CAMARA_ABIERTA) return;
+    const g = MED_BORRADOR_PEND.find(x => x.k === k); if(!g) return;
+    const cliente = (($('#x-client') || {}).value || '').trim(), dir = (($('#x-address') || {}).value || '').trim();
+    const hayTarjetas = !!(medHayTarjetas() && medRecogerCortes(true).length);
+    const misma = medEsLaMismaCasa(g, cliente, dir);
+    if(hayTarjetas && !misma){
+      alert('Estas medidas son de ' + medCasaDe(g) + ', y ahora tiene abierto el trabajo de ' + (dir || cliente) + '.\n\n'
+        + 'Primero toque Guardar en el trabajo abierto (así queda guardado y empieza uno nuevo) y después toque Recuperar.');
+      return;
+    }
+    MED_CAMARA_ABIERTA = true;
+    try{
+      // Una hoja SIN medidas toma el cliente y la dirección de estas medidas: así el trabajo guardado sabe de qué casa
+      // es. (Con otro nombre escrito pero sin ninguna medida no se pierde nada: se cambia a esta casa.)
+      if((!cliente && !dir) || !misma){
+        if($('#x-client')) setFieldValue($('#x-client'), g.cliente || '');
+        if($('#x-address')) setFieldValue($('#x-address'), g.dir || '');
+        if(!misma && $('#x-phone')) setFieldValue($('#x-phone'), '');
+        // (revisión) La hoja pasa a ser de ESTA casa: ya no es el trabajo guardado que estaba abierto (si no, guardar
+        // pisaría ese trabajo con las medidas de otra casa).
+        if(typeof medPantalla !== 'undefined') medPantalla = null;
+        if(typeof medAbiertaId !== 'undefined') medAbiertaId = null;
+      }
+      const medidas = [].concat(...g.sesiones.map(s => s.medidas));
+      volcarRecorrido(medidas);
+      const seGuardo = medGuardarActual();
+      if(typeof saveDraft === 'function') saveDraft();
+      const sesiones = g.sesiones.map(s => s.sesion);
+      sesiones.forEach(x => MED_SESIONES_CERRADAS.add(x));
+      // Ya guardadas: se anotan (nunca dos veces) y se borran del teléfono. Sin poder guardar: se quedan en el teléfono.
+      if(seGuardo){ medAnotarVolcadas(sesiones); medSoltarBorradorNativo(g.k, sesiones); }
+      else sesiones.forEach(x => MED_VOLCADAS_AQUI.add(x));
+      MED_BORRADOR_PEND = MED_BORRADOR_PEND.filter(x => x !== g);
+      medPintarBorradorCamara();
+      medIrAlPaso('revisar');
+      medAvisoEnPantalla(seGuardo
+        ? (medidas.length + (medidas.length === 1 ? ' medida recuperada.' : ' medidas recuperadas.') + ' Revíselas abajo.')
+        : ('⚠️ ' + medidas.length + (medidas.length === 1 ? ' medida recuperada' : ' medidas recuperadas')
+           + ' PERO NO SE GUARDARON: la memoria del teléfono está llena. Borre un trabajo guardado.'));
+    }finally{ MED_CAMARA_ABIERTA = false; }
+  }
+  function medDescartarBorrador(k){
+    if(MED_CAMARA_ABIERTA) return;
+    const g = MED_BORRADOR_PEND.find(x => x.k === k); if(!g) return;
+    const n = medCuantasDe(g);
+    if(!confirm('¿Descartar ' + (n === 1 ? 'esta medida' : 'estas ' + n + ' medidas') + ' de la cámara?\n\n' + medCasaDe(g) + '\n\nSe pierden y no se pueden recuperar.')) return;
+    g.sesiones.forEach(x => MED_SESIONES_CERRADAS.add(x.sesion));
+    medSoltarBorradorNativo(g.k, g.sesiones.map(s => s.sesion));
+    MED_BORRADOR_PEND = MED_BORRADOR_PEND.filter(x => x !== g);
+    medPintarBorradorCamara();
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-medbc]'); if(!b) return;
+    if(b.dataset.medbc === 'recuperar') medRecuperarBorrador(b.dataset.k);
+    else if(b.dataset.medbc === 'descartar') medDescartarBorrador(b.dataset.k);
+  });
+
+  // ---- FASE 4: EL PLANO QUE ESCANEÓ OTRO TELÉFONO DE LA MISMA CASA (solo para VERLO) ----
+  // Su decisión del 20-oct: un muchacho puede ver (no cambiar) el plano que escaneó otro de la misma casa, para que su
+  // cámara también se ubique. La nube los deja LEER a los de la misma empresa (sql/fr-01-planos-compartidos.sql); aquí
+  // se bajan solo los que casan por dirección o por nombre con lo escrito en Medidas, y se quedan en la memoria de esta
+  // pantalla: no entran a Planos guardados, no se suben, no se editan. Sin señal o sin el SQL: no hay, y todo sigue igual.
+  let MED_EQUIPO = { clave: '', at: 0, lista: [] };
+  let MED_EQUIPO_PROMESA = null;
+  function medBajarPlanosEquipo(){ return Promise.resolve().then(medBajarPlanosEquipoYa); }
+  function medBajarPlanosEquipoYa(){
+    if(MED_EQUIPO_PROMESA) return MED_EQUIPO_PROMESA;
+    MED_EQUIPO_PROMESA = medBajarEquipo().catch(e => { console.warn('planos del equipo', e); return false; }).finally(() => { MED_EQUIPO_PROMESA = null; });
+    return MED_EQUIPO_PROMESA;
+  }
+  async function medBajarEquipo(){
+    if(!cloudOn() || !NUBE.planos || !SES || !SES.company_id) return false;
+    const yo = nubeYo(); if(!yo) return false;
+    const cliente = (($('#x-client') || {}).value || '').trim(), dir = (($('#x-address') || {}).value || '').trim();
+    if(!cliente && !dir) return false;
+    const clave = medPelar(cliente) + '|' + medPelar(dir);
+    if(MED_EQUIPO.clave === clave && Date.now() - MED_EQUIPO.at < 5 * 60000) return false;
+    const pedir = async (ruta) => {
+      const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const t = setTimeout(() => { try{ ctl && ctl.abort(); }catch(e){} }, 8000);
+      try{ return await authFetch(ruta, Object.assign({ headers: cloudHeaders() }, ctl ? { signal: ctl.signal } : {})); }
+      finally{ clearTimeout(t); }
+    };
+    const r = await pedir('/rest/v1/floor_plans?select=id,plan_id,author_name,job,at_ms&company_id=eq.' + encodeURIComponent(SES.company_id)
+      + '&created_by=neq.' + encodeURIComponent(yo) + '&deleted_at=is.null&order=at_ms.desc.nullslast&limit=300');
+    if(!r.ok) return false;
+    const filas = await r.json();
+    if(!Array.isArray(filas)) return false;
+    // Los planos que este teléfono ya tiene (un teléfono compartido) no se repiten.
+    const aqui = new Set(fpListLive().map(e => e && e.id).filter(Boolean));
+    // (revisión) MÁS ESTRICTO que con los planos de este teléfono: el de otro teléfono no se ve antes de usarlo.
+    //   - con dirección en los dos lados: tiene que ser LA MISMA dirección (un nombre de pila igual no basta: "Maria"
+    //     casaba con "Maria Lopez" de otra calle);
+    //   - por nombre, solo si NINGUNO de los dos trae dirección y lo escrito tiene nombre y apellido (2 palabras o más).
+    const casan = filas.filter(f => f && f.plan_id && !aqui.has(f.plan_id)).map(f => {
+      const j = f.job || {};
+      const dj = String(j.address || '').trim();
+      let por = '';
+      if(dir && dj) por = medMismaDireccion(dir, dj) ? 'direccion' : '';
+      else if(!dir && !dj && medPalabras(cliente).length >= 2 && medMismoCliente(cliente, j.client)) por = 'cliente';
+      return por ? { f, por } : null;
+    }).filter(Boolean);
+    // Los de dirección primero (la dirección ES la casa), del más nuevo al más viejo; cuatro bastan (uno por piso).
+    casan.sort((a, b) => (a.por === b.por ? 0 : a.por === 'direccion' ? -1 : 1));
+    const lista = [];
+    for(const { f, por } of casan.slice(0, 4)){
+      try{
+        const r2 = await pedir('/rest/v1/floor_plans?select=data&id=eq.' + encodeURIComponent(f.id) + '&limit=1');
+        if(!r2.ok) continue;
+        const d = ((await r2.json()) || [])[0];
+        if(!d || !d.data || !Array.isArray(d.data.rooms)) continue;
+        lista.push({ id: f.plan_id, data: d.data, job: f.job || d.data.job || {}, casoPor: por, equipo: true, autor: f.author_name || '' });
+      }catch(e){}
+    }
+    // Lo escrito pudo cambiar mientras se bajaba: solo se guarda si sigue siendo la misma casa.
+    const ahora = medPelar((($('#x-client') || {}).value || '').trim()) + '|' + medPelar((($('#x-address') || {}).value || '').trim());
+    if(ahora !== clave) return false;
+    MED_EQUIPO = { clave, at: Date.now(), lista };
+    return lista.length > 0;
+  }
+  // Los del equipo que casan con lo escrito AHORA (si cambió el cliente o la dirección, ya no salen).
+  function medPlanosDelEquipo(){
+    const cliente = (($('#x-client') || {}).value || '').trim(), dir = (($('#x-address') || {}).value || '').trim();
+    if(!MED_EQUIPO.lista.length || MED_EQUIPO.clave !== medPelar(cliente) + '|' + medPelar(dir)) return [];
+    return MED_EQUIPO.lista.map(e => Object.assign({}, e));
+  }
+
+  // ---- ABRIR LA CÁMARA NUEVA: lo que se le manda de más ----
+  // Devuelve { params, llave }, o { bloqueo: true } si hay medidas de ESTA casa que la cámara dejó sin guardar (primero
+  // Recuperar o Descartar: si no, el borrador viejo y el nuevo se mezclarían).
+  async function medExtrasCamaraNueva(op, cuartos){
+    const cliente = (($('#x-client') || {}).value || '').trim(), dir = (($('#x-address') || {}).value || '').trim();
+    // El plano de otro teléfono de esta casa (fase 4), con tiempo límite corto: sin señal se mide igual (sin ubicarse).
+    try{ await medConTiempo(medBajarPlanosEquipo(), 2500); }catch(e){}
+    // Un nivel escogido: su plano. "Varios niveles" no manda plano (no se sabe en qué piso empieza).
+    const nivel = op.alcance === 'varios' ? '' : (op.nivel || '');
+    const f = await medFormasParaCamara(nivel);
+    const llave = medLlaveCamara(f.plan, cliente, dir) || medLlaveCamara(medPlanoDelTrabajo(), '', '') || medLlaveRespaldo();
+    await medRecogerBorradorCamara();
+    if(MED_BORRADOR_PEND.some(g => g.k === llave)){
+      const caja = document.getElementById('medBorradorCamara');
+      if(caja && caja.scrollIntoView) try{ caja.scrollIntoView({ block: 'start' }); }catch(e){}
+      try{ hideOverlay(); }catch(e){}
+      alert('Hay medidas de la cámara de esta casa que no se guardaron.\n\nPrimero toque Recuperar (o Descartar) arriba, y después abra la cámara otra vez.');
+      return { bloqueo: true };
+    }
+    const ya = medYaMedidoDeLaCasa(cliente, dir);
+    medAnotarLlave(llave, cliente, dir, nivel);
+    // (revisión) Comprobar que la llave quedó apuntada: con la memoria llena no se apunta, y si la app se cierra con la
+    // cámara abierta la tarjeta de Recuperar no sabría dónde buscar (solo la casa escrita en Medidas). Se dice antes.
+    if(!medCamaraLlaves().some(x => x.k === llave)){
+      try{ hideOverlay(); }catch(e){}
+      if(!confirm('La memoria del teléfono está llena.\n\nSi la app se cierra con la cámara abierta, lo medido podría no recuperarse. Para hacer espacio, borre un trabajo en Medidas guardadas o Planos guardados.\n\n¿Abrir la cámara de todos modos?')) return { bloqueo: true };
+    }
+    // Los cuartos del plano al frente de la lista (los mismos nombres que trae la forma).
+    const delPlano = Object.keys(f.formas);
+    const lista = delPlano.concat((cuartos || []).filter(c => !delPlano.some(x => medNormNombre(x) === medNormNombre(c))));
+    // Los cuartos del nivel escogido con LOS MISMOS nombres de la forma ("Closet 2"), para que la cámara los encuentre.
+    const cpp = Object.assign({}, op.cuartosPorPlanta || medCuartosDelPlanoPorPlanta());
+    if(nivel && delPlano.length) cpp[nivel] = delPlano.concat((cpp[nivel] || []).filter(c => !delPlano.some(x => medNormNombre(x) === medNormNombre(c))));
+    return { llave, params: {
+      experiencia: 'nueva', porMovimiento: true, laboratorio: false,
+      trabajo: llave, borrador: true,
+      paredesPorCuarto: f.paredes, planoPorCuarto: f.formas,
+      cuartosConParedes: medCuartosConParedes(ya), partesGuardadas: medPartesYaGuardadas(ya),
+      cuartos: lista,
+      // Recalculados: el plano del equipo pudo llegar después de escoger el nivel.
+      cuartosPorPlanta: cpp,
+      areasPorPlanta: medAreasDelPlanoPorPlanta()
+    } };
+  }
+  // Volver a la app (o a Medidas) con la cámara cerrada: se mira si quedó algo en el teléfono.
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState !== 'visible') return;
+    const act = document.querySelector('.tab-panel.active');
+    const tab = act && act.dataset ? act.dataset.tab : '';
+    if(tab === 'measurements') medRecogerBorradorCamara();
+    if(tab === 'floorplan' && typeof fpRecogerEscaneos === 'function') fpRecogerEscaneos();
+  });
+
+  let MED_ABRIENDO = false;               // (20-oct) un doble toque no abre dos cámaras
   async function medirRecorrido(opciones){
     const op = opciones || {};
     const ARMeasure = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ARMeasure;
@@ -20254,6 +20763,14 @@ body.med-pp-abierto{overflow:hidden;}
       alert('Medir con cámara solo funciona en la app del teléfono.');
       return;
     }
+    if(MED_ABRIENDO || MED_CAMARA_ABIERTA) return;
+    MED_ABRIENDO = true;
+    try{ await medirRecorridoAbierto(op, ARMeasure); }
+    finally{ MED_ABRIENDO = false; }
+  }
+  async function medirRecorridoAbierto(op, ARMeasure){
+    // (20-oct) ¿La cámara nueva de Scanova? Solo con el aparato 2026-10-24 (app 15) o más nuevo.
+    const nueva = medEsAparatoNuevo(await medNativoInstalado());
     // Los catalogos COMPLETOS: las cuatro secciones con sus materiales, los
     // cuartos, los niveles, y cuanto mide cada cuarto en el plano escaneado.
     // Sin esto la camara no puede cambiar de seccion sola.
@@ -20277,9 +20794,26 @@ body.med-pp-abierto{overflow:hidden;}
     const niveles = LEVEL_OPTIONS.filter(o => o.value !== 'Other').map(o => o.value);
     const areasPorCuarto = {};
     cuartos.forEach(c => { const a = fpAreaOfScannedRoom(c); if(a > 0) areasPorCuarto[c] = a; });
+    // (20-oct) Lo que la cámara nueva necesita de más (plano del nivel, llave, borrador, lo ya medido).
+    let extra = null;
+    if(nueva){
+      // (revisión) Buscar el plano (del disco o del equipo) puede tardar unos segundos: se dice, para que no toque dos veces.
+      try{ showOverlay('Abriendo la cámara… / Opening the camera…'); }catch(e){}
+      try{ extra = await medExtrasCamaraNueva(op, cuartos); }
+      catch(e){
+        console.warn('cámara nueva: sin el plano', e);
+        // Sin el plano igual se mide con la cámara nueva (sin ubicarse), y el borrador sigue guardando.
+        const k = medLlaveRespaldo();
+        medAnotarLlave(k, (($('#x-client') || {}).value || '').trim(), (($('#x-address') || {}).value || '').trim(), op.nivel || '');
+        extra = { llave: k, params: { experiencia: 'nueva', porMovimiento: true, laboratorio: false, trabajo: k, borrador: true } };
+      }
+      try{ hideOverlay(); }catch(e){}
+      if(extra && extra.bloqueo) return;
+    }
 
+    if(extra) MED_CAMARA_ABIERTA = true;
     try{
-      const result = await ARMeasure.measure({
+      const result = await ARMeasure.measure(Object.assign({
         modo: 'recorrido',
         // El nivel YA viene resuelto desde la pantalla: la camara no lo vuelve
         // a preguntar y lo estampa en cada medida del recorrido.
@@ -20298,7 +20832,7 @@ body.med-pp-abierto{overflow:hidden;}
         crewName: fpFirstName((SES && SES.full_name) || ''),
         roomName: op.cuarto || '',
         roomAreaSqFt: op.cuarto ? (areasPorCuarto[op.cuarto] || 0) : 0
-      });
+      }, extra ? extra.params : {}));
       if(result.cancelled){
         if(result.error) alert(result.error);
         return;
@@ -20306,12 +20840,19 @@ body.med-pp-abierto{overflow:hidden;}
       // La cámara se cayó a media sesión pero trae lo que ya estaba guardado (Fase 1, 15 oct 2026).
       if(result.aviso) alert(result.aviso);
       const medidas = Array.isArray(result.measurements) ? result.measurements : [];
-      if(!medidas.length) return;
+      if(!medidas.length){ if(extra && result.sesion) medSoltarBorradorNativo(extra.llave, [result.sesion]); return; }
       volcarRecorrido(medidas);
       showTab('measurements');
       // SE GUARDA SOLO. Su pedido: "cada vez que hacen alguna medida y le dan
       // terminar, que se guarde automáticamente y aparezca en esa sección".
       const seGuardo = medGuardarActual();
+      // (20-oct, fase 2) Ya en tarjetas y guardadas: el borrador del teléfono se suelta. Sin poder guardar (memoria
+      // llena) se queda en el teléfono, y no se vuelve a ofrecer mientras la app siga abierta.
+      if(extra && result.sesion){
+        if(typeof saveDraft === 'function') saveDraft();
+        if(seGuardo){ medAnotarVolcadas([result.sesion]); medSoltarBorradorNativo(extra.llave, [result.sesion]); }
+        else MED_VOLCADAS_AQUI.add(result.sesion);
+      }
       // DIRECTO A REVISARLAS. Su pedido: "después de la cámara, al pulsar
       // terminar debe llevarme directamente a ver las medidas para revisarlas e
       // ir a descargar el PDF".
@@ -20335,7 +20876,7 @@ body.med-pp-abierto{overflow:hidden;}
     }catch(e){
       console.error(e);
       alert('No se pudo abrir la cámara de medir.');
-    }
+    }finally{ MED_CAMARA_ABIERTA = false; }
   }
 
   // Reparte las medidas etiquetadas en tarjetas.
@@ -20356,7 +20897,8 @@ body.med-pp-abierto{overflow:hidden;}
     medidas.forEach(m => {
       const seccion = m.seccion || 'floor';
       const nivel = m.nivel || '';
-      const cuarto = m.cuarto || '';
+      // (20-oct) Lo de TODO EL NIVEL va sin cuarto aunque la cámara se haya abierto desde un cuarto (igual que Scanova).
+      const cuarto = m.todoNivel ? '' : (m.cuarto || '');
       const clave = seccion + '|' + nivel + '|' + cuarto;
       let entrada = tarjetas.get(clave);
       if(!entrada){
@@ -20708,7 +21250,9 @@ body.med-pp-abierto{overflow:hidden;}
             piezas: medCalcular(material, a, b, seccion).piezas,
             linear: medCalcular(material, a, b, seccion).linear,
             // Lo que se restó y qué fue, para que el papel lo diga ("12 × 8 ft − 20 SF (1 door) = 76 SF").
-            menos, menosQue: menos ? String(($('.meas-menos-que', cut) || {}).value || '').trim() : ''
+            menos, menosQue: menos ? String(($('.meas-menos-que', cut) || {}).value || '').trim() : '',
+            // (20-oct, cámara nueva) La marca de "Todo el nivel" que puso la cámara (medAgruparPorNivel la lee).
+            todoNivel: String(($('.meas-todo-nivel', cut) || {}).value || '') === '1'
           });
         });
       });
@@ -20781,7 +21325,7 @@ body.med-pp-abierto{overflow:hidden;}
       const claveCuarto = todoNivel ? '\u0000todo-el-nivel' : (c.cuarto || '');
       let ct = nv.cuartos.get(claveCuarto);
       if(!ct){
-        ct = { cuarto: todoNivel ? '' : claveCuarto, titulo: todoNivel ? 'Whole level' : (claveCuarto || 'Room not specified'),
+        ct = { cuarto: todoNivel ? '' : claveCuarto, titulo: todoNivel ? 'Whole level' : (claveCuarto || 'Room not specified'), todoNivel,
                orden: nv.cuartos.size, sqft:0, linear:0, materiales: new Map() };
         nv.cuartos.set(claveCuarto, ct);
       }
@@ -20824,7 +21368,7 @@ body.med-pp-abierto{overflow:hidden;}
         nivel: nv.nivel, titulo: nv.titulo, rango: nv.rango,
         sqft: med2(nv.sqft), linear: med2(nv.linear), piezas: nv.piezas || 0,
         cuartos: Array.from(nv.cuartos.values()).sort(porOrden).map(ct => ({
-          cuarto: ct.cuarto, titulo: ct.titulo,
+          cuarto: ct.cuarto, titulo: ct.titulo, todoNivel: !!ct.todoNivel,
           sqft: med2(ct.sqft), linear: med2(ct.linear), piezas: ct.piezas || 0,
           materiales: Array.from(ct.materiales.values()).sort(porOrden).map(mt => ({
             material: mt.material, superficie: mt.superficie, seccion: mt.seccion,
@@ -21758,6 +22302,7 @@ body.med-pp-abierto{overflow:hidden;}
           salida.push({ seccion: sec, seccionNombre: nombre, nivel, cuarto, material,
             a: aOk ? a : 0, b: bOk ? b : 0,
             menos, menosQue: menos ? v(dc, 'meas-menos-que').trim() : '',
+            todoNivel: v(dc, 'meas-todo-nivel') === '1',          // (20-oct) "Whole level" también en lo guardado
             sqft: r.sqft, piezas: r.piezas, linear: r.linear, faltaAlto: r.faltaAlto,
             // Una pared sin alto no está completa: no se suma hasta que le pongan el alto (15-oct-2026).
             completo: !!material && aOk && !r.faltaAlto });
@@ -23224,24 +23769,61 @@ body.med-pp-abierto{overflow:hidden;}
       alert('Scanning the floor plan only works in the phone app.');
       return;
     }
+    // (20-oct, fase 2) EL ESCANEO QUE NO SE PIERDE (copiado de Scanova). Con el escáner abierto iOS puede matar la
+    // página por memoria; antes el escaneo se perdía sin aviso. Con `trabajo` + `entrega` el escáner lo escribe en el
+    // teléfono ANTES de responder, y fpRecogerEscaneos lo guarda como cualquier escaneo. Aparato viejo: lo ignora.
+    if(FP_ESCANEANDO) return;
+    FP_ESCANEANDO = true;          // (revisión) ANTES de esperar nada: un doble toque no abre dos escáneres
+    try{
+    // Lo que quedó de antes se guarda primero (si no, el escaneo nuevo lo taparía en la pantalla).
+    try{ await fpRecogerEscaneos(true); }catch(e){}
+    const conCopia = !!RoomScan.pendientes;
+    const entrega = conCopia ? fpNuevaEntrega() : '';
+    if(entrega) fpAnotarEntrega(entrega, { job: fpJobInfo(), planta: fpNivelBase || '' });
     try{
       // La planta viaja a la cámara: la barra de arriba y la voz dicen "2do
       // Piso" en vez de "Nivel 1", que es lo mismo que va a leer en Medidas.
       // Los niveles del proyecto viajan a la bandeja de la cámara; el que se
       // escoja ahí es el que manda (puede cambiarlo sin salir).
-      const result = await RoomScan.scan({ nivelBase: fpNivelBase || '', niveles: FP_PLANTAS });
+      const result = await RoomScan.scan(Object.assign({ nivelBase: fpNivelBase || '', niveles: FP_PLANTAS },
+        entrega ? { trabajo: FP_TRABAJO_ESCANEOS, entrega } : {}));
       if(result && result.nivelBase) fpNivelBase = result.nivelBase;
       if(result.cancelled){
+        if(entrega) fpOlvidarEntrega(entrega);
         if(result.error) alert(result.error);
         return;
       }
+      // Llegó vacía o dañada (un NaN que el puente no pudo mandar): la copia del teléfono manda. Si en el teléfono
+      // tampoco hay nada, sigue como siempre.
+      if(entrega && !(Array.isArray(result.rooms) && result.rooms.length)){
+        if(await fpRecogerEscaneos(true)) return;
+      }
+      fpProcesarEscaneo(result, fpJobInfo(), fpNivelBase);
+      floorplanData = result;
+      floorplanId = null;          // escaneo nuevo = plano nuevo, no pisa al que estaba abierto
+      fpResetUndoStack();
+      const guardado = saveFloorplanDraft();
+      // Ya en Planos guardados: la copia del teléfono se suelta (antes de dibujar: si el dibujo falla, ya está a salvo).
+      // Sin poder guardar, se queda allá.
+      if(entrega && guardado) fpSoltarEntrega(entrega, floorplanId);
+      renderFloorplan(floorplanData);
+    }catch(e){
+      console.error(e);
+      alert('Could not scan the floor plan. Try again.');
+    }
+    }finally{ FP_ESCANEANDO = false; }
+  }
+
+  // Lo que se le hace a un escaneo que acaba de llegar (o que se recogió del teléfono) antes de ser el plano.
+  // El MISMO camino de siempre, solo sacado a su propia función (20-oct) para que el recogido pase por lo mismo.
+  function fpProcesarEscaneo(result, job, planta){
       // Stamp who this plan belongs to onto the plan itself, so it travels
       // with the saved draft and prints even if the fields are edited later.
-      result.job = fpJobInfo();
+      result.job = job || fpJobInfo();
       // LA PLANTA DONDE EMPEZO. Sin esto, el nivel del plano es solo el orden
       // del escaneo y Medidas no puede saber qué cuartos son del segundo piso.
       // Viaja DENTRO del plano, así que sigue ahí cuando lo abra mañana.
-      if(fpNivelBase) result._nivelBase = fpNivelBase;
+      if(planta) result._nivelBase = planta;
       // Un sello por escaneo: sirve unicamente para contar cuantos lleva.
       result._scanId = 'scan-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
       fpMemRememberScan(result);
@@ -23271,16 +23853,99 @@ body.med-pp-abierto{overflow:hidden;}
       // Los cuartos sin acceso que las paredes ya dibujan (un clóset, el
       // laundry): se deducen solos, nombrados por su puerta (13-oct).
       try{ fpAutoCompletarEspacios(result); }catch(e){ console.warn('autocompletar', e); }
-      floorplanData = result;
-      floorplanId = null;          // escaneo nuevo = plano nuevo, no pisa al que estaba abierto
-      fpResetUndoStack();
-      saveFloorplanDraft();
-      renderFloorplan(floorplanData);
-    }catch(e){
-      console.error(e);
-      alert('Could not scan the floor plan. Try again.');
-    }
+      return result;
   }
+
+  // ---- (20-oct, fase 2) LOS ESCANEOS QUE EL ESCÁNER DEJÓ EN EL TELÉFONO ----
+  // Todos los de Field Reports van en una sola carpeta del teléfono (aquí no hay proyecto). De cada uno se apunta,
+  // ANTES de escanear, de quién era (Job Info) y en qué planta empezó: el escaneo recogido se guarda con eso.
+  const FP_TRABAJO_ESCANEOS = 'fr-escaneos';
+  const FP_ENTREGAS_KEY = 'fpEntregas:v1';        // { entrega: { job, planta, at, guardado? } }
+  let FP_ESCANEANDO = false;
+  function fpNuevaEntrega(){
+    try{ if(window.crypto && crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+  }
+  function fpEntregas(){ const o = nubeLeerJSON(FP_ENTREGAS_KEY, {}); return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {}; }
+  function fpAnotarEntrega(entrega, datos){
+    const o = fpEntregas(), limite = Date.now() - 180 * 86400000;     // el teléfono las guarda 180 días
+    Object.keys(o).forEach(k => { if(!(+(o[k] && o[k].at) > limite)) delete o[k]; });
+    o[String(entrega).toLowerCase()] = Object.assign({ at: Date.now() }, o[String(entrega).toLowerCase()] || {}, datos || {});
+    nubeEscribirJSON(FP_ENTREGAS_KEY, o);
+  }
+  function fpOlvidarEntrega(entrega){ const o = fpEntregas(); delete o[String(entrega).toLowerCase()]; nubeEscribirJSON(FP_ENTREGAS_KEY, o); }
+  // Ya guardado como plano: se apunta PRIMERO (si la app se cierra antes de soltar, no se guarda dos veces) y se suelta.
+  function fpSoltarEntrega(entrega, planId){
+    if(planId) fpAnotarEntrega(entrega, { guardado: planId });
+    const RS = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.RoomScan;
+    if(!RS || !RS.soltar){ return; }
+    try{
+      Promise.resolve(RS.soltar({ trabajo: FP_TRABAJO_ESCANEOS, ids: [entrega] }))
+        .then(() => fpOlvidarEntrega(entrega)).catch(() => {});
+    }catch(e){}
+  }
+  let FP_RECOGIENDO = null;
+  // Desde el arranque también (onTabChange): en un microtask, por la zona muerta de los `let` de aquí.
+  // `propio` = lo llama fpEscanear, que ya tiene FP_ESCANEANDO puesto.
+  function fpRecogerEscaneos(propio){ return Promise.resolve().then(() => fpRecogerEscaneosYa(propio)); }
+  function fpRecogerEscaneosYa(propio){
+    if(FP_RECOGIENDO) return FP_RECOGIENDO;
+    FP_RECOGIENDO = fpRecoger(!!propio).catch(e => { console.warn('escaneos sin guardar', e); return 0; }).finally(() => { FP_RECOGIENDO = null; });
+    return FP_RECOGIENDO;
+  }
+  async function fpRecoger(propio){
+    const RS = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.RoomScan;
+    if(!isNative() || !RS || !RS.pendientes || (FP_ESCANEANDO && !propio)) return 0;
+    let r; try{ r = await medConTiempo(RS.pendientes({ trabajo: FP_TRABAJO_ESCANEOS }), 5000); }catch(e){ return 0; }
+    const lista = ((r && r.escaneos) || []).filter(e => e && typeof e === 'object' && e._entrega);
+    let n = 0, ultimo = null, sinLugar = false;
+    for(const e of lista){
+      if(FP_ESCANEANDO && !propio) break;
+      const ent = String(e._entrega).toLowerCase(), apunte = fpEntregas()[ent] || {};
+      // Ya es un plano guardado (la app se cerró entre guardar y soltar): solo se suelta.
+      if(apunte.guardado && fpListLive().some(x => x && x.id === apunte.guardado)){ fpSoltarEntrega(ent, null); continue; }
+      // Sin ningún cuarto no hay nada que guardar.
+      if(!(Array.isArray(e.rooms) && e.rooms.length)){ fpSoltarEntrega(ent, null); continue; }
+      const planta = String(e.nivelBase || apunte.planta || '');
+      try{ fpProcesarEscaneo(e, apunte.job || { client:'', address:'', date:'', claim:'', tech:'', phone:'' }, planta); }
+      catch(err){ console.warn('escaneo recogido', err); continue; }
+      // (revisión) Se guarda con el plano abierto apartado: si no cabe, el abierto regresa tal cual (sin perder su Deshacer).
+      const antesData = floorplanData, antesId = floorplanId;
+      floorplanData = e;
+      floorplanId = null;
+      if(!saveFloorplanDraft()){ floorplanData = antesData; floorplanId = antesId; sinLugar = true; break; }   // memoria llena: se queda en el teléfono
+      fpResetUndoStack();
+      fpSoltarEntrega(ent, floorplanId);
+      ultimo = floorplanId; n++;
+    }
+    if(ultimo){
+      // Se abre el último como si acabara de escanearse, con su Job Info en pantalla.
+      try{ await fpOpenSaved(ultimo); }catch(e){ try{ renderFloorplan(floorplanData); }catch(e2){} }
+      const st = document.getElementById('floorplanStatus');
+      const txt = (n === 1 ? 'Se recuperó un escaneo que no se había guardado.' : 'Se recuperaron ' + n + ' escaneos que no se habían guardado.')
+        + ' Ya ' + (n === 1 ? 'está' : 'están') + ' en Planos guardados.';
+      if(st) st.textContent = txt;
+    } else if(sinLugar){
+      // El aviso de "memoria llena" ya lo dio fpListSave (almacenLleno); aquí solo queda dicho en la pantalla de Plano.
+      const st = document.getElementById('floorplanStatus');
+      if(st) st.textContent = 'Hay un escaneo en el teléfono que no cupo (memoria llena). Borre un plano o un trabajo de medidas y vuelva a entrar a Plano.';
+    }
+    return n;
+  }
+  // El escáner avisa cuando dejó una copia (una página recargada con el escáner abierto ya no espera su respuesta,
+  // pero sí oye este aviso). Solo se recoge estando en Plano.
+  (function fpOirEscaner(){
+    try{
+      const RS = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.RoomScan;
+      if(!RS || !RS.addListener || !RS.pendientes) return;
+      RS.addListener('escaneoEnTelefono', () => {
+        setTimeout(() => {
+          const act = document.querySelector('.tab-panel.active');
+          if(act && act.dataset.tab === 'floorplan' && !FP_ESCANEANDO) fpRecogerEscaneos();
+        }, 400);
+      });
+    }catch(e){}
+  })();
 
   // Los cinco campos de Plano vuelven a sellar el plano abierto. En 'change'
   // (al salir del campo), no en cada tecla: reescribir el plano en cada letra
@@ -42482,6 +43147,7 @@ body.med-pp-abierto{overflow:hidden;}
       superficie: MED_SUPERFICIE_EN[c.seccion] || c.seccion,
       material: c.material, a: c.a, b: c.b, sqft: c.sqft, linear: c.linear, piezas: c.piezas || 0,
       menos: c.menos || 0, menosQue: c.menosQue || '',      // (20-oct) la resta sale igual en la vista previa
+      todoNivel: !!c.todoNivel,                            // (20-oct) y "Whole level"
       vaAlPapel: !!c.completo
     })).filter(c => c.vaAlPapel);
     const cuerpo = cortes.length ? medidasHtmlPorNivel(medAgruparPorNivel(cortes))
@@ -42987,7 +43653,14 @@ body.med-pp-abierto{overflow:hidden;}
       return a;
     }, {});
     const vals = {};
-    Object.keys(t.vals || {}).forEach(k => { if(k.indexOf('measurements|') === 0) vals[k] = t.vals[k]; });
+    Object.keys(t.vals || {}).forEach(k => {
+      if(k.indexOf('measurements|') !== 0) return;
+      // (20-oct, cámara nueva) La marca de "Todo el nivel" VACÍA no cuenta: todo trabajo y todo PDF guardado antes de que
+      // existiera la casilla no la trae, y abrirlo la agrega vacía. Contarla diría "el PDF es de antes del último cambio"
+      // sin que nadie cambiara nada. Marcada (de la cámara), sí cuenta.
+      if(k.indexOf('|meas-todo-nivel|') > 0 && !t.vals[k]) return;
+      vals[k] = t.vals[k];
+    });
     return JSON.stringify([t.cliente || '', t.dir || '', t.fecha || '', +t.cuartos || 0, orden(filas), orden(vals)]);
   }
   // Los niveles de un trabajo guardado, en el orden de la casa (1st Floor antes
