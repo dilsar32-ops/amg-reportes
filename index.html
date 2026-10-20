@@ -8779,7 +8779,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-20-E';
+  const APP_BUILD = '2026-10-20-F';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -43592,8 +43592,8 @@ body.med-pp-abierto{overflow:hidden;}
   // ---- DENTRO DEL APP DEL TELEFONO ----
   // Lo de arriba (checkWebUpdate) es para el enlace de la web, que se arregla
   // recargando. Aqui es distinto: el nativo ya bajo la version nueva y la
-  // dejo lista, pero solo entra al abrir el app EN FRIO. Un recargar no basta,
-  // asi que no se ofrece un boton que no funcionaria.
+  // dejo lista, pero solo entra al abrir el app EN FRIO. Un recargar no basta:
+  // por eso el toque usa usarVersionBajada (cambia la carpeta de la web, no recarga).
   let avisoAppPuesto = false;
   async function checkAppUpdate(){
     if(typeof isNative !== 'function' || !isNative()) return;
@@ -43611,11 +43611,13 @@ body.med-pp-abierto{overflow:hidden;}
         if(/^\d{4}-\d{2}-\d{2}/.test(v) && e && e.nativo && v > e.nativo) nativoNuevo = v;
       }catch(err){}
       if(avisoAppPuesto) return;
-      let texto = null, color = null, instalar = false;
-      if(e && e.lista){
-        texto = 'Ya se bajo la version ' + e.lista + '. Cierre el app por completo y abralo otra vez.';
-        color = '#1f6f5b';
-      }else if(e && e.esperandoCable){
+      // (20-oct) Su queja: "en Scanova toco la barra y me lleva a instalar; en Field
+      // Reports la toco y no hace NADA". La barra que salia casi siempre era la de
+      // "Ya se bajo la version X" (cada web publicada la trae), y tocarla solo la
+      // quitaba. Ahora: 1) el aparato nuevo va PRIMERO (la web bajada entra sola al
+      // volver a abrir; el aparato no), y 2) tocar la de la web bajada la PONE YA.
+      let texto = null, color = null, instalar = false, usarYa = null;
+      if(e && e.esperandoCable){
         // Esta version web pide codigo nativo que el telefono no tiene: se
         // instala el aparato nuevo desde Safari (ya no hace falta cable).
         texto = 'Hay una version nueva (' + e.esperandoCable + ') que trae cambios de camara, escaner o traductor. ' +
@@ -43624,6 +43626,9 @@ body.med-pp-abierto{overflow:hidden;}
       }else if(nativoNuevo){
         texto = 'Hay una version nueva del aparato (' + nativoNuevo + '): reconocedor y traductor del iPhone. Toque aqui para instalarla desde Safari.';
         color = '#8a5c08'; instalar = true;
+      }else if(e && e.lista){
+        texto = 'Ya se bajo la version nueva (' + e.lista + '). Toque aqui para usarla.';
+        color = '#1f6f5b'; usarYa = e.lista;
       }
       if(!texto) return;
       avisoAppPuesto = true;
@@ -43636,9 +43641,59 @@ body.med-pp-abierto{overflow:hidden;}
         'font-weight:700;display:flex;gap:10px;align-items:center;' +
         'justify-content:center;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.35);';
       b.innerHTML = '<span>' + esc(texto) + '</span>';
-      b.addEventListener('click', ()=>{ if(instalar) window.open(NATIVO_PAGINA, '_blank'); b.remove(); avisoAppPuesto = false; });
+      b.setAttribute('role', 'button');
+      b.addEventListener('click', async ()=>{
+        if(instalar){ abrirEnSafari(NATIVO_PAGINA); b.remove(); avisoAppPuesto = false; return; }
+        if(usarYa){
+          if(b.dataset.ocupada) return;
+          b.dataset.ocupada = '1';
+          if(await usarVersionBajada(usarYa)) return;      // la pagina se vuelve a cargar con la nueva
+          // No se pudo cambiar aqui adentro: queda el camino de siempre.
+          b.querySelector('span').textContent = 'Cierre el app por completo y abrala otra vez: ahi entra la version ' + usarYa + '.';
+          return;
+        }
+        b.remove(); avisoAppPuesto = false;
+      });
       document.body.appendChild(b);
     }catch(err){}
+  }
+  // Abre una pagina en Safari, fuera del app. Si el aparato trae la pieza de Scanova
+  // (Aparato.abrirSafari) se usa; si no, window.open: Capacitor lo manda a Safari.
+  function abrirEnSafari(url){
+    const C = window.Capacitor, P = C && C.Plugins;
+    const Ap = P && P.Aparato;
+    // isPluginAvailable: un nombre que el aparato no trae no debe contar (Capacitor
+    // puede darle un objeto de relleno que falla despues, ya fuera del toque).
+    if(Ap && typeof Ap.abrirSafari === 'function' && typeof C.isPluginAvailable === 'function' && C.isPluginAvailable('Aparato')){
+      Ap.abrirSafari({ url }).catch(()=> window.open(url, '_blank'));
+      return;
+    }
+    window.open(url, '_blank');
+  }
+  // Pone YA la version que el telefono bajo (la que normalmente entra al volver a
+  // abrir el app en frio). Lo pide la persona con un toque: antes se guarda lo escrito.
+  // Usa dos piezas que el app ya trae (WebView de Capacitor y Filesystem): sin aparato nuevo.
+  // Si la copia no abre bien, la red de seguridad del Actualizador la tira en el
+  // siguiente arranque igual que siempre.
+  async function usarVersionBajada(v){
+    try{
+      const P = window.Capacitor && window.Capacitor.Plugins;
+      const F = P && P.Filesystem, W = P && P.WebView;
+      if(!F || !W || typeof F.getUri !== 'function' || typeof W.setServerBasePath !== 'function') return false;
+      if(!/^\d{4}-\d{2}-\d{2}-[A-Z]+$/.test(String(v || ''))) return false;
+      const carpeta = 'NoCloud/ionic_built_snapshots/' + v;
+      const st = await F.stat({ directory: 'LIBRARY', path: carpeta + '/index.html' });
+      if(!st || !st.size) return false;
+      const r = await F.getUri({ directory: 'LIBRARY', path: carpeta });
+      const ruta = decodeURIComponent(new URL(r.uri).pathname).replace(/\/+$/, '');
+      if(!ruta) return false;
+      try{ commitPending(); }catch(e){}
+      try{ saveDraft(); }catch(e){}
+      // que al volver a cargar no le pregunte otra vez la empresa (igual que doorTap)
+      try{ if(SIDE) sessionStorage.setItem('sideOnce', SIDE); }catch(e){}
+      await W.setServerBasePath({ path: ruta });
+      return true;
+    }catch(err){ return false; }
   }
 
   // LA CONFIRMACION QUE SOSTIENE TODA LA RED DE SEGURIDAD.
