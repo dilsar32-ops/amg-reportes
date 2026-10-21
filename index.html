@@ -9699,7 +9699,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-Q2';
+  const APP_BUILD = '2026-10-21-Q3';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -9741,12 +9741,64 @@ body.med-pp-abierto{overflow:hidden;}
     return A.letra > B.letra;
   }
 
+  // ---- ACTUALIZAR AL INSTANTE (21 oct 2026, web Q3; su pedido: "que esté buscando constantemente") ----
+  // Cada 60 s con la app a la vista (y al volver a primer plano) se pregunta qué versión hay.
+  //  * Web (Safari): la barra naranja de siempre, que recarga.
+  //  * Aparato: recargar NO sirve (vuelve a abrir la copia vieja). Se le pide al Actualizador que baje la nueva
+  //    YA (forzado, como mucho 1 vez por minuto) y, cuando la deja lista: en la PUERTA o en el panel del asistente
+  //    quieto se pone sola (usarVersionBajada); en cualquier otra pantalla, barra "Versión nueva lista — tocar para usarla".
+  const ACT_FORZADO_MS = 60 * 1000;
+  function actPlugin(){ const P = window.Capacitor && window.Capacitor.Plugins; return (P && P.Actualizador) || null; }
+  // ¿Se puede cambiar de versión sin preguntar? Solo donde no hay nada a medio llenar.
+  function actSeguroAplicarYa(){
+    try{
+      const ap = document.getElementById('asPanel');
+      if(ap && !ap.hidden){
+        const t = document.getElementById('asTarjeta');
+        return (!t || t.hidden) && (ap.dataset.estado === 'reposo' || ap.dataset.estado === 'esperando');
+      }
+      const g = document.getElementById('authGate'), pick = document.getElementById('authPick');
+      return !!(g && !g.classList.contains('done') && pick && !pick.hidden);
+    }catch(e){ return false; }
+  }
+  function actBarraLista(v){
+    if(document.getElementById('appUpdateBar')) return;
+    const b = document.createElement('div');
+    b.id = 'appUpdateBar'; b.setAttribute('role', 'button');
+    b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:400;background:#1f6f5b;color:#fff;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top));'
+      + 'font-weight:700;display:flex;gap:10px;align-items:center;justify-content:center;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.35);';
+    b.innerHTML = '<span></span>'; b.querySelector('span').textContent = 'Versión nueva lista (' + v + ') — tocar para usarla';
+    b.addEventListener('click', async ()=>{
+      if(b.dataset.ocupada) return; b.dataset.ocupada = '1';
+      if(await usarVersionBajada(v)) return;
+      b.querySelector('span').textContent = 'Cierre el app por completo y ábrala otra vez: ahí entra la versión ' + v + '.';
+    });
+    document.body.appendChild(b);
+  }
+  async function actNativoNueva(latest){
+    const A = actPlugin(); if(!A) return 'sin-plugin';
+    let e = null; try{ e = await A.estado(); }catch(err){}
+    // La bajada que hay no es la última: se pide la última YA (el freno de 1 hora del aparato no aplica con forzado).
+    if(!(e && e.lista && !selloMasNuevo(latest, e.lista))){
+      let ult = 0; try{ ult = +localStorage.getItem('actForzadoAt') || 0; }catch(err){}
+      if(Date.now() - ult < ACT_FORZADO_MS || (e && e.revisando)) return 'espera';
+      try{ localStorage.setItem('actForzadoAt', String(Date.now())); }catch(err){}
+      try{ await A.revisar({ forzado: true }); }catch(err){}
+      try{ e = await A.estado(); }catch(err){}
+    }
+    const v = e && e.lista;
+    if(!v || !selloMasNuevo(v, APP_BUILD)) return 'sin-lista';
+    if(actSeguroAplicarYa()){ if(await usarVersionBajada(v)) return 'aplicada'; }
+    actBarraLista(v); return 'barra';
+  }
   async function checkForNewVersion(){
     try{
+      if(document.visibilityState && document.visibilityState !== 'visible') return;
       const res = await fetch('version.txt?cb=' + Date.now(), { cache: 'no-store' });
       if(!res.ok) return;
       const latest = (await res.text()).trim();
       if(!latest || !selloMasNuevo(latest, APP_BUILD)) return;   // solo si es mas nueva, no solo distinta
+      if(typeof isNative === 'function' && isNative() && actPlugin()) return await actNativoNueva(latest);
       let bar = document.getElementById('newVersionBar');
       if(!bar){
         bar = document.createElement('div'); bar.id = 'newVersionBar';
@@ -9758,8 +9810,10 @@ body.med-pp-abierto{overflow:hidden;}
       bar.innerHTML = 'Hay una versi&oacute;n nueva de la app (' + latest + '). '
         + '<button type="button" style="margin-left:8px;padding:6px 12px;border-radius:999px;border:0;background:#111;color:#fff;font-weight:700;">Actualizar ahora</button>';
       bar.querySelector('button').addEventListener('click', ()=> location.reload());
+      return 'barra-web';
     }catch(e){}
   }
+  // ---- /ACTUALIZAR AL INSTANTE ----
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') checkForNewVersion(); });
   // La puerta se vuelve a preguntar si la app estuvo escondida mas de dos
   // horas o cambio el dia: nadie amanece en la empresa de ayer.
@@ -9770,7 +9824,7 @@ body.med-pp-abierto{overflow:hidden;}
     if((Date.now() - hiddenAt) > SIDE_REASK_MS || dayChanged){ commitPending(); saveDraft(); showDoor(true); }
   });
   if($('#menuSwitchSide')) $('#menuSwitchSide').addEventListener('click', ()=>{ commitPending(); saveDraft(); showDoor(true); });
-  setInterval(checkForNewVersion, 10*60*1000);
+  setInterval(checkForNewVersion, 60*1000);   // Q3: cada minuto (solo pregunta si la app está a la vista)
   setTimeout(checkForNewVersion, 4000);
 
   // LA VERSION QUE VE LA CUADRILLA, y el sello que veo yo, son dos cosas.
@@ -44814,7 +44868,7 @@ body.med-pp-abierto{overflow:hidden;}
         const v = r.ok ? String(await r.text()).trim() : '';
         if(/^\d{4}-\d{2}-\d{2}/.test(v) && e && e.nativo && v > e.nativo) nativoNuevo = v;
       }catch(err){}
-      if(avisoAppPuesto) return;
+      if(avisoAppPuesto || document.getElementById('appUpdateBar')) return;
       // (20-oct) Su queja: "en Scanova toco la barra y me lleva a instalar; en Field
       // Reports la toco y no hace NADA". La barra que salia casi siempre era la de
       // "Ya se bajo la version X" (cada web publicada la trae), y tocarla solo la
@@ -44884,7 +44938,7 @@ body.med-pp-abierto{overflow:hidden;}
       const P = window.Capacitor && window.Capacitor.Plugins;
       const F = P && P.Filesystem, W = P && P.WebView;
       if(!F || !W || typeof F.getUri !== 'function' || typeof W.setServerBasePath !== 'function') return false;
-      if(!/^\d{4}-\d{2}-\d{2}-[A-Z]+$/.test(String(v || ''))) return false;
+      if(!/^\d{4}-\d{2}-\d{2}-[A-Z0-9]+$/.test(String(v || ''))) return false;   // Q2, Q3: la letra puede traer número
       const carpeta = 'NoCloud/ionic_built_snapshots/' + v;
       const st = await F.stat({ directory: 'LIBRARY', path: carpeta + '/index.html' });
       if(!st || !st.size) return false;
