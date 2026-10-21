@@ -4917,6 +4917,9 @@ body.med-pp-abierto{overflow:hidden;}
       <h2><span class="num">1</span>Información del Trabajo<span class="en"> / Job Info</span></h2>
       <div id="ct-reanudar" class="ct-check" hidden></div>
       <div id="ct-firmadoAviso" class="ct-check" hidden></div>
+      <!-- (21-oct) ESTÁS AQUÍ: el cliente de la casa donde está parado, de un toque (llena nombre, dirección y teléfono). Vacía
+           y escondida si no hay ubicación, no hay casa cerca o el trabajo ya es de esa casa. -->
+      <div id="ctAqui" class="ct-check" hidden></div>
       <div class="field"><label>Nombre del Cliente<span class="en"> / Client Name</span></label><input type="text" id="ct-client" placeholder="Nombre" autocomplete="off"></div>
       <div class="field"><label>Teléfono del Cliente<span class="en"> / Client Phone</span></label><input type="tel" id="ct-phone" inputmode="tel" placeholder="(703) 555-1234" autocomplete="off"></div>
       <div class="field"><label>Dirección del Trabajo<span class="en"> / Job Address</span></label><input type="text" id="ct-address" placeholder="Calle, Ciudad, Estado" autocomplete="off"></div>
@@ -9982,7 +9985,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-R5';
+  const APP_BUILD = '2026-10-21-R6';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -25973,8 +25976,24 @@ body.med-pp-abierto{overflow:hidden;}
   // Sin permiso, sin GPS, sin señal o sin casa cerca: la tarjeta queda vacía y escondida (nada de avisos ni letreros).
   // Lumi usa lo mismo: window.casaCercana(), window.abrirMedidasCon(trabajo, {nivel}), window.abrirPlanoCon(trabajo, {nivel}).
   // `var` y `function` (no let/const): trMostrar llama trAquiPintar y nunca debe tocar una zona muerta al cargar.
-  var TR_AQUI_M = 150;                       // metros: más lejos que eso ya no es "esta casa"
-  var TR_AQUI_PRECISION_M = 200;             // un GPS que no sabe dónde está con ±200 m no sugiere nada
+  // (R5, su prueba real: no salió la tarjeta) Adentro de una casa el iPhone suele dar ±65 m (Wi-Fi) y a veces ±100-500 m
+  // (solo celular): 150 m / ±200 m dejaban fuera casos reales. Ahora: 250 m; con ±200 m o menos se acepta directo; entre
+  // ±200 y ±500 m solo si la casa más cercana gana por mucho (la siguiente a 600 m o más); peor que ±500 m, nada.
+  var TR_AQUI_M = 250;                       // metros: más lejos que eso ya no es "esta casa"
+  var TR_AQUI_PRECISION_M = 500;             // un GPS que no sabe dónde está con ±500 m no sugiere nada
+  var TR_AQUI_PRECISION_BUENA_M = 200;       // hasta aquí el punto es de fiar sin más condiciones
+  var TR_AQUI_SEGUNDA_LEJOS_M = 600;         // con precisión regular, la segunda casa más cercana debe estar al menos a esto
+  var TR_AQUI_GEO_MAX = 60;                  // casas sin punto que Apple ubica por visita (se para en cuanto una está cerca)
+  var TR_AQUI_BIT_KEY = 'trAquiBit1';        // la bitácora (solo pasos, metros, precisión y errores; nunca datos de clientes)
+  function trAquiBit(paso, datos){
+    try{
+      const l = JSON.parse(localStorage.getItem(TR_AQUI_BIT_KEY) || '[]'), d = new Date();
+      const h = d.toTimeString().slice(0, 8);
+      l.push(h + ' ' + paso + (datos ? ' ' + JSON.stringify(datos) : ''));
+      localStorage.setItem(TR_AQUI_BIT_KEY, JSON.stringify(l.slice(-60)));
+    }catch(e){}
+  }
+  function trAquiBitacora(){ try{ return JSON.parse(localStorage.getItem(TR_AQUI_BIT_KEY) || '[]').join('\n'); }catch(e){ return ''; } }
   var TR_AQUI_FIX_MS = 2 * 60 * 1000;        // un punto de hace menos de 2 minutos sirve sin volver a pedirlo
   var TR_AQUI_ESPERA_MS = 12000;             // lo más que se espera al GPS (el aparato corta a los 20 s)
   var TR_AQUI = null;                        // { casa, metros } o null
@@ -25984,16 +26003,21 @@ body.med-pp-abierto{overflow:hidden;}
   // Pura: la casa más cercana al punto si está a `maxM` metros o menos; si no, null. Empate: la primera (la más reciente).
   function trAquiMasCercana(fix, casas, maxM){
     if(!fix || !Number.isFinite(+fix.lat) || !Number.isFinite(+fix.lng)) return null;
-    if(Number.isFinite(+fix.acc) && +fix.acc > TR_AQUI_PRECISION_M) return null;
+    const acc = Number.isFinite(+fix.acc) ? +fix.acc : null;
+    if(acc != null && acc > TR_AQUI_PRECISION_M) return null;
     const tope = +maxM > 0 ? +maxM : TR_AQUI_M;
-    let mejor = null;
+    let mejor = null, segunda = null;
     (casas || []).forEach(c => {
       if(!c || c.lat == null || c.lng == null || !Number.isFinite(+c.lat) || !Number.isFinite(+c.lng)) return;
       const pies = cliDistanciaPies({ lat: +fix.lat, lng: +fix.lng }, { lat: +c.lat, lng: +c.lng });
       if(pies == null) return;
       const metros = Math.round(pies * 0.3048);
-      if(metros <= tope && (!mejor || metros < mejor.metros)) mejor = { casa: c, metros };
+      if(!mejor || metros < mejor.metros){ segunda = mejor; mejor = { casa: c, metros }; }
+      else if(!segunda || metros < segunda.metros) segunda = { casa: c, metros };
     });
+    if(!mejor || mejor.metros > tope) return null;
+    // Precisión regular (±200-500 m): solo si gana por mucho. Una segunda casa a menos de 600 m podría ser la de verdad.
+    if(acc != null && acc > TR_AQUI_PRECISION_BUENA_M && segunda && segunda.metros < TR_AQUI_SEGUNDA_LEJOS_M) return null;
     return mejor;
   }
   // Las casas de Clientes (la misma lista de "¿De qué trabajo?") con su punto, si ya lo tienen.
@@ -26011,57 +26035,123 @@ body.med-pp-abierto{overflow:hidden;}
     const f = LAST_FIX;
     if(f && Number.isFinite(+f.lat) && Number.isFinite(+f.lng) && Date.now() - (+f.at || 0) < TR_AQUI_FIX_MS) return Promise.resolve(f);
     const Loc = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Location;
-    if(!isNative() || !Loc || typeof Loc.suggestAddress !== 'function') return Promise.resolve(null);
+    if(!isNative() || !Loc || typeof Loc.suggestAddress !== 'function'){ trAquiBit('sin plugin', { nativo: isNative(), Loc: !!Loc }); return Promise.resolve(null); }
     if(!TR_AQUI_PIDIENDO){
+      const t0 = Date.now();
+      trAquiBit('pidiendo GPS');
       TR_AQUI_PIDIENDO = Promise.resolve().then(() => Loc.suggestAddress()).then(r => {
-        if(!r || !Number.isFinite(+r.lat) || !Number.isFinite(+r.lng)) return null;
-        LAST_FIX = { lat: +r.lat, lng: +r.lng, at: Date.now(), acc: Number.isFinite(+r.accuracyM) ? +r.accuracyM : null };
+        if(!r || !Number.isFinite(+r.lat) || !Number.isFinite(+r.lng)){ trAquiBit('GPS sin punto', { ms: Date.now() - t0 }); return null; }
+        LAST_FIX = { lat: +r.lat, lng: +r.lng, at: Date.now(), acc: Number.isFinite(+r.accuracyM) ? Math.round(+r.accuracyM) : null };
         try{ localStorage.setItem('lastFix', JSON.stringify(LAST_FIX)); }catch(e){}
+        trAquiBit('GPS ok', { ms: Date.now() - t0, acc: LAST_FIX.acc });
         return LAST_FIX;
-      }).catch(() => null).then(v => { TR_AQUI_PIDIENDO = null; return v; });
+      }).catch(err => { trAquiBit('GPS error', { ms: Date.now() - t0, code: (err && (err.code || err.errorMessage)) || '', msg: String((err && err.message) || err).slice(0, 80) }); return null; })
+        .then(v => { TR_AQUI_PIDIENDO = null; return v; });
     }
-    return Promise.race([TR_AQUI_PIDIENDO, new Promise(r => setTimeout(() => r(null), +esperaMs > 0 ? +esperaMs : TR_AQUI_ESPERA_MS))]);
+    let tarde = false;
+    const p = TR_AQUI_PIDIENDO;
+    const espera = new Promise(r => setTimeout(() => { tarde = true; r(null); }, +esperaMs > 0 ? +esperaMs : TR_AQUI_ESPERA_MS));
+    // (R5) Si el GPS contesta DESPUÉS del tiempo límite (la primera vez iOS pregunta el permiso y eso cuenta), el punto no se
+    // tira: si sigue en Plano y Medidas, se vuelve a buscar la casa con él.
+    p.then(v => { if(tarde && v){ trAquiBit('GPS llegó tarde'); const act = document.querySelector('.tab-panel.active'); if(act && act.dataset.tab === 'planomed') trAquiBuscar(); } });
+    return Promise.race([p, espera]);
   }
-  // Las casas sin punto: Apple las ubica (máximo 20 por vez, con pausa; sin señal se deja para después). Devuelve cuántas ubicó.
-  async function trAquiUbicarFaltan(){
+  // Las llaves (dir_key) de las casas que este teléfono ya trabajó: planos guardados, medidas guardadas y el trabajo abierto.
+  function trAquiCasasConTrabajo(){
+    const s = new Set();
+    const pon = (nombre, dir) => { const k = clienteClave({ nombre: nombre || '', direccion: dir || '' }); if(k) s.add(k); };
+    try{ fpListLive().forEach(p => { const j = p.job || (p.data && p.data.job) || {}; pon(j.client, j.address); }); }catch(e){}
+    try{ medLeerGuardadas().forEach(x => { if(x) pon(x.cliente, x.dir); }); }catch(e){}
+    try{ const t = trActual(); if(t) pon(t.nombre, t.direccion); }catch(e){}
+    return s;
+  }
+  // Las casas sin punto: Apple las ubica (hasta 60 por visita, con pausa; sin señal se deja para después). Se PARA en cuanto
+  // una ubicada queda cerca del punto `fix` (así la casa de aquí no se queda detrás de otras 20). Devuelve cuántas ubicó.
+  async function trAquiUbicarFaltan(fix, maxM){
     const Loc = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Location;
-    if(TR_AQUI_GEO_CORRIENDO || !isNative() || !Loc || typeof Loc.geocode !== 'function' || navigator.onLine === false) return 0;
-    try{ if(visGeoCorriendo) return 0; }catch(e){}                 // Visitas ya está ubicando: Apple pide calma
-    const faltan = trAquiCasas().filter(c => c.direccion && c.dir_key && c.lat == null && !TR_AQUI_SIN_PUNTO[c.dir_key]).slice(0, 20);
-    if(!faltan.length) return 0;
+    if(TR_AQUI_GEO_CORRIENDO || !isNative() || !Loc || typeof Loc.geocode !== 'function' || navigator.onLine === false){ trAquiBit('no ubica', { corriendo: TR_AQUI_GEO_CORRIENDO, online: navigator.onLine !== false, geocode: !!(Loc && Loc.geocode) }); return 0; }
+    try{ if(visGeoCorriendo){ trAquiBit('no ubica: Visitas ubicando'); return 0; } }catch(e){}   // Visitas ya está ubicando: Apple pide calma
+    // (R5) PRIMERO las casas que ya se trabajaron desde este teléfono (un plano o unas medidas guardadas, o el trabajo
+    // abierto): la casa donde uno está parado casi siempre es una de esas, y así no se queda detrás de 20 clientes nuevos de
+    // CompanyCam. Los puntos solo los guardaba el pin de Visitas, así que una casa escaneada hace días puede no tener punto.
+    const conTrabajo = trAquiCasasConTrabajo();
+    const faltan = trAquiCasas().filter(c => c.direccion && c.dir_key && c.lat == null && !TR_AQUI_SIN_PUNTO[c.dir_key])
+      .map((c, i) => ({ c, i, p: conTrabajo.has(c.dir_key) ? 0 : 1 })).sort((a, b) => a.p - b.p || a.i - b.i).map(x => x.c).slice(0, TR_AQUI_GEO_MAX);
+    if(!faltan.length){ trAquiBit('nada que ubicar'); return 0; }
     TR_AQUI_GEO_CORRIENDO = true;
-    let n = 0;
+    let n = 0, errores = 0, porque = 'fin', reintento = false;
     try{
-      for(const c of faltan){
+      for(let k = 0; k < faltan.length; k++){
+        const c = faltan[k];
         try{
           const r = await Loc.geocode({ address: c.direccion });
-          if(r && Number.isFinite(+r.lat) && Number.isFinite(+r.lng)){ cliGeoPoner(c.dir_key, +r.lat, +r.lng); n++; }
+          if(r && Number.isFinite(+r.lat) && Number.isFinite(+r.lng)){
+            cliGeoPoner(c.dir_key, +r.lat, +r.lng); n++;
+            if(fix && trAquiMasCercana(fix, [Object.assign({}, c, { lat: +r.lat, lng: +r.lng })], maxM)){ porque = 'cerca'; break; }
+          }
           else TR_AQUI_SIN_PUNTO[c.dir_key] = 1;
         }catch(err){
-          if(err && (err.code === 'red' || err.errorMessage === 'red')) break;   // sin señal: después
+          errores++;
+          if(err && (err.code === 'red' || err.errorMessage === 'red')){
+            // Sin señal, o Apple pidiendo calma (da el mismo código): se espera y se prueba UNA vez más; si sigue, después.
+            if(!reintento){ reintento = true; k--; await new Promise(r => setTimeout(r, 2500)); continue; }
+            porque = 'sin señal'; break;
+          }
           TR_AQUI_SIN_PUNTO[c.dir_key] = 1;
         }
         await new Promise(r => setTimeout(r, 400));
       }
     } finally { TR_AQUI_GEO_CORRIENDO = false; }
+    trAquiBit('ubicadas', { pedidas: faltan.length, primeroConTrabajo: faltan.filter(c => conTrabajo.has(c.dir_key)).length, ok: n, errores, porque });
     return n;
   }
   // La casa de aquí: { casa, metros } o null. Si no hay ninguna con punto cerca, ubica las que faltan y vuelve a ver.
   async function trAquiEncontrar(esperaMs, maxM){
     const fix = await trAquiPedirFix(esperaMs);
-    if(!fix) return null;
-    const r = trAquiMasCercana(fix, trAquiCasas(), maxM);
+    if(!fix){ trAquiBit('sin punto del teléfono'); return null; }
+    // (R5) Los puntos que otro teléfono ya subió llegan con la sincronización de Clientes: se le dan hasta 4 s antes de comparar.
+    try{ if(typeof clientesSincronizar === 'function') await Promise.race([Promise.resolve(clientesSincronizar(false)), new Promise(r => setTimeout(r, 4000))]); }catch(e){}
+    const casas = trAquiCasas(), conPunto = casas.filter(c => c.lat != null);
+    let r = trAquiMasCercana(fix, casas, maxM);
+    trAquiBit('comparo', { casas: casas.length, conPunto: conPunto.length, acc: fix.acc, metros: r ? r.metros : null, masCerca: (() => { let m = null; conPunto.forEach(c => { const p = cliDistanciaPies(fix, c); if(p != null && (m == null || p * 0.3048 < m)) m = Math.round(p * 0.3048); }); return m; })() });
     if(r) return r;
-    return (await trAquiUbicarFaltan()) ? trAquiMasCercana(fix, trAquiCasas(), maxM) : null;
+    r = (await trAquiUbicarFaltan(fix, maxM)) ? trAquiMasCercana(fix, trAquiCasas(), maxM) : null;
+    trAquiBit(r ? 'encontrada tras ubicar' : 'nada cerca', r ? { metros: r.metros } : undefined);
+    return r;
   }
   // Al entrar a Plano y Medidas.
   async function trAquiBuscar(){
     const seq = ++TR_AQUI_SEQ;
     let r = null;
-    try{ r = await trAquiEncontrar(TR_AQUI_ESPERA_MS, TR_AQUI_M); }catch(e){ r = null; }
-    if(seq !== TR_AQUI_SEQ) return;
+    trAquiBit('entro', { vista: TR_VISTA });
+    try{ r = await trAquiEncontrar(TR_AQUI_ESPERA_MS, TR_AQUI_M); }catch(e){ r = null; trAquiBit('error', { msg: String((e && e.message) || e).slice(0, 120) }); }
+    if(seq !== TR_AQUI_SEQ){ trAquiBit('respuesta vieja, se ignora'); return; }
     TR_AQUI = r; trAquiPintar();
+    trAquiBit(r ? 'tarjeta' : 'sin tarjeta', { vista: TR_VISTA, visible: !(document.getElementById('trAqui') || {}).hidden });
   }
+  // Leer la bitácora desde el teléfono: un toque LARGO (un segundo) en el título de arriba "PLANO Y MEDIDAS" (o cinco toques
+  // seguidos en "¿De qué trabajo?") la enseña y la copia, para pegarla en un mensaje.
+  function trAquiEnsenarBitacora(){
+    const Loc = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Location;
+    let casas = 0, conPunto = 0; try{ const l = trAquiCasas(); casas = l.length; conPunto = l.filter(c => c.lat != null).length; }catch(e){}
+    const txt = 'Estás aquí · ' + APP_BUILD + ' · ' + (isNative() ? 'app' : 'web') + ' · plugin ' + (Loc ? 'sí' : 'no') + ' · clientes ' + casas + ' · con punto ' + conPunto
+      + ' · trabajo abierto ' + (trActual() ? 'sí' : 'no') + '\n' + (trAquiBitacora() || '(vacía)');
+    try{ if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).catch(() => {}); }catch(err){}
+    alert(txt + '\n\n(Ya quedó copiada: péguela en un mensaje.)');
+  }
+  var TR_AQUI_TOQUES = 0, TR_AQUI_TOQUE_AT = 0, TR_AQUI_LARGO = null;
+  document.addEventListener('click', e => {
+    const h = e.target && e.target.closest && e.target.closest('#trLista > h2'); if(!h) return;
+    const ahora = Date.now(); TR_AQUI_TOQUES = (ahora - TR_AQUI_TOQUE_AT < 1500) ? TR_AQUI_TOQUES + 1 : 1; TR_AQUI_TOQUE_AT = ahora;
+    if(TR_AQUI_TOQUES < 5) return;
+    TR_AQUI_TOQUES = 0; trAquiEnsenarBitacora();
+  });
+  ['touchstart', 'mousedown'].forEach(ev => document.addEventListener(ev, e => {
+    const t = e.target && e.target.closest && e.target.closest('#secTitle'); if(!t) return;
+    const act = document.querySelector('.tab-panel.active'); if(!act || act.dataset.tab !== 'planomed') return;
+    clearTimeout(TR_AQUI_LARGO); TR_AQUI_LARGO = setTimeout(trAquiEnsenarBitacora, 1000);
+  }, { passive: true }));
+  ['touchend', 'touchmove', 'touchcancel', 'mouseup', 'mouseleave'].forEach(ev => document.addEventListener(ev, () => { clearTimeout(TR_AQUI_LARGO); }, { passive: true }));
   // La tarjeta: en la lista ("¿De qué trabajo?") y en el trabajo abierto cuando ese trabajo es de OTRA casa. Nada más.
   function trAquiPintar(){
     const caja = document.getElementById('trAqui'); if(!caja) return;
@@ -26129,7 +26219,42 @@ body.med-pp-abierto{overflow:hidden;}
   window.abrirMedidasCon = function(trabajo, opciones){ return trAquiAbrir(trabajo, 'medidas', opciones); };
   window.abrirPlanoCon = function(trabajo, opciones){ return trAquiAbrir(trabajo, 'plano', opciones); };
   window.nivelesFR = function(){ return FP_PLANTAS.slice(); };
-  window.__trAqui = { masCercana: trAquiMasCercana, casas: trAquiCasas, nivel: trAquiNivel, estado: () => TR_AQUI, buscar: trAquiBuscar };
+  // ---- CONTENIDOS, paso 1 (21-oct): la misma tarjeta, con el mismo buscador. Un toque llena nombre, dirección y teléfono. ----
+  var CT_AQUI = null, CT_AQUI_SEQ = 0;
+  async function ctAquiBuscar(){
+    const seq = ++CT_AQUI_SEQ;
+    let r = null;
+    try{ r = await trAquiEncontrar(TR_AQUI_ESPERA_MS, TR_AQUI_M); }catch(e){ r = null; }
+    if(seq !== CT_AQUI_SEQ) return;
+    CT_AQUI = r; ctAquiPintar();
+    trAquiBit(r ? 'contenidos: tarjeta' : 'contenidos: sin tarjeta');
+  }
+  function ctAquiPintar(){
+    const caja = document.getElementById('ctAqui'); if(!caja) return;
+    const c = CT_AQUI && CT_AQUI.casa;
+    let t = null; try{ t = ctActual(); }catch(e){ t = null; }
+    const cli = String((document.getElementById('ct-client') || {}).value || '').trim(), dir = String((document.getElementById('ct-address') || {}).value || '').trim();
+    const yaEs = !!c && (cli || dir) && trEsLaCasa({ nombre: c.nombre, direccion: c.direccion }, { client: cli, address: dir });
+    const ver = !!c && !!t && t.estado === 'abierto' && !yaEs;
+    if(!ver){ caja.hidden = true; caja.innerHTML = ''; return; }
+    caja.innerHTML = '<div class="hint" style="margin:0 0 6px; text-transform:uppercase; letter-spacing:.08em;"><b>Estás aquí</b><span class="en"> / You are here</span></div>'
+      + '<div class="tr-cab-info"><b>' + esc(c.nombre || c.direccion) + '</b>' + (c.nombre && c.direccion ? '<span>' + esc(c.direccion) + '</span>' : '') + '</div>'
+      + '<button type="button" class="btn btn-accent" data-ct-aqui="' + esc(c.dir_key) + '" style="width:100%; margin:12px 0 0; min-height:52px; font-size:16px;">'
+      + ((cli || dir) ? 'Cambiar a este cliente' : 'Usar este cliente') + ' &#9654;</button>';
+    caja.hidden = false;
+  }
+  document.addEventListener('click', e => {
+    const b = e.target && e.target.closest && e.target.closest('[data-ct-aqui]'); if(!b) return;
+    const c = trAquiClienteDe(b.dataset.ctAqui);
+    if(!c){ CT_AQUI = null; ctAquiPintar(); return; }
+    const t = ctActual(); if(!t || t.estado !== 'abierto') return;
+    cliLlenar(document.getElementById('ct-client'), c.nombre); cliLlenar(document.getElementById('ct-address'), c.direccion);
+    if(c.telefono) cliLlenar(document.getElementById('ct-phone'), c.telefono);
+    ctAquiPintar();
+  });
+  document.addEventListener('input', e => { if(e.target && (e.target.id === 'ct-client' || e.target.id === 'ct-address')) ctAquiPintar(); });
+  window.__ctAqui = { pintar: ctAquiPintar, buscar: ctAquiBuscar, estado: () => CT_AQUI };
+  window.__trAqui = { masCercana: trAquiMasCercana, casas: trAquiCasas, nivel: trAquiNivel, estado: () => TR_AQUI, buscar: trAquiBuscar, bitacora: trAquiBitacora };
 
   // LA AYUDA DE MEDIDAS.
   //
@@ -47144,6 +47269,7 @@ body.med-pp-abierto{overflow:hidden;}
     if(t.enlace && t.estado === 'abierto') ctEnlaceRevisar(t, true);
     ctRefrescarEnvios().then(() => { const p = document.querySelector('.tab-panel[data-tab="contenidos"]'); if(p && p.classList.contains('active')){ ctPintarOtros(); if(ctActual()) ctPintarFirma(); } });
     ctLiberarAuto();
+    try{ if(typeof ctAquiBuscar === 'function') ctAquiBuscar(); }catch(e){}
   }
   function ctCargarFormulario(t){
     const v = (id, val) => { const el = $('#' + id); if(el) el.value = val || ''; };
@@ -47152,6 +47278,7 @@ body.med-pp-abierto{overflow:hidden;}
     if(!t.lider && $('#ct-leader') && $('#ct-leader').value) t.lider = $('#ct-leader').value;
     if(!t.fecha) t.fecha = todayStr();
     v('ct-client', t.cliente); v('ct-address', t.direccion); v('ct-phone', t.telefono); v('ct-date', t.fecha); v('ct-leader', t.lider);
+    if(typeof ctAquiPintar === 'function') ctAquiPintar();
     const bloqueado = t.estado !== 'abierto';
     ['ct-client', 'ct-address', 'ct-phone', 'ct-date', 'ct-leader'].forEach(id => { const el = $('#' + id); if(el) el.disabled = bloqueado; });
     // TRABAJO FIRMADO EN EL PASO 1 (11 oct 2026; Amilcar: "no me deja ingresar nombre de alguien mas"): se dice
