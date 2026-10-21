@@ -9347,7 +9347,12 @@ body.med-pp-abierto{overflow:hidden;}
     note.innerHTML = '';
     try{
       const r = await Loc.suggestAddress();
-      if(r && Number.isFinite(+r.lat) && Number.isFinite(+r.lng)){ LAST_FIX = { lat:+r.lat, lng:+r.lng, at: Date.now() }; try{ localStorage.setItem('lastFix', JSON.stringify(LAST_FIX)); }catch(e){} }
+      if(r && Number.isFinite(+r.lat) && Number.isFinite(+r.lng)){
+        LAST_FIX = { lat:+r.lat, lng:+r.lng, at: Date.now(), acc: Number.isFinite(+r.accuracyM) ? Math.round(+r.accuracyM) : null, dir: String(r.address || '').slice(0, 120) };
+        try{ localStorage.setItem('lastFix', JSON.stringify(LAST_FIX)); }catch(e){}
+        // (R7) Con el punto fresco del pin, la tarjeta "Estás aquí" se vuelve a buscar en la pantalla donde está.
+        try{ if(el.id === 'ct-address' && typeof ctAquiBuscar === 'function') ctAquiBuscar(); }catch(e2){}
+      }
       const acc = Math.round(r.accuracyM || 0);
       if(!r.address){
         note.innerHTML = '<span class="locwarn">' + T.none + '</span>';
@@ -9985,7 +9990,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-R6';
+  const APP_BUILD = '2026-10-21-R7';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -26041,9 +26046,9 @@ body.med-pp-abierto{overflow:hidden;}
       trAquiBit('pidiendo GPS');
       TR_AQUI_PIDIENDO = Promise.resolve().then(() => Loc.suggestAddress()).then(r => {
         if(!r || !Number.isFinite(+r.lat) || !Number.isFinite(+r.lng)){ trAquiBit('GPS sin punto', { ms: Date.now() - t0 }); return null; }
-        LAST_FIX = { lat: +r.lat, lng: +r.lng, at: Date.now(), acc: Number.isFinite(+r.accuracyM) ? Math.round(+r.accuracyM) : null };
+        LAST_FIX = { lat: +r.lat, lng: +r.lng, at: Date.now(), acc: Number.isFinite(+r.accuracyM) ? Math.round(+r.accuracyM) : null, dir: String(r.address || '').slice(0, 120) };
         try{ localStorage.setItem('lastFix', JSON.stringify(LAST_FIX)); }catch(e){}
-        trAquiBit('GPS ok', { ms: Date.now() - t0, acc: LAST_FIX.acc });
+        trAquiBit('GPS ok', { ms: Date.now() - t0, acc: LAST_FIX.acc, conDireccion: !!LAST_FIX.dir });
         return LAST_FIX;
       }).catch(err => { trAquiBit('GPS error', { ms: Date.now() - t0, code: (err && (err.code || err.errorMessage)) || '', msg: String((err && err.message) || err).slice(0, 80) }); return null; })
         .then(v => { TR_AQUI_PIDIENDO = null; return v; });
@@ -26092,6 +26097,7 @@ body.med-pp-abierto{overflow:hidden;}
           else TR_AQUI_SIN_PUNTO[c.dir_key] = 1;
         }catch(err){
           errores++;
+          if(errores <= 3) trAquiBit('geocode error', { code: (err && (err.code || err.errorMessage)) || '', msg: String((err && err.message) || err).slice(0, 80) });
           if(err && (err.code === 'red' || err.errorMessage === 'red')){
             // Sin señal, o Apple pidiendo calma (da el mismo código): se espera y se prueba UNA vez más; si sigue, después.
             if(!reintento){ reintento = true; k--; await new Promise(r => setTimeout(r, 2500)); continue; }
@@ -26110,14 +26116,42 @@ body.med-pp-abierto{overflow:hidden;}
     const fix = await trAquiPedirFix(esperaMs);
     if(!fix){ trAquiBit('sin punto del teléfono'); return null; }
     // (R5) Los puntos que otro teléfono ya subió llegan con la sincronización de Clientes: se le dan hasta 4 s antes de comparar.
-    try{ if(typeof clientesSincronizar === 'function') await Promise.race([Promise.resolve(clientesSincronizar(false)), new Promise(r => setTimeout(r, 4000))]); }catch(e){}
+    // (R7) Se FUERZA (sin el freno de 60 s): los puntos que CompanyCam acaba de poner en la nube bajan ahora, no en un minuto.
+    try{ if(typeof clientesSincronizar === 'function') await Promise.race([Promise.resolve(clientesSincronizar(true)), new Promise(r => setTimeout(r, 4000))]); }catch(e){}
     const casas = trAquiCasas(), conPunto = casas.filter(c => c.lat != null);
+    trAquiBit('clientes', { total: casas.length, conPunto: conPunto.length, nube: (typeof CLIENTES_NUBE !== 'undefined' ? CLIENTES_NUBE : null), geoNube: (typeof CLI_GEO_NUBE !== 'undefined' ? CLI_GEO_NUBE : null) });
     let r = trAquiMasCercana(fix, casas, maxM);
     trAquiBit('comparo', { casas: casas.length, conPunto: conPunto.length, acc: fix.acc, metros: r ? r.metros : null, masCerca: (() => { let m = null; conPunto.forEach(c => { const p = cliDistanciaPies(fix, c); if(p != null && (m == null || p * 0.3048 < m)) m = Math.round(p * 0.3048); }); return m; })() });
     if(r) return r;
     r = (await trAquiUbicarFaltan(fix, maxM)) ? trAquiMasCercana(fix, trAquiCasas(), maxM) : null;
     trAquiBit(r ? 'encontrada tras ubicar' : 'nada cerca', r ? { metros: r.metros } : undefined);
+    // (R7) RESPALDO SIN GEOCODIFICAR: Apple ya dijo la dirección del punto donde está parado (suggestAddress). Si esa calle y
+    // ese número son los de UN cliente, es esa casa (un vecino tiene otro número). Vale aunque Apple no ubique direcciones.
+    if(!r && fix.dir){
+      // Apple suele dar un RANGO de la cuadra ("6880–6898 Calle"): el cliente cuyo número cae en ese rango, en esa calle.
+      const de = trAquiCasaDeTexto(fix.dir);
+      const iguales = de ? trAquiCasas().filter(c => trAquiMismaCasaTexto(de, trAquiCasaDeTexto(c.direccion))) : [];
+      trAquiBit('por dirección', { leida: !!de, iguales: iguales.length });
+      if(iguales.length === 1){ r = { casa: iguales[0], metros: 0, porDireccion: true }; if(iguales[0].dir_key) cliGeoPoner(iguales[0].dir_key, +fix.lat, +fix.lng); }
+    }
     return r;
+  }
+  // "9108 Hamilton Drive, Fairfax, VA" -> { lo: 9108, hi: 9108, calle: 'hamilton' }; "6880–6898 Oak St" -> { lo: 6880, hi: 6898, calle: 'oak' }
+  // (número o rango de la cuadra, y la primera palabra de la calle). Sin número, null.
+  function trAquiCasaDeTexto(d){
+    const linea = String(d || '').split(',')[0].trim();
+    const m = linea.match(/^(\d+)[a-zA-Z]?(?:\s*[-\u2013\u2014]\s*(\d+)[a-zA-Z]?)?\s+(.+)$/);
+    if(!m) return null;
+    const ps = cliNorm(m[3]).split(' ').filter(Boolean); if(!ps.length) return null;
+    const calle = ps.find(w => !/^(n|s|e|w|north|south|east|west|ne|nw|se|sw)$/.test(w)) || ps[0];
+    const lo = +m[1], hi = m[2] ? +m[2] : +m[1];
+    return { lo: Math.min(lo, hi), hi: Math.max(lo, hi), calle };
+  }
+  // ¿La casa del cliente (número exacto) cae en lo que dijo Apple (número o rango de la cuadra), en la misma calle?
+  function trAquiMismaCasaTexto(apple, casa){
+    if(!apple || !casa || apple.calle !== casa.calle) return false;
+    if(casa.lo !== casa.hi) return false;                                   // un cliente con rango no es una casa
+    return casa.lo >= apple.lo && casa.lo <= apple.hi;
   }
   // Al entrar a Plano y Medidas.
   async function trAquiBuscar(){
@@ -49735,7 +49769,9 @@ body.med-pp-abierto{overflow:hidden;}
       const res = await authFetch('/rest/v1/job_clients?company_id=eq.' + encodeURIComponent(SES.company_id) + '&dir_key=eq.' + encodeURIComponent(k) + '&select=dir_key',
         { method: 'PATCH', headers: Object.assign(cloudHeaders(), { 'Prefer': 'return=minimal' }), body: JSON.stringify({ lat, lng, geo_at: new Date().toISOString() }) });
       if(res.status === 400 || res.status === 404) CLI_GEO_NUBE = false;      // falta correr supabase-clientes-geo.sql
-    }catch(e){}
+      let detalle = ''; if(!res.ok){ try{ detalle = (await res.text()).slice(0, 120); }catch(e2){} }
+      if(typeof trAquiBit === 'function') trAquiBit('punto a la nube', Object.assign({ status: res.status }, detalle ? { detalle } : {}));
+    }catch(e){ if(typeof trAquiBit === 'function') trAquiBit('punto a la nube: error', { msg: String((e && e.message) || e).slice(0, 80) }); }
   }
   // Pura: pies entre dos puntos (formula del semiverseno).
   function cliDistanciaPies(a, b){
@@ -51898,6 +51934,8 @@ body.med-pp-abierto{overflow:hidden;}
       asAlTerminarDeHablar(function(){
         // (Brújula) El modelo (herramienta medir_aqui, función v4.2) pide ubicar y abrir: la conversación sigue en el teléfono.
         if(nav && nav.pantalla === 'medir_aqui' && !nav.trabajo){ asMedirAqui(nav.que, { nivel: nav.nivel, cliente: nav.cliente }); return; }
+        // (2c) El labor log dictado: la pantalla ya quedó llena; Lumi espera el "sí" para mandarlo con el botón de siempre.
+        if(nav && nav.pantalla === 'labor_log_llenar'){ asLaborLlenar(nav); return; }
         if(nav){ asNavegar(nav); return; }
         asSeguirOyendo();   // siempre vuelve a oír (también tras una pregunta escrita, salvo con el teclado abierto)
       });
@@ -52073,7 +52111,12 @@ body.med-pp-abierto{overflow:hidden;}
   function asResponderMedir(texto){
     const p = AS.pregunta; if(!p) return;
     const low = asMedirNorm(texto);
-    if(asEsAdios(texto) || /\b(cancela|cancelar|olvidalo|dejalo|mejor no|ya no|nada)\b/.test(low)){ AS.pregunta = null; asMostrarRespuesta('Está bien.'); asHablar('Está bien.', asSeguirOyendo); return; }
+    if(asEsAdios(texto) || /\b(cancela|cancelar|olvidalo|dejalo|mejor no|ya no|nada)\b/.test(low)){ AS.pregunta = null; const m = p.tipo === 'labor_mandar' ? 'Está bien. Queda en la pantalla, sin mandar.' : 'Está bien.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
+    if(p.tipo === 'labor_mandar'){
+      if(asEsSi(low)){ AS.pregunta = null; const m = 'Va. Lo mando al manager.'; asMostrarRespuesta(m); if(window.Cara){ try{ Cara.gesto('exito'); }catch(err){} } asHablar(m, function(){ asNavegar({ pantalla: 'labor_log_revisar', empresa: p.nav.empresa, payload: p.nav.payload, mandar: true }); }); return; }
+      if(asEsNo(low) || (/^(no|nel|todavia no|mejor no|espera|aguanta|primero)\b/.test(low) && !/\d|fuimos|fueron|tambien|era|eran|falta|cambia|quita|pon|agrega/.test(low))){ AS.pregunta = null; const m = 'Queda en la pantalla para que lo revises.'; asMostrarRespuesta(m); asHablar(m, function(){ asNavegar({ pantalla: 'labor_log_revisar', empresa: p.nav.empresa, payload: p.nav.payload }); }); return; }
+      AS.pregunta = null; return asEnviar(texto);   // "no, fueron 3 personas": una corrección va al modelo, que vuelve a llenar
+    }
     if(p.tipo === 'casa'){
       if(asEsSi(low)) return asMedirNivel(p.que, p.nivel, p.t);
       if(asEsNo(low)) return asMedirPregunta({ tipo: 'cliente', que: p.que, nivel: p.nivel, intentos: 0 }, '¿De qué cliente?');
@@ -52137,6 +52180,7 @@ body.med-pp-abierto{overflow:hidden;}
           break;
         }
         case 'planos': { const b = $('#mgrGoPlanos'); if(b) b.click(); break; }
+        case 'labor_log_revisar': { asLaborAbrir(nav, !!nav.mandar); break; }
         case 'medir_aqui': {
           // (Brújula) El trabajo ya está resuelto por voz: la MISMA puerta que "Usar este trabajo ▶" (abrirMedidasCon / abrirPlanoCon).
           const f = nav.que === 'plano' ? window.abrirPlanoCon : window.abrirMedidasCon;
@@ -52154,7 +52198,36 @@ body.med-pp-abierto{overflow:hidden;}
   }
   // La puerta por la que entra: el manager por la suya; la cuadrilla por Restoration Doctor (Plano y Medidas, Visitas,
   // Contenidos viven ahí) o por la que ya traía.
-  function asPuertaPara(nav){ if(isManager()) return 'manager'; const p = (nav && nav.pantalla) || ''; return (/^(planos|medir_aqui|visitas_clientes|visitas_de_casa|contenidos)$/.test(p) || !SIDE || SIDE === 'manager') ? 'restauracion' : SIDE; }
+  function asPuertaPara(nav){ if(isManager()) return 'manager'; const p = (nav && nav.pantalla) || ''; if(/^labor_log_/.test(p)) return nav.empresa === 'mudanza' ? 'mudanza' : 'restauracion'; return (/^(planos|medir_aqui|visitas_clientes|visitas_de_casa|contenidos)$/.test(p) || !SIDE || SIDE === 'manager') ? 'restauracion' : SIDE; }
+  // ---- (2c, 21 oct 2026) EL LABOR LOG DICTADO: el servidor arma el MISMO payload que la pantalla; aquí se llena la
+  // pantalla con loadPayload (lo mismo que abrir un reporte) y el envío es sendToManager, el botón de siempre con sus avisos.
+  function asLaborLlenar(nav){
+    let ok = false;
+    try{
+      const kind = nav.empresa === 'mudanza' ? 'mudanza' : 'restauracion';
+      if(typeof laborMode !== 'undefined') laborMode = kind;
+      if(typeof laborFormOpen !== 'undefined') laborFormOpen = true;
+      if(typeof loadPayload === 'function'){ loadPayload(nav.payload || {}, kind); ok = true; }
+      if(typeof saveDraft === 'function') saveDraft();
+    }catch(e){ console.warn('labor voz', e); ok = false; }
+    if(!ok){ const m = 'No pude llenar la pantalla del labor log. Ábrela desde el menú.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
+    asBit('labor voz: pantalla llena (' + ((nav.payload && nav.payload.s && nav.payload.s.length) || 0) + ' turnos)');
+    AS.pregunta = { tipo: 'labor_mandar', nav };
+    asSeguirOyendo();   // la pregunta "¿Lo mando al manager?" ya la dijo el modelo
+  }
+  // Abrir la pantalla del labor log ya llena (revisar) y, si se pidió, mandarla con el botón de siempre.
+  function asLaborAbrir(nav, mandar){
+    try{
+      const kind = nav.empresa === 'mudanza' ? 'mudanza' : 'restauracion';
+      if(typeof laborMode !== 'undefined') laborMode = kind;
+      if(typeof laborFormOpen !== 'undefined') laborFormOpen = true;
+      showTab('labor');
+      if(nav.payload && typeof loadPayload === 'function') loadPayload(nav.payload, kind);
+      if(typeof goStep === 'function' && typeof stepsFor === 'function') goStep('labor', stepsFor('labor').length - 1);
+      if(mandar && typeof sendToManager === 'function') setTimeout(function(){ sendToManager(); }, 50);
+      return true;
+    }catch(e){ console.warn('labor voz abrir', e); return false; }
+  }
   async function asNavegar(nav){
     if(doorOverlay){
       // La puerta vino como re-pregunta: igual que doorTap, se recarga con la empresa de un solo uso.
@@ -52173,6 +52246,7 @@ body.med-pp-abierto{overflow:hidden;}
       if(p === 'planos') return azulejo('planomed');
       if(p === 'visitas_clientes' || p === 'visitas_de_casa') return azulejo('visitas');
       if(p === 'contenidos') return azulejo('contenidos');
+      if(p === 'labor_log_revisar') return asLaborAbrir(nav, !!nav.mandar);
     }catch(e){ console.warn('asIrACrew', e); }
     return false;
   }
