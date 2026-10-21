@@ -9982,7 +9982,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-R4';
+  const APP_BUILD = '2026-10-21-R5';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -51334,14 +51334,15 @@ body.med-pp-abierto{overflow:hidden;}
   // Solo "si" o "no" de verdad. "sí, pero 250" NO es un si: va al modelo.
   function asEsSi(l){ const w = l.split(' ').filter(Boolean); return w.length > 0 && w.length <= 4 && w.every(x => AS_SI_PALABRAS.includes(x)) && !w.every(x => ['es','de','así','asi','va'].includes(x)); }
   function asEsNo(l){ const w = l.split(' ').filter(Boolean); if(!w.length || w.length > 5) return false; if(/cancel|olv[ií]dalo|d[eé]jalo/.test(l)) return true; return AS_NO_PALABRAS.includes(w[0]) && w.every(x => AS_NO_PALABRAS.includes(x) || ['lo','eso','ese','esa','registres','registre','registro','es','pago','todavía','todavia','gracias','la','cambies','mandes'].includes(x)); }
-  function asPintarEsfera(){ const b = $('#asAbrir'); if(!b) return; b.hidden = !(signedIn() && isManager()); const m = b.querySelector('.as-mini'); if(m && window.Cara && !b.hidden && !m.__cara){ try{ Cara.montar(m, AS_CARA_OPCIONES(76)); b.classList.add('con-cara'); }catch(err){ try{ if(window.Cara.desmontar) Cara.desmontar(m); }catch(e2){} m.classList.remove('cara'); m.innerHTML = ''; b.classList.remove('con-cara'); } } }
+  // (21 oct, opción A del dueño) La esfera es para TODOS los que entraron (manager y cuadrilla); el servidor decide qué ve cada rol.
+  function asPintarEsfera(){ const b = $('#asAbrir'); if(!b) return; b.hidden = !signedIn(); const m = b.querySelector('.as-mini'); if(m && window.Cara && !b.hidden && !m.__cara){ try{ Cara.montar(m, AS_CARA_OPCIONES(76)); b.classList.add('con-cara'); }catch(err){ try{ if(window.Cara.desmontar) Cara.desmontar(m); }catch(e2){} m.classList.remove('cara'); m.innerHTML = ''; b.classList.remove('con-cara'); } } }
   // Decisión del dueño (21 oct): silueta A, color celeste, parallax sí.
   function AS_CARA_OPCIONES(tamano){ return { tamano: tamano, silueta: 'A', color: 'celeste' }; }
   function asEstado(e, pista){ if(AS.estado !== e) asBit('estado ' + e); AS.estado = e; const p = $('#asPanel'); if(p) p.dataset.estado = e; const h = $('#asPista'); if(h && pista !== undefined) h.textContent = pista || ''; if(window.Cara){ try{ Cara.estado({ esperando:'reposo', pensando:'buscando' }[e] || e); }catch(err){} } }
   function asTranscribir(t){ const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; }
   function asMostrarRespuesta(t){ const e = $('#asRespuesta'); if(e) e.textContent = t || ''; }
   function asAbrir(){
-    if(!(signedIn() && isManager())) return;
+    if(!signedIn()) return;
     AS.abierto = true; AS.historial = []; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asTranscribir('');
     const p = $('#asPanel'); if(p){ p.hidden = false; p.classList.toggle('as-prueba-on', AS.sandbox); }
     asEstado('esperando', '');
@@ -51727,7 +51728,7 @@ body.med-pp-abierto{overflow:hidden;}
     }
     if(!AS.conf && asEsAdios(texto)){ asTranscribir(texto); asPararOido(); asMostrarRespuesta('Aquí estoy.'); asHablar('Aquí estoy.', function(){ asReposar(); }); return; }
     // (Brújula) "quiero sacar medidas" / "hacer el plano": todo en el teléfono (ubicación + abrir), sin ir al modelo.
-    if(!AS.conf && !desdeTeclado !== undefined){ const med = asEsMedir(texto); if(med){ asTranscribir(texto); asPararOido(); return asMedirAqui(med.que, { nivel: med.nivel, cliente: med.cliente }); } }
+    if(!AS.conf){ const med = asEsMedir(texto); if(med){ asTranscribir(texto); asPararOido(); return asMedirAqui(med.que, { nivel: med.nivel, cliente: med.cliente }); } }
     asTranscribir(texto); asEstado('pensando', 'Un momento…'); AS.enviando = true; asMostrarRespuesta('');
     asCallar();
     const t0 = Date.now();
@@ -51877,11 +51878,11 @@ body.med-pp-abierto{overflow:hidden;}
     const nivel = asNivelDicho(l);
     // "…de johnson", "…en la casa de brown", "…del cliente garcia": lo que viene después del pedido es el cliente.
     let cliente = '';
-    const m = /(?:medidas|plano|medir|escanear|escaneo|esc[aá]ner)\s+(?:de|del|en|para|a)\s+(?:la\s+casa\s+de\s+|lo\s+de\s+|la\s+de\s+|el\s+cliente\s+|donde\s+)?(.+)$/.exec(l);
+    const m = /(?:medidas|plano|medir|escanear|escaneo|esc[aá]ner)\s+(.+)$/.exec(l);
     if(m){
-      let resto = m[1];
+      let resto = ' ' + m[1] + ' ';
       for(const [, re] of AS_NIVELES_VOZ) resto = resto.replace(re, ' ');
-      resto = resto.replace(/\b(con\s+la\s+camara|la\s+camara|camara|el\s+nivel|nivel|en\s+el|en\s+la|de\s+la|del|de|el|la|los|las|un|una|y|con)\b/g, ' ').replace(/\s+/g, ' ').trim();
+      resto = resto.replace(/\b(la\s+casa\s+de|lo\s+de|la\s+de|el\s+cliente|donde\s+esta|donde\s+estoy|donde|con\s+la\s+camara|la\s+camara|camara|el\s+nivel|nivel|en\s+el|en\s+la|de\s+la|del|de|en|para|el|la|los|las|un|una|y|con|a|casa|cliente)\b/g, ' ').replace(/\s+/g, ' ').trim();
       if(resto && !AS_MEDIR_RELLENO.includes(resto) && resto.length >= 3) cliente = resto;
     }
     return { que, nivel, cliente };
@@ -51973,6 +51974,7 @@ body.med-pp-abierto{overflow:hidden;}
   // ---- abrir pantallas: por los MISMOS botones y funciones que usa el dedo ----
   async function asIrA(nav){
     const p = (nav && nav.pantalla) || 'manager';
+    if(!isManager() && p !== 'medir_aqui'){ asIrACrew(nav); return; }   // la cuadrilla: solo sus azulejos (el servidor ya filtró)
     // La MISMA puerta de Pagos que el azulejo del hub (una sola funcion, carpetas_manager_test lo vigila).
     const pagos = function(vista){ abrirPagos(vista, 'manager'); };
     try{
@@ -52023,15 +52025,29 @@ body.med-pp-abierto{overflow:hidden;}
     }catch(e){ try{ goManagerHome(); }catch(e2){} }
     window.scrollTo(0, 0);
   }
+  // La puerta por la que entra: el manager por la suya; la cuadrilla por Restoration Doctor (Plano y Medidas, Visitas,
+  // Contenidos viven ahí) o por la que ya traía.
+  function asPuertaPara(nav){ if(isManager()) return 'manager'; const p = (nav && nav.pantalla) || ''; return (/^(planos|medir_aqui|visitas_clientes|visitas_de_casa|contenidos)$/.test(p) || !SIDE || SIDE === 'manager') ? 'restauracion' : SIDE; }
   async function asNavegar(nav){
     if(doorOverlay){
       // La puerta vino como re-pregunta: igual que doorTap, se recarga con la empresa de un solo uso.
-      try{ sessionStorage.setItem('sideOnce', 'manager'); sessionStorage.setItem('asNavPendiente', JSON.stringify(nav)); }catch(e){}
+      try{ sessionStorage.setItem('sideOnce', asPuertaPara(nav)); sessionStorage.setItem('asNavPendiente', JSON.stringify(nav)); }catch(e){}
       location.reload(); return;
     }
     asCerrar();
-    SIDE = 'manager'; applySide(); enterApp();
+    SIDE = asPuertaPara(nav); applySide(); enterApp();
     await asIrA(nav);
+  }
+  // (21 oct, opción A) La cuadrilla no tiene los botones del manager: sus pantallas se abren por el MISMO azulejo del menú.
+  function asIrACrew(nav){
+    const p = (nav && nav.pantalla) || '';
+    const azulejo = function(t){ const b = document.querySelector('[data-go-tab="' + t + '"]'); if(b && b.click){ b.click(); return true; } showTab(t); return true; };
+    try{
+      if(p === 'planos') return azulejo('planomed');
+      if(p === 'visitas_clientes' || p === 'visitas_de_casa') return azulejo('visitas');
+      if(p === 'contenidos') return azulejo('contenidos');
+    }catch(e){ console.warn('asIrACrew', e); }
+    return false;
   }
   (function asNavPendiente(){
     let nav = null;
