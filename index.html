@@ -3060,6 +3060,9 @@ body.med-pp-abierto{overflow:hidden;}
   .as-tarjeta-btns{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px;}
   .as-tarjeta-btns .btn{min-height:50px; font-size:17px; border-radius:12px;}
   .as-texto{display:flex; gap:8px; margin-top:12px;}
+  .as-voz-aviso{display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; line-height:1.3; color:#8a8f98;}
+  .as-voz-aviso[hidden]{display:none;}
+  .as-voz-aviso button{flex:none; font-size:12px; padding:4px 8px; border:1px solid #c9ced6; border-radius:8px; background:#fff; color:#4a5059;}
   .as-texto input{flex:1 1 auto; min-width:0; font-size:16px; padding:12px; border-radius:12px; border:1px solid var(--line); background:#111; color:#fff;}
   .as-texto .btn{min-height:48px; padding:0 16px; border-radius:12px;}
   .as-pie{margin-top:10px;}
@@ -3092,6 +3095,7 @@ body.med-pp-abierto{overflow:hidden;}
       <div class="as-tarjeta-escrito" id="asEscritoBox" hidden><label for="asEscrito">Más de $5,000: teclea el monto exacto para confirmar</label><input type="number" id="asEscrito" inputmode="decimal" step="0.01" placeholder="0.00"></div>
       <div class="as-tarjeta-btns"><button type="button" class="btn btn-ghost" id="asCancelar">Cancelar</button><button type="button" class="btn btn-accent" id="asConfirmarBtn">Confirmar</button></div>
     </div>
+    <div class="as-voz-aviso" id="asVozAviso" hidden><span>Voz básica. Para una voz natural: Ajustes › Accesibilidad › Contenido hablado › Voces › Español › Paulina › Premium</span><button type="button" id="asVozYa">Ya la bajé</button></div>
     <div class="as-texto"><input type="text" id="asEntrada" placeholder="O escribe aquí…" autocomplete="off" autocapitalize="sentences"><button type="button" class="btn btn-ink" id="asEnviarBtn">Enviar</button></div>
     <div class="as-pie"><button type="button" class="btn btn-ghost" id="asAtras">Atrás</button></div>
   </div>
@@ -8968,7 +8972,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-20-K';
+  const APP_BUILD = '2026-10-20-L';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -50074,6 +50078,7 @@ body.med-pp-abierto{overflow:hidden;}
     const p = $('#asPanel'); if(p){ p.hidden = false; p.classList.toggle('as-prueba-on', AS.sandbox); }
     asEstado('esperando', 'Toca la esfera y habla.');
     asAnimar();
+    asRevisarVoz();
     asEscuchar();
   }
   function asCerrar(){
@@ -50141,7 +50146,35 @@ body.med-pp-abierto{overflow:hidden;}
     return String(t || '').replace(/\$\s?(\d[\d,]*)(?:\.(\d{1,2}))?/g, function(m, e, c){ const n = e.replace(/,/g, ''); return n + (n === '1' ? ' dólar' : ' dólares') + (c && +c ? ' con ' + (+c) + ' centavos' : ''); })
       .replace(/[*_#`]/g, '').replace(/\s+/g, ' ').trim();
   }
-  function asVozWeb(){ try{ const vs = speechSynthesis.getVoices().filter(v => /^es/i.test(v.lang)); return vs.find(v => /es-US|es-MX/i.test(v.lang)) || vs[0] || null; }catch(e){ return null; } }
+  // La mejor voz en español del navegador: femenina, de calidad (Safari expone Paulina/Mónica mejoradas con el
+  // MISMO nombre que las compactas; se distinguen por "compact" en el voiceURI), México/EE. UU. antes que España.
+  const AS_VOCES_FEM = /paulina|m[oó]nica|ang[eé]lica|juana|marisol|soledad|luciana|isabela|valeria|francisca|sabina|catalina|helena|carmen|elvira|female|mujer/i;
+  function asPuntajeVoz(v){
+    let p = 0; const uri = String(v.voiceURI || ''), nom = String(v.name || '');
+    if(/compact/i.test(uri) || /compact/i.test(nom)) p -= 6;
+    if(/premium/i.test(uri + nom)) p += 5; else if(/enhanced|mejorad|super-compact/i.test(uri + nom)) p += 3;
+    if(AS_VOCES_FEM.test(nom)) p += 3;
+    if(/es-MX|es-US/i.test(v.lang)) p += 2; else if(/es-419|es-CO|es-AR/i.test(v.lang)) p += 1;
+    if(/google/i.test(nom) && /es-US/i.test(v.lang)) p += 2;   // Chrome: "Google español de Estados Unidos" suena bien
+    if(v.localService) p += 0.5;
+    return p;
+  }
+  function asVozWeb(){
+    try{
+      const vs = speechSynthesis.getVoices().filter(v => /^es/i.test(v.lang));
+      if(!vs.length) return null;
+      return vs.slice().sort((a, b) => asPuntajeVoz(b) - asPuntajeVoz(a))[0];
+    }catch(e){ return null; }
+  }
+  // Aviso de "voz básica": una linea gris arriba del cuadro de texto; se quita sola cuando hay una mejor.
+  async function asRevisarVoz(){
+    const el = $('#asVozAviso'); if(!el) return;
+    let basica = false;
+    const S = asPlugin();
+    if(S && S.vozInfo){ try{ const i = await S.vozInfo(); basica = !!(i && i.soloBasicas); }catch(e){ basica = false; } }
+    else if(window.speechSynthesis){ const v = asVozWeb(); basica = !!(v && /compact/i.test(String(v.voiceURI || '') + String(v.name || ''))); }
+    el.hidden = !basica;
+  }
   // UNA frase a la cola de la voz. encolar=true no corta lo que se esta diciendo (streaming frase por frase).
   async function asDecir(t, encolar){
     t = asParaVoz(t); if(!t) return 0;
@@ -50156,7 +50189,7 @@ body.med-pp-abierto{overflow:hidden;}
     if(window.speechSynthesis){
       try{
         if(!encolar) speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(t); u.lang = 'es-US'; const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.05;
+        const u = new SpeechSynthesisUtterance(t); u.lang = 'es-US'; const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */
         AS.ultimaU = u;
         u.onend = u.onerror = function(){ if(AS.ultimaU === u) AS.hablaHasta = Math.min(AS.hablaHasta, Date.now()); };
         speechSynthesis.speak(u);
@@ -50182,7 +50215,7 @@ body.med-pp-abierto{overflow:hidden;}
   function asDecirSuave(t){
     const S = asPlugin();
     if(isNative() && S && S.hablar){ try{ S.hablar({ texto: t, idioma: 'es-MX', preferida: true }); }catch(e){} return; }
-    if(window.speechSynthesis){ try{ const u = new SpeechSynthesisUtterance(t); u.lang = 'es-US'; const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.05; speechSynthesis.speak(u); }catch(e){} }
+    if(window.speechSynthesis){ try{ const u = new SpeechSynthesisUtterance(t); u.lang = 'es-US'; const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */ speechSynthesis.speak(u); }catch(e){} }
   }
   function asCallar(){
     clearTimeout(AS.tmrHabla); clearTimeout(AS.tmrRelleno); AS.hablaHasta = 0;
@@ -50191,15 +50224,36 @@ body.med-pp-abierto{overflow:hidden;}
     if(isNative() && S && AS.estado === 'hablando'){ try{ S.parar(); }catch(e){} }
   }
   // Llama a la funcion. Con `onTexto`, pide STREAMING (SSE) y entrega cada trozo; la respuesta completa va al final.
+  // Una sola llamada. Si la red se corta (Safari: "Load failed"), avisa claro; las LECTURAS se reintentan una
+  // vez solas (asLlamar), las acciones (confirmar) nunca: el servidor ya puede haberlas hecho.
+  const AS_RED_RE = /Load failed|Failed to fetch|NetworkError|network connection was lost|cancelled|abort|se cortó/i;
   async function asLlamar(body, onTexto){
+    try{ return await asLlamarUnaVez(body, onTexto); }
+    catch(e){
+      const esRed = AS_RED_RE.test(String((e && e.message) || e));
+      if(!esRed || body.confirmar) throw e;
+      await new Promise(function(r){ setTimeout(r, 1500); });
+      try{ return await asLlamarUnaVez(body, onTexto); }
+      catch(e2){ throw new Error('se cortó la conexión'); }
+    }
+  }
+  async function asLlamarUnaVez(body, onTexto){
     if(!cloudOn()) return { ok:false, status:0, json:{ error:'sin nube' } };
     const quiereStream = typeof onTexto === 'function' && typeof ReadableStream !== 'undefined';
-    const res = await authFetch('/functions/v1/asistente', { method:'POST', headers: cloudHeaders(), body: JSON.stringify(quiereStream ? Object.assign({ stream:true }, body) : body) });
+    // Si en 35 s no llega NI un byte (el servidor manda ": ping" cada 10 s), se corta aqui y no se queda colgado.
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    let tmr = null; const armar = function(){ if(!ctl) return; clearTimeout(tmr); tmr = setTimeout(function(){ try{ ctl.abort(); }catch(e){} }, 35000); };
+    armar();
+    let res;
+    try{ res = await authFetch('/functions/v1/asistente', Object.assign({ method:'POST', headers: cloudHeaders(), body: JSON.stringify(quiereStream ? Object.assign({ stream:true }, body) : body) }, ctl ? { signal: ctl.signal } : {})); }
+    catch(e){ clearTimeout(tmr); throw e; }
     const ct = (res.headers.get('content-type') || '');
     if(quiereStream && res.ok && /text\/event-stream/.test(ct) && res.body && res.body.getReader){
       const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '', fin = null, status = 200;
       for(;;){
-        const r = await reader.read(); if(r.done) break;
+        let r; try{ r = await reader.read(); }catch(e){ clearTimeout(tmr); throw e; }
+        if(r.done) break;
+        armar();
         buf += dec.decode(r.value, { stream:true });
         let i;
         while((i = buf.indexOf('\n\n')) >= 0){
@@ -50212,10 +50266,12 @@ body.med-pp-abierto{overflow:hidden;}
           });
         }
       }
-      if(!fin) return { ok:false, status:502, json:{ error:'la respuesta se cortó' } };
+      clearTimeout(tmr);
+      if(!fin) throw new Error('se cortó la conexión');
       return { ok: status < 400 && fin.ok !== false, status, json: fin };
     }
     let json = null; try{ json = await res.json(); }catch(e){}
+    clearTimeout(tmr);
     return { ok: res.ok, status: res.status, json };
   }
   // Lo que ya tiene punto final se dice; el resto espera al siguiente trozo. "$317.50" no es un fin de frase.
@@ -50269,7 +50325,8 @@ body.med-pp-abierto{overflow:hidden;}
       return;
     }catch(e){
       AS.enviando = false; clearTimeout(AS.tmrRelleno);
-      const m = /401|venció/.test(String(e.message || e)) ? 'Tu sesión venció. Entra otra vez.' : /429|demasiados/.test(String(e.message || e)) ? 'Muchos pedidos seguidos. Espera un momento.' : 'No se pudo: ' + (e.message || e) + '.';
+      const em = String((e && e.message) || e);
+      const m = /401|venció/.test(em) ? 'Tu sesión venció. Entra otra vez.' : /429|demasiados/.test(em) ? 'Muchos pedidos seguidos. Espera un momento.' : AS_RED_RE.test(em) ? 'Se cortó la conexión. Intenta otra vez.' : 'No se pudo: ' + em + '.';
       asEstado('esperando', m + ' Toca la esfera para intentar otra vez.');
     }
   }
@@ -50313,7 +50370,9 @@ body.med-pp-abierto{overflow:hidden;}
       return;
     }catch(e){
       $$('#asTarjeta button').forEach(b => { b.disabled = false; });
-      const m = 'No se registró: ' + (e.message || e);
+      const em = String((e && e.message) || e);
+      // Si la red se corto a medio confirmar, el servidor PUDO haberlo registrado: no se repite a ciegas.
+      const m = AS_RED_RE.test(em) ? 'Se cortó la conexión y no sé si quedó registrado. Revísalo en Pagos antes de repetirlo.' : 'No se registró: ' + em;
       asMostrarRespuesta(m); AS.enviando = false; asHablar(m);
     }
   }
@@ -50437,7 +50496,8 @@ body.med-pp-abierto{overflow:hidden;}
     if(ent) ent.addEventListener('keydown', function(ev){ if(ev.key === 'Enter'){ ev.preventDefault(); mandar(); } });
     const sb = $('#asSandbox'); if(sb) sb.addEventListener('change', function(){ AS.sandbox = !!sb.checked; AS.historial = []; asQuitarTarjeta(); const p = $('#asPanel'); if(p) p.classList.toggle('as-prueba-on', AS.sandbox); asMostrarRespuesta(AS.sandbox ? 'Modo prueba: nombres inventados, nada se guarda.' : 'Datos reales.'); });
     // Chrome carga las voces tarde.
-    if(window.speechSynthesis && speechSynthesis.addEventListener) speechSynthesis.addEventListener('voiceschanged', function(){});
+    if(window.speechSynthesis && speechSynthesis.addEventListener) speechSynthesis.addEventListener('voiceschanged', function(){ if(AS.abierto) asRevisarVoz(); });
+    const vya = $('#asVozYa'); if(vya) vya.addEventListener('click', function(){ asRevisarVoz(); });
     asPintarEsfera();
   })();
   // Gancho para las pruebas y para la copia de prueba.
