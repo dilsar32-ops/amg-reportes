@@ -33,6 +33,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;700&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="html2canvas.min.js"></script>
 <script src="jspdf.umd.min.js"></script>
+<link rel="stylesheet" href="cara.css?v=2026-10-21-Q">
+<script src="cara.js?v=2026-10-21-Q"></script>
 <style>
   :root{
     color-scheme: dark;
@@ -1976,6 +1978,11 @@ table.eq input[type=text], table.eq input[type=number]{font-size:16px; min-heigh
 }
 @keyframes asGirar{to{transform:rotate(360deg);}}
 @media (prefers-reduced-motion: reduce){ #authPick .as-esfera-btn .as-mini, #authPick .as-esfera-btn .as-mini::before, #authPick .as-esfera-btn::before{animation:none;} }
+/* 21 oct: la CARA (cara.js) en vez de la bola. Con la cara montada el span pierde el recorte redondo y el halo (el casco
+   es más ancho que alto, 76×70); si cara.js no cargó, la bola de arriba sigue tal cual. */
+#authPick .as-esfera-btn .as-mini.cara{width:76px; height:auto; flex-basis:auto; border-radius:0; overflow:visible; clip-path:none; -webkit-mask-image:none; background:none; box-shadow:none; animation:none;}
+#authPick .as-esfera-btn .as-mini.cara::before, #authPick .as-esfera-btn .as-mini.cara::after{content:none;}
+#authPick .as-esfera-btn.con-cara::before{content:none;}
 /* Cerrar sesión: al pie, chico y gris, como el del menú (.btn-salir). margin-top:auto lo clava abajo;
    cuando no hay esfera (cuadrilla) el aire se lo lleva él solo. */
 #authPick #doorSignOut{
@@ -3054,7 +3061,8 @@ body.med-pp-abierto{overflow:hidden;}
   .as-prueba{white-space:nowrap; flex:0 0 auto;}
   .as-pista{margin:6px 0 0; min-height:20px; font-size:14px; color:var(--ink-soft); text-align:center;}
   .as-esfera-wrap{display:flex; justify-content:center; margin:6px 0 4px;}
-  #asEsfera{width:min(62vw,250px); height:min(62vw,250px); display:block; cursor:pointer; border-radius:50%;}
+  #asEsfera{width:min(62vw,250px); height:auto; display:block; cursor:pointer;}
+  #asPanel[data-estado="reposo"] .as-esfera-wrap{opacity:.85;}
   .as-charla{flex:1 1 auto; min-height:70px;}
   .as-tu{margin:4px 0; font-size:15px; color:#9fb4ff; min-height:20px; text-align:center;}
   .as-tu:empty{display:none;}
@@ -3095,7 +3103,7 @@ body.med-pp-abierto{overflow:hidden;}
     <div class="as-cab"><span class="as-titulo">Asistente</span><label class="as-prueba"><input type="checkbox" id="asSandbox"> Datos de prueba</label></div>
     <div class="as-sandbox-banda">MODO PRUEBA: nombres inventados, nada se guarda de verdad.</div>
     <p id="asPista" class="as-pista"></p>
-    <div class="as-esfera-wrap"><canvas id="asEsfera" width="250" height="250" aria-label="Esfera del asistente: tocar para hablar"></canvas></div>
+    <div class="as-esfera-wrap"><div id="asEsfera" role="button" tabindex="0" aria-label="Asistente: tocar para hablar"></div></div>
     <div class="as-charla">
       <p class="as-tu" id="asTu"></p>
       <p class="as-resp" id="asRespuesta"></p>
@@ -8984,7 +8992,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-P';
+  const APP_BUILD = '2026-10-21-Q';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -50080,21 +50088,27 @@ body.med-pp-abierto{overflow:hidden;}
   // Solo "si" o "no" de verdad. "sí, pero 250" NO es un si: va al modelo.
   function asEsSi(l){ const w = l.split(' ').filter(Boolean); return w.length > 0 && w.length <= 4 && w.every(x => AS_SI_PALABRAS.includes(x)) && !w.every(x => ['es','de','así','asi','va'].includes(x)); }
   function asEsNo(l){ const w = l.split(' ').filter(Boolean); if(!w.length || w.length > 5) return false; if(/cancel|olv[ií]dalo|d[eé]jalo/.test(l)) return true; return AS_NO_PALABRAS.includes(w[0]) && w.every(x => AS_NO_PALABRAS.includes(x) || ['lo','eso','ese','esa','registres','registre','registro','es','pago','todavía','todavia','gracias','la','cambies','mandes'].includes(x)); }
-  function asPintarEsfera(){ const b = $('#asAbrir'); if(!b) return; b.hidden = !(signedIn() && isManager()); }
-  function asEstado(e, pista){ AS.estado = e; const p = $('#asPanel'); if(p) p.dataset.estado = e; const h = $('#asPista'); if(h && pista !== undefined) h.textContent = pista || ''; }
+  function asPintarEsfera(){ const b = $('#asAbrir'); if(!b) return; b.hidden = !(signedIn() && isManager()); const m = b.querySelector('.as-mini'); if(m && window.Cara && !b.hidden && !m.__cara){ try{ Cara.montar(m, AS_CARA_OPCIONES(76)); b.classList.add('con-cara'); }catch(err){} } }
+  // Decisión del dueño (21 oct): silueta A, color celeste, parallax sí.
+  function AS_CARA_OPCIONES(tamano){ return { tamano: tamano, silueta: 'A', color: 'celeste' }; }
+  function asEstado(e, pista){ AS.estado = e; const p = $('#asPanel'); if(p) p.dataset.estado = e; const h = $('#asPista'); if(h && pista !== undefined) h.textContent = pista || ''; if(window.Cara){ try{ Cara.estado({ esperando:'reposo', pensando:'buscando' }[e] || e); }catch(err){} } }
   function asTranscribir(t){ const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; }
   function asMostrarRespuesta(t){ const e = $('#asRespuesta'); if(e) e.textContent = t || ''; }
   function asAbrir(){
     if(!(signedIn() && isManager())) return;
     AS.abierto = true; AS.historial = []; AS.conf = null; asQuitarTarjeta(); asMostrarRespuesta(''); asTranscribir('');
     const p = $('#asPanel'); if(p){ p.hidden = false; p.classList.toggle('as-prueba-on', AS.sandbox); }
-    asEstado('esperando', 'Toca la esfera y habla.');
+    asEstado('esperando', '');
     asAnimar();
     asRevisarVoz();
-    asEscuchar();
+    const Sp = asPlugin(); if(isNative() && Sp){ try{ asEnganchar(Sp); }catch(err){} }
+    // Saluda por el nombre de pila (una vez, al abrir) y se queda oyendo.
+    const nombre = asNombreDePila();
+    asHablar(nombre ? '¿Qué necesitas, ' + nombre + '?' : '¿Qué necesitas?', asSeguirOyendo);
   }
   function asCerrar(){
     AS.abierto = false; asPararOido(); asCallar();
+    if(window.Cara){ try{ Cara.hablando(false); Cara.estado('reposo'); }catch(err){} }
     const p = $('#asPanel'); if(p) p.hidden = true;
     if(AS.anim) cancelAnimationFrame(AS.anim); AS.anim = null;
   }
@@ -50114,6 +50128,57 @@ body.med-pp-abierto{overflow:hidden;}
     // 100 lugares: la gente hasta 55, el oficio llena el resto (con mucha gente el oficio no se cae entero).
     return out.slice(0, 55).concat(oficio.filter((x, i, a) => a.indexOf(x) === i)).slice(0, 100);
   }
+  // ---- conversación fluida (21 oct 2026, su pedido: "después de que habla tiene que seguir escuchando") ----
+  const AS_RELLENOS = ['Ahora te lo entrego.', 'Déjame buscarlo.', 'Un segundito.', 'Ya casi.', 'Ahí voy.', 'Dame dos segundos.', 'Mmm, déjame ver.', 'Ya lo busco.', 'Permíteme.', 'Lo reviso ya.', 'Un momentito.', 'Déjame checar.'];
+  function asRelleno(){ let f; do{ f = AS_RELLENOS[Math.floor(Math.random() * AS_RELLENOS.length)]; }while(f === AS.ultRelleno && AS_RELLENOS.length > 1); AS.ultRelleno = f; return f; }
+  // "para", "ya", "gracias, eso es todo", "adiós": se despide y se queda en reposo hasta el próximo toque.
+  const AS_ADIOS_RE = /^(para|ya|ya está|ya estuvo|ya no|gracias|muchas gracias|ok gracias|está bien gracias|listo gracias|gracias listo|eso es todo|gracias eso es todo|eso es todo gracias|nada más|nada mas|adiós|adios|hasta luego|bye|nos vemos|chao)$/;
+  function asEsAdios(t){ const l = String(t || '').toLowerCase().replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim(); return AS_ADIOS_RE.test(l); }
+  function asTecladoActivo(){ const a = document.activeElement; return !!(a && (a.id === 'asEntrada' || a.id === 'asEscrito')); }
+  // Después de hablar SIEMPRE vuelve a oír (también si la pregunta fue escrita), salvo con el teclado abierto.
+  function asSeguirOyendo(){ if(!AS.abierto) return; if(asTecladoActivo()){ asEstado('esperando', 'Toca la cara para hablar.'); return; } AS.oidoReintento = false; asEscuchar(); }
+  // Reposo: 8 s sin voz (o una despedida). Un toque en la cara la despierta.
+  function asReposar(pista){ asPararOido(); asEstado('reposo', pista || 'Toca la cara cuando quieras seguir.'); }
+  function asNombreDePila(){ try{ const n = String((SES && (SES.full_name || SES.name || SES.labor_alias)) || '').trim().split(/\s+/)[0]; return n ? n.charAt(0).toUpperCase() + n.slice(1) : ''; }catch(e){ return ''; } }
+  // Interrumpirla hablando (barge-in): AJUSTE OCULTO, apagado de fábrica (el eco de la bocina puede dispararlo; solo se
+  // prueba en un iPhone real). 5 toques en "Asistente" lo prende/apaga. Pide un aparato que lo entienda (vozInfo.interrumpir).
+  function asInterrumpirOn(){ try{ return localStorage.getItem('asInterrumpir') === '1'; }catch(e){ return false; } }
+  function asVigilarInterrupcion(){
+    const S = asPlugin();
+    if(!(AS.interrumpirPlugin && asInterrumpirOn() && isNative() && S && AS.estado === 'hablando' && !AS.oidoMantiene)) return;
+    asOidoNativo(S, true).catch(function(){});
+  }
+  function asInterrumpir(){ if(AS.enviando || AS.estado !== 'hablando') return; AS.oidoMantiene = false; asCallar(); asEstado('esperando', ''); asEscuchar(); }
+  // El oído nativo: los avisos del plugin y el arranque. mantenerVoz=true (barge-in) abre el micrófono SIN cortar la voz.
+  async function asOidoNativo(S, mantenerVoz){
+    asEnganchar(S);
+    AS.oidoDesde = Date.now(); AS.oidoMantiene = !!mantenerVoz; AS.altoDesde = 0;
+    await S.empezar(Object.assign({ idioma:'es-MX', vocabulario: asVocabulario(), frases: [], pronunciaciones: [] }, mantenerVoz ? { mantenerVoz: true } : {}));
+    AS.modo = 'nativo';
+  }
+  // Los avisos del plugin. Se enganchan también al ABRIR (antes del saludo): sin `hablaFin` el saludo se cortaba
+  // 50 ms antes del estimado y el oído arrancaba encima de la última sílaba.
+  function asEnganchar(S){
+    if(S.removeAllListeners) S.removeAllListeners();
+    S.addListener('nivel', function(d){
+      AS.nivel = Math.max(0, Math.min(1, (d && d.nivel) || 0)); if(window.Cara){ try{ Cara.nivel(AS.nivel); }catch(err){} }
+      if(AS.estado === 'hablando' && AS.oidoMantiene){ const ahora = Date.now(); if(AS.nivel > 0.6){ if(!AS.altoDesde) AS.altoDesde = ahora; else if(ahora - AS.altoDesde > 400){ AS.altoDesde = 0; asInterrumpir(); } } else AS.altoDesde = 0; }
+    });
+    S.addListener('texto', function(d){ const t = (d && d.texto) || ''; if(t !== AS.texto){ AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); } });
+    S.addListener('error', function(d){
+      AS.nivel = 0; if(AS.estado !== 'escuchando') return;
+      // Recién abierto el oído tras hablar, la sesión de audio a veces todavía está cambiando: se reintenta UNA vez.
+      if(!AS.oidoReintento && Date.now() - (AS.oidoDesde || 0) < 2500){ AS.oidoReintento = true; asEstado('esperando', ''); setTimeout(function(){ if(AS.abierto && AS.estado === 'esperando') asEscuchar(); }, 600); return; }
+      asEstado('esperando', (d && d.mensaje) || 'No se pudo oír. Toca la cara.');
+    });
+    // El plugin (aparato 18+) avisa cuando la voz de verdad termino o no arranco: la espera se corta ahi.
+    // Solo cuenta cuando la respuesta ya llego completa (`enviando` en falso): a media respuesta todavia pueden
+    // venir frases, y cortar la espera ahi reabria el oido y mataba la voz.
+    // (21 oct) Se vuelve a poner en CADA arranque: removeAllListeners lo borraba y la segunda vuelta esperaba hasta
+    // hablaLimite (el doble + 3 s) para reabrir el oído: por eso había que tocar la esfera otra vez.
+    S.addListener('hablaFin', function(){ AS.esperaFin = false; if(AS.enviando){ AS.finPendiente = true; return; } AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); });
+    AS.oyeHablaFin = true;
+  }
   async function asEscuchar(){
     if(!AS.abierto || AS.estado === 'escuchando' || AS.estado === 'pensando') return;
     asCallar();
@@ -50121,17 +50186,9 @@ body.med-pp-abierto{overflow:hidden;}
     const S = asPlugin();
     if(isNative() && S){
       try{
-        if(S.removeAllListeners) S.removeAllListeners();
-        S.addListener('nivel', function(d){ AS.nivel = Math.max(0, Math.min(1, (d && d.nivel) || 0)); });
-        S.addListener('texto', function(d){ const t = (d && d.texto) || ''; if(t !== AS.texto){ AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); } });
-        S.addListener('error', function(d){ if(AS.estado === 'escuchando') asEstado('esperando', (d && d.mensaje) || 'No se pudo oír. Toca la esfera.'); AS.nivel = 0; });
-        // El plugin (aparato 18+) avisa cuando la voz de verdad termino o no arranco: la espera se corta ahi.
-        // Solo cuenta cuando la respuesta ya llego completa (`enviando` en falso): a media respuesta todavia pueden
-        // venir frases, y cortar la espera ahi reabria el oido y mataba la voz.
-        if(S.addListener && !AS.oyeHablaFin){ AS.oyeHablaFin = true; S.addListener('hablaFin', function(){ AS.esperaFin = false; if(AS.enviando){ AS.finPendiente = true; return; } AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); }); }
         asEstado('escuchando', 'Te escucho…');
-        await S.empezar({ idioma:'es-MX', vocabulario: asVocabulario(), frases: [], pronunciaciones: [] });
-        AS.modo = 'nativo'; AS.ultTexto = Date.now(); asVigilarSilencio();
+        await asOidoNativo(S, false);
+        AS.ultTexto = Date.now(); asVigilarSilencio();
       }catch(err){
         const code = (err && (err.code || err.message)) || '';
         asEstado('esperando', /permiso/.test(code) ? 'Falta el permiso del micrófono: Ajustes → Field Reports.' : 'No se pudo escuchar. Escribe abajo.');
@@ -50142,13 +50199,13 @@ body.med-pp-abierto{overflow:hidden;}
     if(!R){ asEstado('esperando', 'Este navegador no oye. Escribe abajo.'); return; }
     try{
       const r = new R(); r.lang = 'es-US'; r.continuous = false; r.interimResults = true; r.maxAlternatives = 1;
-      r.onresult = function(ev){ let t = ''; for(let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript; AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); AS.nivel = 0.5 + 0.4 * Math.random(); };
-      r.onerror = function(ev){ AS.rec = null; AS.nivel = 0; if(AS.estado !== 'escuchando') return; asEstado('esperando', ev.error === 'no-speech' ? 'No se oyó nada. Toca la esfera.' : ev.error === 'not-allowed' ? 'Falta el permiso del micrófono del navegador.' : 'No se pudo oír. Escribe abajo.'); };
-      r.onend = function(){ AS.rec = null; AS.nivel = 0; if(AS.estado === 'escuchando'){ if(AS.texto.trim()) asEnviar(AS.texto); else asEstado('esperando', 'Toca la esfera y habla.'); } };
+      r.onresult = function(ev){ let t = ''; for(let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript; AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); AS.nivel = 0.5 + 0.4 * Math.random(); if(window.Cara){ try{ Cara.nivel(AS.nivel); }catch(err){} } };
+      r.onerror = function(ev){ AS.rec = null; AS.nivel = 0; if(AS.estado !== 'escuchando') return; if(ev.error === 'no-speech'){ asReposar(); return; } asEstado('esperando', ev.error === 'not-allowed' ? 'Falta el permiso del micrófono del navegador.' : 'No se pudo oír. Escribe abajo.'); };
+      r.onend = function(){ AS.rec = null; AS.nivel = 0; if(AS.estado === 'escuchando'){ if(AS.texto.trim()) asEnviar(AS.texto); else asReposar(); } };
       AS.rec = r; r.start(); AS.modo = 'web'; asEstado('escuchando', 'Te escucho…');
     }catch(e){ asEstado('esperando', 'No se pudo escuchar. Escribe abajo.'); }
   }
-  // El plugin no dice cuando terminaste: 1.4 s sin texto nuevo y bajito = terminaste.
+  // El plugin no dice cuando terminaste: 1.4 s sin texto nuevo y bajito = terminaste. 8 s sin nada = reposo.
   function asVigilarSilencio(){
     clearInterval(AS.tmrSil);
     const inicio = Date.now();
@@ -50156,8 +50213,8 @@ body.med-pp-abierto{overflow:hidden;}
       if(AS.estado !== 'escuchando' || AS.modo !== 'nativo'){ clearInterval(AS.tmrSil); return; }
       const ahora = Date.now();
       if(AS.texto.trim() && ahora - AS.ultTexto > 1400 && AS.nivel < 0.25){ clearInterval(AS.tmrSil); asPararOido().then(function(){ asEnviar(AS.texto); }); }
-      else if(!AS.texto.trim() && ahora - inicio > 9000){ clearInterval(AS.tmrSil); asPararOido(); asEstado('esperando', 'No se oyó nada. Toca la esfera.'); }
-      else if(ahora - inicio > 25000){ clearInterval(AS.tmrSil); asPararOido().then(function(){ if(AS.texto.trim()) asEnviar(AS.texto); else asEstado('esperando', 'Toca la esfera y habla.'); }); }
+      else if(!AS.texto.trim() && ahora - inicio > 8000){ clearInterval(AS.tmrSil); asReposar(); }
+      else if(ahora - inicio > 25000){ clearInterval(AS.tmrSil); asPararOido().then(function(){ if(AS.texto.trim()) asEnviar(AS.texto); else asReposar(); }); }
     }, 200);
   }
   async function asPararOido(){
@@ -50196,14 +50253,15 @@ body.med-pp-abierto{overflow:hidden;}
     const el = $('#asVozAviso'); if(!el) return;
     let basica = false;
     const S = asPlugin();
-    if(S && S.vozInfo){ try{ const i = await S.vozInfo(); basica = !!(i && i.soloBasicas); }catch(e){ basica = false; } }
+    if(S && S.vozInfo){ try{ const i = await S.vozInfo(); basica = !!(i && i.soloBasicas); AS.interrumpirPlugin = !!(i && i.interrumpir); }catch(e){ basica = false; } }
     else if(window.speechSynthesis){ const v = asVozWeb(); basica = !!(v && /compact/i.test(String(v.voiceURI || '') + String(v.name || ''))); }
     el.hidden = !basica;
   }
   // UNA frase a la cola de la voz. encolar=true no corta lo que se esta diciendo (streaming frase por frase).
   async function asDecir(t, encolar){
     t = asParaVoz(t); if(!t) return 0;
-    asEstado('hablando', '');
+    asEstado('hablando', ''); if(window.Cara){ try{ Cara.hablando(true, t); }catch(err){} }
+    setTimeout(asVigilarInterrupcion, 250);   // barge-in (si está prendido): también con frases encoladas del stream
     const S = asPlugin();
     let ms = Math.max(900, t.length * 62);
     if(isNative() && S && S.hablar){
@@ -50238,7 +50296,7 @@ body.med-pp-abierto{overflow:hidden;}
       if(!AS.abierto){ return; }
       if(AS.finPendiente && !AS.enviando){ AS.finPendiente = false; AS.esperaFin = false; AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); }
       const aguanta = AS.esperaFin && Date.now() < (AS.hablaLimite || 0);
-      if(Date.now() >= AS.hablaHasta - 50 && !aguanta){ if(AS.estado === 'hablando') asEstado('esperando', ''); if(luego) luego(); return; }
+      if(Date.now() >= AS.hablaHasta - 50 && !aguanta){ if(window.Cara){ try{ Cara.hablando(false); }catch(err){} } AS.oidoMantiene = false; if(AS.estado === 'hablando') asEstado('esperando', ''); if(luego) luego(); return; }
       AS.tmrHabla = setTimeout(tic, Math.min(400, Math.max(60, AS.hablaHasta - Date.now())));
     };
     AS.tmrHabla = setTimeout(tic, 60);
@@ -50295,6 +50353,7 @@ body.med-pp-abierto{overflow:hidden;}
             if(!line.startsWith('data:')) return;
             let o = null; try{ o = JSON.parse(line.slice(5).trim()); }catch(e){ return; }
             if(o && typeof o.t === 'string') onTexto(o.t);
+            if(o && typeof o.g === 'string' && window.Cara){ try{ Cara.gesto(o.g); }catch(err){} }
             if(o && o.fin){ fin = o.fin; status = o.status || 200; }
           });
         }
@@ -50325,17 +50384,21 @@ body.med-pp-abierto{overflow:hidden;}
       if(asEsSi(low)) return asConfirmar();
       if(asEsNo(low)) return asCancelar();
     }
+    if(!AS.conf && asEsAdios(texto)){ asTranscribir(texto); asPararOido(); asMostrarRespuesta('Aquí estoy.'); asHablar('Aquí estoy.', function(){ asReposar(); }); return; }
     asTranscribir(texto); asEstado('pensando', 'Un momento…'); AS.enviando = true; asMostrarRespuesta('');
     asCallar();
     const t0 = Date.now();
     // Siri-like: si el modelo tarda, a los 1.6 s dice algo corto para que no sienta el silencio.
     clearTimeout(AS.tmrRelleno);
-    AS.tmrRelleno = setTimeout(function(){ if(AS.estado === 'pensando' && AS.enviando) asDecirSuave(['Déjame ver.', 'Un momento.', 'Ya lo reviso.'][Math.floor(Math.random() * 3)]); }, 1600);
+    AS.tmrRelleno = setTimeout(function(){ if(AS.estado === 'pensando' && AS.enviando) asDecirSuave(asRelleno()); }, 1600);
     let dicho = '', pendiente = '', primerTrozo = 0;
     // Frase por frase solo donde la cola de voz existe: web (speechSynthesis) o aparato 17+ (el plugin con
     // `vozInfo` es el que entiende `encolar`). Un aparato viejo cortaria cada frase con la siguiente.
     const Sv = asPlugin(); const porFrases = !isNative() || !!(Sv && Sv.vozInfo);
+    const filtroCara = window.Cara ? Cara.filtroDeTrozos() : null;
     const onTexto = function(t){
+      // La etiqueta [gesto:x] del modelo va a la cara, nunca a la voz (puede llegar partida en varios trozos).
+      if(filtroCara){ const f = filtroCara(t); if(f.gesto){ try{ Cara.gesto(f.gesto); }catch(err){} } t = f.texto; if(!t) return; }
       if(!primerTrozo){ primerTrozo = Date.now() - t0; clearTimeout(AS.tmrRelleno); }
       pendiente += t;
       asMostrarRespuesta(dicho + pendiente);
@@ -50349,7 +50412,8 @@ body.med-pp-abierto{overflow:hidden;}
       if(!(r.ok && j.ok)) throw new Error(j.error || ('HTTP ' + r.status));
       AS.historial = j.historial || AS.historial;
       AS.ultMs = Date.now() - t0; AS.ultPrimerTrozo = primerTrozo;
-      const final = String(j.texto || (j.confirmacion ? j.confirmacion.resumen + '. ¿Lo registro?' : 'No entendí. Dímelo otra vez.'));
+      let final = String(j.texto || (j.confirmacion ? j.confirmacion.resumen + '. ¿Lo registro?' : 'No entendí. Dímelo otra vez.'));
+      if(window.Cara){ try{ const l = Cara.limpiarEtiqueta(final); final = l.texto; const g = j.confirmacion ? 'pregunta' : (j.gesto || l.gesto || Cara.gestoDelTexto(final)); if(g) Cara.gesto(g); }catch(err){} }
       asMostrarRespuesta(final);
       if(j.confirmacion) asMostrarTarjeta(j.confirmacion); else asQuitarTarjeta();
       const nav = j.navegar;
@@ -50361,20 +50425,21 @@ body.med-pp-abierto{overflow:hidden;}
       AS.enviando = false;
       asAlTerminarDeHablar(function(){
         if(nav){ asNavegar(nav); return; }
-        if(AS.abierto && !desdeTeclado) asEscuchar();
+        asSeguirOyendo();   // siempre vuelve a oír (también tras una pregunta escrita, salvo con el teclado abierto)
       });
       return;
     }catch(e){
       AS.enviando = false; clearTimeout(AS.tmrRelleno);
       const em = String((e && e.message) || e);
+      if(window.Cara){ try{ Cara.gesto(AS_RED_RE.test(em) ? 'sin_senal' : 'triste'); }catch(err){} }
       const m = /401|venció/.test(em) ? 'Tu sesión venció. Entra otra vez.' : /429|demasiados/.test(em) ? 'Muchos pedidos seguidos. Espera un momento.' : AS_RED_RE.test(em) ? 'Se cortó la conexión. Intenta otra vez.' : 'No se pudo: ' + em + '.';
-      asEstado('esperando', m + ' Toca la esfera para intentar otra vez.');
+      asEstado('esperando', m + ' Toca la cara para intentar otra vez.');
     }
   }
   function asMostrarTarjeta(c){
     AS.conf = c;
     const t = $('#asTarjeta'); if(!t) return;
-    const tipos = { pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa' };
+    const tipos = { pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa', visita_lecturas:'Lecturas de la casa', visita_materiales:'Materiales de la casa', visita_comunicacion:'Comunicación de la casa' };
     const metodos = { zelle:'Zelle', cheque:'Cheque', efectivo:'Efectivo', otro:'Otro' };
     const esDinero = ['pago','adelanto','descuento','extra','devolucion','ajuste'].includes(c.tipo);
     $('#asTarjetaTipo').textContent = (tipos[c.tipo] || c.tipo || 'Acción') + (c.cola ? ' · de la lista' : '') + (c.sandbox ? ' · PRUEBA' : '');
@@ -50385,6 +50450,7 @@ body.med-pp-abierto{overflow:hidden;}
     const eb = $('#asEscritoBox'); if(eb){ eb.hidden = !c.escrito_requerido; } const ei = $('#asEscrito'); if(ei) ei.value = '';
     $$('#asTarjeta button').forEach(b => { b.disabled = false; });
     t.hidden = false;
+    if(window.Cara){ try{ Cara.gesto('pregunta', 4000); }catch(err){} }
   }
   function asQuitarTarjeta(){ AS.conf = null; const t = $('#asTarjeta'); if(t) t.hidden = true; }
   async function asConfirmar(){
@@ -50392,7 +50458,7 @@ body.med-pp-abierto{overflow:hidden;}
     let escrito;
     if(c.escrito_requerido){
       const v = parseFloat(String(($('#asEscrito') || {}).value || '').replace(/[^0-9.]/g, ''));
-      if(!(Math.abs(v - (+c.monto)) < 0.005)){ asPararOido(); asHablar('Teclea el monto exacto para confirmar.'); const ei = $('#asEscrito'); if(ei) ei.focus(); return; }
+      if(!(Math.abs(v - (+c.monto)) < 0.005)){ asPararOido(); if(window.Cara){ try{ Cara.gesto('pregunta'); }catch(err){} } asHablar('Teclea el monto exacto para confirmar.'); const ei = $('#asEscrito'); if(ei) ei.focus(); return; }
       escrito = v;
     }
     await asPararOido(); asCallar();
@@ -50406,17 +50472,19 @@ body.med-pp-abierto{overflow:hidden;}
       // Lista de pagos: la respuesta trae el "Listo" y la SIGUIENTE tarjeta.
       if(j.confirmacion) asMostrarTarjeta(j.confirmacion); else asQuitarTarjeta();
       asMostrarRespuesta(j.texto || 'Listo.');
+      if(window.Cara){ try{ Cara.gesto(j.confirmacion ? 'pregunta' : 'exito'); }catch(err){} }
       AS.enviando = false;
       // Fase 2a: lo guardado (una visita) trae a dónde ir; se abre DESPUÉS de decir "Listo", nunca con una tarjeta en espera.
       const navC = (!j.confirmacion && j.navegar) ? j.navegar : null;
-      asHablar(j.texto || 'Listo.', function(){ if(navC){ asNavegar(navC); return; } if(AS.abierto) asEscuchar(); });
+      asHablar(j.texto || 'Listo.', function(){ if(navC){ asNavegar(navC); return; } asSeguirOyendo(); });
       return;
     }catch(e){
       $$('#asTarjeta button').forEach(b => { b.disabled = false; });
       const em = String((e && e.message) || e);
       // Si la red se corto a medio confirmar, el servidor PUDO haberlo registrado: no se repite a ciegas.
       const m = AS_RED_RE.test(em) ? 'Se cortó la conexión y no sé si quedó registrado. Revísalo en Pagos antes de repetirlo.' : 'No se registró: ' + em;
-      asMostrarRespuesta(m); AS.enviando = false; asHablar(m);
+      if(window.Cara){ try{ Cara.gesto(AS_RED_RE.test(em) ? 'sin_senal' : 'triste'); }catch(err){} }
+      asMostrarRespuesta(m); AS.enviando = false; asHablar(m, asSeguirOyendo);
     }
   }
   function asCancelar(){
@@ -50426,7 +50494,8 @@ body.med-pp-abierto{overflow:hidden;}
     asQuitarTarjeta();
     AS.historial = AS.historial.concat([{ role:'user', content:'(No, cancela eso' + (era.cola ? '; si hay más en la lista, sigue con el siguiente cuando te lo pida' : '') + '.)' }, { role:'assistant', content:'Cancelado. No se registró nada.' }]);
     asMostrarRespuesta('Cancelado. No se registró nada.');
-    asHablar('Cancelado. No se registró nada.', function(){ if(AS.abierto) asEscuchar(); });
+    if(window.Cara){ try{ Cara.estado('reposo'); }catch(err){} }
+    asHablar('Cancelado. No se registró nada.', asSeguirOyendo);
   }
   // ---- abrir pantallas: por los MISMOS botones y funciones que usa el dedo ----
   async function asIrA(nav){
@@ -50491,61 +50560,27 @@ body.med-pp-abierto{overflow:hidden;}
       else if(n > 80) clearInterval(t);
     }, 250);
   })();
-  // ---- la esfera: un dibujo en canvas que respira con el nivel del microfono ----
-  function asAnimar(){
-    const cv = $('#asEsfera'); if(!cv) return;
-    const ctx = cv.getContext('2d');
-    const paso = function(){
-      if(!AS.abierto) return;
-      const dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth || 250, H = cv.clientHeight || 250;
-      if(cv.width !== Math.round(W * dpr)){ cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
-      AS.fase += 0.016;
-      const e = AS.estado;
-      const meta = e === 'escuchando' ? Math.min(1, AS.nivel * 1.6) + 0.08
-                 : e === 'hablando'   ? 0.45 + 0.35 * Math.abs(Math.sin(AS.fase * 7))
-                 : e === 'pensando'   ? 0.25 + 0.15 * Math.sin(AS.fase * 3)
-                 : 0.12 + 0.06 * Math.sin(AS.fase * 1.5);
-      AS.suave += (meta - AS.suave) * 0.18;
-      const amp = AS.suave;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
-      const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.3;
-      const g0 = ctx.createRadialGradient(cx, cy, R * 0.6, cx, cy, R * (1.65 + amp * 0.5));
-      g0.addColorStop(0, 'rgba(90,120,255,' + (0.18 + amp * 0.3) + ')'); g0.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g0; ctx.fillRect(0, 0, W, H);
-      const cols = [[64,156,255],[168,85,247],[52,211,153],[255,99,196]];
-      ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R * (1.02 + amp * 0.14), 0, Math.PI * 2); ctx.clip();
-      ctx.globalCompositeOperation = 'lighter';
-      cols.forEach(function(c, i){
-        const a = AS.fase * (0.6 + i * 0.17) + i * 1.7, d = R * (0.3 + amp * 0.4);
-        const x = cx + Math.cos(a) * d, y = cy + Math.sin(a * 1.3) * d, r = R * (0.8 + amp * 0.35 + 0.08 * Math.sin(AS.fase * 2 + i));
-        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-        g.addColorStop(0, 'rgba(' + c.join(',') + ',0.9)'); g.addColorStop(1, 'rgba(' + c.join(',') + ',0)');
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-      });
-      ctx.restore();
-      const g1 = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.05, cx, cy, R);
-      g1.addColorStop(0, 'rgba(255,255,255,0.35)'); g1.addColorStop(0.5, 'rgba(120,150,255,0.12)'); g1.addColorStop(1, 'rgba(20,30,80,0.05)');
-      ctx.fillStyle = g1; ctx.beginPath(); ctx.arc(cx, cy, R * (1.02 + amp * 0.14), 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,' + (0.22 + amp * 0.45) + ')'; ctx.lineWidth = 1.5; ctx.stroke();
-      AS.anim = requestAnimationFrame(paso);
-    };
-    if(AS.anim) cancelAnimationFrame(AS.anim);
-    AS.anim = requestAnimationFrame(paso);
-  }
+  // ---- la cara (21 oct 2026): cara.js dibuja; aqui solo se monta (una vez) y se enciende en cada apertura ----
+  function asAnimar(){ const el = $('#asEsfera'); if(!el || !window.Cara) return; try{ if(!el.__cara) Cara.montar(el, AS_CARA_OPCIONES(250)); else el.__cara.encender(); }catch(err){} }
   // ---- toques ----
   (function asCablear(){
     const abrir = $('#asAbrir'); if(abrir) abrir.addEventListener('click', asAbrir);
     const atras = $('#asAtras'); if(atras) atras.addEventListener('click', asCerrar);
     const esf = $('#asEsfera');
     if(esf) esf.addEventListener('click', function(){
-      if(AS.estado === 'escuchando'){ asPararOido().then(function(){ if(AS.texto.trim()) asEnviar(AS.texto); else asEstado('esperando', 'Toca la esfera y habla.'); }); }
-      else if(AS.estado === 'hablando'){ asCallar(); asEstado('esperando', ''); asEscuchar(); }
-      else if(AS.estado === 'esperando'){ asEscuchar(); }
+      if(window.Cara){ try{ Cara.parallax(); }catch(err){} }   /* giroscopio: pide permiso UNA vez, desde un toque */
+      if(AS.estado === 'escuchando'){ asPararOido().then(function(){ if(AS.texto.trim()) asEnviar(AS.texto); else asReposar(); }); }
+      else if(AS.estado === 'hablando'){ AS.oidoMantiene = false; asCallar(); asEstado('esperando', ''); asEscuchar(); }
+      else if(AS.estado === 'esperando' || AS.estado === 'reposo'){ asEscuchar(); }
     });
+    if(esf) esf.addEventListener('keydown', function(ev){ if(ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); esf.click(); } });
+    // Ajuste oculto: 5 toques seguidos en "Asistente" prenden/apagan "interrumpir hablando" (barge-in).
+    const tit = $('#asPanel .as-titulo'); let toques = 0, tmrToques = null;
+    if(tit) tit.addEventListener('click', function(){ toques++; clearTimeout(tmrToques); tmrToques = setTimeout(function(){ toques = 0; }, 1500); if(toques < 5) return; toques = 0; const on = !asInterrumpirOn(); try{ localStorage.setItem('asInterrumpir', on ? '1' : '0'); }catch(e){} asEstado(AS.estado, 'Interrumpir hablando: ' + (on ? 'prendido' : 'apagado') + (on && !AS.interrumpirPlugin ? ' (este aparato aún no lo entiende)' : '')); });
     const ok = $('#asConfirmarBtn'); if(ok) ok.addEventListener('click', asConfirmar);
     const no = $('#asCancelar'); if(no) no.addEventListener('click', asCancelar);
     const ent = $('#asEntrada'), env = $('#asEnviarBtn');
-    const mandar = function(){ const t = (ent && ent.value || '').trim(); if(!t) return; ent.value = ''; asPararOido().then(function(){ asEnviar(t, true); }); };
+    const mandar = function(){ const t = (ent && ent.value || '').trim(); if(!t) return; ent.value = ''; asCallar(); asPararOido().then(function(){ asEnviar(t, true); }); };
     if(env) env.addEventListener('click', mandar);
     if(ent) ent.addEventListener('keydown', function(ev){ if(ev.key === 'Enter'){ ev.preventDefault(); mandar(); } });
     const sb = $('#asSandbox'); if(sb) sb.addEventListener('change', function(){ AS.sandbox = !!sb.checked; AS.historial = []; asQuitarTarjeta(); const p = $('#asPanel'); if(p) p.classList.toggle('as-prueba-on', AS.sandbox); asMostrarRespuesta(AS.sandbox ? 'Modo prueba: nombres inventados, nada se guarda.' : 'Datos reales.'); });
@@ -50555,7 +50590,7 @@ body.med-pp-abierto{overflow:hidden;}
     asPintarEsfera();
   })();
   // Gancho para las pruebas y para la copia de prueba.
-  window.__as = { abrir: asAbrir, cerrar: asCerrar, enviar: asEnviar, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas };
+  window.__as = { abrir: asAbrir, cerrar: asCerrar, enviar: asEnviar, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
 
 })();
 </script>

@@ -1,0 +1,101 @@
+/* ============================================================================
+   CARA — el personaje del asistente del manager (Field Reports), ronda 3 (21 oct 2026).
+   Casco con volumen, visor de vidrio, orejas de metal con aro turquesa, OJOS Y BOCA CONTINUOS
+   (paths con degradado, brillo especular y bloom) que cambian de forma por morph.
+   Reglas de dibujo para iPhone (WebKit):
+   - NADA de filter:blur ni mix-blend-mode (dentro de overflow:hidden pintan un cuadro). El bloom es un
+     segundo path más grande con degradado radial a transparente.
+   - Las transformaciones 3D (cabeceo, parallax) van en DIVS HTML (.cara-cabeza), nunca en <g>.
+   - Animar/transicionar algo DENTRO de un svg repinta todo ese svg a 60 fps (medido: 26 % de CPU). Por eso
+     los ojos, la boca y el reflejo son svg aparte y chicos, y los lazos (buscar, lágrimas, apagado) y el
+     morph de los ojos van por JS a ≤ 15 pasos/s y SOLO mientras algo cambia. Lo que respira o gira vive en
+     divs HTML (compositor).
+   ============================================================================ */
+.cara{
+  --cara-led: 90,200,255;          /* celeste luminoso (R,G,B) */
+  --cara-led-claro: #e6fbff;       /* centro del ojo */
+  --cara-led-borde: #1e9ae8;       /* borde del ojo, más saturado */
+  --cara-visor-1: #22508f;         /* visor: arriba (vidrio iluminado) */
+  --cara-visor-2: #0e2250;         /* visor: medio */
+  --cara-visor-3: #040a1c;         /* visor: abajo, profundo */
+  --cara-casco-1: #ffffff;         /* luz principal */
+  --cara-casco-2: #e3e7ee;
+  --cara-casco-3: #a9b2c2;         /* oclusión hacia el borde */
+  --cara-aro: #3fe0d8;             /* turquesa de orejas y luz de estado */
+  --cara-aro-2: #1d9b96;
+  --cara-nivel: 0;                 /* 0..1, nivel del micrófono (orejas y brillo) */
+  --cara-ry: 0deg; --cara-rx: 0deg;        /* cabeceo (JS) */
+  --cara-py: 0deg; --cara-px: 0deg;        /* parallax del giroscopio (JS, opcional) */
+  --cara-rfx: 0px;                         /* el brillo del visor se corre un pelo con el cabeceo */
+  position:relative; display:inline-block; width:250px; height:auto; aspect-ratio:240/220;
+  line-height:0; user-select:none; -webkit-user-select:none; -webkit-tap-highlight-color:transparent;
+  contain:layout style;            /* el personaje no empuja a nadie */
+  transition:opacity .55s ease-out, transform .6s cubic-bezier(.2,.8,.3,1);
+}
+.cara.cara-apagada{opacity:0; transform:scale(.9) translateY(6px);}       /* entrada: se enciende */
+.cara svg{width:100%; height:100%; display:block; overflow:visible;}
+.cara .cara-resp, .cara .cara-cabeza{width:100%; height:100%;}
+.cara .cara-cabeza{position:relative;}
+.cara .cara-capa{position:absolute; inset:0; pointer-events:none;}   /* ojos, boca y reflejo: svg aparte encima del casco */
+.cara .cara-capa-led{will-change:transform, opacity;}                 /* capa propia: mover/atenuar los ojos no repinta el casco */
+.cara[data-color="menta"]{--cara-led:120,255,205; --cara-led-claro:#f0fff9; --cara-led-borde:#1fbf85; --cara-aro:#58e8c0; --cara-aro-2:#1f9c7c;}
+.cara[data-color="ambar"]{--cara-led:255,196,90; --cara-led-claro:#fff6e0; --cara-led-borde:#e08a1a; --cara-aro:#ffc46a; --cara-aro-2:#b5802e; --cara-visor-1:#4a3566; --cara-visor-2:#1e1535; --cara-visor-3:#0a0616;}
+.cara[data-color="violeta"]{--cara-led:168,150,255; --cara-led-claro:#f1edff; --cara-led-borde:#6f58e6; --cara-aro:#a99cff; --cara-aro-2:#6a5bd0; --cara-visor-1:#2b2a7a; --cara-visor-2:#15154a; --cara-visor-3:#07071e;}
+
+/* ---- vida: respiración (div de afuera) y cabeceo 3D (div de adentro) ---- */
+.cara .cara-resp{animation:caraRespira 5.4s ease-in-out infinite; transform-origin:50% 90%;}
+@keyframes caraRespira{0%,100%{transform:translateY(0) scale(1);} 50%{transform:translateY(-2px) scale(1.012);}}
+.cara .cara-cabeza{transform-origin:50% 55%; transition:transform .55s cubic-bezier(.2,.8,.3,1);
+  transform:perspective(640px) rotateY(calc(var(--cara-ry) + var(--cara-py))) rotateX(calc(var(--cara-rx) + var(--cara-px)));}
+.cara .cara-reflejo{transition:transform .55s cubic-bezier(.2,.8,.3,1); transform:translateX(var(--cara-rfx));}
+/* La luz de estado: el punto vive en el SVG (quieto); el halo que respira es un DIV (opacidad compositada). */
+.cara .cara-luz-halo{position:absolute; width:12%; aspect-ratio:1; border-radius:50%; transform:translate(-50%,-50%); pointer-events:none;
+  background:radial-gradient(circle, var(--cara-aro) 0, transparent 68%); opacity:.35; animation:caraLuzHalo 3.2s ease-in-out infinite;}
+@keyframes caraLuzHalo{0%,100%{opacity:.25;} 50%{opacity:.85;}}
+
+/* ---- ojos continuos: cuerpo con degradado, líneas de pantalla tenues, brillo especular, bloom ---- */
+.cara .cara-ojo{transition:transform .09s ease-in;}                   /* parpadeo = scaleY (transform-origin en el centro del ojo, inline) */
+.cara.cara-cerrando .cara-ojo{transform:scaleY(.06);}
+.cara .cara-ojos-sq{transform-origin:120px 108px; transition:transform .1s ease-out;}      /* squash leve del par al parpadear */
+.cara .cara-ojo-bloom{opacity:.9; transition:opacity .25s;}
+.cara[data-estado="escuchando"] .cara-ojo-bloom{opacity:calc(.9 + var(--cara-nivel) * .5);}
+.cara .cara-ojo-lineas{opacity:1; pointer-events:none;}               /* el patrón ya es ≤ .05 */
+.cara .cara-ojo-brillo{transition:opacity .15s;}
+.cara .cara-destello{opacity:0; transform:scale(0); transition:transform .25s ease-out, opacity .25s;}
+.cara[data-estado="exito"] .cara-destello{opacity:.95; transform:scale(1);}
+.cara .cara-ojos{transition:transform .32s ease-in-out; transform-origin:120px 108px;}
+.cara[data-estado="buscando"] .cara-ojos{transition:none;}
+.cara .cara-capa-ojos{transition:none;}
+
+/* ---- boca continua: trazo redondo (o, triste, confundido, rayita) o relleno (habla) + bloom ---- */
+.cara .cara-boca-g{transition:opacity .2s;}
+.cara .cara-boca{fill:none; stroke:rgb(var(--cara-led)); stroke-width:3.4; stroke-linecap:round; stroke-linejoin:round;}
+.cara .cara-boca-bloom{fill:none; stroke:rgb(var(--cara-led)); stroke-width:10; stroke-linecap:round; stroke-linejoin:round; opacity:.2;}
+.cara .cara-boca-g.relleno .cara-boca{fill:rgb(var(--cara-led)); stroke:var(--cara-led-claro); stroke-width:1.2;}
+.cara .cara-boca-g.relleno .cara-boca-bloom{fill:rgb(var(--cara-led)); stroke-width:7;}
+.cara .cara-corre{opacity:0;}                                         /* buscando: una rayita que va y viene (JS) */
+
+/* ---- lágrimas (triste): gotas brillantes que caen a pasos (JS) ---- */
+.cara .cara-lagrima{opacity:0;}
+
+/* ---- orejas: metal; el aro se ENCIENDE con el micrófono (luz radial detrás) ---- */
+.cara .cara-oreja{transition:transform .12s ease-out;}
+.cara .cara-oreja.izq{transform-origin:11px 116px;} .cara .cara-oreja.der{transform-origin:229px 116px;}
+.cara[data-estado="escuchando"] .cara-oreja{transform:scale(calc(1 + var(--cara-nivel) * .16));}
+.cara .cara-aro-luz{opacity:0; transition:opacity .12s;}
+.cara[data-estado="escuchando"] .cara-aro-luz{opacity:calc(.25 + var(--cara-nivel) * .75);}
+.cara .cara-aro{transition:opacity .15s;}
+.cara[data-estado="escuchando"] .cara-aro{opacity:calc(.6 + var(--cara-nivel) * .4);}
+
+/* ---- sin señal: los ojos se apagan y laten apenas (el lazo JS); la luz de estado se apaga ---- */
+.cara[data-estado="sin_senal"] .cara-capa-led{opacity:.4;}
+.cara[data-estado="sin_senal"] .cara-luz{opacity:.3;} .cara[data-estado="sin_senal"] .cara-luz-halo{animation:none; opacity:.1;}
+
+/* ---- tamaños ---- */
+.cara.cara-chica .cara-ojo-lineas{display:none;}                      /* a 76 px el micro-detalle solo ensucia */
+
+@media (prefers-reduced-motion: reduce){
+  .cara, .cara .cara-resp, .cara .cara-cabeza, .cara .cara-reflejo, .cara .cara-ojos, .cara .cara-ojos-sq, .cara .cara-ojo, .cara .cara-luz-halo{animation:none !important; transition:none !important;}
+  .cara .cara-cabeza{transform:none;}
+  .cara .cara-luz-halo{opacity:.5;}
+}
