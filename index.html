@@ -8972,7 +8972,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-20-M';
+  const APP_BUILD = '2026-10-20-N';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -50105,7 +50105,9 @@ body.med-pp-abierto{overflow:hidden;}
         S.addListener('texto', function(d){ const t = (d && d.texto) || ''; if(t !== AS.texto){ AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); } });
         S.addListener('error', function(d){ if(AS.estado === 'escuchando') asEstado('esperando', (d && d.mensaje) || 'No se pudo oír. Toca la esfera.'); AS.nivel = 0; });
         // El plugin (aparato 18+) avisa cuando la voz de verdad termino o no arranco: la espera se corta ahi.
-        if(S.addListener && !AS.oyeHablaFin){ AS.oyeHablaFin = true; S.addListener('hablaFin', function(){ AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); }); }
+        // Solo cuenta cuando la respuesta ya llego completa (`enviando` en falso): a media respuesta todavia pueden
+        // venir frases, y cortar la espera ahi reabria el oido y mataba la voz.
+        if(S.addListener && !AS.oyeHablaFin){ AS.oyeHablaFin = true; S.addListener('hablaFin', function(){ AS.esperaFin = false; if(AS.enviando){ AS.finPendiente = true; return; } AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); }); }
         asEstado('escuchando', 'Te escucho…');
         await S.empezar({ idioma:'es-MX', vocabulario: asVocabulario(), frases: [], pronunciaciones: [] });
         AS.modo = 'nativo'; AS.ultTexto = Date.now(); asVigilarSilencio();
@@ -50186,8 +50188,12 @@ body.med-pp-abierto{overflow:hidden;}
     if(isNative() && S && S.hablar){
       // Lo que devuelve el plugin (`segundos`) ya es cuanto falta DESDE AHORA contando la cola: se pone, no se
       // suma (sumarlo dejaba la esfera "hablando" el doble o el triple del tiempo real).
-      try{ const r = await S.hablar({ texto: t, idioma: 'es-MX', preferida: true, encolar: !!encolar }); if(r && r.segundos) ms = r.segundos * 1000; }catch(e){ ms = 0; }
+      AS.esperaFin = !!AS.oyeHablaFin; AS.finPendiente = false;
+      try{ const r = await S.hablar({ texto: t, idioma: 'es-MX', preferida: true, encolar: !!encolar }); if(r && r.segundos) ms = r.segundos * 1000; }catch(e){ ms = 0; AS.esperaFin = false; }
       AS.hablaHasta = Date.now() + ms;
+      // El reloj estimado se queda corto con las voces Premium (hablan mas despacio): mientras el telefono no avise
+      // `hablaFin`, se le aguanta hasta el doble del estimado + 3 s antes de darlo por terminado.
+      AS.hablaLimite = Date.now() + ms * 2 + 3000;
       return ms;
     }
     if(window.speechSynthesis){
@@ -50209,7 +50215,9 @@ body.med-pp-abierto{overflow:hidden;}
     clearTimeout(AS.tmrHabla);
     const tic = function(){
       if(!AS.abierto){ return; }
-      if(Date.now() >= AS.hablaHasta - 50){ if(AS.estado === 'hablando') asEstado('esperando', ''); if(luego) luego(); return; }
+      if(AS.finPendiente && !AS.enviando){ AS.finPendiente = false; AS.esperaFin = false; AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); }
+      const aguanta = AS.esperaFin && Date.now() < (AS.hablaLimite || 0);
+      if(Date.now() >= AS.hablaHasta - 50 && !aguanta){ if(AS.estado === 'hablando') asEstado('esperando', ''); if(luego) luego(); return; }
       AS.tmrHabla = setTimeout(tic, Math.min(400, Math.max(60, AS.hablaHasta - Date.now())));
     };
     AS.tmrHabla = setTimeout(tic, 60);
@@ -50222,7 +50230,7 @@ body.med-pp-abierto{overflow:hidden;}
     if(window.speechSynthesis){ try{ const u = new SpeechSynthesisUtterance(t); u.lang = 'es-US'; const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */ speechSynthesis.speak(u); }catch(e){} }
   }
   function asCallar(){
-    clearTimeout(AS.tmrHabla); clearTimeout(AS.tmrRelleno); AS.hablaHasta = 0;
+    clearTimeout(AS.tmrHabla); clearTimeout(AS.tmrRelleno); AS.hablaHasta = 0; AS.esperaFin = false; AS.finPendiente = false;
     if(window.speechSynthesis){ try{ speechSynthesis.cancel(); }catch(e){} }
     const S = asPlugin();
     if(isNative() && S && AS.estado === 'hablando'){ try{ S.parar(); }catch(e){} }
