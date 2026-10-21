@@ -8984,7 +8984,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-20-O';
+  const APP_BUILD = '2026-10-21-P';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -50103,7 +50103,16 @@ body.med-pp-abierto{overflow:hidden;}
     const out = [];
     try{ if(typeof TEAM_PROFILES === 'object' && TEAM_PROFILES) Object.values(TEAM_PROFILES).forEach(p => { if(p && p.name) out.push(p.name); }); }catch(e){}
     try{ if(Array.isArray(casualWorkers)) casualWorkers.forEach(w => { if(w && w.name) out.push(w.name); }); }catch(e){}
-    return out.concat(['labor log','labor logs','Zelle','adelanto','AMG Moving','Restoration Doctor','invoice','CompanyCam']).slice(0, 100);
+    // Fase 2a: el equipo como lo dice la cuadrilla (el MISMO catálogo del conteo de equipo) y los cuartos, para que el
+    // oído no escriba "fence" por fans ni "jefa" por HEPA. contextualStrings acepta 100: primero la gente, luego el oficio.
+    const oficio = ['labor log','labor logs','Zelle','adelanto','AMG Moving','Restoration Doctor','invoice','CompanyCam',
+      'equipment count','material list','dry log','dehu','dehus','deshumidificador','dehumidifier','fans','fan','air mover','air movers','ventiladores',
+      'HEPA','HEPAs','air scrubber','air duct','air ducts','ducto','drip pan','drip pans','bandeja de goteo','dry mat','dry mats','tapete','zipper','zip wall pole','poste',
+      'generador','heater','calentador','fogger','ozono','bote de basura','sótano','basement','cocina','kitchen','sala','living room','baño','bathroom','recámara','máster','master bedroom',
+      'pasillo','hallway','garaje','garage','clóset','ático','attic','laundry','lavandería','comedor','oficina','escalera','entrada','visita','lecturas','drywall','baseboard'];
+    try{ if(typeof VOZ_EQUIPO !== 'undefined' && Array.isArray(VOZ_EQUIPO)) VOZ_EQUIPO.forEach(e => { if(e && e.en && oficio.indexOf(e.en) < 0) oficio.push(e.en); }); }catch(e){}
+    // 100 lugares: la gente hasta 55, el oficio llena el resto (con mucha gente el oficio no se cae entero).
+    return out.slice(0, 55).concat(oficio.filter((x, i, a) => a.indexOf(x) === i)).slice(0, 100);
   }
   async function asEscuchar(){
     if(!AS.abierto || AS.estado === 'escuchando' || AS.estado === 'pensando') return;
@@ -50365,7 +50374,7 @@ body.med-pp-abierto{overflow:hidden;}
   function asMostrarTarjeta(c){
     AS.conf = c;
     const t = $('#asTarjeta'); if(!t) return;
-    const tipos = { pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo' };
+    const tipos = { pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa' };
     const metodos = { zelle:'Zelle', cheque:'Cheque', efectivo:'Efectivo', otro:'Otro' };
     const esDinero = ['pago','adelanto','descuento','extra','devolucion','ajuste'].includes(c.tipo);
     $('#asTarjetaTipo').textContent = (tipos[c.tipo] || c.tipo || 'Acción') + (c.cola ? ' · de la lista' : '') + (c.sandbox ? ' · PRUEBA' : '');
@@ -50398,7 +50407,9 @@ body.med-pp-abierto{overflow:hidden;}
       if(j.confirmacion) asMostrarTarjeta(j.confirmacion); else asQuitarTarjeta();
       asMostrarRespuesta(j.texto || 'Listo.');
       AS.enviando = false;
-      asHablar(j.texto || 'Listo.', function(){ if(AS.abierto) asEscuchar(); });
+      // Fase 2a: lo guardado (una visita) trae a dónde ir; se abre DESPUÉS de decir "Listo", nunca con una tarjeta en espera.
+      const navC = (!j.confirmacion && j.navegar) ? j.navegar : null;
+      asHablar(j.texto || 'Listo.', function(){ if(navC){ asNavegar(navC); return; } if(AS.abierto) asEscuchar(); });
       return;
     }catch(e){
       $$('#asTarjeta button').forEach(b => { b.disabled = false; });
@@ -50439,6 +50450,17 @@ body.med-pp-abierto{overflow:hidden;}
           break;
         case 'clientes_amg': { showTab('amgmoving'); pushBack('manager'); if(typeof amgShow === 'function') amgShow(null); const b = $('#amgSegClients'); if(b) b.click(); break; }
         case 'visitas_clientes': showTab('visitas'); pushBack('mgrrest'); break;
+        case 'visitas_de_casa': {
+          // La MISMA casa que se toca en la lista de Visitas (visCliente + visPintar), sin abrir el formulario.
+          showTab('visitas'); pushBack('mgrrest');
+          if(nav.dir_key){
+            visCliente = { dir_key: String(nav.dir_key), nombre: String(nav.nombre || ''), direccion: String(nav.direccion || '') };
+            visPintar();
+            // La nube puede traer la visita recién guardada por voz: se sincroniza y se repinta.
+            try{ Promise.resolve(visSincronizar(true)).then(function(){ if(visPantallaActiva() && visCliente && visCliente.dir_key === String(nav.dir_key)) visPintar(); }).catch(function(){}); }catch(e){}
+          }
+          break;
+        }
         case 'planos': { const b = $('#mgrGoPlanos'); if(b) b.click(); break; }
         case 'contenidos': { const b = $('#mgrGoContenidos'); if(b) b.click(); break; }
         case 'codigos': showTab('mgrcodes'); pushBack('mgrrest'); break;
