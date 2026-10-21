@@ -5012,6 +5012,8 @@ body.med-pp-abierto{overflow:hidden;}
       <!-- (20-oct) Sin textos ni contadores. El espacio solo sale cuando va quedando poco (es un aviso de verdad). -->
       <p class="hint" id="medEspacio" style="margin:0 0 10px; color:var(--ink-soft);" hidden></p>
       <div id="medGuardadasRows"></div>
+      <!-- (21-oct) Lo que guardaron OTROS teléfonos del equipo: solo para verlo (supabase/sql/fr-05-medidas-compartidas.sql). Vacía y escondida si no hay. -->
+      <div id="medGuardadasEquipo" hidden></div>
     </section>
   </section>
 
@@ -9990,7 +9992,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-R7';
+  const APP_BUILD = '2026-10-21-R8';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -22144,6 +22146,121 @@ body.med-pp-abierto{overflow:hidden;}
     return MED_EQUIPO.lista.map(e => Object.assign({}, e));
   }
 
+  // ---- (21-oct) LAS MEDIDAS QUE GUARDÓ OTRO TELÉFONO DEL EQUIPO (solo para VERLAS) ----
+  // Su decisión del 21-oct ("sí a todo"): cualquier trabajador de la empresa que llegue al día siguiente a la misma casa ve
+  // las medidas que guardó otro teléfono (para seguir midiendo o revisar). La nube los deja LEER a los de la misma empresa
+  // (supabase/sql/fr-05-medidas-compartidas.sql); aquí se baja solo el RESUMEN (sin vals) y las medidas completas de UN
+  // trabajo solo al tocar Vista previa. Se quedan en la memoria de esta pantalla: no entran a Medidas guardadas del
+  // teléfono, no se suben, no se editan ni se borran. Sin señal o sin el SQL: no hay, y todo sigue igual.
+  let MED_EQUIPO_MED = { at: 0, lista: [] };
+  let MED_EQUIPO_MED_PROMESA = null;
+  function medBajarMedidasEquipo(forzar){ return Promise.resolve().then(() => medBajarMedidasEquipoYa(forzar)); }
+  function medBajarMedidasEquipoYa(forzar){
+    if(MED_EQUIPO_MED_PROMESA) return MED_EQUIPO_MED_PROMESA;
+    MED_EQUIPO_MED_PROMESA = medBajarMedidasEquipoNube(forzar).catch(e => { console.warn('medidas del equipo', e); return false; }).finally(() => { MED_EQUIPO_MED_PROMESA = null; });
+    return MED_EQUIPO_MED_PROMESA;
+  }
+  async function medBajarMedidasEquipoNube(forzar){
+    if(!cloudOn() || !NUBE.medidas || !SES || !SES.company_id) return false;
+    const yo = nubeYo(); if(!yo) return false;
+    if(!forzar && MED_EQUIPO_MED.at && Date.now() - MED_EQUIPO_MED.at < 5 * 60000) return MED_EQUIPO_MED.lista.length > 0;
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const tm = setTimeout(() => { try{ ctl && ctl.abort(); }catch(e){} }, 8000);
+    let r;
+    try{
+      r = await authFetch('/rest/v1/measure_jobs?select=id,job_id,author_name,created_by,cliente,dir,fecha,tarjetas,cortes,sqft,lineal,at_ms'
+        + '&company_id=eq.' + encodeURIComponent(SES.company_id) + '&created_by=neq.' + encodeURIComponent(yo)
+        + '&deleted_at=is.null&order=at_ms.desc.nullslast&limit=300', Object.assign({ headers: cloudHeaders() }, ctl ? { signal: ctl.signal } : {}));
+    }finally{ clearTimeout(tm); }
+    if(!r.ok) return false;
+    const filas = await r.json();
+    if(!Array.isArray(filas)) return false;
+    // Lo que este teléfono ya tiene (un teléfono compartido) no se repite.
+    const aqui = new Set(medLeerGuardadas().map(t => t && t.id).filter(Boolean));
+    const lista = filas.filter(f => f && f.id && f.job_id && !aqui.has(f.job_id)).map(f => ({
+      uuid: String(f.id), id: String(f.job_id), autor: String(f.author_name || '').trim() || 'otro del equipo', creadoPor: f.created_by || '',
+      cliente: String(f.cliente || ''), dir: String(f.dir || ''), fecha: String(f.fecha || ''),
+      cuartos: +f.tarjetas || 0, cortes: +f.cortes || 0, sqft: +f.sqft || 0, lineal: +f.lineal || 0, at: +f.at_ms || 0, equipo: true }));
+    MED_EQUIPO_MED = { at: Date.now(), lista };
+    return lista.length > 0;
+  }
+  // Las del equipo; con `casa` ({cliente, dir}) solo las de ESA casa, con la misma regla estricta que los planos del
+  // equipo: con dirección en los dos lados tiene que ser LA MISMA dirección; por nombre solo si ninguno trae dirección
+  // y el nombre tiene nombre y apellido.
+  function medMedidasDelEquipo(casa){
+    const lista = MED_EQUIPO_MED.lista.slice();
+    if(!casa) return lista;
+    const cliente = String(casa.cliente || '').trim(), dir = String(casa.dir || '').trim();
+    if(!cliente && !dir) return [];
+    return lista.filter(t => {
+      const dt = String(t.dir || '').trim();
+      if(dir && dt) return medMismaDireccion(dir, dt);
+      if(!dir && !dt) return medPalabras(cliente).length >= 2 && medMismoCliente(cliente, t.cliente);
+      return false;
+    });
+  }
+  // "de Juan: 12 medidas" para la pantalla del trabajo (varios autores, separados por " y ").
+  function medResumenMedidasEquipo(casa){
+    const porAutor = new Map();
+    medMedidasDelEquipo(casa).forEach(t => {
+      const g = porAutor.get(t.autor) || { n: 0, trabajos: 0 };
+      g.n += t.cortes; g.trabajos++; porAutor.set(t.autor, g);
+    });
+    return Array.from(porAutor.entries()).map(([a, g]) => 'de ' + a + ': ' + (g.n ? g.n + (g.n === 1 ? ' medida' : ' medidas') : g.trabajos + (g.trabajos === 1 ? ' trabajo' : ' trabajos'))).join(' y ');
+  }
+  // La pantalla del trabajo: debajo de lo de este teléfono, lo del equipo ("· de Juan: 12 medidas (solo para ver)").
+  // `base`=true toma el texto que acaba de poner trPintarTrabajo como base; después (cuando llega la nube) se reusa.
+  function trPintarMedidasEquipo(t, base){
+    const e = document.getElementById('trSubMedidas'); if(!e || !t) return;
+    if(base || e.dataset.base == null) e.dataset.base = e.textContent || '';
+    const res = medResumenMedidasEquipo({ cliente: t.nombre, dir: t.direccion });
+    e.textContent = e.dataset.base + (res ? ' · ' + res + ' (solo para ver)' : '');
+  }
+  // Medidas guardadas: la caja "Del equipo", debajo de la lista de siempre (que no cambia). El buscador también la filtra.
+  function medPintarGuardadasEquipo(){
+    const caja = document.getElementById('medGuardadasEquipo');
+    if(!caja) return;
+    const q = ((document.getElementById('medBuscador') || {}).value || '')
+      .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+    const todas = medMedidasDelEquipo();
+    const lista = !q ? todas : todas.filter(t => (medLlaveDeCasa(t.cliente, t.dir) + '|' + medLlaveDeCasa(t.autor, '')).includes(q));
+    if(!lista.length){ caja.innerHTML = ''; caja.hidden = true; return; }
+    const fecha = t => { if(t.fecha) return t.fecha; const f = new Date(t.at || Date.now()); return f.getFullYear() + '-' + String(f.getMonth() + 1).padStart(2, '0') + '-' + String(f.getDate()).padStart(2, '0'); };
+    caja.innerHTML = '<h2 style="margin-top:14px;">Del equipo<span class="en"> / From the team</span></h2>'
+      + '<p class="hint" style="margin:0 0 6px; color:var(--ink-soft);">Lo midió otro teléfono de la empresa. Solo para ver.</p>'
+      + lista.map(t => '<div class="med-guardado" data-medeq="' + esc(t.uuid) + '">'
+        + '<div class="med-guardado-info">'
+        + '<span class="med-guardado-nombre"><span class="who">' + esc(t.cliente || 'Sin nombre') + '</span>'
+        + '<span class="med-nivel-pill">de ' + esc(t.autor) + '</span></span>'
+        + '<span class="when">' + esc(t.dir || 'Sin dirección') + ' &middot; ' + esc(fecha(t)) + (t.cortes ? ' &middot; ' + t.cortes + (t.cortes === 1 ? ' medida' : ' medidas') : '') + '</span>'
+        + '</div><div class="med-guardado-acc">'
+        + '<button type="button" class="btn btn-accent medVerEquipo" data-medeq="' + esc(t.uuid) + '">&#128065;&#65039; Vista previa<span class="en"> / Preview</span></button>'
+        + '</div></div>').join('');
+    caja.hidden = false;
+  }
+  // Vista previa de un trabajo del equipo: se bajan vals y rows de ESE trabajo (por su id de la nube) y se arma la misma
+  // hoja que la vista previa de siempre. No se guarda nada en el teléfono.
+  async function medVistaPreviaEquipo(uuid){
+    const t = medMedidasDelEquipo().find(x => x.uuid === uuid); if(!t) return;
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const tm = setTimeout(() => { try{ ctl && ctl.abort(); }catch(e){} }, 8000);
+    let fila = null;
+    try{
+      const r = await authFetch('/rest/v1/measure_jobs?select=vals,rows&id=eq.' + encodeURIComponent(uuid) + '&limit=1', Object.assign({ headers: cloudHeaders() }, ctl ? { signal: ctl.signal } : {}));
+      if(r.ok) fila = ((await r.json()) || [])[0] || null;
+    }catch(e){ fila = null; }
+    finally{ clearTimeout(tm); }
+    if(!fila || !fila.vals){ alert('No se pudieron traer esas medidas. Revise su internet.'); return; }
+    await previaVer({
+      titulo: (t.cliente || 'Sin nombre') + (t.fecha ? ' · ' + t.fecha : ''),
+      imagenes: [],
+      html: medVistaPreviaHtml({ cliente: t.cliente, dir: t.dir, fecha: t.fecha, vals: fila.vals || {}, rows: fila.rows || {} }),
+      zoom: true,
+      pie: 'De ' + t.autor + ' · solo para ver / From ' + t.autor + ' · view only',
+      sinCerrarArriba: true
+    });
+  }
+
   // ---- ABRIR LA CÁMARA NUEVA: lo que se le manda de más ----
   // Devuelve { params, llave }, o { bloqueo: true } si hay medidas de ESTA casa que la cámara dejó sin guardar (primero
   // Recuperar o Descartar: si no, el borrador viejo y el nuevo se mezclarían).
@@ -25639,6 +25756,8 @@ body.med-pp-abierto{overflow:hidden;}
     // (20-oct) El estado de verdad: cuántas medidas tiene esta casa y de qué niveles ("12 medidas · Primer Piso").
     const m = trMedidasDeLaCasa(t);
     pon('trSubMedidas', m.n ? m.n + (m.n === 1 ? ' medida' : ' medidas') + (m.niveles.length ? ' · ' + m.niveles.map(trPlantaEs).join(' y ') : '') : 'Todavía sin medidas');
+    // (21-oct) Y lo que midió OTRO teléfono del equipo en esta casa (solo para ver); llega de la nube y se agrega al final.
+    try{ trPintarMedidasEquipo(t, true); medBajarMedidasEquipo().then(llego => { if(llego && TR_VISTA === 'trabajo' && trActual()) trPintarMedidasEquipo(trActual(), false); }); }catch(e){}
   }
   // Las medidas de la casa del trabajo: las de la hoja de Medidas (si es esta casa) y las de sus trabajos guardados (uno por
   // nivel) que no son la hoja. Una medida = un corte con material o con un número, igual que trAMedidas. Solo se lee.
@@ -26336,6 +26455,7 @@ body.med-pp-abierto{overflow:hidden;}
     const img = document.getElementById('irAMedGuardadas');
     if(img) img.addEventListener('click', () => {
       medPintarGuardadas();
+      try{ medPintarGuardadasEquipo(); medBajarMedidasEquipo().then(() => medPintarGuardadasEquipo()); }catch(e){}   // (21-oct) lo del equipo, debajo
       showTab('medguardadas'); pushBack('planomed');
     });
     const ipg = document.getElementById('irAPlanosGuardados');
@@ -26345,8 +26465,11 @@ body.med-pp-abierto{overflow:hidden;}
     });
     const bus = document.getElementById('medBuscador');
     if(bus) bus.addEventListener('input', medPintarGuardadas);
+    if(bus) bus.addEventListener('input', () => { try{ medPintarGuardadasEquipo(); }catch(e){} });   // (21-oct)
     const busfp = document.getElementById('fpBuscador');
     if(busfp) busfp.addEventListener('input', paintFpSaved);
+    const eq = document.getElementById('medGuardadasEquipo');
+    if(eq) eq.addEventListener('click', (e) => { const v = e.target.closest('.medVerEquipo'); if(v) medVistaPreviaEquipo(v.dataset.medeq); });   // (21-oct)
     const filas = document.getElementById('medGuardadasRows');
     if(filas) filas.addEventListener('click', (e) => {
       const ver = e.target.closest('.medVerSaved');
