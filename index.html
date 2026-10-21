@@ -9592,8 +9592,26 @@ body.med-pp-abierto{overflow:hidden;}
     if(typeof finPersonFor !== 'function' || typeof finNombreParecido !== 'function') return null;
     if(!Array.isArray(FIN_PEOPLE) || !FIN_PEOPLE.length) return null;   // sin lista no se acusa a nadie
     if(finPersonFor(nm)) return null;
+    if(typeof nombreNuevoConfirmado === 'function' && nombreNuevoConfirmado(nm)) return null;   // (21-oct) ya dijo "sí, es una persona nueva": no se vuelve a preguntar
     const parecido = finNombreParecido(nm);
     return parecido ? { name: nm, parecido } : null;
+  }
+  // (21-oct-2026, su pedido por "Sejio"/Sergio) Los nombres que el que manda confirmó como PERSONA NUEVA, en este
+  // teléfono: la próxima vez ya no se le pregunta por ese nombre.
+  const NOMBRES_NUEVOS_KEY = 'nombresNuevosOk:v1';
+  function nombresNuevosOk(){ try{ const a = JSON.parse(localStorage.getItem(NOMBRES_NUEVOS_KEY) || '[]'); return Array.isArray(a) ? a : []; }catch(e){ return []; } }
+  function nombreNuevoConfirmado(nm){ const q = finNorm(nm); return nombresNuevosOk().some(x => finNorm(x) === q); }
+  function nombreNuevoRecordar(nm){ try{ const a = nombresNuevosOk().filter(x => finNorm(x) !== finNorm(nm)); a.unshift(String(nm).trim()); localStorage.setItem(NOMBRES_NUEVOS_KEY, JSON.stringify(a.slice(0, 60))); }catch(e){} }
+  // Cambia un nombre por otro en TODOS los turnos (si el bueno ya estaba en el turno, el malo simplemente sobra).
+  function nombreCorregirEnTodos(mal, bien){
+    $$('.shift-card', shiftsContainer).forEach(card => {
+      const t = [...card.querySelectorAll('.nametag')].find(x => x.dataset.name === mal);
+      if(!t) return;
+      const yaEsta = nameTags(card).some(n => finNorm(n) === finNorm(bien));
+      if(yaEsta) t.remove();
+      else { t.dataset.name = bien; t.innerHTML = esc(bien) + '<button type="button" aria-label="Quitar">&times;</button>'; }
+      syncNames(card); pintarDudas(card);
+    });
   }
   function dudasDeLaCard(card){ return nameTags(card).map(nombreDudoso).filter(Boolean); }
   // El aviso va pegado a los nombres de ESE turno, con el boton que lo corrige
@@ -10001,7 +10019,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-R9';
+  const APP_BUILD = '2026-10-21-R10';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -14504,12 +14522,28 @@ body.med-pp-abierto{overflow:hidden;}
   // name can turn up in more than one of those blocks - so this has to
   // collect every block that mentions her that day, not just the first one
   // found, or her later shifts silently disappear from her total.
+  // (21-oct-2026) Un nombre MAL ESCRITO en el turno ("Sejio") cuenta para la persona a la que se parece (Sergio),
+  // con la misma regla con que se avisa al mandar: la persona del equipo más cercana, y una sola. Devuelve cómo
+  // quedó escrito, para enseñarlo ("escrito 'Sejio'"), o '' si casó exacto.
+  function nombreEscritoComo(shiftNames, nameLower){
+    const n = String(shiftNames || '').toLowerCase();
+    if(n.includes(nameLower)) return '';
+    if(typeof finNombreParecido !== 'function' || typeof splitNames !== 'function') return null;
+    const primero = finNorm(String(nameLower).split(/\s+/)[0] || '');
+    if(!primero) return null;
+    for(const tok of splitNames(shiftNames)){
+      const p = finNombreParecido(tok);
+      if(p && (finNorm(p) === finNorm(nameLower) || finNorm(p).split(/\s+/)[0] === primero)) return String(tok).trim();
+    }
+    return null;
+  }
   function findCasualShiftMatches(rows, nameLower){
     const matches = [];
     for(const r of rows){
       const shifts = (r.payload && r.payload.s) || [];
       shifts.forEach(sh => {
-        if((sh.n||'').toLowerCase().includes(nameLower)) matches.push({ sh, leader: r.crew_leader, logId: r.id });
+        const escrito = nombreEscritoComo(sh.n, nameLower);
+        if(escrito !== null) matches.push({ sh, leader: r.crew_leader, logId: r.id, escrito });
       });
     }
     return matches;
@@ -14723,7 +14757,8 @@ body.med-pp-abierto{overflow:hidden;}
       const mins = matches.reduce((s, m) => s + (hoursBetween(m.sh.f, m.sh.o) || 0), 0);
       return { kind, estado:'encontrado', hours: Math.round(mins/60*100)/100, matches, logs: logs.length,
                leader: matches[0].leader || '',
-               times: matches.map(m => fmtTime12(m.sh.f||'') + ' - ' + fmtTime12(m.sh.o||'')).join(', ') };
+               times: matches.map(m => fmtTime12(m.sh.f||'') + ' - ' + fmtTime12(m.sh.o||'')).join(', ')
+                 + (matches.some(m => m.escrito) ? ' · escrito "' + matches.find(m => m.escrito).escrito + '"' : '') };
     }
     if(logs.length) return { kind, estado:'noaparece', hours:null, matches:[], logs: logs.length, leader: logs[0].crew_leader || '' };
     return { kind, estado:'sinreporte', hours:null, matches:[], logs:0 };
@@ -42385,11 +42420,43 @@ body.med-pp-abierto{overflow:hidden;}
       if(!todas.some(x => x.name === d.name)) todas.push(d);
     }));
     if(!todas.length) return true;
-    const lista = todas.map(d => '\u2022 "' + d.name + '"  \u2192  ¿' + d.parecido + '?').join('\n');
-    return confirm('Hay ' + (todas.length === 1 ? 'un nombre que no es' : todas.length + ' nombres que no son')
-      + ' de nadie del equipo:\n\n' + lista
-      + '\n\nSi lo manda así, esas horas NO se le pagan a nadie.'
-      + '\n\nAceptar = mandarlo de todos modos.\nCancelar = volver a los turnos y corregirlo.');
+    // (21-oct-2026) Su pedido, por "Sejio" en vez de Sergio: ALTO antes de mandar y preguntar por cada nombre,
+    // de uno en uno, "¿es Sergio, o es una persona nueva?". Si es Sergio, se corrige solo en todos los turnos.
+    // Si es una persona nueva, se recuerda y no se vuelve a preguntar. Si no está seguro, vuelve a los turnos.
+    return (async () => {
+      for(const d of todas){
+        const caja = (titulo, cuerpo) =>
+            '<div style="padding:18px 20px; color:#1C2530; font-family:-apple-system,system-ui,sans-serif;">'
+          + '<div style="font-size:20px; font-weight:700; margin-bottom:10px;">' + titulo + '</div>'
+          + '<div style="font-size:17px; line-height:1.45;">' + cuerpo + '</div></div>';
+        const esEl = await previaVer({
+          titulo: 'Revise este nombre / Check this name',
+          html: caja('&#9888; "' + esc(d.name) + '" no es nadie del equipo',
+            'Se parece a <b>' + esc(d.parecido) + '</b>. ¿Es la misma persona?'
+            + '<div style="font-size:14px; color:#3A4552; margin-top:10px;">Si lo manda con el nombre mal escrito, esas horas no se le pagan a nadie.</div>'),
+          confirmar: 'Sí, es ' + esc(d.parecido),
+          cancelar: 'No, es otra persona'
+        });
+        if(esEl){ nombreCorregirEnTodos(d.name, d.parecido); continue; }
+        const esNuevo = await previaVer({
+          titulo: 'Persona nueva / New person',
+          html: caja('¿"' + esc(d.name) + '" es una persona nueva?',
+            'Nadie del equipo se llama así. Si de verdad es alguien nuevo, el reporte se manda con ese nombre '
+            + 'y el manager lo agrega al equipo.<div style="font-size:14px; color:#3A4552; margin-top:10px;">Si no está seguro de cómo se escribe, vuelva a los turnos y pregúntele.</div>'),
+          confirmar: 'Sí, es nuevo: mandar así',
+          cancelar: 'Volver a corregir<span class="en"> / Go back</span>'
+        });
+        if(!esNuevo){
+          const i = stepsFor('labor').findIndex(x => x.k === 'shifts');
+          if(i >= 0) goStep('labor', i);
+          window.scrollTo(0, 0);
+          return false;
+        }
+        nombreNuevoRecordar(d.name);
+        $$('.shift-card', shiftsContainer).forEach(pintarDudas);
+      }
+      return true;
+    })();
   }
   async function sendToManager(){
     // Entrada = salida no es un turno: un telefono viejo lo cobraria como 24 h.
@@ -42403,7 +42470,7 @@ body.med-pp-abierto{overflow:hidden;}
     // de verdad tiene que poder mandar su dia. Pero lo DICE con el nombre y con
     // la consecuencia, que es lo que faltaba -- el reporte de Susan se fue con
     // "Ridrigo" y nadie lo supo hasta el cierre, con el invoice ya mandado.
-    if(!laborAvisarNombres()) return;
+    if(!(await laborAvisarNombres())) return;
     // CORRIGIENDO UNO DEVUELTO: se actualiza EL MISMO reporte, no se manda otro.
     // Dos reportes del mismo dia es como se le cobro dos veces a Susan.
     if(fixingLogId) return resendFixedLog();
@@ -51664,8 +51731,29 @@ body.med-pp-abierto{overflow:hidden;}
     asRevisarVoz();
     const Sp = asPlugin(); if(isNative() && Sp){ try{ asEnganchar(Sp); }catch(err){} }
     // Saluda por el nombre de pila (una vez, al abrir) y se queda oyendo.
+    // (pendiente 1, 21 oct) Y dice el resumen del día (logs sin ver, pagos por confirmar, casas con equipo), que la nube
+    // arma sin modelo; se pide mientras saluda y se dice después, a lo más una vez cada 30 minutos.
     const nombre = asNombreDePila();
-    asHablar(nombre ? '¿Qué necesitas, ' + nombre + '?' : '¿Qué necesitas?', asSeguirOyendo);
+    const resumen = asPedirResumen();
+    asHablar(nombre ? '¿Qué necesitas, ' + nombre + '?' : '¿Qué necesitas?', function(){
+      resumen.then(function(t){
+        if(!AS.abierto || AS.estado !== 'esperando' && AS.estado !== 'hablando') return;   // ya está oyendo/pensando: no se interrumpe
+        if(!t){ asSeguirOyendo(); return; }
+        asMostrarRespuesta(t); asHablar(t, asSeguirOyendo);
+      });
+    });
+  }
+  const AS_RESUMEN_CADA_MS = 30 * 60 * 1000;
+  function asPedirResumen(){
+    let ultimo = 0; try{ ultimo = +(localStorage.getItem('asResumenAt') || 0); }catch(e){}
+    if(Date.now() - ultimo < AS_RESUMEN_CADA_MS || !cloudOn()) return Promise.resolve('');
+    const tope = new Promise(function(res){ setTimeout(function(){ res(''); }, 6000); });
+    const pedido = asLlamar({ resumen_abrir: true, sandbox: AS.sandbox }).then(function(r){
+      const t = r && r.ok && r.json && r.json.ok ? String(r.json.texto || '').trim() : '';
+      if(t){ try{ localStorage.setItem('asResumenAt', String(Date.now())); }catch(e){} asBit('resumen al abrir: ' + t.length + ' letras'); }
+      return t;
+    }).catch(function(){ return ''; });
+    return Promise.race([pedido, tope]);
   }
   function asCerrar(){
     AS.abierto = false; AS.pregunta = null; asPararOido(); asCallar();
