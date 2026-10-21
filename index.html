@@ -3754,6 +3754,12 @@ body.med-pp-abierto{overflow:hidden;}
   #asPanel{position:absolute; top:0; left:0; right:0; bottom:0; background:#000; color:#fff; z-index:5; display:flex; flex-direction:column;
     padding:calc(14px + env(safe-area-inset-top)) 16px calc(12px + env(safe-area-inset-bottom)); overflow-y:auto; -webkit-overflow-scrolling:touch;}   /* (simulador 20-oct) el titulo se encimaba con la hora */
   #asPanel[hidden]{display:none !important;}
+  .as-version{margin:6px 0 0; text-align:center; font-size:11px; color:var(--ink-soft); opacity:.6; letter-spacing:.3px;}
+  .as-bit{position:absolute; left:8px; right:8px; top:calc(8px + env(safe-area-inset-top)); bottom:calc(8px + env(safe-area-inset-bottom)); z-index:20; background:#0b0d12; border:1px solid #333; border-radius:12px; padding:10px; display:flex; flex-direction:column;}
+  .as-bit[hidden]{display:none !important;}
+  .as-bit-cab{display:flex; gap:8px; align-items:center; justify-content:space-between; margin-bottom:6px;}
+  .as-bit-cab .btn{min-height:36px; padding:6px 12px;}
+  .as-bit pre{flex:1; margin:0; overflow:auto; -webkit-overflow-scrolling:touch; font:11px/1.35 Menlo,monospace; color:#9f9; white-space:pre-wrap;}
   .as-cab{display:flex; align-items:center; justify-content:space-between; gap:10px;}
   .as-titulo{font-size:20px; font-weight:700; letter-spacing:.2px;}
   .as-prueba{font-size:13px; color:var(--ink-soft); display:flex; align-items:center; gap:6px;}
@@ -3825,6 +3831,8 @@ body.med-pp-abierto{overflow:hidden;}
     <div class="as-voz-aviso" id="asVozAviso" hidden><span>Voz básica. Para una voz natural: Ajustes › Accesibilidad › Contenido hablado › Voces › Español › Paulina › Premium</span><button type="button" id="asVozYa">Ya la bajé</button></div>
     <div class="as-texto"><input type="text" id="asEntrada" placeholder="O escribe aquí…" autocomplete="off" autocapitalize="sentences"><button type="button" class="btn btn-ink" id="asEnviarBtn">Enviar</button></div>
     <div class="as-pie"><button type="button" class="btn btn-ghost" id="asAtras">Atrás</button></div>
+    <p class="as-version" id="asVersion"></p>
+    <div class="as-bit" id="asBit" hidden><div class="as-bit-cab"><b>Bitácora de voz</b><button type="button" class="btn btn-ghost" id="asBitCopiar">Copiar</button><button type="button" class="btn btn-ghost" id="asBitCerrar">Cerrar</button></div><pre id="asBitPre"></pre></div>
   </div>
   <div class="authcard">
 
@@ -9699,7 +9707,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-R1';
+  const APP_BUILD = '2026-10-21-R2';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -50852,7 +50860,7 @@ body.med-pp-abierto{overflow:hidden;}
   function asPintarEsfera(){ const b = $('#asAbrir'); if(!b) return; b.hidden = !(signedIn() && isManager()); const m = b.querySelector('.as-mini'); if(m && window.Cara && !b.hidden && !m.__cara){ try{ Cara.montar(m, AS_CARA_OPCIONES(76)); b.classList.add('con-cara'); }catch(err){ try{ if(window.Cara.desmontar) Cara.desmontar(m); }catch(e2){} m.classList.remove('cara'); m.innerHTML = ''; b.classList.remove('con-cara'); } } }
   // Decisión del dueño (21 oct): silueta A, color celeste, parallax sí.
   function AS_CARA_OPCIONES(tamano){ return { tamano: tamano, silueta: 'A', color: 'celeste' }; }
-  function asEstado(e, pista){ AS.estado = e; const p = $('#asPanel'); if(p) p.dataset.estado = e; const h = $('#asPista'); if(h && pista !== undefined) h.textContent = pista || ''; if(window.Cara){ try{ Cara.estado({ esperando:'reposo', pensando:'buscando' }[e] || e); }catch(err){} } }
+  function asEstado(e, pista){ if(AS.estado !== e) asBit('estado ' + e); AS.estado = e; const p = $('#asPanel'); if(p) p.dataset.estado = e; const h = $('#asPista'); if(h && pista !== undefined) h.textContent = pista || ''; if(window.Cara){ try{ Cara.estado({ esperando:'reposo', pensando:'buscando' }[e] || e); }catch(err){} } }
   function asTranscribir(t){ const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; }
   function asMostrarRespuesta(t){ const e = $('#asRespuesta'); if(e) e.textContent = t || ''; }
   function asAbrir(){
@@ -50860,6 +50868,8 @@ body.med-pp-abierto{overflow:hidden;}
     AS.abierto = true; AS.historial = []; AS.conf = null; asQuitarTarjeta(); asMostrarRespuesta(''); asTranscribir('');
     const p = $('#asPanel'); if(p){ p.hidden = false; p.classList.toggle('as-prueba-on', AS.sandbox); }
     asEstado('esperando', '');
+    { const v = $('#asVersion'); if(v) v.textContent = 'Versión ' + String(APP_BUILD).replace(/^\d{4}-\d{2}-\d{2}-/, '') + ' · ' + String(APP_BUILD).slice(0, 10); }
+    asBit('abrir panel ' + APP_BUILD);
     asAnimar();
     asRevisarVoz();
     const Sp = asPlugin(); if(isNative() && Sp){ try{ asEnganchar(Sp); }catch(err){} }
@@ -50914,8 +50924,30 @@ body.med-pp-abierto{overflow:hidden;}
   async function asOidoNativo(S, mantenerVoz){
     asEnganchar(S);
     AS.oidoDesde = Date.now(); AS.oidoMantiene = !!mantenerVoz; AS.altoDesde = 0;
+    asBit('empezar (oído)' + (mantenerVoz ? ' sin cortar la voz' : '') + ' enVuelo=' + (AS.vozEnVuelo || 0));
     await S.empezar(Object.assign({ idioma:'es-MX', vocabulario: asVocabulario(), frases: [], pronunciaciones: [] }, mantenerVoz ? { mantenerVoz: true } : {}));
     AS.modo = 'nativo';
+  }
+  // ---- BITÁCORA DE VOZ (R2, 21 oct 2026): para ver EN SU TELÉFONO qué pasa con la voz Premium. Últimas 40 líneas con la
+  // hora en ms. Sin datos de clientes ni montos: de lo que se dice solo va el largo; en los mensajes de error los números
+  // se tapan con # (asTapar). Las cuentas propias (letras, segundos, ms) sí se ven.
+  const asTapar = function(x){ return String(x || '').replace(/\d/g, '#').slice(0, 80); };
+  const AS_BIT = [];
+  function asBit(t){
+    try{
+      const d = new Date(), p = function(n, k){ return String(n).padStart(k || 2, '0'); };
+      AS_BIT.push(p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '.' + p(d.getMilliseconds(), 3) + ' ' + String(t).slice(0, 140));
+      if(AS_BIT.length > 40) AS_BIT.splice(0, AS_BIT.length - 40);
+      const pre = document.getElementById('asBitPre'); if(pre && !pre.closest('[hidden]')) pre.textContent = AS_BIT.join('\n');
+    }catch(e){}
+  }
+  try{
+    window.addEventListener('error', function(ev){ asBit('ERROR JS ' + asTapar(ev && ev.message) + ' @' + String((ev && ev.lineno) || '')); });
+    window.addEventListener('unhandledrejection', function(ev){ asBit('PROMESA ' + asTapar(ev && ev.reason && (ev.reason.message || ev.reason))); });
+  }catch(e){}
+  function asBitAbrir(){
+    const b = document.getElementById('asBit'); if(!b) return;
+    b.hidden = false; const pre = document.getElementById('asBitPre'); if(pre) pre.textContent = AS_BIT.join('\n') || '(vacía)';
   }
   // Los avisos del plugin. Se enganchan también al ABRIR (antes del saludo): sin `hablaFin` el saludo se cortaba
   // 50 ms antes del estimado y el oído arrancaba encima de la última sílaba.
@@ -50926,7 +50958,9 @@ body.med-pp-abierto{overflow:hidden;}
       if(AS.estado === 'hablando' && AS.oidoMantiene){ const ahora = Date.now(); if(AS.nivel > 0.6){ if(!AS.altoDesde) AS.altoDesde = ahora; else if(ahora - AS.altoDesde > 400){ AS.altoDesde = 0; asInterrumpir(); } } else AS.altoDesde = 0; }
     });
     S.addListener('texto', function(d){ const t = (d && d.texto) || ''; if(t !== AS.texto){ AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); } });
+    S.addListener('aviso', function(d){ asBit('aviso ' + ((d && d.aviso) || '') + ' ' + ((d && d.idioma) || '')); });
     S.addListener('error', function(d){
+      asBit('error del oído: ' + asTapar(d && d.mensaje));
       AS.nivel = 0; if(AS.estado !== 'escuchando') return;
       // Recién abierto el oído tras hablar, la sesión de audio a veces todavía está cambiando: se reintenta UNA vez.
       if(!AS.oidoReintento && Date.now() - (AS.oidoDesde || 0) < 2500){ AS.oidoReintento = true; asEstado('esperando', ''); setTimeout(function(){ if(AS.abierto && AS.estado === 'esperando') asEscuchar(); }, 600); return; }
@@ -50939,7 +50973,23 @@ body.med-pp-abierto{overflow:hidden;}
     // hablaLimite (el doble + 3 s) para reabrir el oído: por eso había que tocar la esfera otra vez.
     // (R1) Un hablaFin que llega con un `hablar` todavía en camino es de la tanda ANTERIOR (el aparato manda los avisos
     // en orden): contarlo abría el oído encima de la respuesta y `empezar` la cortaba. Se ignora.
-    S.addListener('hablaFin', function(){ if((AS.vozEnVuelo || 0) > 0) return; AS.esperaFin = false; if(AS.enviando){ AS.finPendiente = true; return; } AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); });
+    S.addListener('hablaFin', function(d){
+      const ok = !(d && d.ok === false);
+      asBit('hablaFin ok=' + ok + (AS.rellenoActivo ? ' (relleno)' : '') + ' enVuelo=' + (AS.vozEnVuelo || 0));
+      // (R2) El fin del RELLENO ("ya lo busco"): solo suelta a la respuesta que lo esperaba. No cuenta para la respuesta.
+      if(AS.rellenoActivo){ asRellenoTermino(); return; }
+      if((AS.vozEnVuelo || 0) > 0) return;
+      // (R2) El aparato se rindió (la voz no arrancó ni con la de fábrica): la respuesta se dice con la voz del WebView.
+      if(!ok && AS.textoTanda){
+        // Un ok=false a menos de 2.8 s de empezar la tanda es el corte del primer reintento del aparato (sus avisos de
+        // "cancelada" llegan tarde y bajan la cuenta): la voz de fábrica todavía va a sonar. Solo se ignora.
+        const desde = Date.now() - (AS.tandaDesde || 0);
+        if(desde < 2800){ asBit('hablaFin ok=false a ' + desde + ' ms: corte del reintento, se espera'); return; }
+        const t = AS.textoTanda; AS.textoTanda = ''; asDecirRespaldo(t, 'el aparato no pudo hablar'); return;
+      }
+      AS.textoTanda = '';
+      AS.esperaFin = false; if(AS.enviando){ AS.finPendiente = true; return; } AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now());
+    });
     AS.oyeHablaFin = true;
   }
   async function asEscuchar(){
@@ -50983,7 +51033,7 @@ body.med-pp-abierto{overflow:hidden;}
   async function asPararOido(){
     clearInterval(AS.tmrSil); AS.nivel = 0;
     const S = asPlugin();
-    if(AS.modo === 'nativo' && S){ try{ await S.parar(); }catch(e){} }
+    if(AS.modo === 'nativo' && S){ asBit('parar (oído)'); try{ await S.parar(); }catch(e){} }
     if(AS.rec){ try{ AS.rec.onend = null; AS.rec.onresult = null; AS.rec.stop(); }catch(e){} AS.rec = null; }
   }
   // "$1,234.50" -> "1234 dólares con 50 centavos": la voz lo lee mejor que el simbolo.
@@ -51016,8 +51066,8 @@ body.med-pp-abierto{overflow:hidden;}
     const el = $('#asVozAviso'); if(!el) return;
     let basica = false;
     const S = asPlugin();
-    if(S && S.vozInfo){ try{ const i = await S.vozInfo(); basica = !!(i && i.soloBasicas); AS.interrumpirPlugin = !!(i && i.interrumpir); }catch(e){ basica = false; } }
-    else if(window.speechSynthesis){ const v = asVozWeb(); basica = !!(v && /compact/i.test(String(v.voiceURI || '') + String(v.name || ''))); }
+    if(S && S.vozInfo){ try{ const i = await S.vozInfo(); basica = !!(i && i.soloBasicas); AS.interrumpirPlugin = !!(i && i.interrumpir); asBit('vozInfo ' + String((i && i.nombre) || '?') + ' / ' + String((i && i.calidad) || '?') + ' / soloBasicas=' + basica + ' / ' + APP_BUILD); }catch(e){ basica = false; asBit('vozInfo error'); } }
+    else if(window.speechSynthesis){ asBit('sin vozInfo (web o aparato viejo) / ' + APP_BUILD); const v = asVozWeb(); basica = !!(v && /compact/i.test(String(v.voiceURI || '') + String(v.name || ''))); }
     el.hidden = !basica;
   }
   // UNA frase a la cola de la voz. encolar=true no corta lo que se esta diciendo (streaming frase por frase).
@@ -51035,8 +51085,17 @@ body.med-pp-abierto{overflow:hidden;}
       // rato se daba la voz por terminada, se abría el oído y `empezar` cortaba la respuesta. Se cuenta lo que va en camino
       // (asAlTerminarDeHablar espera a que llegue a 0) y, si el aparato no contesta en 4 s, se sigue con la cuenta estimada.
       AS.vozEnVuelo = (AS.vozEnVuelo || 0) + 1;
-      try{ const r = await Promise.race([S.hablar({ texto: t, idioma: 'es-MX', preferida: true, encolar: !!encolar }), new Promise(function(res){ setTimeout(function(){ res(null); }, 4000); })]); if(r && r.segundos) ms = r.segundos * 1000; }catch(e){ ms = 0; AS.esperaFin = false; }
+      // (R2) Nunca detrás de un relleno: en el aparato 19 lo encolado detrás del relleno se perdía si la voz tardaba en
+      // arrancar (el vigilante repite SOLO el texto de la primera llamada = "ya lo busco"). Se espera a que el relleno
+      // termine (su hablaFin, o 4 s) y la respuesta sale como tanda propia.
+      if(AS.rellenoEspera){ asBit('respuesta espera al relleno'); await AS.rellenoEspera; }
+      const t0h = Date.now(); let r = null, fallo = '';
+      try{ r = await Promise.race([S.hablar({ texto: t, idioma: 'es-MX', preferida: true, encolar: !!encolar }), new Promise(function(res){ setTimeout(function(){ res(null); }, 4000); })]); if(r && r.segundos) ms = r.segundos * 1000; else if(!r) fallo = 'hablar no contestó en 4 s'; else if(r.ok === false) fallo = 'hablar ok=false'; }catch(e){ fallo = 'hablar error ' + asTapar((e && e.message) || e); ms = 0; AS.esperaFin = false; }
       finally{ AS.vozEnVuelo = Math.max(0, (AS.vozEnVuelo || 1) - 1); }
+      asBit('hablar(' + t.length + ' letras' + (encolar ? ', encolar' : '') + ') -> ' + (fallo || ('ok ' + (r && r.segundos ? (+r.segundos).toFixed(1) + ' s' : '?'))) + ' en ' + (Date.now() - t0h) + ' ms');
+      if(fallo && fallo !== 'hablar no contestó en 4 s'){ asDecirRespaldo(t, fallo); return ms || t.length * 85; }
+      if(!AS.textoTanda) AS.tandaDesde = Date.now();
+      AS.textoTanda = ((AS.textoTanda || '') + ' ' + t).trim();
       // Un hablaFin que llegó ANTES de esta respuesta era de la tanda anterior: no cuenta para esta.
       if(ms > 0){ AS.finPendiente = false; AS.esperaFin = !!AS.oyeHablaFin; }
       AS.hablaHasta = Math.max(AS.hablaHasta || 0, Date.now() + ms);
@@ -51073,18 +51132,37 @@ body.med-pp-abierto{overflow:hidden;}
     AS.tmrHabla = setTimeout(tic, 60);
   }
   async function asHablar(texto, luego){ await asDecir(texto, false); asAlTerminarDeHablar(luego); }
+  // (R2) RESPALDO: la voz del WebView (speechSynthesis también funciona dentro del app). Para que NUNCA se quede callada.
+  function asDecirRespaldo(t, porque){
+    asBit('RESPALDO voz del WebView (' + porque + '): ' + String(t || '').length + ' letras');
+    if(!window.speechSynthesis){ asBit('sin speechSynthesis: no hay respaldo'); return; }
+    try{
+      const u = new SpeechSynthesisUtterance(t); u.lang = 'es-MX'; const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0;
+      const ms = String(t || '').length * 85 + 600;
+      AS.esperaFin = false; AS.finPendiente = false; AS.ultimaU = u;
+      AS.hablaHasta = Math.max(AS.hablaHasta || 0, Date.now()) + ms; AS.hablaLimite = AS.hablaHasta + 3000;
+      u.onstart = function(){ asBit('respaldo: empezó'); };
+      u.onend = u.onerror = function(ev){ asBit('respaldo: ' + (ev && ev.type) ); if(AS.ultimaU === u) AS.hablaHasta = Math.min(AS.hablaHasta, Date.now()); };
+      speechSynthesis.speak(u);
+    }catch(e){ asBit('respaldo falló: ' + asTapar((e && e.message) || e)); }
+  }
+  function asRellenoTermino(){ AS.rellenoActivo = false; clearTimeout(AS.tmrRellenoTope); const f = AS.rellenoFin; AS.rellenoFin = null; AS.rellenoEspera = null; if(f) f(); }
   // Habla sin cambiar el estado (el relleno de "déjame ver" mientras piensa).
   function asDecirSuave(t){
     const S = asPlugin();
-    if(isNative() && S && S.hablar){ AS.vozEnVuelo = (AS.vozEnVuelo || 0) + 1; let listo = false; const fin = function(){ if(listo) return; listo = true; AS.vozEnVuelo = Math.max(0, (AS.vozEnVuelo || 1) - 1); };
-      try{ Promise.resolve(S.hablar({ texto: t, idioma: 'es-MX', preferida: true })).then(fin, fin); }catch(e){ fin(); } setTimeout(fin, 4000); return; }
+    if(isNative() && S && S.hablar){ AS.vozEnVuelo = (AS.vozEnVuelo || 0) + 1; let listo = false; const fin = function(r){ if(listo) return; listo = true; AS.vozEnVuelo = Math.max(0, (AS.vozEnVuelo || 1) - 1); asBit('relleno hablar -> ' + (r && r.ok === false ? 'ok=false' : (r && r.segundos ? 'ok ' + (+r.segundos).toFixed(1) + ' s' : 'sin respuesta'))); if(r && r.ok === false) asRellenoTermino(); };
+      // (R2) La respuesta espera a que el relleno termine (su hablaFin, o 4 s como tope): nunca se encola detrás.
+      AS.rellenoActivo = true; AS.rellenoEspera = new Promise(function(res){ AS.rellenoFin = res; }); clearTimeout(AS.tmrRellenoTope); AS.tmrRellenoTope = setTimeout(function(){ if(AS.rellenoActivo){ asBit('relleno: 4 s sin hablaFin, sigue la respuesta'); asRellenoTermino(); } }, 4000);
+      asBit('relleno (' + t.length + ' letras)');
+      try{ Promise.resolve(S.hablar({ texto: t, idioma: 'es-MX', preferida: true })).then(fin, function(){ fin({ ok: false }); }); }catch(e){ fin({ ok: false }); } setTimeout(fin, 4000); return; }
     if(window.speechSynthesis){ try{ const u = new SpeechSynthesisUtterance(t); u.lang = 'es-US'; const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */ speechSynthesis.speak(u); }catch(e){} }
   }
   function asCallar(){
-    clearTimeout(AS.tmrHabla); clearTimeout(AS.tmrRelleno); AS.hablaHasta = 0; AS.esperaFin = false; AS.finPendiente = false;
+    clearTimeout(AS.tmrHabla); clearTimeout(AS.tmrRelleno); AS.hablaHasta = 0; AS.esperaFin = false; AS.finPendiente = false; AS.textoTanda = '';
+    if(AS.rellenoActivo) asRellenoTermino();
     if(window.speechSynthesis){ try{ speechSynthesis.cancel(); }catch(e){} }
     const S = asPlugin();
-    if(isNative() && S && AS.estado === 'hablando'){ try{ S.parar(); }catch(e){} }
+    if(isNative() && S && AS.estado === 'hablando'){ asBit('parar (callar)'); try{ S.parar(); }catch(e){} }
   }
   // Llama a la funcion. Con `onTexto`, pide STREAMING (SSE) y entrega cada trozo; la respuesta completa va al final.
   // Una sola llamada. Si la red se corta (Safari: "Load failed"), avisa claro; las LECTURAS se reintentan una
@@ -51223,7 +51301,7 @@ body.med-pp-abierto{overflow:hidden;}
   function asMostrarTarjeta(c){
     AS.conf = c;
     const t = $('#asTarjeta'); if(!t) return;
-    const tipos = { pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa', visita_lecturas:'Lecturas de la casa', visita_materiales:'Materiales de la casa', visita_comunicacion:'Comunicación de la casa' };
+    const tipos = { pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa', visita_lecturas:'Lecturas de la casa', visita_materiales:'Materiales de la casa', visita_comunicacion:'Comunicación de la casa', cal_dia:'Calendario de AMG' };
     const metodos = { zelle:'Zelle', cheque:'Cheque', efectivo:'Efectivo', otro:'Otro' };
     const esDinero = ['pago','adelanto','descuento','extra','devolucion','ajuste'].includes(c.tipo);
     $('#asTarjetaTipo').textContent = (tipos[c.tipo] || c.tipo || 'Acción') + (c.cola ? ' · de la lista' : '') + (c.sandbox ? ' · PRUEBA' : '');
@@ -51299,7 +51377,11 @@ body.med-pp-abierto{overflow:hidden;}
         case 'mudanzas_recibidas': if(typeof amgOpenLabor === 'function'){ amgOpenLabor('inbox', 'amgmoving'); break; } /* si no, cae al indice de AMG */
         case 'calendario_amg': case 'horas_amg': case 'finanzas_amg': case 'invoices_amg':
           showTab('amgmoving'); pushBack('manager');
+          // (R2) Lo guardado por voz en el calendario: se abre en la semana de ese día, y el cambio queda anotado igual que
+          // si se hubiera tocado Guardar en la hoja (al salir del calendario, a la cuadrilla le llega UN aviso).
+          if(p === 'calendario_amg' && nav.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(nav.fecha))){ try{ if(typeof calLunes === 'function') calMgrLunes = calLunes(String(nav.fecha)); }catch(e){} }
           if(typeof amgShow === 'function') amgShow({ calendario_amg:'cal', horas_amg:'hours', finanzas_amg:'fin', invoices_amg:'inv' }[p] || null);
+          if(p === 'calendario_amg' && nav.fecha && nav.cambio){ try{ if(typeof calCambio === 'function') calCambio(String(nav.fecha).slice(0, 10), String(nav.cambio).slice(0, 120)); }catch(e){} }
           break;
         case 'clientes_amg': { showTab('amgmoving'); pushBack('manager'); if(typeof amgShow === 'function') amgShow(null); const b = $('#amgSegClients'); if(b) b.click(); break; }
         case 'visitas_clientes': showTab('visitas'); pushBack('mgrrest'); break;
@@ -51356,6 +51438,18 @@ body.med-pp-abierto{overflow:hidden;}
       if(AS.estado === 'escuchando'){ asPararOido().then(function(){ if(AS.texto.trim()) asEnviar(AS.texto); else asReposar(); }); }
       else if(AS.estado === 'hablando'){ AS.oidoMantiene = false; asCallar(); asEstado('esperando', ''); asEscuchar(); }
       else if(AS.estado === 'esperando' || AS.estado === 'reposo'){ asEscuchar(); }
+    });
+    // (R2) 5 toques seguidos sobre la cara (o sobre la versión) abren la bitácora de voz.
+    let bitToques = 0, bitTmr = null;
+    const bitToque = function(){ bitToques++; clearTimeout(bitTmr); bitTmr = setTimeout(function(){ bitToques = 0; }, 2000); if(bitToques >= 5){ bitToques = 0; asBitAbrir(); } };
+    if(esf) esf.addEventListener('click', bitToque);
+    const ver = $('#asVersion'); if(ver) ver.addEventListener('click', bitToque);
+    const bc = $('#asBitCerrar'); if(bc) bc.addEventListener('click', function(){ const b = $('#asBit'); if(b) b.hidden = true; });
+    const bcp = $('#asBitCopiar'); if(bcp) bcp.addEventListener('click', function(){
+      const txt = 'Field Reports ' + APP_BUILD + '\n' + AS_BIT.join('\n');
+      const listo = function(){ bcp.textContent = 'Copiado'; setTimeout(function(){ bcp.textContent = 'Copiar'; }, 1500); };
+      const aMano = function(){ try{ const ta = document.createElement('textarea'); ta.value = txt; ta.setAttribute('readonly', ''); ta.style.position = 'absolute'; ta.style.left = '-9999px'; document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, txt.length); document.execCommand('copy'); ta.remove(); listo(); }catch(e){} };
+      try{ if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(listo, aMano); else aMano(); }catch(e){ aMano(); }
     });
     if(esf) esf.addEventListener('keydown', function(ev){ if(ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); esf.click(); } });
     // Ajuste oculto: 5 toques seguidos en "Asistente" prenden/apagan "interrumpir hablando" (barge-in).
