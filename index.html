@@ -9699,7 +9699,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-Q3';
+  const APP_BUILD = '2026-10-21-R1';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -50937,7 +50937,9 @@ body.med-pp-abierto{overflow:hidden;}
     // venir frases, y cortar la espera ahi reabria el oido y mataba la voz.
     // (21 oct) Se vuelve a poner en CADA arranque: removeAllListeners lo borraba y la segunda vuelta esperaba hasta
     // hablaLimite (el doble + 3 s) para reabrir el oído: por eso había que tocar la esfera otra vez.
-    S.addListener('hablaFin', function(){ AS.esperaFin = false; if(AS.enviando){ AS.finPendiente = true; return; } AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); });
+    // (R1) Un hablaFin que llega con un `hablar` todavía en camino es de la tanda ANTERIOR (el aparato manda los avisos
+    // en orden): contarlo abría el oído encima de la respuesta y `empezar` la cortaba. Se ignora.
+    S.addListener('hablaFin', function(){ if((AS.vozEnVuelo || 0) > 0) return; AS.esperaFin = false; if(AS.enviando){ AS.finPendiente = true; return; } AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); });
     AS.oyeHablaFin = true;
   }
   async function asEscuchar(){
@@ -51029,8 +51031,15 @@ body.med-pp-abierto{overflow:hidden;}
       // Lo que devuelve el plugin (`segundos`) ya es cuanto falta DESDE AHORA contando la cola: se pone, no se
       // suma (sumarlo dejaba la esfera "hablando" el doble o el triple del tiempo real).
       AS.esperaFin = !!AS.oyeHablaFin; AS.finPendiente = false;
-      try{ const r = await S.hablar({ texto: t, idioma: 'es-MX', preferida: true, encolar: !!encolar }); if(r && r.segundos) ms = r.segundos * 1000; }catch(e){ ms = 0; AS.esperaFin = false; }
-      AS.hablaHasta = Date.now() + ms;
+      // (R1, "no dice todo") Mientras un `hablar` no contesta, el aparato todavía no puso esa frase en su cola: si en ese
+      // rato se daba la voz por terminada, se abría el oído y `empezar` cortaba la respuesta. Se cuenta lo que va en camino
+      // (asAlTerminarDeHablar espera a que llegue a 0) y, si el aparato no contesta en 4 s, se sigue con la cuenta estimada.
+      AS.vozEnVuelo = (AS.vozEnVuelo || 0) + 1;
+      try{ const r = await Promise.race([S.hablar({ texto: t, idioma: 'es-MX', preferida: true, encolar: !!encolar }), new Promise(function(res){ setTimeout(function(){ res(null); }, 4000); })]); if(r && r.segundos) ms = r.segundos * 1000; }catch(e){ ms = 0; AS.esperaFin = false; }
+      finally{ AS.vozEnVuelo = Math.max(0, (AS.vozEnVuelo || 1) - 1); }
+      // Un hablaFin que llegó ANTES de esta respuesta era de la tanda anterior: no cuenta para esta.
+      if(ms > 0){ AS.finPendiente = false; AS.esperaFin = !!AS.oyeHablaFin; }
+      AS.hablaHasta = Math.max(AS.hablaHasta || 0, Date.now() + ms);
       // El reloj estimado se queda corto con las voces Premium (hablan mas despacio): mientras el telefono no avise
       // `hablaFin`, se le aguanta hasta el doble del estimado + 3 s antes de darlo por terminado.
       AS.hablaLimite = Date.now() + ms * 2 + 3000;
@@ -51055,6 +51064,7 @@ body.med-pp-abierto{overflow:hidden;}
     clearTimeout(AS.tmrHabla);
     const tic = function(){
       if(!AS.abierto){ return; }
+      if((AS.vozEnVuelo || 0) > 0){ AS.tmrHabla = setTimeout(tic, 80); return; }   // (R1) todavía hay frases camino al aparato
       if(AS.finPendiente && !AS.enviando){ AS.finPendiente = false; AS.esperaFin = false; AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); }
       const aguanta = AS.esperaFin && Date.now() < (AS.hablaLimite || 0);
       if(Date.now() >= AS.hablaHasta - 50 && !aguanta){ if(window.Cara){ try{ Cara.hablando(false); }catch(err){} } AS.oidoMantiene = false; if(AS.estado === 'hablando') asEstado('esperando', ''); if(luego) luego(); return; }
@@ -51066,7 +51076,8 @@ body.med-pp-abierto{overflow:hidden;}
   // Habla sin cambiar el estado (el relleno de "déjame ver" mientras piensa).
   function asDecirSuave(t){
     const S = asPlugin();
-    if(isNative() && S && S.hablar){ try{ S.hablar({ texto: t, idioma: 'es-MX', preferida: true }); }catch(e){} return; }
+    if(isNative() && S && S.hablar){ AS.vozEnVuelo = (AS.vozEnVuelo || 0) + 1; let listo = false; const fin = function(){ if(listo) return; listo = true; AS.vozEnVuelo = Math.max(0, (AS.vozEnVuelo || 1) - 1); };
+      try{ Promise.resolve(S.hablar({ texto: t, idioma: 'es-MX', preferida: true })).then(fin, fin); }catch(e){ fin(); } setTimeout(fin, 4000); return; }
     if(window.speechSynthesis){ try{ const u = new SpeechSynthesisUtterance(t); u.lang = 'es-US'; const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */ speechSynthesis.speak(u); }catch(e){} }
   }
   function asCallar(){
@@ -51136,6 +51147,17 @@ body.med-pp-abierto{overflow:hidden;}
     for(;;){ const m = re.exec(resto); if(!m) break; const f = m[1].trim(); out.push(f); resto = resto.slice(m[0].length).replace(/^\s+/, ''); }
     return { listas: out, resto };
   }
+  // (R1) Qué falta por decir del texto final que ya se enseña: se saltan, en orden, las oraciones que ya se dijeron
+  // (comparadas sin espacios ni puntuación: el texto final del servidor puede venir limpiado distinto al del stream);
+  // desde la primera que no se dijo, se dice todo lo demás. Nunca se repite ni se corta a media palabra.
+  function asFaltante(final, dicho){
+    const k = function(x){ return String(x || '').toLowerCase().normalize('NFD').replace(/[^a-z0-9ñ]+/g, ''); };
+    const f = asFrasesCompletas(String(final || '').trim() + ' ');
+    const frases = f.listas.concat(f.resto.trim() ? [f.resto.trim()] : []);
+    let resto = k(dicho), i = 0;
+    for(; i < frases.length; i++){ const kf = k(frases[i]); if(!kf) continue; if(resto.startsWith(kf)) resto = resto.slice(kf.length); else break; }
+    return frases.slice(i).join(' ').trim();
+  }
   async function asEnviar(texto, desdeTeclado){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
@@ -51165,7 +51187,9 @@ body.med-pp-abierto{overflow:hidden;}
       asMostrarRespuesta(dicho + pendiente);
       if(!porFrases) return;
       const f = asFrasesCompletas(pendiente);
-      if(f.listas.length){ f.listas.forEach(function(fr){ asDecir(fr, true); dicho += fr + ' '; }); pendiente = f.resto; }
+      // (R1) Todas las oraciones completas de este trozo en UNA llamada: si la voz Premium tarda en arrancar, el aparato 19
+      // repite solo el texto de la primera llamada de la tanda; así esa llamada ya trae la respuesta entera.
+      if(f.listas.length){ const junto = f.listas.join(' '); asDecir(junto, true); dicho += junto + ' '; pendiente = f.resto; }
     };
     try{
       const r = await asLlamar({ texto: texto, historial: AS.historial, sandbox: AS.sandbox }, onTexto);
@@ -51180,9 +51204,8 @@ body.med-pp-abierto{overflow:hidden;}
       const nav = j.navegar;
       // Lo que falto por decir (lo que no llego por el stream, o el remate sin punto).
       const norm = function(x){ return String(x || '').replace(/\s+/g, ' ').trim(); };
-      const fN = norm(final), dN = norm(dicho);
-      const faltante = dN ? (fN.startsWith(dN) ? fN.slice(dN.length).trim() : (fN.length > dN.length ? fN.slice(dN.length).trim() : '')) : fN;
-      if(faltante) await asDecir(faltante, !!dicho);
+      const faltante = asFaltante(final, dicho);
+      if(faltante) await asDecir(faltante, !!norm(dicho));
       AS.enviando = false;
       asAlTerminarDeHablar(function(){
         if(nav){ asNavegar(nav); return; }
