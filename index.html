@@ -5018,6 +5018,9 @@ body.med-pp-abierto{overflow:hidden;}
          vez (de Clientes, o "+ Trabajo nuevo") y de ahí sale todo: escanear por nivel, medir con la cámara, las medidas y el
          PDF / CompanyCam. Plano y Medidas toman el cliente, la dirección y el teléfono del trabajo: nada se escribe dos veces.
          "Medidas guardadas" y "Planos guardados" se quedan igual y en el mismo lugar. -->
+    <!-- (21-oct, su pedido en la casa de un cliente) ESTÁS AQUÍ: el trabajo cuya casa está a menos de 150 m del teléfono,
+         de un toque. Sale solo si hay ubicación y una casa cerca; si no, queda vacía y escondida: la pantalla es la de siempre. -->
+    <section class="card" id="trAqui" hidden></section>
     <section class="card" id="trLista">
       <h2><span class="num">1</span>¿De qué trabajo?<span class="en"> / Which job?</span></h2>
       <!-- (20-oct, botones que sobran, aprobado por él con las fotos de antes/después) Sin textos que explican: el buscador,
@@ -9979,7 +9982,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-R3';
+  const APP_BUILD = '2026-10-21-R4';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -25578,6 +25581,7 @@ body.med-pp-abierto{overflow:hidden;}
     const ver = { lista: ['trLista'], form: ['trForm'], trabajo: ['trCab', 'trMenu'], nivelCam: ['trCab', 'trNivelCam'],
                   nivelScan: ['trCab', 'trNivelScan'], pdf: ['trCab', 'trPdf'] }[v] || ['trLista'];
     ['trLista', 'trForm', 'trCab', 'trMenu', 'trNivelCam', 'trNivelScan', 'trPdf'].forEach(id => { const e = document.getElementById(id); if(e) e.hidden = ver.indexOf(id) < 0; });
+    if(typeof trAquiPintar === 'function') trAquiPintar();
     window.scrollTo(0, 0);
     if(typeof pintarSalidas === 'function') pintarSalidas();
   }
@@ -25600,6 +25604,7 @@ body.med-pp-abierto{overflow:hidden;}
     }
     else { TR_LUEGO = ''; trPintarLista(); trMostrar('lista'); }
     trMarcarAparato();
+    try{ trAquiBuscar(); }catch(e){}
     try{ if(typeof clientesSincronizar === 'function') Promise.resolve(clientesSincronizar(false)).then(() => { if(TR_VISTA === 'lista') trPintarLista(); }).catch(() => {}); }catch(e){}
   }
   function trPintarLista(){
@@ -25855,23 +25860,29 @@ body.med-pp-abierto{overflow:hidden;}
     // Después de que la hoja termine de acomodarse (resetMeasurements vuelve al paso 1 en un setTimeout).
     setTimeout(fn, 30);
   }
+  // El nivel ya escogido: ESCANEAR el plano de ese nivel del trabajo abierto (el botón de nivel, y Lumi directo).
+  function trEscanearEnNivel(planta){
+    if(Date.now() - TR_YENDO < 900) return; TR_YENDO = Date.now();
+    if(!trAlPlano()) return;
+    showTab('floorplan'); pushBack('planomed');
+    setTimeout(() => {
+      const i = stepsFor('floorplan').findIndex(s => s.k === 'scan'); if(i >= 0) goStep('floorplan', i);
+      // (20-oct) Si no salió plano (canceló, o el teléfono no tiene LiDAR), de vuelta al trabajo: no se queda en una
+      // pantalla vacía.
+      Promise.resolve(fpEscanear(planta)).then(() => {
+        const act = document.querySelector('.tab-panel.active');
+        if(!floorplanData && act && act.dataset.tab === 'floorplan' && navStack[navStack.length - 1] === 'planomed') goBack();
+      }).catch(() => {});
+    }, 30);
+  }
+  // El nivel ya escogido: MEDIR CON LA CÁMARA ese nivel del trabajo abierto (el botón de nivel, y Lumi directo).
+  function trCamaraEnNivel(planta){
+    trAMedidasYDespues(() => { medMostrar('medMenuRecorrido'); medMostrarTarjetas(true); medirRecorrido({ nivel: planta, alcance: 'nivel', cuartos: medCuartosSugeridos(planta) }); }, planta);
+  }
   function trIr(que, id){
     const t = trActual(); if(!t) return;
     if(que === 'escanear'){
-      trPintarNiveles('trNivelScanConPlano', 'trNivelScanOtros', 'trNivelScanOtrosT', trPlantasDe(trPlanosDeLaCasa(t)), planta => {
-        if(Date.now() - TR_YENDO < 900) return; TR_YENDO = Date.now();
-        if(!trAlPlano()) return;
-        showTab('floorplan'); pushBack('planomed');
-        setTimeout(() => {
-          const i = stepsFor('floorplan').findIndex(s => s.k === 'scan'); if(i >= 0) goStep('floorplan', i);
-          // (20-oct) Si no salió plano (canceló, o el teléfono no tiene LiDAR), de vuelta al trabajo: no se queda en una
-          // pantalla vacía.
-          Promise.resolve(fpEscanear(planta)).then(() => {
-            const act = document.querySelector('.tab-panel.active');
-            if(!floorplanData && act && act.dataset.tab === 'floorplan' && navStack[navStack.length - 1] === 'planomed') goBack();
-          }).catch(() => {});
-        }, 30);
-      });
+      trPintarNiveles('trNivelScanConPlano', 'trNivelScanOtros', 'trNivelScanOtrosT', trPlantasDe(trPlanosDeLaCasa(t)), trEscanearEnNivel);
       trMostrar('nivelScan'); return;
     }
     if(que === 'camara'){
@@ -25879,8 +25890,7 @@ body.med-pp-abierto{overflow:hidden;}
       // hasta que escoja el nivel.
       const pintar = () => {
         const pl = trPlantasDe(trPlanosDeLaCasa(t).concat(trPlanosEquipo(t)));
-        trPintarNiveles('trNivelCamConPlano', 'trNivelCamOtros', 'trNivelCamOtrosT', pl, planta =>
-          trAMedidasYDespues(() => { medMostrar('medMenuRecorrido'); medMostrarTarjetas(true); medirRecorrido({ nivel: planta, alcance: 'nivel', cuartos: medCuartosSugeridos(planta) }); }, planta));
+        trPintarNiveles('trNivelCamConPlano', 'trNivelCamOtros', 'trNivelCamOtrosT', pl, trCamaraEnNivel);
       };
       pintar();
       try{ medBajarPlanosEquipo({ cliente: t.nombre, dir: t.direccion }).then(llego => { if(llego && TR_VISTA === 'nivelCam') pintar(); }); }catch(e){}
@@ -25952,6 +25962,174 @@ body.med-pp-abierto{overflow:hidden;}
   // lo de arriba ya existe.
   setTimeout(() => { try{ trMarcarAparato(); }catch(e){} }, 1500);
   document.addEventListener('change', e => { if(e.target && e.target.id === 'trFoto'){ const f = e.target.files && e.target.files[0]; if(f) trLeerFoto(f); e.target.value = ''; } });
+
+  // ============ ESTÁS AQUÍ (21-oct-2026, su pedido estando en la casa de un cliente) ============
+  // "Cuando el técnico entra a Planos y medidas, ya le sugiera primero la dirección de este cliente donde él está."
+  // Al entrar a Plano y Medidas el teléfono pide su ubicación UNA vez (Location.suggestAddress, el plugin que el aparato ya
+  // trae: no hace falta aparato nuevo) y, si la casa de un cliente está a menos de 150 m, la pone arriba con un botón grande.
+  // El punto de cada casa ya existe: job_clients.lat/lng (supabase-clientes-geo.sql, lo saca Apple una vez y lo comparte el
+  // equipo) y la copia del teléfono (cliGeoDe). Las casas que todavía no tienen punto se ubican aquí con Apple (Location.geocode,
+  // sin llave ni costo), de una en una, igual que Visitas.
+  // Sin permiso, sin GPS, sin señal o sin casa cerca: la tarjeta queda vacía y escondida (nada de avisos ni letreros).
+  // Lumi usa lo mismo: window.casaCercana(), window.abrirMedidasCon(trabajo, {nivel}), window.abrirPlanoCon(trabajo, {nivel}).
+  // `var` y `function` (no let/const): trMostrar llama trAquiPintar y nunca debe tocar una zona muerta al cargar.
+  var TR_AQUI_M = 150;                       // metros: más lejos que eso ya no es "esta casa"
+  var TR_AQUI_PRECISION_M = 200;             // un GPS que no sabe dónde está con ±200 m no sugiere nada
+  var TR_AQUI_FIX_MS = 2 * 60 * 1000;        // un punto de hace menos de 2 minutos sirve sin volver a pedirlo
+  var TR_AQUI_ESPERA_MS = 12000;             // lo más que se espera al GPS (el aparato corta a los 20 s)
+  var TR_AQUI = null;                        // { casa, metros } o null
+  var TR_AQUI_SEQ = 0, TR_AQUI_PIDIENDO = null, TR_AQUI_GEO_CORRIENDO = false;
+  var TR_AQUI_SIN_PUNTO = {};                // direcciones que Apple no encontró en esta sesión: no se piden otra vez
+
+  // Pura: la casa más cercana al punto si está a `maxM` metros o menos; si no, null. Empate: la primera (la más reciente).
+  function trAquiMasCercana(fix, casas, maxM){
+    if(!fix || !Number.isFinite(+fix.lat) || !Number.isFinite(+fix.lng)) return null;
+    if(Number.isFinite(+fix.acc) && +fix.acc > TR_AQUI_PRECISION_M) return null;
+    const tope = +maxM > 0 ? +maxM : TR_AQUI_M;
+    let mejor = null;
+    (casas || []).forEach(c => {
+      if(!c || c.lat == null || c.lng == null || !Number.isFinite(+c.lat) || !Number.isFinite(+c.lng)) return;
+      const pies = cliDistanciaPies({ lat: +fix.lat, lng: +fix.lng }, { lat: +c.lat, lng: +c.lng });
+      if(pies == null) return;
+      const metros = Math.round(pies * 0.3048);
+      if(metros <= tope && (!mejor || metros < mejor.metros)) mejor = { casa: c, metros };
+    });
+    return mejor;
+  }
+  // Las casas de Clientes (la misma lista de "¿De qué trabajo?") con su punto, si ya lo tienen.
+  function trAquiCasas(){
+    let l = [], geo = {};
+    try{ l = clientesLeer(); }catch(e){ l = []; }
+    try{ geo = cliGeoLeer(); }catch(e){ geo = {}; }
+    return l.map(c => {
+      const k = clienteClave(c), g = k ? geo[k] : null, ok = !!(g && Number.isFinite(+g.lat) && Number.isFinite(+g.lng));
+      return { id: c.id, dir_key: k, nombre: c.nombre || '', direccion: c.direccion || '', telefono: c.telefono || '', lat: ok ? +g.lat : null, lng: ok ? +g.lng : null };
+    });
+  }
+  // Dónde está el teléfono: el punto de hace un momento, o uno nuevo del GPS. Nunca truena: sin punto = null.
+  function trAquiPedirFix(esperaMs){
+    const f = LAST_FIX;
+    if(f && Number.isFinite(+f.lat) && Number.isFinite(+f.lng) && Date.now() - (+f.at || 0) < TR_AQUI_FIX_MS) return Promise.resolve(f);
+    const Loc = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Location;
+    if(!isNative() || !Loc || typeof Loc.suggestAddress !== 'function') return Promise.resolve(null);
+    if(!TR_AQUI_PIDIENDO){
+      TR_AQUI_PIDIENDO = Promise.resolve().then(() => Loc.suggestAddress()).then(r => {
+        if(!r || !Number.isFinite(+r.lat) || !Number.isFinite(+r.lng)) return null;
+        LAST_FIX = { lat: +r.lat, lng: +r.lng, at: Date.now(), acc: Number.isFinite(+r.accuracyM) ? +r.accuracyM : null };
+        try{ localStorage.setItem('lastFix', JSON.stringify(LAST_FIX)); }catch(e){}
+        return LAST_FIX;
+      }).catch(() => null).then(v => { TR_AQUI_PIDIENDO = null; return v; });
+    }
+    return Promise.race([TR_AQUI_PIDIENDO, new Promise(r => setTimeout(() => r(null), +esperaMs > 0 ? +esperaMs : TR_AQUI_ESPERA_MS))]);
+  }
+  // Las casas sin punto: Apple las ubica (máximo 20 por vez, con pausa; sin señal se deja para después). Devuelve cuántas ubicó.
+  async function trAquiUbicarFaltan(){
+    const Loc = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Location;
+    if(TR_AQUI_GEO_CORRIENDO || !isNative() || !Loc || typeof Loc.geocode !== 'function' || navigator.onLine === false) return 0;
+    try{ if(visGeoCorriendo) return 0; }catch(e){}                 // Visitas ya está ubicando: Apple pide calma
+    const faltan = trAquiCasas().filter(c => c.direccion && c.dir_key && c.lat == null && !TR_AQUI_SIN_PUNTO[c.dir_key]).slice(0, 20);
+    if(!faltan.length) return 0;
+    TR_AQUI_GEO_CORRIENDO = true;
+    let n = 0;
+    try{
+      for(const c of faltan){
+        try{
+          const r = await Loc.geocode({ address: c.direccion });
+          if(r && Number.isFinite(+r.lat) && Number.isFinite(+r.lng)){ cliGeoPoner(c.dir_key, +r.lat, +r.lng); n++; }
+          else TR_AQUI_SIN_PUNTO[c.dir_key] = 1;
+        }catch(err){
+          if(err && (err.code === 'red' || err.errorMessage === 'red')) break;   // sin señal: después
+          TR_AQUI_SIN_PUNTO[c.dir_key] = 1;
+        }
+        await new Promise(r => setTimeout(r, 400));
+      }
+    } finally { TR_AQUI_GEO_CORRIENDO = false; }
+    return n;
+  }
+  // La casa de aquí: { casa, metros } o null. Si no hay ninguna con punto cerca, ubica las que faltan y vuelve a ver.
+  async function trAquiEncontrar(esperaMs, maxM){
+    const fix = await trAquiPedirFix(esperaMs);
+    if(!fix) return null;
+    const r = trAquiMasCercana(fix, trAquiCasas(), maxM);
+    if(r) return r;
+    return (await trAquiUbicarFaltan()) ? trAquiMasCercana(fix, trAquiCasas(), maxM) : null;
+  }
+  // Al entrar a Plano y Medidas.
+  async function trAquiBuscar(){
+    const seq = ++TR_AQUI_SEQ;
+    let r = null;
+    try{ r = await trAquiEncontrar(TR_AQUI_ESPERA_MS, TR_AQUI_M); }catch(e){ r = null; }
+    if(seq !== TR_AQUI_SEQ) return;
+    TR_AQUI = r; trAquiPintar();
+  }
+  // La tarjeta: en la lista ("¿De qué trabajo?") y en el trabajo abierto cuando ese trabajo es de OTRA casa. Nada más.
+  function trAquiPintar(){
+    const caja = document.getElementById('trAqui'); if(!caja) return;
+    const a = TR_AQUI, c = a && a.casa;
+    let t = null; try{ t = trActual(); }catch(e){ t = null; }
+    const otraCasa = !!(c && t && !trEsLaCasa(t, { client: c.nombre, address: c.direccion }));
+    // Buscando otro trabajo en el buscador: no se le mete una tarjeta encima mientras escribe (vuelve al borrar lo escrito).
+    const bus = document.getElementById('trBuscar'), buscando = !!(bus && String(bus.value || '').trim());
+    const ver = !!c && ((TR_VISTA === 'lista' && !buscando) || (TR_VISTA === 'trabajo' && otraCasa));
+    if(!ver){ caja.hidden = true; caja.innerHTML = ''; return; }
+    caja.innerHTML = '<div class="hint" style="margin:0 0 6px; text-transform:uppercase; letter-spacing:.08em;"><b>Estás aquí</b><span class="en"> / You are here</span></div>'
+      + '<div class="tr-cab-info"><b>' + esc(c.nombre || c.direccion) + '</b>' + (c.nombre && c.direccion ? '<span>' + esc(c.direccion) + '</span>' : '') + '</div>'
+      + '<button type="button" class="btn btn-accent" data-tr-aqui="' + esc(c.dir_key) + '" style="width:100%; margin:12px 0 0; min-height:52px; font-size:16px;">'
+      + (TR_VISTA === 'trabajo' ? 'Cambiar a este trabajo' : 'Usar este trabajo') + ' &#9654;</button>';
+    caja.hidden = false;
+  }
+  // Un trabajo de Lumi ({trabajo_id} de casaCercana, el dir_key, o {cliente, direccion}) -> el cliente de la lista.
+  function trAquiClienteDe(trabajo){
+    let l = []; try{ l = clientesLeer(); }catch(e){ return null; }
+    const k = typeof trabajo === 'string' ? trabajo : (trabajo && (trabajo.trabajo_id || trabajo.dir_key)) || '';
+    let c = k ? l.find(x => clienteClave(x) === k) : null;
+    if(!c && trabajo && typeof trabajo === 'object' && (trabajo.direccion || trabajo.cliente)){
+      const kk = clienteClave({ nombre: trabajo.cliente || '', direccion: trabajo.direccion || '' });
+      c = l.find(x => clienteClave(x) === kk) || null;
+    }
+    return c || null;
+  }
+  // "1st Floor", "Primer Piso", "primer piso", "Basement", "sótano"… -> el valor del nivel; otra cosa -> ''.
+  function trAquiNivel(n){
+    const s = cliNorm(n); if(!s) return '';
+    const o = LEVEL_OPTIONS.find(x => x.value !== 'Other' && (cliNorm(x.value) === s || x.label.split(' / ').some(p => cliNorm(p) === s)));
+    return o ? o.value : '';
+  }
+  // Abrir el trabajo y de una vez la cámara de medir o el escáner. Con nivel: directo; sin nivel: el "¿Qué nivel?" del trabajo.
+  async function trAquiAbrir(trabajo, que, opciones){
+    try{
+      if(isAmgSide()) return false;                                  // AMG Moving no tiene Plano y Medidas
+      const c = trAquiClienteDe(trabajo); if(!c) return false;
+      const nivel = trAquiNivel(opciones && opciones.nivel);
+      navStack = []; updateNavButtons();                             // como el azulejo del menú: Atrás vuelve al menú
+      trAbrirCliente(c.id);
+      showTab('planomed');
+      await new Promise(r => setTimeout(r, 0));                     // trEntrar (en un microtask) ya pintó el trabajo
+      if(que === 'plano'){ if(nivel) trEscanearEnNivel(nivel); else trIr('escanear'); }
+      else { if(nivel) trCamaraEnNivel(nivel); else trIr('camara'); }
+      return true;
+    }catch(e){ console.warn('trabajo', e); return false; }
+  }
+  document.addEventListener('click', e => {
+    const b = e.target && e.target.closest && e.target.closest('[data-tr-aqui]'); if(!b) return;
+    const c = trAquiClienteDe(b.dataset.trAqui);
+    if(!c){ TR_AQUI = null; trAquiPintar(); return; }               // se borró de Clientes mientras tanto
+    trAbrirCliente(c.id);
+  });
+  document.addEventListener('input', e => { if(e.target && e.target.id === 'trBuscar') trAquiPintar(); });
+  // ---- para Lumi (el agente "Todo" lo conecta a la voz) ----
+  // casaCercana({ maxMetros?, esperaMs? }) -> Promise<{ trabajo_id, cliente, direccion, telefono, metros } | null>. Nunca falla.
+  window.casaCercana = function(opciones){
+    const o = opciones || {};
+    return trAquiEncontrar(+o.esperaMs > 0 ? +o.esperaMs : TR_AQUI_ESPERA_MS, +o.maxMetros > 0 ? +o.maxMetros : TR_AQUI_M)
+      .then(r => r ? { trabajo_id: r.casa.dir_key, cliente: r.casa.nombre, direccion: r.casa.direccion, telefono: r.casa.telefono, metros: r.metros } : null)
+      .catch(() => null);
+  };
+  // abrirMedidasCon(trabajo, { nivel? }) / abrirPlanoCon(trabajo, { nivel? }) -> Promise<boolean>.
+  window.abrirMedidasCon = function(trabajo, opciones){ return trAquiAbrir(trabajo, 'medidas', opciones); };
+  window.abrirPlanoCon = function(trabajo, opciones){ return trAquiAbrir(trabajo, 'plano', opciones); };
+  window.nivelesFR = function(){ return FP_PLANTAS.slice(); };
+  window.__trAqui = { masCercana: trAquiMasCercana, casas: trAquiCasas, nivel: trAquiNivel, estado: () => TR_AQUI, buscar: trAquiBuscar };
 
   // LA AYUDA DE MEDIDAS.
   //
@@ -51147,7 +51325,7 @@ body.med-pp-abierto{overflow:hidden;}
   //   tarjeta, se lee, y solo con "si"/Confirmar se manda el token de vuelta. Una lista de pagos ("pagales a
   //   todos") viene de a uno: al confirmar, la respuesta trae el "Listo" y la siguiente tarjeta.
   // - Lo que se oye mientras habla la app: el plugin descarta ese audio, asi que no se oye a si misma.
-  const AS = { abierto:false, estado:'esperando', historial:[], conf:null, nivel:0, suave:0, texto:'', modo:null, sandbox:false,
+  const AS = { abierto:false, estado:'esperando', historial:[], conf:null, pregunta:null, nivel:0, suave:0, texto:'', modo:null, sandbox:false,
                rec:null, tmrSil:null, tmrHabla:null, tmrRelleno:null, ultTexto:0, enviando:false, anim:null, fase:0, ultMs:0, hablaHasta:0, ultimaU:null };
   const AS_SI_PALABRAS = ['sí','si','sip','simón','simon','claro','correcto','exacto','ajá','aja','dale','órale','orale','ok','okay','okey','yes','confirmar','confirma','confirmo','confírmalo','confirmalo','hazlo','registralo','regístralo','va','sale','bueno','listo','así','asi','es','de','acuerdo','adelante','mándalo','mandalo','seguro','cámbiala','cambiala','mándaselo','mandaselo','créalo','crealo','archívalo','archivalo'];
   const AS_NO_PALABRAS = ['no','nop','nel','negativo','incorrecto','cancela','cancelar','cancélalo','cancelalo','olvídalo','olvidalo','mejor','nada','todavía','todavia','para','espera','déjalo','dejalo'];
@@ -51164,7 +51342,7 @@ body.med-pp-abierto{overflow:hidden;}
   function asMostrarRespuesta(t){ const e = $('#asRespuesta'); if(e) e.textContent = t || ''; }
   function asAbrir(){
     if(!(signedIn() && isManager())) return;
-    AS.abierto = true; AS.historial = []; AS.conf = null; asQuitarTarjeta(); asMostrarRespuesta(''); asTranscribir('');
+    AS.abierto = true; AS.historial = []; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asTranscribir('');
     const p = $('#asPanel'); if(p){ p.hidden = false; p.classList.toggle('as-prueba-on', AS.sandbox); }
     asEstado('esperando', '');
     { const v = $('#asVersion'); if(v) v.textContent = 'Versión ' + String(APP_BUILD).replace(/^\d{4}-\d{2}-\d{2}-/, '') + ' · ' + String(APP_BUILD).slice(0, 10); }
@@ -51177,7 +51355,7 @@ body.med-pp-abierto{overflow:hidden;}
     asHablar(nombre ? '¿Qué necesitas, ' + nombre + '?' : '¿Qué necesitas?', asSeguirOyendo);
   }
   function asCerrar(){
-    AS.abierto = false; asPararOido(); asCallar();
+    AS.abierto = false; AS.pregunta = null; asPararOido(); asCallar();
     if(window.Cara){ try{ Cara.hablando(false); Cara.estado('reposo'); }catch(err){} }
     const p = $('#asPanel'); if(p) p.hidden = true;
     if(AS.anim) cancelAnimationFrame(AS.anim); AS.anim = null;
@@ -51538,6 +51716,9 @@ body.med-pp-abierto{overflow:hidden;}
   async function asEnviar(texto, desdeTeclado){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
+    // (Brújula) Una pregunta de "medir aquí" en espera ("¿Vas a sacar medidas de…?", "¿Qué nivel?") se contesta en el
+    // teléfono, sin tarjeta y sin modelo.
+    if(AS.pregunta && !AS.conf){ asTranscribir(texto); return asResponderMedir(texto); }
     // Con una tarjeta esperando, un "si" o un "no" se resuelven aqui, sin molestar al modelo.
     if(AS.conf){
       const low = texto.toLowerCase().replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -51545,6 +51726,8 @@ body.med-pp-abierto{overflow:hidden;}
       if(asEsNo(low)) return asCancelar();
     }
     if(!AS.conf && asEsAdios(texto)){ asTranscribir(texto); asPararOido(); asMostrarRespuesta('Aquí estoy.'); asHablar('Aquí estoy.', function(){ asReposar(); }); return; }
+    // (Brújula) "quiero sacar medidas" / "hacer el plano": todo en el teléfono (ubicación + abrir), sin ir al modelo.
+    if(!AS.conf && !desdeTeclado !== undefined){ const med = asEsMedir(texto); if(med){ asTranscribir(texto); asPararOido(); return asMedirAqui(med.que, { nivel: med.nivel, cliente: med.cliente }); } }
     asTranscribir(texto); asEstado('pensando', 'Un momento…'); AS.enviando = true; asMostrarRespuesta('');
     asCallar();
     const t0 = Date.now();
@@ -51585,6 +51768,8 @@ body.med-pp-abierto{overflow:hidden;}
       if(faltante) await asDecir(faltante, !!norm(dicho));
       AS.enviando = false;
       asAlTerminarDeHablar(function(){
+        // (Brújula) El modelo (herramienta medir_aqui, función v4.2) pide ubicar y abrir: la conversación sigue en el teléfono.
+        if(nav && nav.pantalla === 'medir_aqui' && !nav.trabajo){ asMedirAqui(nav.que, { nivel: nav.nivel, cliente: nav.cliente }); return; }
         if(nav){ asNavegar(nav); return; }
         asSeguirOyendo();   // siempre vuelve a oír (también tras una pregunta escrita, salvo con el teclado abierto)
       });
@@ -51658,6 +51843,133 @@ body.med-pp-abierto{overflow:hidden;}
     if(window.Cara){ try{ Cara.estado('reposo'); if(Cara.negar) Cara.negar(); }catch(err){} }
     asHablar('Cancelado. No se registró nada.', asSeguirOyendo);
   }
+  // ---- (Brújula, 21 oct 2026) "QUIERO SACAR MEDIDAS" / "HACER EL PLANO": manos ocupadas, todo por voz ----
+  // El teléfono ve dónde está (window.casaCercana, parche Brújula), sugiere la casa más cercana ("¿Vas a sacar medidas
+  // de <dirección>?"), con un "sí" pregunta el nivel y abre la cámara de medir o el escáner de una vez
+  // (abrirMedidasCon / abrirPlanoCon). Sin casa cerca pregunta de qué cliente y lo busca en Clientes. Abrir una cámara no
+  // cambia datos: la confirmación es de voz (sí/no), nunca una tarjeta que tocar. Nada de esto va al modelo.
+  const AS_MEDIR_PREGUNTA_RE = /^(cu[aá]nt|qu[eé]\b|cu[aá]l|d[oó]nde|dame|dime|ens[eé]ñame|mu[eé]strame|abre|[aá]breme|ll[eé]vame|busca|b[uú]scame|hay\b|tiene)/;
+  const AS_MEDIR_PLANO_RE = /\b(hacer|sacar|escanear|tomar|levantar|empezar|comenzar)\s+(el\s+)?plano\b|\bescanear\b|\bescaneo\b|\besc[aá]ner\b/;
+  const AS_MEDIR_MED_RE = /\b(sacar|tomar|hacer|empezar|comenzar|levantar|anotar)\s+(las\s+|unas\s+)?medidas\b|\b(quiero|vamos|voy|hay que|necesito|toca)\s+(a\s+)?medir\b|\bmedir\s+(con\s+la\s+c[aá]mara|la\s+casa|aqu[ií]|el\s+s[oó]tano|el\s+piso|el\s+cuarto|esto)|\bc[aá]mara\s+de\s+medir\b|^medidas$|^medir$/;
+  const AS_MEDIR_RELLENO = ['aqui','aquí','ahora','ya','por favor','porfa','de una vez','rapido','rápido','esta casa','la casa','esto','este trabajo','el trabajo'];
+  const AS_NIVELES_VOZ = [
+    ['Basement', /\b(s[oó]tano|basement|beism[ae]n|beisment|sotano)\b/],
+    ['1st Floor', /\b(primer(o)?\s+(piso|nivel)|planta\s+baja|first\s+floor|1st|piso\s+(uno|1)|nivel\s+(uno|1))\b/],
+    ['2nd Floor', /\b(segundo\s+(piso|nivel)|second\s+floor|2nd|piso\s+(dos|2)|nivel\s+(dos|2))\b/],
+    ['3rd Floor', /\b(tercer(o)?\s+(piso|nivel)|third\s+floor|3rd|piso\s+(tres|3)|nivel\s+(tres|3))\b/],
+    ['Attic', /\b([aá]tico|attic|atico)\b/],
+  ];
+  const AS_NIVEL_DICHO = { 'Basement': 'el sótano', '1st Floor': 'el primer piso', '2nd Floor': 'el segundo piso', '3rd Floor': 'el tercer piso', 'Attic': 'el ático' };
+  function asMedirNorm(t){ return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim(); }
+  // "sótano", "en el segundo piso", "Primer Piso" -> el valor del nivel del plano; nada reconocible -> ''.
+  function asNivelDicho(t){
+    const l = asMedirNorm(t); if(!l) return '';
+    for(const [v, re] of AS_NIVELES_VOZ){ if(re.test(l)) return v; }
+    try{ if(window.__trAqui && typeof window.__trAqui.nivel === 'function'){ const v = window.__trAqui.nivel(String(t || '')); if(v) return v; } }catch(e){}
+    return '';
+  }
+  // ¿Es un pedido de medir / escanear? -> { que: 'medidas'|'plano', nivel, cliente } o null. Las PREGUNTAS ("cuántas
+  // medidas tiene johnson", "abre las medidas") no son pedidos: esas van al modelo como siempre.
+  function asEsMedir(texto){
+    const l = asMedirNorm(texto); if(!l || AS_MEDIR_PREGUNTA_RE.test(l)) return null;
+    const que = AS_MEDIR_PLANO_RE.test(l) ? 'plano' : (AS_MEDIR_MED_RE.test(l) ? 'medidas' : '');
+    if(!que) return null;
+    const nivel = asNivelDicho(l);
+    // "…de johnson", "…en la casa de brown", "…del cliente garcia": lo que viene después del pedido es el cliente.
+    let cliente = '';
+    const m = /(?:medidas|plano|medir|escanear|escaneo|esc[aá]ner)\s+(?:de|del|en|para|a)\s+(?:la\s+casa\s+de\s+|lo\s+de\s+|la\s+de\s+|el\s+cliente\s+|donde\s+)?(.+)$/.exec(l);
+    if(m){
+      let resto = m[1];
+      for(const [, re] of AS_NIVELES_VOZ) resto = resto.replace(re, ' ');
+      resto = resto.replace(/\b(con\s+la\s+camara|la\s+camara|camara|el\s+nivel|nivel|en\s+el|en\s+la|de\s+la|del|de|el|la|los|las|un|una|y|con)\b/g, ' ').replace(/\s+/g, ' ').trim();
+      if(resto && !AS_MEDIR_RELLENO.includes(resto) && resto.length >= 3) cliente = resto;
+    }
+    return { que, nivel, cliente };
+  }
+  function asMedirDireccion(t){ const d = String((t && (t.direccion || t.cliente)) || '').trim(); return d.replace(/\s*,\s*(USA|EE\.?\s?UU\.?)\s*$/i, '').slice(0, 90); }
+  function asMedirQue(que, t){ return (que === 'plano' ? 'Plano de ' : 'Medidas de ') + (t && t.cliente ? t.cliente : asMedirDireccion(t)); }
+  function asMedirPregunta(p, texto){ AS.pregunta = p; asMostrarRespuesta(texto); if(window.Cara){ try{ Cara.gesto('pregunta', 4000); }catch(err){} } asHablar(texto, asSeguirOyendo); }
+  // Arranque: ubicar la casa (o, si ya dijo el cliente, buscarlo).
+  async function asMedirAqui(que, o){
+    o = o || {}; que = que === 'plano' ? 'plano' : 'medidas';
+    AS.pregunta = null; asQuitarTarjeta();
+    if(typeof window.casaCercana !== 'function' || typeof window.abrirMedidasCon !== 'function'){ const m = 'Eso todavía no está en esta versión de la app. Abre Plano y Medidas desde el menú.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
+    const nivel = o.nivel ? asNivelDicho(o.nivel) : '';
+    if(o.cliente){ return asMedirCliente(que, nivel, String(o.cliente), 0); }
+    asMostrarRespuesta('Déjame ver dónde estás.'); asBit('medir aquí: ubicando (' + que + (nivel ? ', ' + nivel : '') + ')');
+    await asDecir('Déjame ver dónde estás.', false);
+    asAlTerminarDeHablar(function(){ if(AS.abierto && !AS.pregunta) asEstado('pensando', 'Buscando la casa más cercana…'); });
+    let t = null;
+    try{ t = await window.casaCercana(); }catch(e){ t = null; }
+    if(!AS.abierto) return;
+    asBit('medir aquí: ' + (t ? 'casa a ' + Math.round(+t.metros || 0) + ' m' : 'nada cerca'));
+    if(t){ asMedirPregunta({ tipo: 'casa', que, nivel, t }, (que === 'plano' ? '¿Vas a escanear el plano de ' : '¿Vas a sacar medidas de ') + asMedirDireccion(t) + '?'); return; }
+    asMedirPregunta({ tipo: 'cliente', que, nivel, intentos: 0 }, 'No veo ninguna casa cerca de donde estás. ¿De qué cliente?');
+  }
+  // Buscar el cliente dicho en Clientes (nombre o dirección). Uno = sigue; varios = pregunta cuál; ninguno = vuelve a preguntar (2 veces).
+  function asMedirCliente(que, nivel, dicho, intentos){
+    const l = asMedirNorm(dicho).replace(/^(no|si|sí)\b[ ,]*/, '').replace(/^(la|lo|el)\s+(casa\s+)?(de\s+)?/, '').replace(/^(de|del|en)\s+/, '').trim();
+    let lista = []; try{ lista = (typeof clientesLeer === 'function' ? clientesLeer() : []) || []; }catch(e){ lista = []; }
+    const norm = function(x){ return asMedirNorm(x); };
+    const tok = l.split(' ').filter(function(x){ return x.length >= 2 && !['la','el','de','del','los','las','casa','cliente','senor','senora','mister','mr','mrs','ms'].includes(x); });
+    let hits = [];
+    if(tok.length){
+      hits = lista.filter(function(c){ const n = norm(c.nombre), d = norm(c.direccion); return tok.every(function(w){ return n.includes(w) || d.includes(w); }); });
+      if(!hits.length) hits = lista.filter(function(c){ const n = norm(c.nombre), d = norm(c.direccion); return tok.some(function(w){ return w.length >= 4 && (n.split(' ').includes(w) || d.split(' ').includes(w)); }); });
+    }
+    const aTrabajo = function(c){ let k = ''; try{ k = typeof clienteClave === 'function' ? clienteClave(c) : ''; }catch(e){} return { trabajo_id: k, cliente: String(c.nombre || ''), direccion: String(c.direccion || ''), telefono: String(c.telefono || '') }; };
+    if(hits.length === 1){ return asMedirNivel(que, nivel, aTrabajo(hits[0])); }
+    if(hits.length > 1){
+      const ops = hits.slice(0, 3).map(aTrabajo);
+      return asMedirPregunta({ tipo: 'cual', que, nivel, opciones: ops }, '¿Cuál? ' + ops.map(function(o){ return o.cliente || o.direccion; }).join(', o ') + '.');
+    }
+    if(intentos >= 1){
+      const m = 'No lo encuentro en Clientes. Te abro Plano y Medidas para que lo escojas.'; AS.pregunta = null; asMostrarRespuesta(m);
+      asHablar(m, function(){ asNavegar({ pantalla: 'planos' }); }); return;
+    }
+    asMedirPregunta({ tipo: 'cliente', que, nivel, intentos: intentos + 1 }, (l ? 'No encuentro a ' + l + '. ' : '') + '¿De qué cliente? Dime el nombre o la dirección.');
+  }
+  function asMedirNivel(que, nivel, t){
+    if(nivel) return asMedirAbrir(que, nivel, t);
+    asMedirPregunta({ tipo: 'nivel', que, t, intentos: 0 }, '¿Qué nivel? Sótano, primer piso, segundo piso, tercer piso o ático.');
+  }
+  // Abrir: dice "Listo…" y entra a la cámara (sin nivel, la app pregunta el nivel en pantalla). Igual que el azulejo del menú.
+  function asMedirAbrir(que, nivel, t){
+    AS.pregunta = null;
+    const m = 'Listo. ' + asMedirQue(que, t) + (nivel ? ', ' + (AS_NIVEL_DICHO[nivel] || nivel) : ', escoge el nivel en la pantalla') + '.';
+    asMostrarRespuesta(m); if(window.Cara){ try{ Cara.gesto('exito'); }catch(err){} }
+    asBit('medir aquí: abrir ' + que + ' ' + (nivel || '(sin nivel)'));
+    asHablar(m, function(){ asNavegar({ pantalla: 'medir_aqui', que, nivel: nivel || '', trabajo: t, titulo: asMedirQue(que, t) }); });
+  }
+  // La respuesta a la pregunta en espera.
+  function asResponderMedir(texto){
+    const p = AS.pregunta; if(!p) return;
+    const low = asMedirNorm(texto);
+    if(asEsAdios(texto) || /\b(cancela|cancelar|olvidalo|dejalo|mejor no|ya no|nada)\b/.test(low)){ AS.pregunta = null; asMostrarRespuesta('Está bien.'); asHablar('Está bien.', asSeguirOyendo); return; }
+    if(p.tipo === 'casa'){
+      if(asEsSi(low)) return asMedirNivel(p.que, p.nivel, p.t);
+      if(asEsNo(low)) return asMedirPregunta({ tipo: 'cliente', que: p.que, nivel: p.nivel, intentos: 0 }, '¿De qué cliente?');
+      // "no, la de brown" / "la de brown": el nombre dicho manda.
+      const nivelDicho = asNivelDicho(low);
+      if(nivelDicho && /^(si|sí|claro|dale|ok|va)\b/.test(low)) return asMedirAbrir(p.que, nivelDicho, p.t);   // "sí, el sótano"
+      return asMedirCliente(p.que, p.nivel, texto, 0);
+    }
+    if(p.tipo === 'cliente'){ return asMedirCliente(p.que, p.nivel, texto, p.intentos || 0); }
+    if(p.tipo === 'cual'){
+      const tok = low.split(' ').filter(function(x){ return x.length >= 3; });
+      const hit = p.opciones.find(function(o){ const n = asMedirNorm(o.cliente + ' ' + o.direccion); return tok.some(function(w){ return n.includes(w); }); })
+        || (/(primer|primera|uno|1)\b/.test(low) ? p.opciones[0] : /(segund|dos|2)\b/.test(low) ? p.opciones[1] : /(tercer|tres|3)\b/.test(low) ? p.opciones[2] : null);
+      if(!hit) return asMedirPregunta(p, '¿Cuál? ' + p.opciones.map(function(o){ return o.cliente || o.direccion; }).join(', o ') + '.');
+      return asMedirNivel(p.que, p.nivel, hit);
+    }
+    if(p.tipo === 'nivel'){
+      const n = asNivelDicho(low);
+      if(n) return asMedirAbrir(p.que, n, p.t);
+      if((p.intentos || 0) < 1) return asMedirPregunta({ tipo: 'nivel', que: p.que, t: p.t, intentos: 1 }, '¿Sótano, primer piso, segundo piso, tercer piso o ático?');
+      return asMedirAbrir(p.que, '', p.t);   // no se entendió dos veces: se abre el trabajo y escoge el nivel en pantalla
+    }
+    AS.pregunta = null; asSeguirOyendo();
+  }
   // ---- abrir pantallas: por los MISMOS botones y funciones que usa el dedo ----
   async function asIrA(nav){
     const p = (nav && nav.pantalla) || 'manager';
@@ -51696,6 +52008,13 @@ body.med-pp-abierto{overflow:hidden;}
           break;
         }
         case 'planos': { const b = $('#mgrGoPlanos'); if(b) b.click(); break; }
+        case 'medir_aqui': {
+          // (Brújula) El trabajo ya está resuelto por voz: la MISMA puerta que "Usar este trabajo ▶" (abrirMedidasCon / abrirPlanoCon).
+          const f = nav.que === 'plano' ? window.abrirPlanoCon : window.abrirMedidasCon;
+          let ok = false; if(typeof f === 'function' && nav.trabajo){ try{ ok = await f(nav.trabajo, { nivel: nav.nivel || '' }); }catch(e){ ok = false; } }
+          if(!ok){ const b = $('#mgrGoPlanos'); if(b) b.click(); }
+          break;
+        }
         case 'contenidos': { const b = $('#mgrGoContenidos'); if(b) b.click(); break; }
         case 'codigos': showTab('mgrcodes'); pushBack('mgrrest'); break;
         case 'precio_cliente': abrirMgrMore('rates', 'mgrrest'); break;
@@ -51767,7 +52086,7 @@ body.med-pp-abierto{overflow:hidden;}
     asPintarEsfera();
   })();
   // Gancho para las pruebas y para la copia de prueba.
-  window.__as = { abrir: asAbrir, cerrar: asCerrar, enviar: asEnviar, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
+  window.__as = { abrir: asAbrir, cerrar: asCerrar, enviar: asEnviar, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
 
 })();
 </script>
