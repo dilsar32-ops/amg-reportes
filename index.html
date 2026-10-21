@@ -4414,6 +4414,8 @@ body.med-pp-abierto{overflow:hidden;}
             <button type="button" id="inboxSegArchived">Archivados</button>
           </div>
         </div>
+        <!-- (2c, 21 oct 2026) El grupo de Mensajes al que el asistente manda las hojas: el ajuste vive donde se usa, aqui. -->
+        <div style="margin:8px 0 2px;"><button type="button" class="minibtn" id="mgrGoGrupo">Grupo de Mensajes de los labor logs</button></div>
         <p class="inboxnote" id="inboxNote">Todavía no llega nada</p>
         <div id="inboxList"></div>
       </div>
@@ -6347,6 +6349,13 @@ body.med-pp-abierto{overflow:hidden;}
          una escogida, y el encabezado + el "Atras" del pie dicen cual es.
          Ojo: si alguna vez vuelve una pastilla aqui, vuelve el problema. -->
 
+    <section class="card" id="mgrMoreGrupo" hidden>
+      <h2>Grupo de labor logs</h2>
+      <p class="hint">Los tel&eacute;fonos de las personas del grupo de Mensajes (uno por rengl&oacute;n). Con ellos, el asistente abre Mensajes ya dirigido al grupo con las hojas del labor log; sin n&uacute;meros abre la hoja de compartir y usted escoge el grupo.</p>
+      <div class="field"><label>Tel&eacute;fonos</label><textarea id="mgrGrupoTels" rows="4" placeholder="+1 703 555 0100&#10;+1 703 555 0101"></textarea></div>
+      <div class="actions"><button type="button" class="btn btn-accent" id="mgrGrupoSave">Guardar</button></div>
+      <p class="hint" id="mgrGrupoMsg"></p>
+    </section>
     <section class="card" id="mgrMoreRates">
       <h2>Precio que se le cobra al cliente</h2>
       <div id="mgrRateBox">
@@ -9992,7 +10001,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-21-R8';
+  const APP_BUILD = '2026-10-21-R9';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -13455,13 +13464,13 @@ body.med-pp-abierto{overflow:hidden;}
   if($('#amgSegCal')) $('#amgSegCal').addEventListener('click', ()=> amgShow('cal'));
 
   function mgrMoreShow(which){
-    const map = [['rates','#mgrMoreRates']];
+    const map = [['rates','#mgrMoreRates'], ['grupo','#mgrMoreGrupo']];
     map.forEach(([key, cardSel]) => {
       const card = $(cardSel);
       if(card) card.hidden = key !== which;
     });
     // El nombre de la pantalla sigue a la seccion abierta (ver nombreDeSeccion).
-    const NOMBRES = { rates:'Precio al cliente' };
+    const NOMBRES = { rates:'Precio al cliente' }; NOMBRES.grupo = 'Grupo de labor logs';
     mgrMoreNombre = NOMBRES[which] || '';
     mgrMoreSeccion = which;
     const panelAct = document.querySelector('.tab-panel.active');
@@ -14003,6 +14012,23 @@ body.med-pp-abierto{overflow:hidden;}
     mgrMoreShow(seccion);
   }
   if($('#mgrGoRates'))    $('#mgrGoRates').addEventListener('click',    ()=> abrirMgrMore('rates', 'mgrrest'));
+  // (2c) El grupo de labor logs: se lee de asistente_ajustes al abrir y se guarda con Guardar (solo el manager escribe, fr-05).
+  if($('#mgrGoGrupo')) $('#mgrGoGrupo').addEventListener('click', async ()=>{
+    abrirMgrMore('grupo', 'labor');
+    const ta = $('#mgrGrupoTels'), msg = $('#mgrGrupoMsg'); if(!ta) return; msg.textContent = 'Leyendo…';
+    try{ const res = await authFetch('/rest/v1/asistente_ajustes?select=valor&clave=eq.grupo_labor_logs&company_id=eq.' + encodeURIComponent(SES.company_id) + '&limit=1', { headers: cloudHeaders() });
+      if(res.status === 404){ msg.textContent = 'Falta correr fr-05 en Supabase (avísele a Amilcar). Mientras, el asistente usa la hoja de compartir.'; return; }
+      const rows = res.ok ? await res.json() : []; const v = rows[0] && rows[0].valor; ta.value = (Array.isArray(v && v.telefonos) ? v.telefonos : []).join('\n'); msg.textContent = ''; }
+    catch(e){ msg.textContent = 'No se pudo leer. Revise su internet.'; }
+  });
+  if($('#mgrGrupoSave')) $('#mgrGrupoSave').addEventListener('click', async ()=>{
+    const ta = $('#mgrGrupoTels'), msg = $('#mgrGrupoMsg'); if(!ta) return;
+    const tels = ta.value.split(/[\n,;]+/).map(t => t.replace(/[^\d+]/g, '')).filter(t => t.length >= 7);
+    msg.textContent = 'Guardando…';
+    try{ const res = await authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave', { method: 'POST', headers: Object.assign(cloudHeaders(), { Prefer: 'resolution=merge-duplicates,return=minimal' }), body: JSON.stringify({ company_id: SES.company_id, clave: 'grupo_labor_logs', valor: { telefonos: tels }, updated_by: SES.user_id || null, updated_at: new Date().toISOString() }) });
+      msg.textContent = res.ok ? ('Guardado: ' + tels.length + ' teléfono(s).') : (res.status === 404 ? 'Falta correr fr-05 en Supabase (avísele a Amilcar).' : 'No se guardó (HTTP ' + res.status + ').'); }
+    catch(e){ msg.textContent = 'No se guardó. Revise su internet.'; }
+  });
   if($('#mgrGoCodes'))    $('#mgrGoCodes').addEventListener('click',    ()=>{ showTab('mgrcodes'); pushBack('mgrrest'); });
   // Straight to the app check from the Manager menu - he uses this every
   // time I send a change, so it should not be two taps deep.
@@ -52059,6 +52085,8 @@ body.med-pp-abierto{overflow:hidden;}
         if(nav && nav.pantalla === 'medir_aqui' && !nav.trabajo){ asMedirAqui(nav.que, { nivel: nav.nivel, cliente: nav.cliente }); return; }
         // (2c) El labor log dictado: la pantalla ya quedó llena; Lumi espera el "sí" para mandarlo con el botón de siempre.
         if(nav && nav.pantalla === 'labor_log_llenar'){ asLaborLlenar(nav); return; }
+        // (2c-b) Las hojas al grupo: Lumi espera el "sí" (la pregunta ya la dijo el modelo) y el teléfono abre Mensajes.
+        if(nav && nav.pantalla === 'labor_log_mandar'){ AS.pregunta = { tipo: 'labor_grupo', nav }; asSeguirOyendo(); return; }
         if(nav){ asNavegar(nav); return; }
         asSeguirOyendo();   // siempre vuelve a oír (también tras una pregunta escrita, salvo con el teclado abierto)
       });
@@ -52235,6 +52263,11 @@ body.med-pp-abierto{overflow:hidden;}
     const p = AS.pregunta; if(!p) return;
     const low = asMedirNorm(texto);
     if(asEsAdios(texto) || /\b(cancela|cancelar|olvidalo|dejalo|mejor no|ya no|nada)\b/.test(low)){ AS.pregunta = null; const m = p.tipo === 'labor_mandar' ? 'Está bien. Queda en la pantalla, sin mandar.' : 'Está bien.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
+    if(p.tipo === 'labor_grupo'){
+      if(asEsSi(low)){ AS.pregunta = null; const m = 'Va. Armo las hojas y abro Mensajes.'; asMostrarRespuesta(m); if(window.Cara){ try{ Cara.gesto('exito'); }catch(err){} } asHablar(m, function(){ asCerrar(); laborMandarHojas(p.nav).catch(function(e){ alert('No se pudo mandar el labor log.\n\n' + ((e && e.message) || e)); }); }); return; }
+      if(asEsNo(low)){ AS.pregunta = null; asMostrarRespuesta('Está bien.'); asHablar('Está bien.', asSeguirOyendo); return; }
+      AS.pregunta = null; return asEnviar(texto);
+    }
     if(p.tipo === 'labor_mandar'){
       if(asEsSi(low)){ AS.pregunta = null; const m = 'Va. Lo mando al manager.'; asMostrarRespuesta(m); if(window.Cara){ try{ Cara.gesto('exito'); }catch(err){} } asHablar(m, function(){ asNavegar({ pantalla: 'labor_log_revisar', empresa: p.nav.empresa, payload: p.nav.payload, mandar: true }); }); return; }
       if(asEsNo(low) || (/^(no|nel|todavia no|mejor no|espera|aguanta|primero)\b/.test(low) && !/\d|fuimos|fueron|tambien|era|eran|falta|cambia|quita|pon|agrega/.test(low))){ AS.pregunta = null; const m = 'Queda en la pantalla para que lo revises.'; asMostrarRespuesta(m); asHablar(m, function(){ asNavegar({ pantalla: 'labor_log_revisar', empresa: p.nav.empresa, payload: p.nav.payload }); }); return; }
@@ -52338,6 +52371,90 @@ body.med-pp-abierto{overflow:hidden;}
     AS.pregunta = { tipo: 'labor_mandar', nav };
     asSeguirOyendo();   // la pregunta "¿Lo mando al manager?" ya la dijo el modelo
   }
+  // ---- (2c-b, 21 oct 2026) LAS HOJAS DE UN LABOR LOG AL GRUPO DE MENSAJES, como JPG, con sus recibos ----
+  // 1) se lee el labor log por id, 2) se pinta en el formulario (loadPayload) y se sacan las hojas JPG con el MISMO
+  // código de la impresión (ccHojasDelReporte), 3) se bajan los recibos de sus gastos (bucket recibos), 4) Mensajes:
+  // con el plugin v2 (app 20) y los números del grupo va directo al grupo; si no, la hoja de compartir de iOS con
+  // todos los JPG (él escoge el grupo); 5) con "enviado" se marca en la nube (marcar_labor_log_mandado, fr-05).
+  const LAB_GRUPO_AJUSTE = 'grupo_labor_logs', LAB_MANDADOS_KEY = 'labMandados1';
+  function asDataUrlABlob(d){ const i = String(d).indexOf(','); const b = atob(String(d).slice(i + 1)); const u = new Uint8Array(b.length); for(let k = 0; k < b.length; k++) u[k] = b.charCodeAt(k); return new Blob([u], { type: 'image/jpeg' }); }
+  async function laborGrupoNumeros(){
+    try{
+      const res = await authFetch('/rest/v1/asistente_ajustes?select=valor&clave=eq.' + LAB_GRUPO_AJUSTE + '&company_id=eq.' + encodeURIComponent(SES.company_id) + '&limit=1', { headers: cloudHeaders() });
+      if(!res.ok) return [];
+      const rows = await res.json(); const v = rows && rows[0] && rows[0].valor;
+      const tels = Array.isArray(v && v.telefonos) ? v.telefonos : [];
+      return tels.map(function(t){ return String(t || '').replace(/[^\d+]/g, ''); }).filter(function(t){ return t.length >= 7; });
+    }catch(e){ return []; }
+  }
+  async function laborMarcarMandado(id){
+    try{ localStorage.setItem(LAB_MANDADOS_KEY, JSON.stringify(Object.assign(JSON.parse(localStorage.getItem(LAB_MANDADOS_KEY) || '{}'), { [id]: new Date().toISOString() }))); }catch(e){}
+    try{ const res = await authFetch('/rest/v1/rpc/marcar_labor_log_mandado', { method: 'POST', headers: cloudHeaders(), body: JSON.stringify({ p_id: id }) }); return res.ok; }catch(e){ return false; }   // 404 = fr-05 sin correr: la marca local se queda
+  }
+  async function laborRecibosDe(clientId){
+    if(!clientId) return [];
+    const out = [];
+    try{
+      const res = await authFetch('/rest/v1/expenses?select=id,what,amount,receipt_path&labor_log_client_id=eq.' + encodeURIComponent(clientId) + '&company_id=eq.' + encodeURIComponent(SES.company_id) + '&receipt_path=not.is.null&limit=20', { headers: cloudHeaders() });
+      if(!res.ok) return [];
+      const rows = await res.json();
+      for(const r of rows){
+        try{ const u = await signedReceiptUrl(r.receipt_path); const b = await (await fetch(u)).blob(); out.push({ blob: b, nombre: 'recibo-' + (r.what || 'gasto') + '-' + String(r.id).slice(0, 6) + '.jpg' }); }catch(e){}
+      }
+    }catch(e){}
+    return out;
+  }
+  // nav = { id, lider, fecha, empresa, ya_mandado }. deps: para las pruebas (todo inyectable); en la app se usan las de verdad.
+  async function laborMandarHojas(nav, deps){
+    deps = deps || {};
+    const id = String(nav && nav.id || ''); if(!id) throw new Error('falta el id del labor log');
+    const overlay = deps.overlay || function(t){ if(t){ if(typeof showOverlay === 'function') showOverlay(t); } else if(typeof hideOverlay === 'function') hideOverlay(); };
+    overlay('Preparando las hojas…');
+    try{
+      // 1. el labor log
+      const res = await (deps.authFetch || authFetch)('/rest/v1/labor_logs?select=id,crew_leader,log_date,payload,work_kind,client_id&id=eq.' + encodeURIComponent(id) + '&limit=1', { headers: (deps.cloudHeaders || cloudHeaders)() });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const row = (await res.json())[0]; if(!row) throw new Error('ese labor log ya no está');
+      const kind = row.work_kind === 'mudanza' ? 'mudanza' : 'restauracion';
+      // 2. las hojas (el formulario se pinta con el reporte y se imprime a JPG, igual que CompanyCam)
+      if(deps.loadPayload || typeof loadPayload === 'function'){ if(typeof laborMode !== 'undefined') laborMode = kind; (deps.loadPayload || loadPayload)(row.payload || {}, kind); }
+      const hojas = await (deps.hojas || function(){ return ccHojasDelReporte('labor'); })();
+      const imagenes = (hojas && hojas.imagenes) || [];
+      if(!imagenes.length) throw new Error('no salió ninguna hoja');
+      // 3. los recibos
+      const recibos = await (deps.recibos || laborRecibosDe)(row.client_id);
+      const base = 'labor-log-' + String(row.log_date || '').slice(0, 10) + '-' + String(row.crew_leader || '').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 20);
+      const archivos = imagenes.map(function(d, i){ return { blob: asDataUrlABlob(d), nombre: base + (imagenes.length > 1 ? '-p' + (i + 1) : '') + '.jpg' }; }).concat(recibos);
+      const texto = 'Labor log ' + String(row.crew_leader || '') + ' · ' + String(row.log_date || '').slice(0, 10) + (recibos.length ? ' · ' + recibos.length + ' recibo(s)' : '');
+      overlay('Abriendo Mensajes…');
+      let estado = 'nada';
+      const nativo = deps.isNative ? deps.isNative() : isNative();
+      if(nativo){
+        const uris = []; for(const a of archivos) uris.push(await (deps.saveToCache || saveToCache)(a.blob, a.nombre));
+        const M = deps.Mensaje || (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Mensaje);
+        let v2 = false; try{ const d = M && M.disponible ? await M.disponible() : null; v2 = !!(d && d.varios && d.adjuntos); }catch(e){ v2 = false; }
+        const grupo = v2 ? await (deps.grupo || laborGrupoNumeros)() : [];
+        if(v2 && grupo.length){
+          let r = null; try{ r = await M.enviar({ telefonos: grupo, texto, archivos: uris.map(function(u, i){ return { archivo: u, nombre: archivos[i].nombre, tipo: 'image/jpeg' }; }) }); }catch(e){ r = null; }
+          estado = (r && r.estado) || 'fallo';
+        }
+        if(estado !== 'enviado' && estado !== 'cancelado'){
+          // Sin plugin v2 o sin números del grupo (o falló): la hoja de compartir de iOS con TODOS los JPG; él escoge el grupo.
+          const Share = deps.Share || (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Share);
+          try{ await Share.share({ title: texto, text: texto, files: uris, dialogTitle: 'Mandar al grupo / Send to group' }); estado = 'compartido'; }
+          catch(e){ estado = /cancel/i.test(String((e && e.message) || e)) ? 'cancelado' : 'fallo'; if(estado === 'fallo') throw e; }
+        }
+      } else {
+        // En la compu: se bajan los JPG (no hay Mensajes).
+        archivos.forEach(function(a){ try{ const url = URL.createObjectURL(a.blob); const el = document.createElement('a'); el.href = url; el.download = a.nombre; el.click(); URL.revokeObjectURL(url); }catch(e){} });
+        estado = 'bajado';
+      }
+      // 5. la marca (solo si de verdad salió)
+      let marcado = false;
+      if(estado === 'enviado' || estado === 'compartido') marcado = await (deps.marcar || laborMarcarMandado)(id);
+      return { estado, hojas: imagenes.length, recibos: recibos.length, marcado };
+    } finally { overlay(''); }
+  }
   // Abrir la pantalla del labor log ya llena (revisar) y, si se pidió, mandarla con el botón de siempre.
   function asLaborAbrir(nav, mandar){
     try{
@@ -52426,7 +52543,7 @@ body.med-pp-abierto{overflow:hidden;}
     asPintarEsfera();
   })();
   // Gancho para las pruebas y para la copia de prueba.
-  window.__as = { abrir: asAbrir, cerrar: asCerrar, enviar: asEnviar, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
+  window.__as = { abrir: asAbrir, cerrar: asCerrar, enviar: asEnviar, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, mandarHojas: laborMandarHojas, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
 
 })();
 </script>
