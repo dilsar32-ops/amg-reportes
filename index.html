@@ -8972,7 +8972,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-20-L';
+  const APP_BUILD = '2026-10-20-M';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -50104,6 +50104,8 @@ body.med-pp-abierto{overflow:hidden;}
         S.addListener('nivel', function(d){ AS.nivel = Math.max(0, Math.min(1, (d && d.nivel) || 0)); });
         S.addListener('texto', function(d){ const t = (d && d.texto) || ''; if(t !== AS.texto){ AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); } });
         S.addListener('error', function(d){ if(AS.estado === 'escuchando') asEstado('esperando', (d && d.mensaje) || 'No se pudo oír. Toca la esfera.'); AS.nivel = 0; });
+        // El plugin (aparato 18+) avisa cuando la voz de verdad termino o no arranco: la espera se corta ahi.
+        if(S.addListener && !AS.oyeHablaFin){ AS.oyeHablaFin = true; S.addListener('hablaFin', function(){ AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now()); }); }
         asEstado('escuchando', 'Te escucho…');
         await S.empezar({ idioma:'es-MX', vocabulario: asVocabulario(), frases: [], pronunciaciones: [] });
         AS.modo = 'nativo'; AS.ultTexto = Date.now(); asVigilarSilencio();
@@ -50182,8 +50184,10 @@ body.med-pp-abierto{overflow:hidden;}
     const S = asPlugin();
     let ms = Math.max(900, t.length * 62);
     if(isNative() && S && S.hablar){
+      // Lo que devuelve el plugin (`segundos`) ya es cuanto falta DESDE AHORA contando la cola: se pone, no se
+      // suma (sumarlo dejaba la esfera "hablando" el doble o el triple del tiempo real).
       try{ const r = await S.hablar({ texto: t, idioma: 'es-MX', preferida: true, encolar: !!encolar }); if(r && r.segundos) ms = r.segundos * 1000; }catch(e){ ms = 0; }
-      AS.hablaHasta = Math.max(Date.now(), encolar ? AS.hablaHasta : Date.now()) + ms;
+      AS.hablaHasta = Date.now() + ms;
       return ms;
     }
     if(window.speechSynthesis){
@@ -50278,7 +50282,9 @@ body.med-pp-abierto{overflow:hidden;}
   function asFrasesCompletas(texto){
     const out = []; let resto = texto;
     const re = /^([\s\S]*?[.!?…]+)(?=\s)(?![0-9])/;
-    for(;;){ const m = re.exec(resto); if(!m) break; const f = m[1].trim(); if(/\d[.,]$/.test(f)){ break; } out.push(f); resto = resto.slice(m[0].length).replace(/^\s+/, ''); }
+    // Una oracion que termina en numero ("le debes $317.50.") SI es una oracion: la regla vieja de "\d." la
+    // frenaba y mandaba el resto junto al plugin (21 oct 2026: eso era lo que dejaba la respuesta muda).
+    for(;;){ const m = re.exec(resto); if(!m) break; const f = m[1].trim(); out.push(f); resto = resto.slice(m[0].length).replace(/^\s+/, ''); }
     return { listas: out, resto };
   }
   async function asEnviar(texto, desdeTeclado){
@@ -50297,10 +50303,14 @@ body.med-pp-abierto{overflow:hidden;}
     clearTimeout(AS.tmrRelleno);
     AS.tmrRelleno = setTimeout(function(){ if(AS.estado === 'pensando' && AS.enviando) asDecirSuave(['Déjame ver.', 'Un momento.', 'Ya lo reviso.'][Math.floor(Math.random() * 3)]); }, 1600);
     let dicho = '', pendiente = '', primerTrozo = 0;
+    // Frase por frase solo donde la cola de voz existe: web (speechSynthesis) o aparato 17+ (el plugin con
+    // `vozInfo` es el que entiende `encolar`). Un aparato viejo cortaria cada frase con la siguiente.
+    const Sv = asPlugin(); const porFrases = !isNative() || !!(Sv && Sv.vozInfo);
     const onTexto = function(t){
       if(!primerTrozo){ primerTrozo = Date.now() - t0; clearTimeout(AS.tmrRelleno); }
       pendiente += t;
       asMostrarRespuesta(dicho + pendiente);
+      if(!porFrases) return;
       const f = asFrasesCompletas(pendiente);
       if(f.listas.length){ f.listas.forEach(function(fr){ asDecir(fr, true); dicho += fr + ' '; }); pendiente = f.resto; }
     };
@@ -50315,7 +50325,9 @@ body.med-pp-abierto{overflow:hidden;}
       if(j.confirmacion) asMostrarTarjeta(j.confirmacion); else asQuitarTarjeta();
       const nav = j.navegar;
       // Lo que falto por decir (lo que no llego por el stream, o el remate sin punto).
-      const faltante = dicho ? final.slice(dicho.trim().length).trim() : final;
+      const norm = function(x){ return String(x || '').replace(/\s+/g, ' ').trim(); };
+      const fN = norm(final), dN = norm(dicho);
+      const faltante = dN ? (fN.startsWith(dN) ? fN.slice(dN.length).trim() : (fN.length > dN.length ? fN.slice(dN.length).trim() : '')) : fN;
       if(faltante) await asDecir(faltante, !!dicho);
       AS.enviando = false;
       asAlTerminarDeHablar(function(){
