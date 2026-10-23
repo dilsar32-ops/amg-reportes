@@ -4166,6 +4166,11 @@ body.med-pp-abierto{overflow:hidden;}
   .as-prev-hojas .cargando{padding:26px 10px; text-align:center; color:#555; font-size:14px; background:#fff;}
   .as-prev-zoom{margin:8px 0 0; width:100%; min-height:44px; font-size:15px;}
   .as-prev-zoom[hidden]{display:none !important;}
+  /* mis horas: es HTML de la app (no una imagen): sin fondo blanco, y sin botones (el preview solo mira) */
+  .as-prev-hojas.es-horas{background:transparent; border:0; max-height:min(420px, 48vh);}
+  .as-prev-hojas.es-horas button{display:none !important;}
+  .as-prev-hojas.es-horas .entryrow{pointer-events:none;}
+  .as-prev-hojas.es-horas .entryrow:not(.telocked) .hrs::after{content:' · sin confirmar'; color:#d9a021; font-size:12px; font-weight:600; font-family:inherit;}
   /* con el preview a la vista, la esfera se achica para que OK / Corregir / Cancelar queden en pantalla sin bajar */
   #asPanel:has(.as-prev:not([hidden])) #asEsfera{width:56px;}
   #asPanel:has(.as-prev:not([hidden])) #asEsfera:not(.cara){height:56px;}
@@ -10137,7 +10142,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-22-R14';
+  const APP_BUILD = '2026-10-23-R15';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -52543,6 +52548,8 @@ body.med-pp-abierto{overflow:hidden;}
     }
     // (22 oct) Respuesta al menú de previews (aunque haya una tarjeta de confirmar esperando).
     if(AS.pregunta && AS.pregunta.tipo === 'preview_menu'){ asTranscribir(texto); return asResponderMedir(texto); }
+    // (22 oct) "Quiero ver mis horas": la lista real de la pantalla Horas, en la tarjeta (solo si ya hay horas que enseñar).
+    if(!AS.pregunta && /\b(ver|ens[eé]ñame|mu[eé]strame|revisar|revisa|checar|checa)\b[^.?!]*\bmis\s+horas\b/i.test(texto) && AS_PREVIEWS.horas.hay()){ asTranscribir(texto); return asPreviewMostrar(AS_PREVIEWS.horas.spec()); }
     // (22 oct) "Enséñame el preview": lo que Lumi llenó, en una tarjeta.
     if(!AS.pregunta && /\b(preview|vista previa|previa|ens[eé]ñame\s+(lo\s+que|que)\s+(hiciste|llenaste)|qu[eé]\s+llenaste)\b/i.test(texto)){ asTranscribir(texto); return asOfrecerPreview(); }
     // (Brújula) Una pregunta de "medir aquí" en espera ("¿Vas a sacar medidas de…?", "¿Qué nivel?") se contesta en el
@@ -52673,21 +52680,22 @@ body.med-pp-abierto{overflow:hidden;}
   function asPrevHojasHtml(urls){ return (urls || []).map(function(u, i){ return '<img alt="Hoja ' + (i + 1) + '" src="' + esc(u) + '">'; }).join(''); }
   async function asPrevHojasPintar(spec){
     const caja = $('#asPrevHojas'), lista = $('#asPrevLista'), zoom = $('#asPrevZoom'); if(!caja) return;
-    caja.hidden = true; caja.innerHTML = ''; caja.classList.remove('grande');
+    caja.hidden = true; caja.innerHTML = ''; caja.classList.remove('grande'); caja.classList.remove('es-horas');
     if(zoom){ zoom.hidden = true; zoom.textContent = 'Ampliar la hoja'; }
     if(lista) lista.hidden = false;
-    if(typeof spec.hojas !== 'function') return;
+    if(typeof spec.hojas !== 'function' && typeof spec.vista !== 'function') return;
     spec.cargando = true; if(lista) lista.hidden = true;
-    caja.hidden = false; caja.innerHTML = '<div class="cargando">Armando la hoja del labor log…</div>';
+    caja.hidden = false; if(typeof spec.vista === 'function') caja.classList.add('es-horas');
+    caja.innerHTML = '<div class="cargando">' + (spec.cargandoTexto || 'Armando la hoja del labor log…') + '</div>';
     const okb = $('#asPrevOk'); if(okb) okb.disabled = true;
-    let urls = [];
-    try{ urls = await spec.hojas(); }catch(e){ console.warn('preview hoja', e); urls = []; }
+    let cuerpo = '';
+    try{ cuerpo = typeof spec.vista === 'function' ? String((await spec.vista()) || '') : asPrevHojasHtml(await spec.hojas()); }catch(e){ console.warn('preview hoja', e); cuerpo = ''; }
     if(AS_PREV.spec !== spec) return;   // mientras tanto se cerró o cambió
     spec.cargando = false; if(okb) okb.disabled = false;
-    if(urls && urls.length){ caja.innerHTML = asPrevHojasHtml(urls); if(zoom) zoom.hidden = false; spec.conHoja = true; }
+    if(cuerpo){ caja.innerHTML = cuerpo; if(zoom) zoom.hidden = typeof spec.vista === 'function'; spec.conHoja = true; }
     else {
       caja.hidden = true; caja.innerHTML = ''; if(lista) lista.hidden = false;
-      const av = $('#asPrevAviso'); if(av){ av.textContent = 'No pude armar la hoja; esto es un resumen. ' + (spec.aviso || ''); av.hidden = false; }
+      const av = $('#asPrevAviso'); if(av){ av.textContent = (spec.falloTexto || 'No pude armar la hoja; esto es un resumen. ') + (spec.aviso || ''); av.hidden = false; }
     }
   }
   function asPreviewQuitar(){ AS_PREV.spec = null; const t = $('#asPrev'); if(t) t.hidden = true; }
@@ -52711,7 +52719,23 @@ body.med-pp-abierto{overflow:hidden;}
       spec: function(){ const c = AS.conf; return { tipo: 'Conteo de equipo', titulo: String(c.resumen || 'Equipo de la casa'), sub: '',
         lineas: [{ k: 'Detalle', v: String(c.efecto || c.resumen || '') }], aviso: '', okTexto: 'OK, guárdalo',
         onOk: function(){ asConfirmar(); }, onCancelar: function(){ asCancelar(); },
-        onCorregir: function(){ const m = 'Dime qué cambio.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); } }; } }
+        onCorregir: function(){ const m = 'Dime qué cambio.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); } }; } },
+    // Mis horas: la MISMA lista "Mis registros" de la pantalla Horas (rows, aviso contra el líder, total). Solo se mira:
+    // OK no confirma nada (confirmar sigue siendo el botón de cada registro) y Corregir abre la pantalla de Horas.
+    horas: { nombre: 'de tus horas',
+      hay: function(){ try{ const b = $('#myEntries'); return !!(b && /class="entryrow/.test(b.innerHTML || '')) || (typeof myEntries !== 'undefined' && Array.isArray(myEntries) && myEntries.length > 0); }catch(e){ return false; } },
+      spec: function(){ return { tipo: 'Mis horas', titulo: 'Tus horas sin pagar', sub: '', lineas: [], aviso: '', okTexto: 'Está bien',
+        cargandoTexto: 'Trayendo tus horas…', falloTexto: 'No pude traer tus horas. Ábrelas en la pantalla de Horas. ',
+        vista: async function(){
+          try{ if(typeof loadMyEntries === 'function') await loadMyEntries(); }catch(e){}
+          try{ if(typeof checkMyHoursAgainstLaborLog === 'function') await checkMyHoursAgainstLaborLog(); }catch(e){}
+          const box = $('#myEntries'); if(!box || !/class="entryrow/.test(box.innerHTML || '')) return '';
+          const al = $('#myHoursAlert'), tot = $('#myHoursTotal');
+          return (al && !al.hidden && al.innerHTML ? al.innerHTML : '') + box.innerHTML + (tot && !tot.hidden && tot.innerHTML ? tot.innerHTML : '');
+        },
+        onOk: function(){ const m = 'Va. Tus horas quedan como están. Para confirmarlas, toca Confirmar en la pantalla de Horas.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); },
+        onCorregir: function(){ const m = 'Te abro la pantalla de Horas para que lo corrijas.'; asMostrarRespuesta(m); asHablar(m, function(){ asCerrar(); try{ showTab('reloj'); }catch(e){} }); },
+        onCancelar: function(){ const m = 'Está bien.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); } }; } }
   };
   // "Enséñame el preview": si hay uno solo lo enseña; si hay varios, pregunta cuál.
   function asOfrecerPreview(){
@@ -52904,8 +52928,8 @@ body.med-pp-abierto{overflow:hidden;}
     }
     if(p.tipo === 'preview_menu'){
       AS.pregunta = null;
-      const pideLabor = /\blabor\b|\blog\b|\bturnos?\b/.test(low), pideEquipo = /\bequipo|conteo|dehu|fans?|ventilador/.test(low);
-      let k = (pideLabor && p.opciones.includes('labor_log')) ? 'labor_log' : (pideEquipo && p.opciones.includes('equipo')) ? 'equipo' : null;
+      const pideLabor = /\blabor\b|\blog\b|\bturnos?\b/.test(low), pideEquipo = /\bequipo|conteo|dehu|fans?|ventilador/.test(low), pideHoras = /\bhoras?\b|\breloj\b/.test(low);
+      let k = (pideLabor && p.opciones.includes('labor_log')) ? 'labor_log' : (pideEquipo && p.opciones.includes('equipo')) ? 'equipo' : (pideHoras && p.opciones.includes('horas')) ? 'horas' : null;
       if(!k && asEsSi(low)) k = p.opciones[0];
       if(!k){ const m = 'Está bien.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
       return asPreviewMostrar(AS_PREVIEWS[k].spec());
