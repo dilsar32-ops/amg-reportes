@@ -7666,6 +7666,7 @@ body.med-pp-abierto{overflow:hidden;}
     // job information". The typed data is still in the DOM and in the draft,
     // so it opens already filled in, one tap from where they left off.
     if(FLOWS[name]) goStep(name, 0);
+    try{ if(typeof aquiAlEntrar === 'function') aquiAlEntrar(name); }catch(e){}      // (23 oct) Estás aquí: la casa más cercana, antes de escribir
     // ENTRAR A MEDIDAS CAE EN INFORMACION DEL TRABAJO, siempre.
     //
     // Aqui habia un salto automatico a "Revisar las medidas" cuando ya habia
@@ -10142,7 +10143,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-23-R16';
+  const APP_BUILD = '2026-10-23-R17';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -26591,6 +26592,67 @@ body.med-pp-abierto{overflow:hidden;}
   });
   document.addEventListener('input', e => { if(e.target && (e.target.id === 'ct-client' || e.target.id === 'ct-address')) ctAquiPintar(); });
   window.__ctAqui = { pintar: ctAquiPintar, buscar: ctAquiBuscar, estado: () => CT_AQUI };
+  // ---- (23 oct 2026) ESTÁS AQUÍ EN CADA FORMULARIO: la casa más cercana se sugiere ANTES de escribir ----
+  // Equipo, Comunicación, Secado y Materiales: al entrar a la pantalla se busca la casa más cercana (la misma búsqueda de Plano y Medidas)
+  // y arriba de "Nombre del Cliente" sale la tarjeta. Un toque llena nombre, dirección y teléfono. Si el formulario ya trae a ese
+  // cliente, no sale. Una búsqueda sirve un minuto (no se pide el GPS cada vez que se cambia de pantalla).
+  const AQUI_FORMS = {
+    equipment: { cli: 'e-clientname', dir: 'e-address', tel: 'e-phone' },
+    comms: { cli: 'c-client', dir: 'c-address', tel: 'c-phone' },
+    drying: { cli: 'd-client', dir: 'd-address', tel: 'd-phone' },
+    materials: { cli: 'm-client', dir: 'm-address', tel: 'm-phone' }
+  };
+  const AQUI_VIGENCIA_MS = 60000;
+  const AQUI_ESTADO = {};
+  // Lo que debe enseñar la tarjeta (puro): { ver, cambiar }. 'cambiar' = el formulario ya trae OTRO cliente.
+  function aquiDecidir(casa, cli, dir){
+    if(!casa) return { ver: false, cambiar: false };
+    const c = String(cli || '').trim(), d = String(dir || '').trim(), hay = !!(c || d);
+    const yaEs = hay && trEsLaCasa({ nombre: casa.nombre, direccion: casa.direccion }, { client: c, address: d });
+    return { ver: !yaEs, cambiar: hay };
+  }
+  function aquiCaja(tab){
+    const f = AQUI_FORMS[tab]; if(!f) return null;
+    let caja = document.getElementById('aqui-' + tab); if(caja) return caja;
+    const campo = (document.getElementById(f.cli) || {}).closest ? document.getElementById(f.cli).closest('.field') : null; if(!campo || !campo.parentNode) return null;
+    caja = document.createElement('div'); caja.id = 'aqui-' + tab; caja.className = 'ct-check aqui-form'; caja.hidden = true;
+    campo.parentNode.insertBefore(caja, campo);
+    return caja;
+  }
+  function aquiPintar(tab){
+    const f = AQUI_FORMS[tab]; if(!f) return;
+    const caja = aquiCaja(tab); if(!caja) return;
+    const est = AQUI_ESTADO[tab], casa = est && est.r && est.r.casa;
+    const val = function(id){ return String((document.getElementById(id) || {}).value || ''); };
+    const d = aquiDecidir(casa, val(f.cli), val(f.dir));
+    if(!d.ver){ caja.hidden = true; caja.innerHTML = ''; return; }
+    caja.innerHTML = '<div class="hint" style="margin:0 0 6px; text-transform:uppercase; letter-spacing:.08em;"><b>Estás aquí</b><span class="en"> / You are here</span></div>'
+      + '<div class="tr-cab-info"><b>' + esc(casa.nombre || casa.direccion) + '</b>' + (casa.nombre && casa.direccion ? '<span>' + esc(casa.direccion) + '</span>' : '') + '</div>'
+      + '<button type="button" class="btn btn-accent" data-aqui-form="' + esc(tab) + '" data-aqui-clave="' + esc(casa.dir_key) + '" style="width:100%; margin:12px 0 0; min-height:52px; font-size:16px;">'
+      + (d.cambiar ? 'Cambiar a este cliente' : 'Usar este cliente') + ' &#9654;</button>';
+    caja.hidden = false;
+  }
+  async function aquiBuscar(tab, forzar){
+    const est = AQUI_ESTADO[tab] || (AQUI_ESTADO[tab] = { seq: 0, r: null, en: 0 });
+    if(!forzar && est.en && Date.now() - est.en < AQUI_VIGENCIA_MS){ aquiPintar(tab); return; }
+    const seq = ++est.seq; let r = null;
+    try{ r = await trAquiEncontrar(TR_AQUI_ESPERA_MS, TR_AQUI_M); }catch(e){ r = null; }
+    if(seq !== est.seq) return;
+    est.r = r; est.en = Date.now(); aquiPintar(tab);
+    try{ trAquiBit(r ? tab + ': tarjeta' : tab + ': sin tarjeta'); }catch(e){}
+  }
+  function aquiAlEntrar(tab){ if(!AQUI_FORMS[tab]) return; aquiPintar(tab); aquiBuscar(tab, false); }
+  document.addEventListener('click', e => {
+    const b = e.target && e.target.closest && e.target.closest('[data-aqui-form]'); if(!b) return;
+    const tab = b.dataset.aquiForm, f = AQUI_FORMS[tab]; if(!f) return;
+    const c = trAquiClienteDe(b.dataset.aquiClave);
+    if(!c){ if(AQUI_ESTADO[tab]) AQUI_ESTADO[tab].r = null; aquiPintar(tab); return; }      // se borró de Clientes mientras tanto
+    cliLlenar(document.getElementById(f.cli), c.nombre); cliLlenar(document.getElementById(f.dir), c.direccion);
+    if(c.telefono && f.tel) cliLlenar(document.getElementById(f.tel), c.telefono);
+    aquiPintar(tab);
+  });
+  document.addEventListener('input', e => { const id = e.target && e.target.id; if(!id) return; Object.keys(AQUI_FORMS).forEach(tab => { if(AQUI_FORMS[tab].cli === id || AQUI_FORMS[tab].dir === id) aquiPintar(tab); }); });
+  window.__aqui = { forms: AQUI_FORMS, estado: AQUI_ESTADO, decidir: aquiDecidir, pintar: aquiPintar, buscar: aquiBuscar, alEntrar: aquiAlEntrar };
   window.__trAqui = { masCercana: trAquiMasCercana, casas: trAquiCasas, nivel: trAquiNivel, estado: () => TR_AQUI, buscar: trAquiBuscar, bitacora: trAquiBitacora };
 
   // LA AYUDA DE MEDIDAS.
