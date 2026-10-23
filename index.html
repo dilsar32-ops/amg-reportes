@@ -4139,6 +4139,25 @@ body.med-pp-abierto{overflow:hidden;}
   .as-tarjeta-escrito input{width:100%; font-size:20px; padding:10px; border-radius:10px; border:1px solid var(--line); background:#111; color:#fff;}
   .as-tarjeta-btns{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px;}
   .as-tarjeta-btns .btn{min-height:50px; font-size:17px; border-radius:12px;}
+  /* (22-oct-2026) PREVIEW: lo que Lumi llenó, en una tarjeta chica; el usuario dice OK, Corregir o Cancelar. */
+  .as-prev{margin:10px 0 0; padding:14px; border-radius:14px; background:var(--card); border:1px solid rgba(80,200,150,.55);}
+  .as-prev[hidden]{display:none !important;}
+  .as-prev-tipo{font-size:13px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.6px;}
+  .as-prev-tit{font-size:18px; font-weight:700; margin:2px 0 2px;}
+  .as-prev-sub{font-size:13px; color:var(--ink-soft); margin:0 0 6px;}
+  .as-prev-sub[hidden]{display:none !important;}
+  .as-prev-lista{list-style:none; margin:6px 0 0; padding:0; max-height:190px; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch;}
+  .as-prev-lista li{display:flex; gap:10px; justify-content:space-between; padding:7px 0; border-top:1px solid var(--line); font-size:14.5px; line-height:1.3;}
+  .as-prev-lista li:first-child{border-top:0;}
+  .as-prev-lista .k{color:var(--ink-soft); flex:none; max-width:40%;}
+  .as-prev-lista .v{text-align:right; min-width:0; overflow-wrap:anywhere;}
+  .as-prev-lista li.alerta .v{color:var(--danger);}
+  .as-prev-aviso{margin:8px 0 0; font-size:13px; color:#ffd37a;}
+  .as-prev-aviso[hidden]{display:none !important;}
+  .as-prev-btns{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:12px;}
+  .as-prev-btns .btn{min-height:50px; font-size:16px; border-radius:12px; margin:0; padding:8px 4px;}
+  .as-prev{flex:none;}
+  #asPanel:has(.as-prev:not([hidden])) .as-charla{flex:0 0 auto;}   /* con preview a la vista, el texto de Lumi no se encoge ni queda tapado */
   .as-texto{display:flex; gap:8px; margin-top:12px;}
   .as-voz-aviso{display:flex; align-items:center; gap:8px; margin-top:10px; font-size:12px; line-height:1.3; color:#8a8f98;}
   .as-voz-aviso[hidden]{display:none;}
@@ -4174,6 +4193,14 @@ body.med-pp-abierto{overflow:hidden;}
       <div class="as-tarjeta-det" id="asTarjetaDet"></div>
       <div class="as-tarjeta-escrito" id="asEscritoBox" hidden><label for="asEscrito">Más de $5,000: teclea el monto exacto para confirmar</label><input type="number" id="asEscrito" inputmode="decimal" step="0.01" placeholder="0.00"></div>
       <div class="as-tarjeta-btns"><button type="button" class="btn btn-ghost" id="asCancelar">Cancelar</button><button type="button" class="btn btn-accent" id="asConfirmarBtn">Confirmar</button></div>
+    </div>
+    <div class="as-prev" id="asPrev" hidden>
+      <div class="as-prev-tipo" id="asPrevTipo"></div>
+      <div class="as-prev-tit" id="asPrevTit"></div>
+      <div class="as-prev-sub" id="asPrevSub" hidden></div>
+      <ul class="as-prev-lista" id="asPrevLista"></ul>
+      <p class="as-prev-aviso" id="asPrevAviso" hidden></p>
+      <div class="as-prev-btns"><button type="button" class="btn btn-ghost" id="asPrevCancelar">Cancelar</button><button type="button" class="btn btn-outline" id="asPrevCorregir">Corregir</button><button type="button" class="btn btn-accent" id="asPrevOk">OK</button></div>
     </div>
     <div class="as-voz-aviso" id="asVozAviso" hidden><span>Voz básica. Para una voz natural: Ajustes › Accesibilidad › Contenido hablado › Voces › Español › Paulina › Premium</span><button type="button" id="asVozYa">Ya la bajé</button></div>
     <div class="as-texto"><input type="text" id="asEntrada" placeholder="O escribe aquí…" autocomplete="off" autocapitalize="sentences"><button type="button" class="btn btn-ink" id="asEnviarBtn">Enviar</button></div>
@@ -10095,7 +10122,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-22-R12';
+  const APP_BUILD = '2026-10-22-R13';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -52132,7 +52159,7 @@ body.med-pp-abierto{overflow:hidden;}
     return Promise.race([pedido, tope]);
   }
   function asCerrar(){
-    AS.abierto = false; AS.pregunta = null; asPararOido(); asCallar();
+    AS.abierto = false; AS.pregunta = null; asPararOido(); asCallar(); asPreviewQuitar();
     if(window.Cara){ try{ Cara.hablando(false); Cara.estado('reposo'); }catch(err){} }
     const p = $('#asPanel'); if(p) p.hidden = true;
     if(AS.anim) cancelAnimationFrame(AS.anim); AS.anim = null;
@@ -52493,6 +52520,16 @@ body.med-pp-abierto{overflow:hidden;}
   async function asEnviar(texto, desdeTeclado){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
+    // (22 oct) Con un preview en pantalla: "sí/ok" y "no/cancela" lo resuelven aquí; una corrección larga sigue al modelo.
+    if(AS_PREV.spec && !AS.conf){
+      const rp = asPrevRespuesta(texto);
+      if(rp === 'ok' || rp === 'no'){ asTranscribir(texto); return asPreviewAccion(rp); }
+      if(rp === 'corregir'){ if(texto.split(/\s+/).length < 3){ asTranscribir(texto); return asPreviewAccion('corregir'); } asPreviewQuitar(); }
+    }
+    // (22 oct) Respuesta al menú de previews (aunque haya una tarjeta de confirmar esperando).
+    if(AS.pregunta && AS.pregunta.tipo === 'preview_menu'){ asTranscribir(texto); return asResponderMedir(texto); }
+    // (22 oct) "Enséñame el preview": lo que Lumi llenó, en una tarjeta.
+    if(!AS.pregunta && /\b(preview|vista previa|previa|ens[eé]ñame\s+(lo\s+que|que)\s+(hiciste|llenaste)|qu[eé]\s+llenaste)\b/i.test(texto)){ asTranscribir(texto); return asOfrecerPreview(); }
     // (Brújula) Una pregunta de "medir aquí" en espera ("¿Vas a sacar medidas de…?", "¿Qué nivel?") se contesta en el
     // teléfono, sin tarjeta y sin modelo.
     if(AS.pregunta && !AS.conf){ asTranscribir(texto); return asResponderMedir(texto); }
@@ -52563,6 +52600,87 @@ body.med-pp-abierto{overflow:hidden;}
       asEstado('esperando', m + ' Toca la cara para intentar otra vez.');
     }
   }
+  // ---- (22 oct 2026) PREVIEW: una tarjeta chica y reutilizable para ver LO QUE LUMI LLENÓ y decir OK ----
+  // Cada pantalla se registra en AS_PREVIEWS con un adaptador { nombre, hay(), spec() }; la tarjeta es una sola.
+  // El preview NUNCA guarda ni manda nada por sí mismo: OK llama a lo mismo que ya hacía el "sí" de siempre.
+  const AS_PREV = { spec: null };
+  const AS_MESES_CORTOS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  function asPrevFecha(d){ const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? (+m[3]) + ' ' + AS_MESES_CORTOS[+m[2] - 1] + ' ' + m[1] : String(d || ''); }
+  // Lo que dijo el usuario ante un preview: ok | no | corregir | otro (puro: se prueba solo).
+  function asPrevRespuesta(texto){
+    const l = String(texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim();
+    if(!l) return 'otro';
+    if(/\b(cancela|cancelar|olvidalo|dejalo|mejor no|ya no)\b/.test(l)) return 'no';
+    if(/\b(corrige|corregir|corrijo|cambia|cambiar|cambio|modifica|edita|editar|arregla|espera|aguanta|falta|quita|pon|agrega|fueron|fue|eran|era|esta mal|no es)\b/.test(l)) return 'corregir';
+    if(asEsSi(l) || /^(ok|okay|esta bien|perfecto|mandalo|envialo|enviar|guardalo|listo|asi esta bien|todo bien)\b/.test(l)) return 'ok';
+    if(asEsNo(l)) return 'no';
+    return 'otro';
+  }
+  // El labor log a la tarjeta (puro: recibe el payload de buildPayload() / loadPayload).
+  function asPrevLaborSpec(p, kind){
+    p = p || {}; const f = function(x){ return String(x == null ? '' : x).trim(); };
+    const turnos = Array.isArray(p.s) ? p.s : [];
+    const lineas = [], faltan = [];
+    const eq = f(p.t), lid = f(p.l);
+    lineas.push({ k: kind === 'mudanza' ? 'Cliente' : 'Equipo / cliente', v: eq || 'falta', alerta: !eq }); if(!eq) faltan.push('el equipo o cliente');
+    lineas.push({ k: 'Líder', v: lid || 'falta', alerta: !lid }); if(!lid) faltan.push('el líder');
+    turnos.forEach(function(sh, i){
+      const hora = (f(sh.f) || '?') + ' a ' + (f(sh.o) || '?');
+      const quien = f(sh.n).replace(/\s*,\s*/g, ', ');
+      const sinH = !f(sh.f) || !f(sh.o), sinN = !quien;
+      if(sinH) faltan.push('la hora del turno ' + (i + 1)); if(sinN) faltan.push('quién trabajó en el turno ' + (i + 1));
+      lineas.push({ k: 'Turno ' + (i + 1), v: hora + ' · ' + (quien || 'sin nombres') + (f(sh.k) ? ' · ' + f(sh.k) : ''), alerta: sinH || sinN });
+      if(f(sh.a)) lineas.push({ k: 'Dirección', v: f(sh.a) });
+      const xs = Array.isArray(sh.xs) && sh.xs.length ? sh.xs : (f(sh.e) ? [{ e: sh.e, x: sh.x, eo: sh.eo }] : []);
+      xs.forEach(function(it){ lineas.push({ k: 'Extra', v: (f(it.e) === 'Other' && f(it.eo) ? f(it.eo) : f(it.e)) + (f(it.x) ? ' · $' + f(it.x) : '') }); });
+      if(+sh.g > 0) lineas.push({ k: 'Gasolina', v: '$' + f(sh.g) + (f(sh.gw) ? ' · ' + f(sh.gw) : '') });
+    });
+    if(!turnos.length){ lineas.push({ k: 'Turnos', v: 'ninguno', alerta: true }); faltan.push('los turnos'); }
+    return { tipo: kind === 'mudanza' ? 'Labor log · Mudanza' : 'Labor log', titulo: asPrevFecha(p.d) || 'Sin fecha',
+             sub: turnos.length + (turnos.length === 1 ? ' turno' : ' turnos'), lineas: lineas,
+             aviso: faltan.length ? 'Falta: ' + faltan.join(', ') + '.' : '' };
+  }
+  function asPreviewMostrar(spec){
+    AS_PREV.spec = spec; const t = $('#asPrev'); if(!t) return;
+    $('#asPrevTipo').textContent = spec.tipo || 'Preview';
+    $('#asPrevTit').textContent = spec.titulo || '';
+    const sub = $('#asPrevSub'); sub.textContent = spec.sub || ''; sub.hidden = !spec.sub;
+    $('#asPrevLista').innerHTML = (spec.lineas || []).map(function(l){ return '<li' + (l.alerta ? ' class="alerta"' : '') + '><span class="k">' + esc(l.k) + '</span><span class="v">' + esc(l.v) + '</span></li>'; }).join('');
+    const av = $('#asPrevAviso'); av.textContent = spec.aviso || ''; av.hidden = !spec.aviso;
+    $('#asPrevOk').textContent = spec.okTexto || 'OK';
+    $$('#asPrev button').forEach(function(b){ b.disabled = false; });
+    t.hidden = false;
+    const lista = $('#asPrevLista'); if(lista) lista.scrollTop = 0;
+  }
+  function asPreviewQuitar(){ AS_PREV.spec = null; const t = $('#asPrev'); if(t) t.hidden = true; }
+  function asPreviewAccion(que){
+    const s = AS_PREV.spec; if(!s) return; asPreviewQuitar();
+    const fn = que === 'ok' ? s.onOk : que === 'no' ? s.onCancelar : s.onCorregir;
+    try{ if(typeof fn === 'function') fn(); }catch(e){ console.warn('preview', e); }
+  }
+  // Los previews que existen hoy. Agregar una pantalla = agregar su adaptador aquí.
+  const AS_PREVIEWS = {
+    labor_log: { nombre: 'del labor log',
+      hay: function(){ try{ return typeof buildPayload === 'function' && $$('.shift-card').length > 0; }catch(e){ return false; } },
+      spec: function(){ const kind = (typeof formKind === 'function' ? formKind() : 'restauracion'); const sp = asPrevLaborSpec(buildPayload(), kind);
+        sp.onOk = function(){ asResponderMedir('sí'); }; sp.onCancelar = function(){ asResponderMedir('no'); };
+        sp.onCorregir = function(){ const m = 'Dime qué cambio.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); }; sp.okTexto = 'OK, mándalo'; return sp; } },
+    equipo: { nombre: 'del conteo de equipo',
+      hay: function(){ return !!(AS.conf && AS.conf.tipo === 'visita'); },
+      spec: function(){ const c = AS.conf; return { tipo: 'Conteo de equipo', titulo: String(c.resumen || 'Equipo de la casa'), sub: '',
+        lineas: [{ k: 'Detalle', v: String(c.efecto || c.resumen || '') }], aviso: '', okTexto: 'OK, guárdalo',
+        onOk: function(){ asConfirmar(); }, onCancelar: function(){ asCancelar(); },
+        onCorregir: function(){ const m = 'Dime qué cambio.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); } }; } }
+  };
+  // "Enséñame el preview": si hay uno solo lo enseña; si hay varios, pregunta cuál.
+  function asOfrecerPreview(){
+    const hay = Object.keys(AS_PREVIEWS).filter(function(k){ try{ return AS_PREVIEWS[k].hay(); }catch(e){ return false; } });
+    if(!hay.length){ const m = 'Todavía no he llenado nada para enseñarte.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
+    if(hay.length === 1){ return asPreviewMostrar(AS_PREVIEWS[hay[0]].spec()); }
+    const nombres = hay.map(function(k){ return AS_PREVIEWS[k].nombre; });
+    AS.pregunta = { tipo: 'preview_menu', opciones: hay };
+    asMedirPregunta(AS.pregunta, '¿Quieres ver el preview ' + nombres.slice(0, -1).join(', ') + ' o ' + nombres[nombres.length - 1] + '?');
+  }
   function asMostrarTarjeta(c){
     AS.conf = c;
     const t = $('#asTarjeta'); if(!t) return;
@@ -52579,7 +52697,7 @@ body.med-pp-abierto{overflow:hidden;}
     t.hidden = false;
     if(window.Cara){ try{ if(esDinero && Math.abs(+c.monto || 0) >= 1000 && Cara.sorpresa) Cara.sorpresa(900, 'pregunta', 4000); else Cara.gesto('pregunta', 4000); }catch(err){} }
   }
-  function asQuitarTarjeta(){ AS.conf = null; const t = $('#asTarjeta'); if(t) t.hidden = true; }
+  function asQuitarTarjeta(){ AS.conf = null; const t = $('#asTarjeta'); if(t) t.hidden = true; asPreviewQuitar(); }
   async function asConfirmar(){
     const c = AS.conf; if(!c || AS.enviando) return;
     let escrito;
@@ -52668,6 +52786,12 @@ body.med-pp-abierto{overflow:hidden;}
     return { que, nivel, cliente };
   }
   function asMedirDireccion(t){ const d = String((t && (t.direccion || t.cliente)) || '').trim(); return d.replace(/\s*,\s*(USA|EE\.?\s?UU\.?)\s*$/i, '').slice(0, 90); }
+  // (22 oct) Lumi dice DÓNDE estás y de QUIÉN es la casa: "Estás en la casa de Johnson, 123 Prueba St. ¿Escaneo el plano aquí?"
+  function asMedirDondeEstas(que, t){
+    const dir = asMedirDireccion(t), cli = String((t && t.cliente) || '').trim();
+    if(!cli) return (que === 'plano' ? '¿Vas a escanear el plano de ' : '¿Vas a sacar medidas de ') + dir + '?';
+    return 'Estás en la casa de ' + cli + (dir && dir !== cli ? ', ' + dir : '') + '. ' + (que === 'plano' ? '¿Escaneo el plano aquí?' : '¿Saco las medidas aquí?');
+  }
   function asMedirQue(que, t){ return (que === 'plano' ? 'Plano de ' : 'Medidas de ') + (t && t.cliente ? t.cliente : asMedirDireccion(t)); }
   function asMedirPregunta(p, texto){ AS.pregunta = p; asMostrarRespuesta(texto); if(window.Cara){ try{ Cara.gesto('pregunta', 4000); }catch(err){} } asHablar(texto, asSeguirOyendo); }
   // Arranque: ubicar la casa (o, si ya dijo el cliente, buscarlo).
@@ -52684,7 +52808,7 @@ body.med-pp-abierto{overflow:hidden;}
     try{ t = await window.casaCercana(); }catch(e){ t = null; }
     if(!AS.abierto) return;
     asBit('medir aquí: ' + (t ? 'casa a ' + Math.round(+t.metros || 0) + ' m' : 'nada cerca'));
-    if(t){ asMedirPregunta({ tipo: 'casa', que, nivel, t }, (que === 'plano' ? '¿Vas a escanear el plano de ' : '¿Vas a sacar medidas de ') + asMedirDireccion(t) + '?'); return; }
+    if(t){ asMedirPregunta({ tipo: 'casa', que, nivel, t }, asMedirDondeEstas(que, t)); return; }
     asMedirPregunta({ tipo: 'cliente', que, nivel, intentos: 0 }, 'No veo ninguna casa cerca de donde estás. ¿De qué cliente?');
   }
   // Buscar el cliente dicho en Clientes (nombre o dirección). Uno = sigue; varios = pregunta cuál; ninguno = vuelve a preguntar (2 veces).
@@ -52736,6 +52860,14 @@ body.med-pp-abierto{overflow:hidden;}
       if(asEsSi(low)){ AS.pregunta = null; const m = 'Va. Lo mando al manager.'; asMostrarRespuesta(m); if(window.Cara){ try{ Cara.gesto('exito'); }catch(err){} } asHablar(m, function(){ asNavegar({ pantalla: 'labor_log_revisar', empresa: p.nav.empresa, payload: p.nav.payload, mandar: true }); }); return; }
       if(asEsNo(low) || (/^(no|nel|todavia no|mejor no|espera|aguanta|primero)\b/.test(low) && !/\d|fuimos|fueron|tambien|era|eran|falta|cambia|quita|pon|agrega/.test(low))){ AS.pregunta = null; const m = 'Queda en la pantalla para que lo revises.'; asMostrarRespuesta(m); asHablar(m, function(){ asNavegar({ pantalla: 'labor_log_revisar', empresa: p.nav.empresa, payload: p.nav.payload }); }); return; }
       AS.pregunta = null; return asEnviar(texto);   // "no, fueron 3 personas": una corrección va al modelo, que vuelve a llenar
+    }
+    if(p.tipo === 'preview_menu'){
+      AS.pregunta = null;
+      const pideLabor = /\blabor\b|\blog\b|\bturnos?\b/.test(low), pideEquipo = /\bequipo|conteo|dehu|fans?|ventilador/.test(low);
+      let k = (pideLabor && p.opciones.includes('labor_log')) ? 'labor_log' : (pideEquipo && p.opciones.includes('equipo')) ? 'equipo' : null;
+      if(!k && asEsSi(low)) k = p.opciones[0];
+      if(!k){ const m = 'Está bien.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
+      return asPreviewMostrar(AS_PREVIEWS[k].spec());
     }
     if(p.tipo === 'casa'){
       if(asEsSi(low)) return asMedirNivel(p.que, p.nivel, p.t);
@@ -52833,6 +52965,7 @@ body.med-pp-abierto{overflow:hidden;}
     if(!ok){ const m = 'No pude llenar la pantalla del labor log. Ábrela desde el menú.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
     asBit('labor voz: pantalla llena (' + ((nav.payload && nav.payload.s && nav.payload.s.length) || 0) + ' turnos)');
     AS.pregunta = { tipo: 'labor_mandar', nav };
+    try{ asPreviewMostrar(AS_PREVIEWS.labor_log.spec()); }catch(e){ console.warn('preview labor', e); }   // (22 oct) lo llenado, en una tarjeta, con OK / Corregir / Cancelar
     asSeguirOyendo();   // la pregunta "¿Lo mando al manager?" ya la dijo el modelo
   }
   // ---- (2c-b, 21 oct 2026) LAS HOJAS DE UN LABOR LOG AL GRUPO DE MENSAJES, como JPG, con sus recibos ----
@@ -52996,6 +53129,9 @@ body.med-pp-abierto{overflow:hidden;}
     if(tit) tit.addEventListener('click', function(){ toques++; clearTimeout(tmrToques); tmrToques = setTimeout(function(){ toques = 0; }, 1500); if(toques < 5) return; toques = 0; const on = !asInterrumpirOn(); try{ localStorage.setItem('asInterrumpir', on ? '1' : '0'); }catch(e){} asEstado(AS.estado, 'Interrumpir hablando: ' + (on ? 'prendido' : 'apagado') + (on && !AS.interrumpirPlugin ? ' (este aparato aún no lo entiende)' : '')); });
     const ok = $('#asConfirmarBtn'); if(ok) ok.addEventListener('click', asConfirmar);
     const no = $('#asCancelar'); if(no) no.addEventListener('click', asCancelar);
+    const pOk = $('#asPrevOk'); if(pOk) pOk.addEventListener('click', function(){ asPreviewAccion('ok'); });
+    const pNo = $('#asPrevCancelar'); if(pNo) pNo.addEventListener('click', function(){ asPreviewAccion('no'); });
+    const pCo = $('#asPrevCorregir'); if(pCo) pCo.addEventListener('click', function(){ asPreviewAccion('corregir'); });
     const ent = $('#asEntrada'), env = $('#asEnviarBtn');
     const mandar = function(){ const t = (ent && ent.value || '').trim(); if(!t) return; ent.value = ''; asCallar(); asPararOido().then(function(){ asEnviar(t, true); }); };
     if(env) env.addEventListener('click', mandar);
