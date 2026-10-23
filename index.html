@@ -4202,6 +4202,28 @@ body.med-pp-abierto{overflow:hidden;}
   .as-sandbox-banda{display:none; margin:6px 0 0; padding:6px 10px; border-radius:10px; background:rgba(255,180,0,.15); color:#ffd37a; font-size:13px; text-align:center;}
   #asPanel.as-prueba-on .as-sandbox-banda{display:block;}
 
+
+/* IDIOMA POR USUARIO (23 oct 2026, fase 2): un solo idioma por etiqueta. */
+/* AJUSTES (23 oct 2026): el engranaje abajo a la izquierda de la puerta y la pantalla donde se escoge el idioma. */
+.idi-gear{width:44px; height:44px; padding:0; display:grid; place-items:center; background:none; border:0; color:var(--ink-soft); cursor:pointer; -webkit-tap-highlight-color:transparent;}
+.idi-gear .ico{width:24px; height:24px;}
+.idi-gear:active{color:var(--text);}
+#authPick{position:relative;}
+#authPick .idi-gear-puerta{position:absolute; left:-12px; bottom:0;}   /* a 6 px del borde, en la fila de "Cerrar sesión" */
+.aj-velo{position:fixed; inset:0; z-index:10050; background:var(--paper); display:flex; flex-direction:column;}
+.aj-velo[hidden]{display:none !important;}
+.aj-cuerpo{flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:calc(env(safe-area-inset-top,0px) + 20px) 16px 16px; max-width:560px; width:100%; margin:0 auto; box-sizing:border-box;}
+.aj-cuerpo h2{font-size:28px; margin:8px 0 16px;}
+.aj-pie{flex:0 0 auto; padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px)); max-width:560px; width:100%; margin:0 auto; box-sizing:border-box;}
+.aj-pie .btn{width:100%; min-height:50px; font-size:17px;}
+.aj-velo .idi-slot{margin-top:0;}
+
+.idi-off{display:none !important;}
+.idi-solo{font-size:inherit !important; color:inherit !important; opacity:1 !important; font-weight:inherit !important; letter-spacing:inherit !important; display:inline !important;}
+.idi-slot{display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; margin-top:16px;}
+.idi-slot .idi-tit{width:100%; text-align:center; font-size:13px; color:var(--ink-soft);}
+.idi-slot button{flex:0 1 150px; min-height:44px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--text); font-size:16px; font-weight:600;}
+.idi-slot button[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:var(--on-accent);}
 </style>
 </head>
 <body>
@@ -4254,6 +4276,7 @@ body.med-pp-abierto{overflow:hidden;}
       <!-- (20 oct) Solo la esfera, sin letrero: el aria-label la nombra. Cerrar sesión va al pie, chico. -->
       <button class="as-esfera-btn" type="button" id="asAbrir" hidden aria-label="Asistente de voz"><span class="as-mini"></span></button>
       <button class="btn btn-ghost" type="button" id="doorSignOut" hidden>Cerrar sesión</button>
+      <button type="button" class="idi-gear idi-gear-puerta" data-ajustes aria-label="Ajustes"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg></button>
     </div>
     <div class="authstep" id="authRole" hidden>
       <h2 id="authRoleTitle">Restoration Doctor</h2>
@@ -7271,6 +7294,13 @@ body.med-pp-abierto{overflow:hidden;}
   <img id="calPreviaImg" alt="Calendario semanal de AMG Moving">
   <div class="cal-dos"><button type="button" class="btn btn-outline" id="calPreviaCerrar" style="color:#fff; border-color:#fff;">Cerrar</button><button type="button" class="btn btn-amg" id="calPreviaCompartir">&#128228; Compartir</button></div>
 </div>
+<div id="ajustes" class="aj-velo" hidden role="dialog" aria-modal="true" aria-labelledby="ajTitulo">
+  <div class="aj-cuerpo">
+    <h2 id="ajTitulo">Ajustes<span class="en"> / Settings</span></h2>
+    <section class="card"><aside class="idi-slot"></aside></section>
+  </div>
+  <div class="aj-pie"><button type="button" class="btn btn-outline" id="ajVolver"><span aria-hidden="true">&larr; </span>Regresar<span class="en"> / Back</span></button></div>
+</div>
 <div id="overlay"><div class="spinner"></div><div id="overlayText">Generando… / Generating…</div></div>
 
 <!-- LA CASILLA VERDE DE "YA SE FUE" (17 sep 2026)
@@ -7291,6 +7321,167 @@ body.med-pp-abierto{overflow:hidden;}
 <script>
 (function(){
   const $ = (sel, el=document) => el.querySelector(sel);
+  // ===== IDIOMA POR USUARIO (23 oct 2026, FASE 2) =====================================================================
+  // Su pedido: "cada etiqueta muestra los DOS idiomas a la vez y debe verse SOLO UNO, el que cada usuario escoja".
+  //   Español: se esconde el inglés de las etiquetas bilingües, SALVO las palabras del oficio (tools/glosario_oficio.json),
+  //            que se leen en inglés como las conoce la cuadrilla (Drywall, Baseboard, Fans...). Insulación sigue en español.
+  //   English: solo el inglés.
+  // Solo cambia lo que se LEE: el `value` de cada opción y los nombres guardados (.eq-name, .mat-name...) no se tocan,
+  // así que los reportes, el PDF del seguro y Xactimate salen igual. Lo que existe en un solo idioma queda como estaba (Fase 3).
+  // La zona IDI-PURO no toca la página: la prueba tests/idioma_fase2_test.js la corre sola.
+  /*IDI-PURO:INICIO*/
+  const IDI_GLOSARIO = ["6 mil plastic", "Air Ducts", "Air Mover", "Air Scrubber", "Airlock", "Backsplash", "Baseboard", "Cabinets", "Carpet", "Carpet Pad", "Cement Board (Durock)", "CompanyCam", "Containment", "Containment Barrier/Airlock/Decon. Chamber", "Countertop", "Crown Molding", "Decon Chamber", "Dehu", "Dehu / Dehumidifier", "Dehumidifier", "Dehumidifier Drip Pans", "Dehumidifiers", "Dry Mats", "Drywall", "Exhaust Fan", "Fans", "Flood cut", "Floor protection", "Floor Tile", "Generators", "Greenboard", "Hardwood", "Heaters", "HEPA", "Invoice", "Labor log", "Laminate", "linear ft", "Mortar Bed", "OmniSense", "Ozone Machine", "Plaster", "plastic sheeting", "Plywood", "Plywood / Underlayment", "Poly", "Poly / plastic sheeting", "Popcorn Texture", "Range Hood", "Range Hood / Microwave", "Shoe Molding", "Shower Curb", "Shower Door", "Shower Drain", "Shower Pan", "Shower Surround", "Shower Tile", "sq ft", "Stud", "Stud / Framing", "Stud / Studs", "Studs", "Subfloor", "Tackless Strip", "Thinset", "Thinset / Mortar Bed", "Tile", "Toe Kick", "Trim", "Underlayment", "Vanity", "Vanity Top", "Vapor Barrier", "Vinyl LVP", "Wood Floor", "Xactimate", "Zip Wall Poles", "Zipper"];
+  const IDI_PARES = [["2x4 Lumber / Madera 2x4", "Madera 2x4", "2x4 Lumber"], ["Air Ducts / Ductos de Aire", "Ductos de Aire", "Air Ducts"], ["Backsplash / Salpicadero", "Salpicadero", "Backsplash"], ["Baseboard / Zócalo", "Zócalo", "Baseboard"], ["Bathtub / Tina", "Tina", "Bathtub"], ["Baño / Bathroom", "Baño", "Bathroom"], ["Baño Principal / Master Bathroom", "Baño Principal", "Master Bathroom"], ["Baño de Visitas / Guest Bathroom", "Baño de Visitas", "Guest Bathroom"], ["Blankets / Cobijas", "Cobijas", "Blankets"], ["Bodega / Storage Room", "Bodega", "Storage Room"], ["Cabinets / Gabinetes", "Gabinetes", "Cabinets"], ["Camión / Truck ($170)", "Camión", "Truck ($170)"], ["Carpet / Alfombra", "Alfombra", "Carpet"], ["Carpet Pad / Almohadilla", "Almohadilla", "Carpet Pad"], ["Cartón y cinta, protección de piso / Floor protection - cardboard and tape", "Cartón y cinta, protección de piso", "Floor protection - cardboard and tape"], ["Cement Board (Durock) / Tabla de cemento", "Tabla de cemento", "Cement Board (Durock)"], ["Clóset / Closet", "Clóset", "Closet"], ["Cocina / Kitchen", "Cocina", "Kitchen"], ["Comedor / Dining Room", "Comedor", "Dining Room"], ["Concrete / Concreto", "Concreto", "Concrete"], ["Countertop / Cubierta", "Cubierta", "Countertop"], ["Crown Molding / Moldura de Corona", "Moldura de Corona", "Crown Molding"], ["Cuarto / Room", "Cuarto", "Room"], ["Cuarto Familiar / Family Room", "Cuarto Familiar", "Family Room"], ["Cuarto de Máquinas / Utility Room", "Cuarto de Máquinas", "Utility Room"], ["Cuarto de TV / TV Room", "Cuarto de TV", "TV Room"], ["Cuarto de Visitas / Guest Bedroom", "Cuarto de Visitas", "Guest Bedroom"], ["Cuarto de los Niños / Kids Bedroom", "Cuarto de los Niños", "Kids Bedroom"], ["Dehumidifier Drip Pans / Bandejas de Goteo", "Bandejas de Goteo", "Dehumidifier Drip Pans"], ["Dehumidifiers / Deshumidificadores", "Deshumidificadores", "Dehumidifiers"], ["Despensa / Pantry", "Despensa", "Pantry"], ["Dirección del trabajo / Job address", "Dirección del trabajo", "Job address"], ["Dishwasher / Lavaplatos", "Lavaplatos", "Dishwasher"], ["Dry Mats / Tapetes Secos", "Tapetes Secos", "Dry Mats"], ["Drywall / Tablaroca", "Tablaroca", "Drywall"], ["Ej. Baño principal / Main bathroom", "Ej. Baño principal", "E.g. Main bathroom"], ["Ej. Escalones / Stair treads", "Ej. Escalones", "E.g. Stair treads"], ["Eléctrico / Electrical ($150)", "Eléctrico ($150)", "Electrical ($150)"], ["Escaleras / Stairs", "Escaleras", "Stairs"], ["Exhaust Fan / Extractor", "Extractor", "Exhaust Fan"], ["Explique aquí, si aplica / Explain here", "Explique aquí, si aplica", "Explain here"], ["Fans / Ventiladores", "Ventiladores", "Fans"], ["Floor Tile / Azulejo del piso", "Azulejo del piso", "Floor Tile"], ["Garaje / Garage", "Garaje", "Garage"], ["Generators / Generadores", "Generadores", "Generators"], ["Gimnasio / Gym", "Gimnasio", "Gym"], ["Greenboard / Tablaroca verde (de humedad)", "Tablaroca verde (de humedad)", "Greenboard"], ["Hardwood / Madera", "Madera", "Hardwood"], ["Heaters / Calentadores", "Calentadores", "Heaters"], ["Insulación / Insulation", "Insulación", "Insulation"], ["Laminate / Laminado", "Laminado", "Laminate"], ["Large Boxes / Cajas Grandes", "Cajas Grandes", "Large Boxes"], ["Lavandería / Laundry Room", "Lavandería", "Laundry Room"], ["Material de empaque / Packing materials", "Material de empaque", "Packing materials"], ["Mattress Bags / Bolsas para Colchón", "Bolsas para Colchón", "Mattress Bags"], ["Medicine Cabinet / Botiquín", "Botiquín", "Medicine Cabinet"], ["Medio Baño / Half Bathroom", "Medio Baño", "Half Bathroom"], ["Medium Boxes / Cajas Medianas", "Cajas Medianas", "Medium Boxes"], ["Mirror / Espejo", "Espejo", "Mirror"], ["Nailo, plástico encima / Cover / mask with plastic sheeting", "Nailo, plástico encima", "Cover / mask with plastic sheeting"], ["Nailo, plástico para cubrir / Plastic sheeting (cover)", "Nailo, plástico para cubrir", "Plastic sheeting (cover)"], ["Nails / Clavos", "Clavos", "Nails"], ["Ninguno / None", "Ninguno", "None"], ["Nivel / Level", "Nivel", "Level"], ["Nombre / Name", "Nombre", "Name"], ["Nombre del cuarto / Room name", "Nombre del cuarto", "Room name"], ["Nombre del material / Material name", "Nombre del material", "Material name"], ["Nombre del nivel / Level name", "Nombre del nivel", "Level name"], ["Nombres / Names", "Nombres", "Names"], ["Oficina / Office", "Oficina", "Office"], ["Opcional / Optional", "Opcional", "Optional"], ["Otro / Other", "Otro", "Other"], ["Otro / Other ($150)", "Otro ($150)", "Other ($150)"], ["Ozone Machine / Máquina de Ozono", "Máquina de Ozono", "Ozone Machine"], ["Packing Paper / Papel de Embalaje", "Papel de Embalaje", "Packing Paper"], ["Paper Pad / Almohadilla de Papel", "Almohadilla de Papel", "Paper Pad"], ["Pared / Wall", "Pared", "Wall"], ["Pasillo / Hallway", "Pasillo", "Hallway"], ["Piso / Floor", "Piso", "Floor"], ["Plaster / Yeso", "Yeso", "Plaster"], ["Plomería / Plumbing ($200)", "Plomería ($200)", "Plumbing ($200)"], ["Plywood / Contrapiso", "Contrapiso", "Plywood"], ["Plywood / Triplay", "Triplay", "Plywood"], ["Plywood / Underlayment / Triplay", "Triplay", "Plywood / Underlayment"], ["Plástico 6 mil de contención / 6 mil containment plastic", "Plástico 6 mil de contención", "6 mil containment plastic"], ["Plástico de contención / Containment Barrier/Airlock/Decon. Chamber", "Plástico de contención", "Containment Barrier/Airlock/Decon. Chamber"], ["Popcorn Texture / Textura", "Textura", "Popcorn Texture"], ["Primer Piso / 1st Floor", "Primer Piso", "1st Floor"], ["Protección de piso / Floor protection", "Protección de piso", "Floor protection"], ["Quiénes fueron, uno por renglón / Who went, one per line", "Quiénes fueron, uno por renglón", "Who went, one per line"], ["Qué se hizo / What was done", "Qué se hizo", "What was done"], ["Range Hood / Microwave / Campana o microondas", "Campana o microondas", "Range Hood / Microwave"], ["Recámara / Bedroom", "Recámara", "Bedroom"], ["Recámara Principal / Master Bedroom", "Recámara Principal", "Master Bedroom"], ["Refrigerator / Refrigerador", "Refrigerador", "Refrigerator"], ["Renta de troca / Truck rental ($150)", "Renta de troca ($150)", "Truck rental ($150)"], ["Rope / Cuerda", "Cuerda", "Rope"], ["Roto martillo / Jack hammer ($200)", "Roto martillo ($200)", "Jack hammer ($200)"], ["Sala / Living Room", "Sala", "Living Room"], ["Segundo Piso / 2nd Floor", "Segundo Piso", "2nd Floor"], ["Shoe Molding / Moldura de Zapata", "Moldura de Zapata", "Shoe Molding"], ["Shower Curb / Bordillo de la regadera", "Bordillo de la regadera", "Shower Curb"], ["Shower Door / Puerta de la regadera", "Puerta de la regadera", "Shower Door"], ["Shower Drain / Coladera de la regadera", "Coladera de la regadera", "Shower Drain"], ["Shower Pan / Base de la regadera", "Base de la regadera", "Shower Pan"], ["Shower Surround / Cubierta de la regadera", "Cubierta de la regadera", "Shower Surround"], ["Shower Tile / Azulejo de la regadera", "Azulejo de la regadera", "Shower Tile"], ["Sink / Fregadero", "Fregadero", "Sink"], ["Small Boxes / Cajas Pequeñas", "Cajas Pequeñas", "Small Boxes"], ["Stove / Range / Estufa", "Estufa", "Stove / Range"], ["Stretch Wrap / Envoltura Elástica", "Envoltura Elástica", "Stretch Wrap"], ["Stud / Framing / Armazón", "Armazón", "Stud / Framing"], ["Subfloor / Subpiso", "Subpiso", "Subfloor"], ["Sótano / Basement", "Sótano", "Basement"], ["Tackless Strip / Tira de clavos", "Tira de clavos", "Tackless Strip"], ["Tape / Cinta", "Cinta", "Tape"], ["Tarps / Lonas", "Lonas", "Tarps"], ["Techo / Ceiling", "Techo", "Ceiling"], ["Tercer Piso / 3rd Floor", "Tercer Piso", "3rd Floor"], ["Thinset / Mortar Bed / Mortero", "Mortero", "Thinset / Mortar Bed"], ["Tile / Baldosa", "Baldosa", "Tile"], ["Todo el nivel / Whole level", "Todo el nivel", "Whole level"], ["Toe Kick / Zócalo de Gabinete", "Zócalo de Gabinete", "Toe Kick"], ["Toilet / Inodoro", "Inodoro", "Toilet"], ["Towel Bar / Toallero", "Toallero", "Towel Bar"], ["Trash Cans / Botes de Basura", "Botes de Basura", "Trash Cans"], ["Trim / Marco de puerta y ventana", "Marco de puerta y ventana", "Trim"], ["Un problema por línea / One problem per line", "Un problema por línea", "One problem per line"], ["Una cosa por línea / One item per line", "Una cosa por línea", "One item per line"], ["Una solicitud por línea / One request per line", "Una solicitud por línea", "One request per line"], ["Underlayment / Base", "Base", "Underlayment"], ["Vanity / Tocador", "Tocador", "Vanity"], ["Vanity Top / Cubierta del tocador", "Cubierta del tocador", "Vanity Top"], ["Vapor Barrier / Barrera de vapor", "Barrera de vapor", "Vapor Barrier"], ["Vinyl LVP / Vinilo", "Vinilo", "Vinyl LVP"], ["Wardrobe Boxes / Cajas de Guardarropa", "Cajas de Guardarropa", "Wardrobe Boxes"], ["Wood Floor / Piso de Madera", "Piso de Madera", "Wood Floor"], ["Zip Wall Poles / Postes de Pared Zip", "Postes de Pared Zip", "Zip Wall Poles"], ["Zipper de la contención / Peel & seal zipper", "Zipper de la contención", "Peel & seal zipper"], ["Zippers / Cierres de Acceso (Zipper)", "Cierres de Acceso (Zipper)", "Zippers"], ["Ático / Attic", "Ático", "Attic"], ["— Escoger cuarto / Pick room —", "— Escoger cuarto —", "— Pick room —"], ["— Escoger material / Pick material —", "— Escoger material —", "— Pick material —"], ["— Escoger nivel / Pick level —", "— Escoger nivel —", "— Pick level —"]];   // [texto original "A / B", español, inglés]
+  const idiNorm = s => String(s == null ? '' : s).toLowerCase().replace(/\(s\)/g, '').replace(/[^a-z0-9]+/g, ' ').trim().replace(/s$/, '');
+  const IDI_GL = new Set(IDI_GLOSARIO.map(idiNorm));
+  const idiEsGlosario = en => IDI_GL.has(idiNorm(en));
+  const IDI_MAPA = new Map(IDI_PARES.map(p => [p[0], { es: p[1], en: p[2], gl: idiEsGlosario(p[2]) }]));
+  // Textos sueltos de la puerta (FASE 3 los completa): solo en English, por texto exacto o por patron.
+  const IDI_SUELTOS = new Map([['¿A dónde va a entrar?', 'Where are you going in?'], ['Escoja la empresa. Después le pedimos su código.', 'Pick the company. Then we ask for your code.'],
+    ['Cerrar sesión', 'Sign out'], ['Cambiar de empresa', 'Switch company'], ['Ajustes', 'Settings']]);
+  const IDI_PATRONES = [[/^Bienvenido, (.+)$/, 'Welcome, $1'], [/^Está en (.+)\. ¿A dónde va ahora\?$/, 'You are in $1. Where to now?']];
+  function idiSuelto(texto){
+    const s = String(texto), core = s.trim();
+    if(!core || core.length > 120) return null;
+    const lead = s.slice(0, s.indexOf(core)), trail = s.slice(s.indexOf(core) + core.length);
+    if(IDI_SUELTOS.has(core)) return lead + IDI_SUELTOS.get(core) + trail;
+    for(const [re, r] of IDI_PATRONES) if(re.test(core)) return lead + core.replace(re, r) + trail;
+    return null;
+  }
+  const idiLado = (p, lang) => (lang === 'en' || p.gl) ? p.en : p.es;
+  // "Texto" -> el texto en un solo idioma, o null si no es una pareja conocida. Aguanta un adorno antes (emoji, —) y
+  // otro después (" — 3 cuartos", "(2)").
+  function idiTraducir(texto, lang){
+    const s = String(texto), core = s.trim();
+    if(core.indexOf(' / ') < 0 || core.length > 140) return null;
+    const lead = s.slice(0, s.indexOf(core)), trail = s.slice(s.indexOf(core) + core.length);
+    let p = IDI_MAPA.get(core);
+    if(p) return lead + idiLado(p, lang) + trail;
+    const m = /^([^A-Za-zÀ-ÿ0-9¿¡(]*)(.+?)(\s+[—–-]\s+.*|\s*\([^)]*\))?$/.exec(core);
+    if(!m) return null;
+    p = IDI_MAPA.get(m[2]);
+    return p ? lead + m[1] + idiLado(p, lang) + (m[3] || '') + trail : null;
+  }
+  // El inglés de una etiqueta <span class="en"> / English</span>: lo que sigue a la diagonal.
+  const idiInglesDeSpan = txt => { const m = /^\s*\/\s*([\s\S]+?)\s*$/.exec(String(txt)); return m ? m[1] : null; };
+  /*IDI-PURO:FIN*/
+  const IDIOMA = (function(){
+    let lang = 'es', listo = false;
+    const uid = () => { if(window.__idiUid !== undefined) return window.__idiUid; try{ return (typeof SES !== 'undefined' && SES && SES.user_id) || ''; }catch(e){ return ''; } };   // __idiUid: solo para las pruebas
+    function leer(){
+      try{
+        const u = uid();
+        let v = u ? localStorage.getItem('fr_lang:' + u) : null;
+        if(!v){ v = localStorage.getItem('fr_lang'); if(u && v) localStorage.setItem('fr_lang:' + u, v); }
+        return v === 'en' ? 'en' : 'es';
+      }catch(e){ return 'es'; }
+    }
+    function guardar(l){
+      try{ localStorage.setItem('fr_lang', l); const u = uid(); if(u) localStorage.setItem('fr_lang:' + u, l); }catch(e){}
+    }
+    // ---- texto suelto (opciones, botones, placeholders): "Drywall / Tablaroca" ----
+    function textoNodo(n){
+      const v = n.nodeValue;
+      const base = (n.__idiR !== undefined && v === n.__idiR) ? n.__idiO : v;
+      let out = base && base.indexOf(' / ') >= 0 ? idiTraducir(base, lang) : null;
+      if(out === null && lang === 'en' && base) out = idiSuelto(base);
+      if(out === null){ n.__idiO = n.__idiR = undefined; return; }
+      n.__idiO = base; n.__idiR = out;
+      if(out !== v) n.nodeValue = out;
+    }
+    const ATTRS = ['placeholder', 'title', 'aria-label'];
+    function atributos(el){
+      for(const a of ATTRS){
+        const v = el.getAttribute && el.getAttribute(a);
+        const reg = el.__idiA && el.__idiA[a];
+        const base = (reg && v === reg[1]) ? reg[0] : v;
+        if(!base || base.indexOf(' / ') < 0){ if(reg) delete el.__idiA[a]; continue; }
+        const out = idiTraducir(base, lang);
+        if(out === null){ if(reg) delete el.__idiA[a]; continue; }
+        (el.__idiA = el.__idiA || {})[a] = [base, out];
+        if(out !== v) el.setAttribute(a, out);
+      }
+    }
+    // ---- <span class="en"> / English</span> pegado a su texto en español ----
+    function span(el){
+      let d = el.__idi;
+      if(!d){
+        if(el.children.length) return;
+        const en = idiInglesDeSpan(el.textContent);
+        const prev = el.previousSibling;
+        if(en === null || !prev || (prev.nodeType === 3 && !prev.nodeValue.trim())) return;
+        d = el.__idi = { orig: el.textContent, en: en, ref: prev, esTxt: prev.nodeType === 3 ? prev.nodeValue : null, gl: idiEsGlosario(en) };
+        el.setAttribute('data-idi', d.gl ? 'gl' : '1');
+      }
+      const solo = lang === 'en' || d.gl;
+      if(d.ref.nodeType === 3) d.ref.nodeValue = solo ? '' : d.esTxt;
+      else d.ref.classList.toggle('idi-off', solo);
+      el.textContent = solo ? d.en : d.orig;
+      el.classList.toggle('idi-solo', solo);
+      el.classList.toggle('idi-off', !solo);
+    }
+    const SALTAR = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1 };
+    function procesar(raiz){
+      if(!raiz) return;
+      if(raiz.nodeType === 3){ if(!SALTAR[raiz.parentNode && raiz.parentNode.nodeName] && !(raiz.parentNode && raiz.parentNode.closest && raiz.parentNode.closest('[data-no-idioma]'))) textoNodo(raiz); return; }
+      if(raiz.nodeType !== 1 || SALTAR[raiz.nodeName] || (raiz.closest && raiz.closest('[data-no-idioma]'))) return;
+      if(raiz.classList.contains('en')) span(raiz);
+      raiz.querySelectorAll('.en').forEach(span);
+      atributos(raiz);
+      raiz.querySelectorAll('[placeholder],[title],[aria-label]').forEach(atributos);
+      const w = document.createTreeWalker(raiz, NodeFilter.SHOW_TEXT);
+      let n; while((n = w.nextNode())){
+        const p = n.parentNode; if(!p || SALTAR[p.nodeName] || (p.closest && p.closest('[data-no-idioma]'))) continue;
+        if(lang === 'en' || n.nodeValue.indexOf(' / ') >= 0 || n.__idiR !== undefined) textoNodo(n);
+      }
+    }
+    // ---- el selector: un renglón "Idioma · Language" en cada puerta/menú ----
+    function pintarSelector(){
+      document.querySelectorAll('.idi-slot').forEach(s => {
+        if(!s.firstChild){
+          s.setAttribute('data-no-idioma', '');
+          s.innerHTML = '<div class="idi-tit">Idioma &middot; Language</div>' +
+            '<button type="button" data-idi-set="es">Espa&ntilde;ol</button><button type="button" data-idi-set="en">English</button>';
+        }
+        s.querySelectorAll('[data-idi-set]').forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute('data-idi-set') === lang)));
+      });
+    }
+    function aplicar(l){
+      lang = l === 'en' ? 'en' : 'es';
+      if(document.body){ document.body.classList.toggle('idi-en', lang === 'en'); document.body.classList.toggle('idi-es', lang === 'es'); }
+      document.documentElement.setAttribute('lang', lang);
+      procesar(document.body); pintarSelector(); etiquetasAjustes();
+    }
+    function etiquetasAjustes(){
+      document.querySelectorAll('[data-ajustes]').forEach(b => { const t = lang === 'en' ? 'Settings' : 'Ajustes'; b.setAttribute('aria-label', t); b.setAttribute('title', t); });
+    }
+    function abrirAjustes(){ const v = document.getElementById('ajustes'); if(v){ v.hidden = false; pintarSelector(); const b = v.querySelector('[aria-pressed="true"]'); if(b) b.focus(); } }
+    function cerrarAjustes(){ const v = document.getElementById('ajustes'); if(v) v.hidden = true; }
+    document.addEventListener('keydown', e => { if(e.key === 'Escape') cerrarAjustes(); });
+    function poner(l){ guardar(l === 'en' ? 'en' : 'es'); aplicar(l); }
+    function arrancar(){
+      if(listo) return; listo = true;
+      aplicar(leer());
+      new MutationObserver(ms => {
+        for(const m of ms){
+          if(m.type === 'childList') m.addedNodes.forEach(procesar);
+          else if(m.type === 'characterData') procesar(m.target);
+          else if(m.type === 'attributes') atributos(m.target);
+        }
+      }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS });
+      document.addEventListener('click', e => {
+        if(e.target.closest && e.target.closest('[data-ajustes]')){ abrirAjustes(); return; }
+        if(e.target.closest && (e.target.closest('#ajVolver') || e.target === document.getElementById('ajustes'))){ cerrarAjustes(); return; }
+        const b = e.target.closest && e.target.closest('[data-idi-set]');
+        if(b){ poner(b.getAttribute('data-idi-set')); return; }
+        setTimeout(() => { const n = leer(); if(n !== lang) aplicar(n); }, 0);   // al entrar otra persona, su idioma
+      }, true);
+    }
+    return { arrancar, poner, actual: () => lang, leer, procesar, mapa: IDI_MAPA, glosario: IDI_GL, traducir: idiTraducir };
+  })();
+  window.__idioma = IDIOMA;
+  IDIOMA.arrancar();
+
   // ===== LA PUERTA: de que empresa es esta sesion. SOLO en memoria. =====
   // Nunca en localStorage, nunca en 'ses' ni en 'casualSes': cada apertura
   // en frio vuelve a preguntar, asi nadie hereda la empresa de ayer.
@@ -10155,7 +10346,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-23-R18';
+  const APP_BUILD = '2026-10-23-R19';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
