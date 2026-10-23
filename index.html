@@ -10142,7 +10142,7 @@ body.med-pp-abierto{overflow:hidden;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-23-R15';
+  const APP_BUILD = '2026-10-23-R16';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -52550,6 +52550,10 @@ body.med-pp-abierto{overflow:hidden;}
     if(AS.pregunta && AS.pregunta.tipo === 'preview_menu'){ asTranscribir(texto); return asResponderMedir(texto); }
     // (22 oct) "Quiero ver mis horas": la lista real de la pantalla Horas, en la tarjeta (solo si ya hay horas que enseñar).
     if(!AS.pregunta && /\b(ver|ens[eé]ñame|mu[eé]strame|revisar|revisa|checar|checa)\b[^.?!]*\bmis\s+horas\b/i.test(texto) && AS_PREVIEWS.horas.hay()){ asTranscribir(texto); return asPreviewMostrar(AS_PREVIEWS.horas.spec()); }
+    // (23 oct) "Quiero ver el secado" / "enséñame los materiales": la hoja real, si ya hay algo lleno.
+    if(!AS.pregunta){ const mV = /\b(ver|ens[eé]ñame|mu[eé]strame|revisar|revisa|checar|checa)\b[^.?!]*\b(el\s+secado|los\s+materiales|las\s+lecturas)\b/i.exec(texto);
+      if(mV){ const cual = /secado|lecturas/i.test(mV[2]) ? 'secado' : 'materiales'; let hay = false; try{ hay = AS_PREVIEWS[cual].hay(); }catch(e){}
+        if(hay){ asTranscribir(texto); return asPreviewMostrar(AS_PREVIEWS[cual].spec()); } } }
     // (22 oct) "Enséñame el preview": lo que Lumi llenó, en una tarjeta.
     if(!AS.pregunta && /\b(preview|vista previa|previa|ens[eé]ñame\s+(lo\s+que|que)\s+(hiciste|llenaste)|qu[eé]\s+llenaste)\b/i.test(texto)){ asTranscribir(texto); return asOfrecerPreview(); }
     // (Brújula) Una pregunta de "medir aquí" en espera ("¿Vas a sacar medidas de…?", "¿Qué nivel?") se contesta en el
@@ -52608,6 +52612,9 @@ body.med-pp-abierto{overflow:hidden;}
         if(nav && nav.pantalla === 'medir_aqui' && !nav.trabajo){ asMedirAqui(nav.que, { nivel: nav.nivel, cliente: nav.cliente }); return; }
         // (2c) El labor log dictado: la pantalla ya quedó llena; Lumi espera el "sí" para mandarlo con el botón de siempre.
         if(nav && nav.pantalla === 'labor_log_llenar'){ asLaborLlenar(nav); return; }
+        // (23 oct) Secado y Materiales por voz: se llena el formulario y se enseña la hoja real en el preview.
+        if(nav && nav.pantalla === 'secado_llenar'){ asSecadoLlenar(nav); return; }
+        if(nav && nav.pantalla === 'materiales_llenar'){ asMaterialesLlenar(nav); return; }
         // (2c-b) Las hojas al grupo: Lumi espera el "sí" (la pregunta ya la dijo el modelo) y el teléfono abre Mensajes.
         if(nav && nav.pantalla === 'labor_log_mandar'){ AS.pregunta = { tipo: 'labor_grupo', nav }; asSeguirOyendo(); return; }
         if(nav){ asNavegar(nav); return; }
@@ -52706,6 +52713,140 @@ body.med-pp-abierto{overflow:hidden;}
     const fn = que === 'ok' ? s.onOk : que === 'no' ? s.onCancelar : s.onCorregir;
     try{ if(typeof fn === 'function') fn(); }catch(e){ console.warn('preview', e); }
   }
+  // ---- (23 oct 2026) LUMI LLENA SECADO Y MATERIALES ----
+  // El payload viene del servidor (herramientas llenar_secado / llenar_materiales, ya validadas). Aquí se vuelve a validar (el teléfono
+  // nunca se fía): lo que no es válido se ignora. Lo que no vino (null) se deja como estaba. La firma del cliente NO se dicta.
+  const AS_SUPERFICIES = { Floor: 'Piso', Wall: 'Pared', Ceiling: 'Techo' };
+  function asLlNum(v, min, max){ const n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return (isFinite(n) && n >= min && n <= max) ? n : null; }
+  function asLlFecha(v){ return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : ''; }
+  function asLlTexto(v, max){ return String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max || 200); }
+  function asLlSet(el, v){ if(el && v != null && String(v) !== '') el.value = String(v); }
+  // Secado: pone lo dictado en el formulario de Secado. true = algo se llenó.
+  function asSecadoAplicar(p){
+    p = p || {}; let algo = false;
+    const set = function(id, v, max){ const t = asLlTexto(v, max); if(t){ asLlSet(document.getElementById(id), t); algo = true; } };
+    set('d-client', p.cliente); set('d-phone', p.telefono, 40); set('d-address', p.direccion); set('d-tech', p.lider); set('d-pm', p.pm);
+    set('d-room', p.area); set('d-sendto', p.para); set('d-notes', p.notas, 1000);
+    if(AS_SUPERFICIES[p.superficie]){ surfaceSelect.value = p.superficie; populateMaterialOptions(); algo = true; }   // la superficie ANTES del material
+    if(p.material && [...materialSelect.options].some(function(o){ return o.value === p.material; })){ materialSelect.value = p.material; algo = true; }
+    if(['Urgent', 'Priority', 'Low'].includes(p.prioridad)){ $$('input[name="d-priority"]').forEach(function(r){ r.checked = (r.value === p.prioridad); }); algo = true; }
+    const ini = asLlFecha(p.inicio), rep = asLlFecha(p.fecha_reporte);
+    if(ini){ asLlSet(document.getElementById('d-startdate'), ini); algo = true; }
+    if(rep){ asLlSet(document.getElementById('d-reportdate'), rep); algo = true; }
+    if(ini || rep){ try{ recalcDaysDrying(); }catch(e){} }
+    if(Array.isArray(p.lecturas) && p.lecturas.length){
+      readingsContainer.innerHTML = '';
+      p.lecturas.slice(0, 30).forEach(function(l){
+        const v = asLlNum(l && l.valor, 0, 100); if(v == null) return;
+        addReading(); const c = readingsContainer.lastElementChild;
+        asLlSet($('.r-date', c), asLlFecha(l.fecha) || todayStr()); asLlSet($('.r-value', c), v);
+        asLlSet($('.r-location', c), asLlTexto(l.lugar)); asLlSet($('.r-notes', c), asLlTexto(l.notas, 300)); algo = true;
+      });
+      try{ renumberReadings(); }catch(e){}
+    }
+    try{ if(typeof saveDraft === 'function') saveDraft(); }catch(e){}
+    return algo;
+  }
+  // Materiales: empareja el nombre dicho con los renglones fijos (inglés o español, singular o plural); si no coincide, renglón propio.
+  function asMatClave(t){ return asMedirNorm(t).replace(/\bde\b|\bla\b|\blas\b|\blos\b/g, ' ').replace(/(\w{3,})s\b/g, '$1').replace(/\s+/g, ' ').trim(); }
+  function asMatEmparejar(body, pre, nombre){
+    const q = asMatClave(nombre); if(!q) return null;
+    const filas = Array.from(body.children || []);
+    const fijos = filas.filter(function(tr){ return !!(tr.querySelector && tr.querySelector('.eq-name-fixed')) && !!$('.' + pre + '-name', tr); });
+    const nombresDe = function(tr){ const dato = $('.' + pre + '-name', tr); return [String((tr.dataset && tr.dataset.en) || ''), String(dato.value || '')].concat(String(dato.value || '').split('/')).map(asMatClave).filter(Boolean); };
+    const exactos = fijos.filter(function(tr){ return nombresDe(tr).some(function(n){ return n === q; }); });
+    if(exactos.length === 1) return exactos[0];
+    if(exactos.length > 1) return null;
+    // Parecidos: solo si es UNO. Si "cajas" cabe en tres tamaños, no se adivina: queda como renglón propio.
+    const parecidos = fijos.filter(function(tr){ return q.length >= 4 && nombresDe(tr).some(function(n){ return n.includes(q) || q.includes(n); }); });
+    return parecidos.length === 1 ? parecidos[0] : null;
+  }
+  function asMaterialesAplicar(p){
+    p = p || {}; let algo = false;
+    const set = function(id, v, max){ const t = asLlTexto(v, max); if(t){ asLlSet(document.getElementById(id), t); algo = true; } };
+    set('m-client', p.cliente); set('m-phone', p.telefono, 40); set('m-address', p.direccion); set('m-leader', p.lider);
+    const f = asLlFecha(p.fecha); if(f){ asLlSet(document.getElementById('m-date'), f); algo = true; }
+    const llenar = function(body, agregar, pre, filas, conMedida){
+      if(!Array.isArray(filas) || !filas.length) return;
+      Array.from(body.children || []).forEach(function(tr){ const q = $('.' + pre + '-qty', tr); if(q) q.value = ''; });
+      Array.from(body.children || []).filter(function(tr){ return !(tr.querySelector && tr.querySelector('.eq-name-fixed')); }).forEach(function(tr){ tr.remove(); });   // los renglones propios se rehacen
+      filas.slice(0, 40).forEach(function(it){
+        const cant = asLlNum(it && it.cantidad, 1, 9999); /* 0 o negativo = no se pone: no pisa una cantidad buena */ const nom = asLlTexto(it && it.nombre, 80); if(cant == null || !nom) return;
+        let tr = asMatEmparejar(body, pre, nom);
+        if(!tr){ agregar(); tr = body.lastElementChild; asLlSet($('.' + pre + '-name', tr), nom); }
+        asLlSet($('.' + pre + '-qty', tr), Math.round(cant));
+        if(conMedida){
+          const lg = asLlNum(it.largo, 0, 999), an = asLlNum(it.ancho, 0, 999);
+          if(lg != null) asLlSet($('.ep-len', tr), lg); if(an != null) asLlSet($('.ep-wid', tr), an);
+          try{ $('.ep-len', tr).dispatchEvent(new Event('input', { bubbles: true })); }catch(e){}   // rehace los sq ft
+        }
+        algo = true;
+      });
+    };
+    llenar(materialsBody, addMaterialRow, 'mat', p.materiales, false);
+    llenar(epBody, addEpRow, 'ep', p.proteccion, true);
+    try{ if(typeof saveDraft === 'function') saveDraft(); }catch(e){}
+    return algo;
+  }
+  // Lo que HAY en los formularios ahora (para el preview y para el resumen si la hoja no sale).
+  function asSecadoLeer(){
+    const v = function(id){ const e = document.getElementById(id); return e ? String(e.value || '') : ''; };
+    const pr = $('input[name="d-priority"]:checked');
+    return { cliente: v('d-client'), telefono: v('d-phone'), direccion: v('d-address'), lider: v('d-tech'), pm: v('d-pm'), inicio: v('d-startdate'), fecha_reporte: v('d-reportdate'),
+      area: v('d-room'), superficie: surfaceSelect.value, material: materialSelect.value, para: v('d-sendto'), prioridad: pr ? pr.value : '', notas: v('d-notes'),
+      lecturas: $$('.reading-card', readingsContainer).map(function(c){ return { fecha: $('.r-date', c).value, valor: $('.r-value', c).value, lugar: $('.r-location', c).value, notas: $('.r-notes', c).value }; }) };
+  }
+  function asMaterialesLeer(){
+    const v = function(id){ const e = document.getElementById(id); return e ? String(e.value || '') : ''; };
+    const filas = function(body, pre){ return Array.from(body.children || []).map(function(tr){
+      const n = $('.' + pre + '-name', tr), q = $('.' + pre + '-qty', tr), lg = $('.ep-len', tr), an = $('.ep-wid', tr);
+      return { nombre: n ? String(n.value || '') : '', cantidad: q ? String(q.value || '') : '', largo: lg ? String(lg.value || '') : '', ancho: an ? String(an.value || '') : '' }; }); };
+    return { cliente: v('m-client'), telefono: v('m-phone'), direccion: v('m-address'), fecha: v('m-date'), lider: v('m-leader'), materiales: filas(materialsBody, 'mat'), proteccion: filas(epBody, 'ep') };
+  }
+  // Las tarjetas (puras: reciben lo leído del formulario). La hoja real es lo principal; esto es el resumen si la hoja no sale.
+  function asPrevSecadoSpec(d){
+    d = d || {}; const f = function(x){ return String(x == null ? '' : x).trim(); };
+    const lec = (Array.isArray(d.lecturas) ? d.lecturas : []).filter(function(l){ return f(l && l.valor) !== ''; });
+    const faltan = [];
+    if(!f(d.cliente)) faltan.push('el cliente'); if(!f(d.direccion)) faltan.push('la dirección'); if(!f(d.area)) faltan.push('el área o habitación'); if(!lec.length) faltan.push('las lecturas');
+    const lineas = [{ k: 'Cliente', v: f(d.cliente) || 'falta', alerta: !f(d.cliente) }, { k: 'Dirección', v: f(d.direccion) || 'falta', alerta: !f(d.direccion) },
+      { k: 'Área', v: f(d.area) || 'falta', alerta: !f(d.area) }, { k: 'Superficie', v: AS_SUPERFICIES[d.superficie] || f(d.superficie) || '—' }, { k: 'Material', v: f(d.material) || '—' }];
+    lec.forEach(function(l, i){ lineas.push({ k: 'Lectura ' + (i + 1), v: f(l.valor) + '% · ' + (f(l.lugar) || 'sin lugar') + (f(l.fecha) ? ' · ' + f(l.fecha) : '') }); });
+    return { tipo: 'Secado', titulo: f(d.cliente) || 'Reporte de secado', sub: lec.length + (lec.length === 1 ? ' lectura' : ' lecturas'), lineas: lineas, aviso: faltan.length ? 'Falta: ' + faltan.join(', ') + '.' : '' };
+  }
+  function asPrevMaterialesSpec(d){
+    d = d || {}; const f = function(x){ return String(x == null ? '' : x).trim(); };
+    const conCant = function(a){ return (Array.isArray(a) ? a : []).filter(function(it){ return (+it.cantidad || 0) > 0; }); };
+    const mats = conCant(d.materiales), prot = conCant(d.proteccion), faltan = [];
+    if(!f(d.cliente)) faltan.push('el cliente'); if(!f(d.direccion)) faltan.push('la dirección'); if(!mats.length && !prot.length) faltan.push('los materiales o la protección');
+    const lineas = [{ k: 'Cliente', v: f(d.cliente) || 'falta', alerta: !f(d.cliente) }, { k: 'Dirección', v: f(d.direccion) || 'falta', alerta: !f(d.direccion) }, { k: 'Fecha', v: f(d.fecha) || '—' }, { k: 'Líder', v: f(d.lider) || '—' }];
+    mats.forEach(function(it){ lineas.push({ k: f(it.nombre).split('/')[0].trim() || 'Material', v: f(it.cantidad) }); });
+    prot.forEach(function(it){ lineas.push({ k: 'Protección · ' + (f(it.nombre).split('/')[0].trim() || 'Artículo'), v: f(it.cantidad) + (f(it.largo) && f(it.ancho) ? ' · ' + f(it.largo) + 'x' + f(it.ancho) + ' ft' : '') }); });
+    return { tipo: 'Materiales', titulo: f(d.cliente) || 'Materiales y protección', sub: (mats.length + prot.length) + ((mats.length + prot.length) === 1 ? ' renglón' : ' renglones'), lineas: lineas,
+             aviso: (faltan.length ? 'Falta: ' + faltan.join(', ') + '. ' : '') + 'La firma del cliente se pone en la pantalla.' };
+  }
+  function asAvisoFormListo(cual, nombre){
+    const sp = AS_PREVIEWS[cual].spec();
+    try{ asPreviewMostrar(sp); }catch(e){ console.warn('preview ' + cual, e); }
+  }
+  function asSecadoLlenar(nav){
+    let ok = false;
+    try{ ok = asSecadoAplicar((nav && nav.payload) || {}); }catch(e){ console.warn('secado voz', e); ok = false; }
+    if(!ok){ const m = 'No pude llenar la pantalla de secado. Ábrela desde el menú.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
+    asBit('secado voz: pantalla llena');
+    AS.pregunta = { tipo: 'form_listo', cual: 'secado' };
+    asAvisoFormListo('secado');
+    asSeguirOyendo();
+  }
+  function asMaterialesLlenar(nav){
+    let ok = false;
+    try{ ok = asMaterialesAplicar((nav && nav.payload) || {}); }catch(e){ console.warn('materiales voz', e); ok = false; }
+    if(!ok){ const m = 'No pude llenar la pantalla de materiales. Ábrela desde el menú.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
+    asBit('materiales voz: pantalla llena');
+    AS.pregunta = { tipo: 'form_listo', cual: 'materiales' };
+    asAvisoFormListo('materiales');
+    asSeguirOyendo();
+  }
   // Los previews que existen hoy. Agregar una pantalla = agregar su adaptador aquí.
   const AS_PREVIEWS = {
     labor_log: { nombre: 'del labor log',
@@ -52735,7 +52876,23 @@ body.med-pp-abierto{overflow:hidden;}
         },
         onOk: function(){ const m = 'Va. Tus horas quedan como están. Para confirmarlas, toca Confirmar en la pantalla de Horas.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); },
         onCorregir: function(){ const m = 'Te abro la pantalla de Horas para que lo corrijas.'; asMostrarRespuesta(m); asHablar(m, function(){ asCerrar(); try{ showTab('reloj'); }catch(e){} }); },
-        onCancelar: function(){ const m = 'Está bien.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); } }; } }
+        onCancelar: function(){ const m = 'Está bien.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); } }; } },
+    // Secado y Materiales: lo que Lumi llenó, como LA HOJA REAL (ccHojasDelReporte). OK solo la deja lista en la pantalla: mandarla
+    // (CompanyCam, PDF) sigue siendo el botón de siempre. Corregir = dime qué cambio (el modelo vuelve a llenar).
+    secado: { nombre: 'del secado',
+      hay: function(){ try{ const d = asSecadoLeer(); return !!(d.cliente.trim() || d.area.trim() || d.lecturas.some(function(l){ return String(l.valor).trim() !== ''; })); }catch(e){ return false; } },
+      spec: function(){ const sp = asPrevSecadoSpec(asSecadoLeer()); sp.okTexto = 'OK, así está'; sp.cargandoTexto = 'Armando la hoja del secado…';
+        sp.hojas = function(){ return Promise.resolve(ccHojasDelReporte('drying')).then(function(r){ return (r && r.imagenes) || []; }); };
+        sp.onOk = function(){ AS.pregunta = null; const m = 'Va. El secado queda lleno en la pantalla de Secado. Para mandarlo, toca Enviar a CompanyCam o Descargar.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); };
+        sp.onCancelar = function(){ const m = 'Está bien. Queda en la pantalla de Secado sin mandar.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); };
+        sp.onCorregir = function(){ const m = 'Dime qué cambio.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); }; return sp; } },
+    materiales: { nombre: 'de los materiales',
+      hay: function(){ try{ const d = asMaterialesLeer(); return !!(d.cliente.trim() || d.materiales.some(function(i){ return (+i.cantidad || 0) > 0; }) || d.proteccion.some(function(i){ return (+i.cantidad || 0) > 0; })); }catch(e){ return false; } },
+      spec: function(){ const sp = asPrevMaterialesSpec(asMaterialesLeer()); sp.okTexto = 'OK, así está'; sp.cargandoTexto = 'Armando la hoja de materiales…';
+        sp.hojas = function(){ return Promise.resolve(ccHojasDelReporte('materials')).then(function(r){ return (r && r.imagenes) || []; }); };
+        sp.onOk = function(){ AS.pregunta = null; const m = 'Va. Los materiales quedan llenos en la pantalla de Materiales. La firma del cliente va ahí. Para mandarlos, toca Enviar a CompanyCam o Descargar.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); };
+        sp.onCancelar = function(){ const m = 'Está bien. Queda en la pantalla de Materiales sin mandar.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); };
+        sp.onCorregir = function(){ const m = 'Dime qué cambio.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); }; return sp; } }
   };
   // "Enséñame el preview": si hay uno solo lo enseña; si hay varios, pregunta cuál.
   function asOfrecerPreview(){
@@ -52926,10 +53083,17 @@ body.med-pp-abierto{overflow:hidden;}
       if(asEsNo(low) || (/^(no|nel|todavia no|mejor no|espera|aguanta|primero)\b/.test(low) && !/\d|fuimos|fueron|tambien|era|eran|falta|cambia|quita|pon|agrega/.test(low))){ AS.pregunta = null; const m = 'Queda en la pantalla para que lo revises.'; asMostrarRespuesta(m); asHablar(m, function(){ asNavegar({ pantalla: 'labor_log_revisar', empresa: p.nav.empresa, payload: p.nav.payload }); }); return; }
       AS.pregunta = null; return asEnviar(texto);   // "no, fueron 3 personas": una corrección va al modelo, que vuelve a llenar
     }
+    if(p.tipo === 'form_listo'){
+      // Lumi llenó una pantalla y la tarjeta ya se cerró: sí/no se resuelven aquí; cualquier otra cosa es una corrección y va al modelo.
+      if(asEsSi(low) || asEsNo(low)){ AS.pregunta = null; const m = 'Está bien. Queda en la pantalla.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
+      AS.pregunta = null; return asEnviar(texto);
+    }
     if(p.tipo === 'preview_menu'){
       AS.pregunta = null;
       const pideLabor = /\blabor\b|\blog\b|\bturnos?\b/.test(low), pideEquipo = /\bequipo|conteo|dehu|fans?|ventilador/.test(low), pideHoras = /\bhoras?\b|\breloj\b/.test(low);
-      let k = (pideLabor && p.opciones.includes('labor_log')) ? 'labor_log' : (pideEquipo && p.opciones.includes('equipo')) ? 'equipo' : (pideHoras && p.opciones.includes('horas')) ? 'horas' : null;
+      const pideSecado = /\bsecado\b|\blecturas?\b|\bhumedad\b/.test(low), pideMat = /\bmateriales?\b|\bprotecci[oó]n\b|\blonas?\b/.test(low);
+      let k = (pideLabor && p.opciones.includes('labor_log')) ? 'labor_log' : (pideEquipo && p.opciones.includes('equipo')) ? 'equipo' : (pideHoras && p.opciones.includes('horas')) ? 'horas'
+        : (pideSecado && p.opciones.includes('secado')) ? 'secado' : (pideMat && p.opciones.includes('materiales')) ? 'materiales' : null;
       if(!k && asEsSi(low)) k = p.opciones[0];
       if(!k){ const m = 'Está bien.'; asMostrarRespuesta(m); asHablar(m, asSeguirOyendo); return; }
       return asPreviewMostrar(AS_PREVIEWS[k].spec());
