@@ -9519,13 +9519,14 @@ body.idi-en [data-solo-es]{display:none !important;}
     el.className = 'shift-card';
     el.innerHTML = `
       <div class="shift-head"><span>Turno ${shiftsContainer.children.length + 1}<span class="en"> / Shift ${shiftsContainer.children.length + 1}</span></span><button class="icon-btn remove-shift">Eliminar<span class="en"> / Remove</span></button></div>
-      <div class="row2">
+      <div class="row2 s-horas">
         <div class="field"><label>Hora Desde<span class="en"> / Time From</span></label><input type="time" class="s-from"></div>
         <div class="field"><label>Hora Hasta<span class="en"> / Time To</span></label><input type="time" class="s-to"></div>
       </div>
       <div class="field"><label>Nombres<span class="en"> / Names</span></label>
         <div class="namebox"><input type="text" class="nameadd" placeholder="Agregar nombre" autocomplete="off" autocorrect="off" autocapitalize="words"></div>
         <input type="hidden" class="s-names">
+        <div class="s-nsug" hidden></div>
       </div>
       <div class="field"><label>Dirección<span class="en"> / Address</span></label><input type="text" class="s-address" placeholder="Dirección del trabajo / Job address"></div>
       <div class="field"><label>Tarea<span class="en"> / Task</span></label><input type="text" class="s-task" placeholder="Qué se hizo / What was done"></div>
@@ -10519,7 +10520,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-24-R33';
+  const APP_BUILD = '2026-10-24-R34';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -27609,6 +27610,62 @@ body.idi-en [data-solo-es]{display:none !important;}
     try{ const st = document.createElement('style'); st.id = 'lCabCss'; st.textContent = css; (document.head || document.documentElement).appendChild(st); }catch(e){}
   })();
   window.__ruta = { agregar: rutaAgregar, casasDelDia: rutaCasasDelDia, sugerir: rutaSugerir, sugerenciaTurno: rutaSugerenciaTurno, anotar: rutaAnotar, leer: rutaLeer, llave: rutaLlave, unirNombres: lUnirNombres, fechaHoja: lFechaHoja, fechaCorta: lFechaCorta, rol: laborRol, pintar: lCabPintar };
+  // ===== (24 oct 2026, R34) EL TURNO COMPACTO (su "sí, así" con el turno de la maqueta b_propuesta v1) =====
+  // Horas lado a lado, Extra / Extra $ lado a lado, y debajo de Nombres los NOMBRES SUGERIDOS ("+ Mario Prueba", borde punteado):
+  // un toque lo agrega al turno y el botón se va. De dónde salen: primero los del turno de arriba de este mismo labor log, luego la
+  // gente con la que esta persona ha trabajado (las sugerencias que la app ya guarda, sugStore 'person'), solo si son del equipo
+  // (FIN_PEOPLE) cuando la lista del equipo existe. Máximo 4, nunca un nombre dudoso, sin datos no sale nada. Solo restauración.
+  /*NSUG-PURO:INICIO*/
+  // previos: nombres del turno de arriba; guardados: los que la app recuerda; ya: los de este turno; esDelEquipo / dudoso: funciones.
+  function nsugElegir(previos, guardados, ya, esDelEquipo, dudoso, max){
+    const vistos = {}, out = [];
+    (ya || []).forEach(function(n){ vistos[String(n).trim().toLowerCase()] = 1; });
+    function poner(n, pedirEquipo){
+      const t = String(n || '').trim(), k = t.toLowerCase();
+      if(!t || vistos[k] || out.length >= (max || 4)) return;
+      if(dudoso && dudoso(t)) return;
+      if(pedirEquipo && esDelEquipo && !esDelEquipo(t)) return;
+      vistos[k] = 1; out.push(t);
+    }
+    (previos || []).forEach(function(n){ poner(n, false); });
+    (guardados || []).forEach(function(n){ poner(n, true); });
+    return out;
+  }
+  /*NSUG-PURO:FIN*/
+  function nsugPintar(card){
+    const box = card && card.querySelector('.s-nsug'); if(!box) return;
+    let lista = [];
+    try{
+      if(!(typeof formKind === 'function' && formKind() === 'mudanza')){
+        const cards = Array.prototype.slice.call(shiftsContainer.querySelectorAll('.shift-card')), i = cards.indexOf(card);
+        const previos = i > 0 ? nameTags(cards[i - 1]) : [];
+        const guardados = (typeof sugStore !== 'undefined') ? sugStore.get('person') : [];
+        const hayEquipo = Array.isArray(FIN_PEOPLE) && FIN_PEOPLE.length && typeof finPersonFor === 'function';
+        lista = nsugElegir(previos, guardados, nameTags(card), hayEquipo ? function(n){ return !!finPersonFor(n); } : null,
+          function(n){ try{ return !!nombreDudoso(n); }catch(e){ return false; } }, 4);
+      }
+    }catch(e){ lista = []; }
+    const h = lista.map(function(n){ return '<button type="button" class="s-nsug-b" data-nsug="' + esc(n) + '"><b>+</b> ' + esc(n) + '</button>'; }).join('');
+    if(box._h !== h){ box.innerHTML = h; box._h = h; box.hidden = !h; }
+  }
+  function nsugPintarTodos(){ try{ shiftsContainer.querySelectorAll('.shift-card').forEach(nsugPintar); }catch(e){} }
+  document.addEventListener('click', function(e){
+    const b = e.target && e.target.closest && e.target.closest('[data-nsug]'); if(!b) return;
+    const card = b.closest('.shift-card'); if(!card) return;
+    addName(card, b.getAttribute('data-nsug'));
+    nsugPintarTodos();
+  });
+  setInterval(function(){ const p = document.querySelector('.tab-panel[data-tab="labor"]'); if(p && p.classList.contains('active')) nsugPintarTodos(); }, 700);
+  (function(){
+    const css = '.shift-card .row2.s-horas, .shift-card .row2.s-extra-first{grid-template-columns:repeat(2, minmax(0, 1fr)) !important; gap:10px;}'
+      + '.shift-card .row2.s-horas input[type=time]{padding-left:10px; padding-right:8px; font-size:16px; min-width:0;}'
+      + '.shift-card .row2.s-extra-first .s-extra-other-wrap{grid-column:1 / -1;}'
+      + '.s-nsug{display:flex; gap:8px; overflow-x:auto; flex-wrap:nowrap; margin-top:8px; -webkit-overflow-scrolling:touch; scrollbar-width:none;} .s-nsug::-webkit-scrollbar{display:none;} .s-nsug[hidden]{display:none !important;}'
+      + '.s-nsug-b{flex:0 0 auto; min-height:36px; padding:7px 12px; margin:0; border:1px dashed #5a5a62; border-radius:12px; background:transparent; color:#c7c7cc; font-size:14px; font-weight:600; white-space:nowrap; box-shadow:none;}'
+      + '.s-nsug-b b{color:#0a84ff; margin-right:2px;}';
+    try{ const st = document.createElement('style'); st.id = 'nsugCss'; st.textContent = css; (document.head || document.documentElement).appendChild(st); }catch(e){}
+  })();
+  window.__nsug = { elegir: nsugElegir, pintar: nsugPintarTodos };
   window.__trAqui = { masCercana: trAquiMasCercana, casas: trAquiCasas, nivel: trAquiNivel, estado: () => TR_AQUI, buscar: trAquiBuscar, bitacora: trAquiBitacora };
 
   // LA AYUDA DE MEDIDAS.
