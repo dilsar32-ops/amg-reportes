@@ -10604,7 +10604,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-25-R45';
+  const APP_BUILD = '2026-10-25-R47';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -11135,7 +11135,8 @@ body.idi-en [data-solo-es]{display:none !important;}
     }).join('');
     if(box) box.innerHTML = filas || '<p class="clockhint">Todavía no tiene días de mudanza.</p>';
 
-    const debe = sinTarifa ? null : (minsSinPagar / 60) * (+p.rate);
+    // Redondeado turno por turno: el MISMO numero de la lista (p.debe, ver dineroTurnos en loadMgHours).
+    const debe = sinTarifa ? null : (+p.debe || 0);
     if(sum) sum.innerHTML =
         '<div class="line"><span>Días en mudanza</span><span>' + todos.length + '</span></div>'
       + '<div class="line"><span>Horas AMG en total</span><span>' + hhmm(minsSinPagar + minsPagados) + '</span></div>'
@@ -11196,6 +11197,15 @@ body.idi-en [data-solo-es]{display:none !important;}
       const minsCrew = {}, minsTemp = {};
       te.forEach(e => { minsCrew[e.user_id] = (minsCrew[e.user_id]||0) + (hoursBetween(e.clock_in, e.clock_out)||0); });
       ch.forEach(h => { minsTemp[h.casual_worker_id] = (minsTemp[h.casual_worker_id]||0) + Math.round((+h.reported_hours||0)*60); });
+      // REDONDEAR CADA TURNO (25 oct 2026, el dueño: "Redondear cada turno"). El dinero de AMG es la suma
+      // de cada turno ya redondeado al centavo, igual que la ficha de pago (payFor / payForCasual), lo que se
+      // guarda al pagar y lo que dice Lumi. Antes era horas totales x tarifa: un centavo distinto.
+      const dineroTurnos = (lista, idDe, minsDe, tarifaDe) => { const o = {};
+        lista.forEach(x => { const k = idDe(x), rr = tarifaDe(k); if(rr === null || rr === undefined) return;
+          o[k] = (o[k] || 0) + Math.round((minsDe(x) / 60) * (+rr || 0) * 100) / 100; });
+        Object.keys(o).forEach(k => { o[k] = Math.round(o[k]*100)/100; }); return o; };
+      const owedCrew = dineroTurnos(te, e => e.user_id, e => hoursBetween(e.clock_in, e.clock_out) || 0, mgRateCrew);
+      const owedTemp = dineroTurnos(ch, h => h.casual_worker_id, h => (+h.reported_hours || 0) * 60, mgRateTemp);
 
       // ---- ¿CUADRA CON EL REPORTE DE MUDANZA? (18 sep 2026) ----
       //
@@ -11287,7 +11297,7 @@ body.idi-en [data-solo-es]{display:none !important;}
       });
       // El monto se saca ANTES de ordenar y se reusa al pintar: una sola
       // aritmetica, para que el orden y el numero no se puedan separar.
-      rows.forEach(r => { r.debe = (r.rate === null) ? null : (r.mins / 60) * (+r.rate); });
+      rows.forEach(r => { r.debe = (r.rate === null) ? null : ((r.tipo === 'c' ? owedCrew : owedTemp)[r.id] || 0); });
       rows.sort(ordenPorDeuda);
       others.sort((a,b) => a.name.localeCompare(b.name));   // estos no deben nada: por nombre, para buscarlos
       if(sel){
@@ -14911,8 +14921,10 @@ body.idi-en [data-solo-es]{display:none !important;}
       let grand = 0, missing = 0, totalMins = 0, credit = 0, creditPeople = 0;
       const rowsHtml = visible.map(w => {
         const b = casualBalanceOf(w.id);
+        // Sin tarifa el renglon dice "sin tarifa" y no da numero: tampoco entra
+        // al total (antes si lo sumaba y la pantalla se contradecia sola).
         if(b.unpriced) missing++;
-        if(b.balance > 0.004) grand += b.balance;
+        else if(b.balance > 0.004) grand += b.balance;
         else if(b.balance < -0.004){ credit += -b.balance; creditPeople++; }
         totalMins += b.openMins;
         const owedTxt = b.unpriced ? 'sin tarifa'
@@ -41564,31 +41576,41 @@ body.idi-en [data-solo-es]{display:none !important;}
     // "Ya pagados" es un historial, no una cuenta por pagar: ahi no hay nada
     // que deber, asi que se queda por nombre para poder buscar a alguien.
     const all = teamPaidView ? [...people.values()].sort((a,b)=>a.name.localeCompare(b.name)) : list;
+    // TOTAL A PAGAR NETO (25 oct 2026, decision del dueno): el renglon y el
+    // total restan lo que ya se le dio (adelantos, pagos que esperan su
+    // respuesta, extras), con la MISMA cuenta de la ficha (renderPerson:
+    // partialPaid). Antes sumaban las horas en bruto: con un adelanto de $300
+    // la lista decia $300 de mas que la ficha y que Lumi. Quien no tiene
+    // tarifa no da numero y no entra al total ("falta la tarifa de N"); si no
+    // se pudo leer su dinero (TEAM_GIVEN null) se queda el bruto y abajo sale
+    // el aviso rojo de siempre.
+    let grand = 0, missing = 0;
     if(!teamPaidView){
       all.forEach(p => {
-        if(p.alDia){ p.debe = (p.given === null) ? null : Math.round((0 - p.given)*100)/100; return; }
+        if(p.alDia){ p.debe = (p.given === null) ? null : Math.round((0 - p.given)*100)/100; if(p.debe !== null && p.debe > 0.004) grand += p.debe; return; }
         const r = rateOf(p.key);
         const pg = payFor(p.rows, r, mgRateCrew(p.key));
         p._pay = pg;                                           // se reusa abajo: una sola cuenta
-        p.debe = (pg.wasPaid || r !== null) ? pg.amount : null;
+        const show = pg.wasPaid || r !== null;
+        p._dado = (show && !pg.wasPaid && p.given !== null) ? (+p.given || 0) : 0;
+        p.debe = show ? Math.round((pg.amount - p._dado)*100)/100 : null;
+        if(!show) missing++; else if(p.debe > 0.004) grand += p.debe;
       });
       all.sort(ordenPorDeuda);
     }
-    let grand = 0, missing = 0;
     const payTagOf = key => {
       const alerts = paymentAlerts.filter(pp => pp.user_id === key);
       return alerts.some(pp => pp.accepted === false) ? ' &middot; <span class="paytag-bad">&#10007; Pago rechazado</span>'
         : alerts.some(pp => pp.accepted === null) ? ' &middot; <span class="paytag-wait">&#8987; Esperando respuesta</span>' : '';
     };
     const html = all.map(p => {
-      // TOTAL A PAGAR sigue siendo lo mismo de antes: las horas sin pagar. El
-      // dinero de quien ya no debe horas va en SU renglon, no en el total, para
-      // no mezclar dos cuentas distintas en un solo numero.
+      // El total ya se sumo arriba (neto, igual que la ficha y Lumi).
       if(p.alDia) return teamAlDiaRow(p, payTagOf(p.key));
       const rate = rateOf(p.key);
       const pay  = p._pay || payFor(p.rows, rate, mgRateCrew(p.key));
       const show = pay.wasPaid || rate !== null;      // paid rows carry their own amount
-      if(!show) missing++; else grand += pay.amount;
+      if(teamPaidView){ if(!show) missing++; else grand += pay.amount; }   // TOTAL PAGADO: lo pagado, como siempre
+      const neto = !show ? null : teamPaidView ? pay.amount : p.debe, dado = teamPaidView ? 0 : (p._dado || 0);
       // Unconfirmed hours are still editable by the worker. Paying them means
       // paying a number they have not agreed to yet, so say so on the line.
       const open = p.rows.filter(r => !r.confirmed).length;
@@ -41599,9 +41621,10 @@ body.idi-en [data-solo-es]{display:none !important;}
         <span><span class="who">${esc(p.name)}</span><br>
           <span class="when">${hhmm(pay.minutes)}${
             pay.wasPaid ? '' : ' &middot; ' + (rate === null ? 'falta la tarifa' : money(rate) + '/hora')}${
-            open ? ' &middot; <b>' + open + ' sin confirmar</b>' : ''}${payTag}</span></span>
+            open ? ' &middot; <b>' + open + ' sin confirmar</b>' : ''}${
+            dado ? ' &middot; entregado ' + money(dado) : ''}${payTag}</span></span>
         <span style="display:flex;align-items:center;gap:10px;">
-          <span class="hrs">${show ? money(pay.amount) : '—'}</span>
+          <span class="hrs">${!show ? '—' : neto < -0.004 ? '<span style="color:var(--green);">+' + money(-neto) + '</span>' : money(Math.max(0, neto))}</span>
           <span class="chev">&#9654;</span></span></div>`;
     }).join('');
     box.innerHTML = html + `<div class="entryrow" style="border-top:2px solid var(--line);margin-top:6px">
@@ -44341,6 +44364,10 @@ body.idi-en [data-solo-es]{display:none !important;}
   addKitchenRow();
   addBathroomRow();
 
+  // (R46) El paquete YA arrancó y pintó lo básico: se confirma al nativo lo antes posible (dos cuadros después), con o sin nube.
+  // Antes solo se confirmaba a los 3 s y solo con nube: si el teléfono se cerraba antes, el Actualizador descartaba la web buena.
+  try{ window.__frInitOk = true; requestAnimationFrame(function(){ requestAnimationFrame(function(){ try{ avisarQueAbrioBien(); }catch(e){} }); }); }catch(e){ try{ avisarQueAbrioBien(); }catch(e2){} }
+
   // keep the badge honest while the app is open
   if(cloudOn()){
     refreshInbox();
@@ -45751,7 +45778,7 @@ body.idi-en [data-solo-es]{display:none !important;}
       // vacia y la pantalla decia "Nada todavia".
       const ex = a.ok ? await a.json() : null;
       g.innerHTML = !ex ? FIN_SIN_LEER
-        : (ex.length ? ex.map(r => gastoRowHtml(r, false)).join('') + '<div class="paysum" style="margin-top:8px;"><div class="line"><span>Pendiente de devolver</span><span>' + finMoney(ex.filter(r => !r.reimbursed_at && r.paid_by_kind !== 'e').reduce((s, r) => s + (+r.amount||0), 0)) + '</span></div></div>' : FIN_NADA);
+        : (ex.length ? ex.map(r => gastoRowHtml(r, false)).join('') + '<div class="paysum" style="margin-top:8px;"><div class="line"><span>Pendiente de devolver</span><span>' + finMoney(ex.filter(r => !r.reimbursed_at && r.paid_by_kind !== 'e' && gastoCuenta(r)).reduce((s, r) => s + (+r.amount||0), 0)) + '</span></div>' + (ex.some(r => gastoPorAprobar(r)) ? '<div class="line"><span>Por aprobar (el manager)</span><span>' + finMoney(ex.filter(r => gastoPorAprobar(r)).reduce((s, r) => s + (+r.amount||0), 0)) + '</span></div>' : '') + '</div>' : FIN_NADA);   /* (R47) lo pendiente de aprobar va aparte, como en Lumi */
     }catch(e){ g.innerHTML = FIN_SIN_LEER; }
   }
   async function finPatch(table, id, body){
@@ -53325,7 +53352,12 @@ body.idi-en [data-solo-es]{display:none !important;}
   const asEn = () => !!(window.__idioma && window.__idioma.actual() === 'en');
   const asIdioma = () => asEn() ? 'en-US' : 'es-MX';
   const asIdiomaWeb = () => asEn() ? 'en-US' : 'es-US';
-  const AS_SI_PALABRAS = ['guárdalas','guardalas','guárdalos','guardalos','bien','está','esta','asi','dale pues','mándalo','mandalo','mándala','mandala','mándalos','mandalos','otra','vez','again','guárdalo','guardalo','guárdala','guardala','ándale','andale','porfa','please','yes,','yep','yup','sure','confirm','do','it','go','ahead','send','save','right','sounds','good','looks','sí','si','sip','simón','simon','claro','correcto','exacto','ajá','aja','dale','órale','orale','ok','okay','okey','yes','confirmar','confirma','confirmo','confírmalo','confirmalo','hazlo','registralo','regístralo','va','sale','bueno','listo','así','asi','es','de','acuerdo','adelante','mándalo','mandalo','seguro','cámbiala','cambiala','mándaselo','mandaselo','créalo','crealo','archívalo','archivalo'];
+  // (Voz, 25 oct) El idioma de la VOZ: el de la app, o el de la respuesta que se está diciendo (una plática en inglés
+  // con la app en español). El aparato nuevo escoge su voz en inglés con esto; el viejo lo ignora (sigue en español).
+  const asVozEn = () => asEn() || (typeof AS !== 'undefined' && AS.idiomaResp === 'en');
+  const asIdiomaVoz = () => asVozEn() ? 'en-US' : 'es-MX';
+  const asIdiomaVozWeb = () => asVozEn() ? 'en-US' : 'es-US';
+  const AS_SI_PALABRAS = ['ya','igual','guárdalas','guardalas','guárdalos','guardalos','bien','está','esta','asi','dale pues','mándalo','mandalo','mándala','mandala','mándalos','mandalos','otra','vez','again','guárdalo','guardalo','guárdala','guardala','ándale','andale','porfa','please','yes,','yep','yup','sure','confirm','do','it','go','ahead','send','save','right','sounds','good','looks','sí','si','sip','simón','simon','claro','correcto','exacto','ajá','aja','dale','órale','orale','ok','okay','okey','yes','confirmar','confirma','confirmo','confírmalo','confirmalo','hazlo','registralo','regístralo','va','sale','bueno','listo','así','asi','es','de','acuerdo','adelante','mándalo','mandalo','seguro','cámbiala','cambiala','mándaselo','mandaselo','créalo','crealo','archívalo','archivalo'];
   const AS_NO_PALABRAS = ['nope','negative','incorrect','never','mind','stop','wait','hold','undo','no','nop','nel','negativo','incorrecto','cancela','cancelar','cancélalo','cancelalo','olvídalo','olvidalo','mejor','nada','todavía','todavia','para','espera','déjalo','dejalo'];
   function asPlugin(){ return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AsistenteVoz; }
   function asWebRec(){ return window.SpeechRecognition || window.webkitSpeechRecognition || null; }
@@ -53398,7 +53430,9 @@ body.idi-en [data-solo-es]{display:none !important;}
   }
   // ---- conversación fluida (21 oct 2026, su pedido: "después de que habla tiene que seguir escuchando") ----
   const AS_RELLENOS = ['Ahora te lo entrego.', 'Déjame buscarlo.', 'Un segundito.', 'Ya casi.', 'Ahí voy.', 'Dame dos segundos.', 'Mmm, déjame ver.', 'Ya lo busco.', 'Permíteme.', 'Lo reviso ya.', 'Un momentito.', 'Déjame checar.'];
-  function asRelleno(){ let f; do{ f = AS_RELLENOS[Math.floor(Math.random() * AS_RELLENOS.length)]; }while(f === AS.ultRelleno && AS_RELLENOS.length > 1); AS.ultRelleno = f; return f; }
+  // (Voz, 25 oct) En una plática en inglés (la app en inglés, o la respuesta que va llegando en inglés) el relleno va en inglés.
+  const AS_RELLENOS_EN = ['One sec.', 'Let me check.', 'Give me a second.', 'Almost there.', 'Let me look.', 'On it.', 'Just a moment.', 'Hang on.', 'Checking now.', 'Let me see.'];
+  function asRelleno(){ const L = (asEn() || AS.idiomaResp === 'en') ? AS_RELLENOS_EN : AS_RELLENOS; let f; do{ f = L[Math.floor(Math.random() * L.length)]; }while(f === AS.ultRelleno && L.length > 1); AS.ultRelleno = f; return f; }
   // "para", "ya", "gracias, eso es todo", "adiós": se despide y se queda en reposo hasta el próximo toque.
   const AS_ADIOS_RE = /^(para|ya|ya está|ya estuvo|ya no|gracias|muchas gracias|ok gracias|está bien gracias|listo gracias|gracias listo|eso es todo|gracias eso es todo|eso es todo gracias|nada más|nada mas|adiós|adios|hasta luego|bye|nos vemos|chao)$/;
   function asEsAdios(t){ const l = String(t || '').toLowerCase().replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim(); return AS_ADIOS_RE.test(l); }
@@ -53632,9 +53666,106 @@ body.idi-en [data-solo-es]{display:none !important;}
     if(AS.rec){ try{ AS.rec.onend = null; AS.rec.onresult = null; AS.rec.stop(); }catch(e){} AS.rec = null; }
   }
   // "$1,234.50" -> "1234 dólares con 50 centavos": la voz lo lee mejor que el simbolo.
-  function asParaVoz(t){
-    return String(t || '').replace(/\$\s?(\d[\d,]*)(?:\.(\d{1,2}))?/g, function(m, e, c){ const n = e.replace(/,/g, ''); return n + (n === '1' ? ' dólar' : ' dólares') + (c && +c ? ' con ' + (+c) + ' centavos' : ''); })
-      .replace(/[*_#`]/g, '').replace(/\s+/g, ' ').trim();
+  // (Voz, 25 oct) Y todo lo que se escribe para LEER y se oye mal: horas "08:00 a 16:00" -> "de 8 a 4", "8 h" -> "8 horas",
+  // "15.5" -> "15 punto 5", St/Ave -> Street/Avenue, "+2 Fans" -> "2 ventiladores más", "·" "→" "&" y paréntesis, fechas
+  // 2026-10-24 -> "sábado 24 de octubre", teléfonos en grupos, y en español el catálogo como lo dice la cuadrilla.
+  // Solo cambia lo que se OYE (la pantalla enseña el texto de siempre). `idioma` ('es'/'en'/'en-US'); sin él se adivina.
+  // Autocontenida a propósito: tests/lumi_auditorias_test.mjs y tools/lumi_pruebas/oido la sacan sola del archivo.
+  function asParaVoz(t, idioma){
+    let s = String(t || '').replace(/[*_#`]/g, '');
+    let en;
+    if(idioma) en = /^en/i.test(String(idioma));
+    else{ const w = s.toLowerCase().match(/[a-záéíóúñü']+/g) || []; let ne = 0, ns = 0;
+      const EN = /^(the|you|your|you're|is|are|was|were|has|have|had|and|of|to|in|it|it's|this|that|for|with|on|at|i|i'm|i'll|what|how|there|left|today|yesterday|hours|owe|can|can't|couldn't|do|did|will|would|should|got|from|by|which|want|here|shall)$/;
+      const ES = /^(el|la|los|las|de|del|que|en|un|una|por|para|con|es|son|hay|tienes|debes|hoy|ayer|quedan|horas|solo|puedo|ya|sin|tu|tus|te|le|se|y|lo|al|está|están|qué|cuál|dime)$/;
+      for(const x of w){ if(EN.test(x)) ne++; if(ES.test(x)) ns++; } en = ne > ns; }
+    const MES = en ? ['January','February','March','April','May','June','July','August','September','October','November','December'] : ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const DIA = en ? ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'] : ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+    const decimal = function(e, d){ return e + (en ? ' point ' : ' punto ') + d; };
+    // horas de trabajo: 15.5 -> "15 horas y media"
+    const horasDichas = function(n){
+      n = Math.round((+n || 0) * 100) / 100; const e = Math.floor(n), r = Math.round((n - e) * 60);
+      if(en){ const h = e + (e === 1 ? ' hour' : ' hours'); if(!r) return h; if(r === 30) return e ? e + ' and a half hours' : 'half an hour'; return (e ? h + ' and ' : '') + r + ' minutes'; }
+      const h = e + (e === 1 ? ' hora' : ' horas'); if(!r) return h;
+      if(r === 30) return e ? h + ' y media' : 'media hora'; if(r === 15) return e ? h + ' y cuarto' : 'un cuarto de hora'; if(r === 45) return e ? h + ' y tres cuartos' : 'tres cuartos de hora';
+      return (e ? h + ' y ' : '') + r + ' minutos';
+    };
+    // una hora del reloj: "16:00" -> "4" / "4 de la tarde"; en inglés "4 PM"
+    // conParte: true = siempre "de la mañana/tarde"; 'auto' = solo si se escribió en 24 h ("08:00", "16:30")
+    const hora = function(hh, mm, ampm, conParte){
+      let h = +hh; const m = +(mm || 0); if(h > 23 || m > 59) return null;
+      if(conParte === 'auto') conParte = !!ampm || h >= 13 || (String(hh).length === 2 && String(hh)[0] === '0');
+      if(ampm){ const pm = /^p/i.test(ampm); if(pm && h < 12) h += 12; if(!pm && h === 12) h = 0; }
+      const h12 = h % 12 === 0 ? 12 : h % 12;
+      if(en){ return h12 + (m ? ':' + String(m).padStart(2, '0') : '') + (conParte ? (h < 12 ? ' AM' : ' PM') : ''); }
+      const min = !m ? '' : m === 30 ? ' y media' : m === 15 ? ' y cuarto' : ' y ' + m;
+      const parte = !conParte ? '' : h < 12 ? (h === 0 ? ' de la noche' : ' de la mañana') : h < 13 ? ' del día' : h < 20 ? ' de la tarde' : ' de la noche';
+      return h12 + min + parte;
+    };
+    s = s
+      // fechas 2026-10-24
+      .replace(/\b(con fecha|dated)\s+(?=\d{4}-\d{2}-\d{2}\b)/gi, function(m, a){ return en ? 'dated ' : 'con fecha del '; })
+      .replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, function(m, y, mo, d){ const f = new Date(Date.UTC(+y, +mo - 1, +d)); if(isNaN(f) || +mo < 1 || +mo > 12) return m;
+        const anio = (+y !== new Date().getFullYear()) ? (en ? ', ' + y : ' de ' + y) : '';
+        return en ? DIA[f.getUTCDay()] + ', ' + MES[+mo - 1] + ' ' + (+d) + anio : DIA[f.getUTCDay()] + ' ' + (+d) + ' de ' + MES[+mo - 1] + anio; })
+      // teléfonos en grupos: 703-555-0100 -> "703, 555, 0100"
+      .replace(/\(?\b(\d{3})\)?[-. ](\d{3})[-.](\d{4})\b/g, '$1, $2, $3')
+      // dinero negativo y dinero
+      .replace(/(?:[-−]\s?\$|\$\s?[-−])\s?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/g, function(m, n){ return (en ? 'minus $' : 'menos $') + n; })
+      .replace(/\$\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?!\d)/g, function(m, e, c){ const n = e.replace(/,/g, ''); const cc = c ? (c.length === 1 ? c + '0' : c) : '';
+        if(en) return n + (n === '1' ? ' dollar' : ' dollars') + (cc && +cc ? ' and ' + (+cc) + (+cc === 1 ? ' cent' : ' cents') : '');
+        return n + (n === '1' ? ' dólar' : ' dólares') + (cc && +cc ? ' con ' + (+cc) + (+cc === 1 ? ' centavo' : ' centavos') : ''); })
+      // rangos de horas: "de 08:00 a 16:00", "08:00–16:00" -> "de 8 a 4"
+      .replace(/(\b(?:de|from)\s+)?\b(\d{1,2}):(\d{2})\s?(AM|PM|a\.\s?m\.|p\.\s?m\.)?\s?(?:–|—|-|\ba\b|\bto\b|\bhasta\b)\s?(\d{1,2}):(\d{2})\s?(AM|PM|a\.\s?m\.|p\.\s?m\.)?(?!\d|:\d)/gi, function(m, de, h1, m1, p1, h2, m2, p2){
+        const a = hora(h1, m1, p1, en ? 'auto' : false), b = hora(h2, m2, p2, en ? 'auto' : false); if(a == null || b == null) return m; return (en ? 'from ' : 'de ') + a + (en ? ' to ' : ' a ') + b; })
+      // una hora con AM/PM: "7:30 AM" -> "7 y media de la mañana"
+      .replace(/\b(\d{1,2})(?::(\d{2}))?\s?(AM|PM|a\.\s?m\.|p\.\s?m\.)(?![a-z])/gi, function(m, h, mm, p){ const x = hora(h, mm, p, true); return x == null ? m : x; })
+      // una hora sola de 24: "a las 16:00" -> "a las 4 de la tarde"
+      .replace(/\b(\d{1,2}):(\d{2})\b(?!:\d)/g, function(m, h, mm){ const x = hora(h, mm, null, 'auto'); return x == null ? m : x; })
+      // "8 h", "8.5 h", "15.5 horas", "3 hrs"
+      .replace(/\b(\d+(?:[.,]\d{1,2})?)\s?(?:h|hrs?|horas?|hours?)\b(?![\p{L}\d])/giu, function(m, n){ return horasDichas(String(n).replace(',', '.')); })
+      // porcentajes: "7.5 %" -> "7 y medio por ciento"
+      .replace(/\b(\d+)(?:\.(\d+))?\s?%/g, function(m, e, d){ const pc = en ? ' percent' : ' por ciento'; if(!d) return e + pc; if(/^50?$/.test(d)) return e + (en ? ' and a half' : ' y medio') + pc; return decimal(e, d) + pc; })
+      // miles con coma fuera del dinero: "2,300" -> "2300"
+      .replace(/\b(\d{1,3})((?:,\d{3})+)\b(?![.,]\d)/g, function(m, a, b){ return a + b.replace(/,/g, ''); })
+      // medidas: "2x4", "12 x 20", "9 × 9"
+      .replace(/\b(\d+)\s?[x×]\s?(\d+)\b/g, en ? '$1 by $2' : '$1 por $2')
+      // decimales: "95.2" -> "95 punto 2"
+      .replace(/\b(\d+)\.(\d+)\b/g, function(m, e, d){ return decimal(e, d); })
+      // "+2 Fans" -> "2 Fans más"; "−3 Fans" -> "3 Fans menos"
+      .replace(/(^|[\s:(,;])\+\s?(\d+)\s+([^\s,.;:!?()¿][^,.;:!?()]*)/gu, function(m, a, n, x){ x = x.replace(/\s+$/, ''); return a + (en ? n + ' more ' + x : n + ' ' + x + ' más'); })
+      .replace(/(^|[\s:(,;])−\s?(\d+)\s+(\p{L}[^,.;:!?()]*)/gu, function(m, a, n, x){ x = x.replace(/\s+$/, ''); return a + (en ? n + ' fewer ' + x : n + ' ' + x + ' menos'); })
+      .replace(/(\d)\s?\+\s?(\d)/g, en ? '$1 plus $2' : '$1 más $2')
+      // símbolos
+      .replace(/\s*[·•]\s*/g, ', ')
+      .replace(/\s*(?:→|->|=>|⇒|➜|➡)\s*/g, en ? ', then ' : ', en ')
+      .replace(/\s*&\s*/g, en ? ' and ' : ' y ')
+      // calles: "45 Test Ave" -> "45 Test Avenue"
+      .replace(/(\p{L}\s)(St|Ave|Av|Rd|Dr|Blvd|Ln|Ct|Hwy|Pkwy|Pl)(?=\s*(?:[,;:!?)]|\.(?:\s|$)|$))/gu, function(m, a, c){ return a + ({ St: 'Street', Ave: 'Avenue', Av: 'Avenue', Rd: 'Road', Dr: 'Drive', Blvd: 'Boulevard', Ln: 'Lane', Ct: 'Court', Hwy: 'Highway', Pkwy: 'Parkway', Pl: 'Place' })[c]; })
+      // siglas del oficio
+      .replace(/\bGPP\b/g, en ? 'grains per pound' : 'granos por libra')
+      .replace(/\b(\d[\d.,]*)\s?(?:SF|sq ?ft|sqft|ft2|pies2)\b/gi, en ? '$1 square feet' : '$1 pies cuadrados')
+      .replace(/\b(\d[\d.,]*)\s?LF\b/g, en ? '$1 linear feet' : '$1 pies lineales')
+      .replace(/\bSF\b/g, en ? 'square feet' : 'pies cuadrados').replace(/\bLF\b/g, en ? 'linear feet' : 'pies lineales')
+      .replace(/\b(\d[\d.,]*)\s?lbs?\b/gi, en ? '$1 pounds' : '$1 libras').replace(/\b(\d[\d.,]*)\s?ft\b/gi, en ? '$1 feet' : '$1 pies')
+      .replace(/\bRH\b/g, en ? 'relative humidity' : 'humedad relativa')
+      .replace(/\b(aprox|approx)\.?(?=\s|$)/gi, en ? 'about' : 'aproximadamente').replace(/\betc\.?(?=\s|$)/gi, en ? 'et cetera' : 'etcétera');
+    if(!en){
+      s = s.replace(/\bPPE\b/g, 'equipo de protección').replace(/\bAMG\b/g, 'a eme ge');
+      // el catálogo y los cuartos como los dice la cuadrilla (la hoja los guarda en inglés)
+      const CU = { 'master bedroom': ['recámara principal', 'la'], 'living room': ['sala', 'la'], 'dining room': ['comedor', 'el'], 'laundry room': ['lavandería', 'la'], 'powder room': ['medio baño', 'el'], 'kitchen': ['cocina', 'la'], 'bathroom': ['baño', 'el'], 'bedroom': ['recámara', 'la'], 'basement': ['sótano', 'el'], 'hallway': ['pasillo', 'el'], 'garage': ['garaje', 'el'], 'attic': ['ático', 'el'], 'office': ['oficina', 'la'], 'stairs': ['escaleras', 'las'], 'entry': ['entrada', 'la'] };
+      const SUP = { wall: 'pared', walls: 'paredes', floor: 'piso', ceiling: 'techo' };
+      const cuartos = Object.keys(CU).join('|');
+      s = s.replace(new RegExp('\\b(' + cuartos + ')\\s+(wall|walls|floor|ceiling|drywall|tile|carpet|baseboard|subfloor|cabinets?|plywood|concrete)\\b', 'gi'), function(m, c, x){ const k = CU[c.toLowerCase()], de = k[1] === 'el' ? 'del ' : 'de ' + k[1] + ' '; return (SUP[x.toLowerCase()] || x.toLowerCase()) + ' ' + de + k[0]; })
+        .replace(new RegExp('\\b(' + cuartos + ')\\b', 'gi'), function(m, c){ return CU[c.toLowerCase()][0]; });
+      const CAT = [['dehumidifier drip pans', 'bandejas de goteo'], ['zip wall poles', 'postes de zip wall'], ['ozone machines?', 'máquinas de ozono'], ['air scrubbers', 'purificadores de aire'], ['air scrubber', 'purificador de aire'], ['air movers', 'ventiladores'], ['air mover', 'ventilador'], ['air ducts', 'ductos de aire'], ['dry mats', 'tapetes secos'], ['trash cans', 'botes de basura'],
+        ['small boxes', 'cajas pequeñas'], ['medium boxes', 'cajas medianas'], ['large boxes', 'cajas grandes'], ['wardrobe boxes', 'cajas de guardarropa'], ['paper pads?', 'almohadilla de papel'], ['packing paper', 'papel de embalaje'], ['mattress bags', 'bolsas para colchón'], ['stretch wrap', 'envoltura elástica'],
+        ['2 por 4 lumber', 'tablas de 2 por 4'], ['lumber', 'madera'], ['dehumidifiers', 'deshumidificadores'], ['dehumidifier', 'deshumidificador'], ['fans', 'ventiladores'], ['fan', 'ventilador'], ['generators', 'generadores'], ['heaters', 'calentadores'], ['zippers', 'cierres'], ['blankets', 'cobijas'], ['tarps', 'lonas'], ['nails', 'clavos'], ['rope', 'cuerda'], ['boxes', 'cajas']];
+      for(const [a, b] of CAT) s = s.replace(new RegExp('(^|[^\\p{L}])' + a + '(?![\\p{L}])', 'giu'), function(m, pre){ return pre + b; });
+    }
+    // paréntesis -> comas (la aclaración queda como pausa, no a media frase)
+    s = s.replace(/\s*\(([^()]*)\)/g, function(m, x){ x = x.trim(); return x ? ', ' + x + ',' : ''; }).replace(/[()]/g, '');
+    return s.replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$1').replace(/,(\s*[,.;:!?])+/g, function(m){ return m.replace(/^,\s*/, ''); }).replace(/([¿¡])\s*,\s*/g, '$1').replace(/^[,\s]+/, '').replace(/,\s*$/, '').replace(/:\s*,/g, ':').trim();
   }
   // La mejor voz en español del navegador: femenina, de calidad (Safari expone Paulina/Mónica mejoradas con el
   // MISMO nombre que las compactas; se distinguen por "compact" en el voiceURI), México/EE. UU. antes que España.
@@ -53644,7 +53775,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     if(/compact/i.test(uri) || /compact/i.test(nom)) p -= 6;
     if(/premium/i.test(uri + nom)) p += 5; else if(/enhanced|mejorad|super-compact/i.test(uri + nom)) p += 3;
     if(AS_VOCES_FEM.test(nom)) p += 3;
-    if(asEn()){ if(/en-US/i.test(v.lang)) p += 2; else if(/^en/i.test(v.lang)) p += 1; if(/google/i.test(nom) && /en-US/i.test(v.lang)) p += 2; }
+    if(asVozEn()){ if(/en-US/i.test(v.lang)) p += 2; else if(/^en/i.test(v.lang)) p += 1; if(/google/i.test(nom) && /en-US/i.test(v.lang)) p += 2; }
     else{ if(/es-MX|es-US/i.test(v.lang)) p += 2; else if(/es-419|es-CO|es-AR/i.test(v.lang)) p += 1;
     if(/google/i.test(nom) && /es-US/i.test(v.lang)) p += 2; }   // Chrome: "Google español de Estados Unidos" suena bien
     if(v.localService) p += 0.5;
@@ -53652,7 +53783,8 @@ body.idi-en [data-solo-es]{display:none !important;}
   }
   function asVozWeb(){
     try{
-      const vs = speechSynthesis.getVoices().filter(v => /^es/i.test(v.lang));
+      const re = asVozEn() ? /^en/i : /^es/i;
+      const vs = speechSynthesis.getVoices().filter(v => re.test(v.lang));
       if(!vs.length) return null;
       return vs.slice().sort((a, b) => asPuntajeVoz(b) - asPuntajeVoz(a))[0];
     }catch(e){ return null; }
@@ -53668,7 +53800,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   }
   // UNA frase a la cola de la voz. encolar=true no corta lo que se esta diciendo (streaming frase por frase).
   async function asDecir(t, encolar){
-    t = asParaVoz(asTrVoz(t)); if(!t) return 0;
+    t = asParaVoz(asTrVoz(t), asEn() ? 'en' : (AS.idiomaResp || 'es')); if(!t) return 0;
     asEstado('hablando', ''); if(window.Cara){ try{ Cara.hablando(true, t); }catch(err){} }
     setTimeout(asVigilarInterrupcion, 250);   // barge-in (si está prendido): también con frases encoladas del stream
     const S = asPlugin();
@@ -53686,7 +53818,7 @@ body.idi-en [data-solo-es]{display:none !important;}
       // termine (su hablaFin, o 4 s) y la respuesta sale como tanda propia.
       if(AS.rellenoEspera){ asBit('respuesta espera al relleno'); await AS.rellenoEspera; }
       const t0h = Date.now(); let r = null, fallo = '';
-      try{ r = await Promise.race([S.hablar({ texto: t, idioma: asIdioma(), preferida: true, encolar: !!encolar }), new Promise(function(res){ setTimeout(function(){ res(null); }, 4000); })]); if(r && r.segundos) ms = r.segundos * 1000; else if(!r) fallo = 'hablar no contestó en 4 s'; else if(r.ok === false) fallo = 'hablar ok=false'; }catch(e){ fallo = 'hablar error ' + asTapar((e && e.message) || e); ms = 0; AS.esperaFin = false; }
+      try{ r = await Promise.race([S.hablar({ texto: t, idioma: asIdiomaVoz(), preferida: true, encolar: !!encolar }), new Promise(function(res){ setTimeout(function(){ res(null); }, 4000); })]); if(r && r.segundos) ms = r.segundos * 1000; else if(!r) fallo = 'hablar no contestó en 4 s'; else if(r.ok === false) fallo = 'hablar ok=false'; }catch(e){ fallo = 'hablar error ' + asTapar((e && e.message) || e); ms = 0; AS.esperaFin = false; }
       finally{ AS.vozEnVuelo = Math.max(0, (AS.vozEnVuelo || 1) - 1); }
       asBit('hablar(' + t.length + ' letras' + (encolar ? ', encolar' : '') + ') -> ' + (fallo || ('ok ' + (r && r.segundos ? (+r.segundos).toFixed(1) + ' s' : '?'))) + ' en ' + (Date.now() - t0h) + ' ms');
       if(fallo && fallo !== 'hablar no contestó en 4 s'){ asDecirRespaldo(t, fallo); return ms || t.length * 85; }
@@ -53703,7 +53835,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     if(window.speechSynthesis){
       try{
         if(!encolar) speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(t); u.lang = asIdiomaWeb(); const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */
+        const u = new SpeechSynthesisUtterance(t); u.lang = asIdiomaVozWeb(); const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */
         AS.ultimaU = u;
         u.onend = u.onerror = function(){ if(AS.ultimaU === u) AS.hablaHasta = Math.min(AS.hablaHasta, Date.now()); };
         speechSynthesis.speak(u);
@@ -53733,7 +53865,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     asBit('RESPALDO voz del WebView (' + porque + '): ' + String(t || '').length + ' letras');
     if(!window.speechSynthesis){ asBit('sin speechSynthesis: no hay respaldo'); return; }
     try{
-      const u = new SpeechSynthesisUtterance(t); u.lang = asIdiomaWeb(); const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0;
+      const u = new SpeechSynthesisUtterance(t); u.lang = asIdiomaVozWeb(); const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0;
       const ms = String(t || '').length * 85 + 600;
       AS.esperaFin = false; AS.finPendiente = false; AS.ultimaU = u;
       AS.hablaHasta = Math.max(AS.hablaHasta || 0, Date.now()) + ms; AS.hablaLimite = AS.hablaHasta + 3000;
@@ -53750,8 +53882,8 @@ body.idi-en [data-solo-es]{display:none !important;}
       // (R2) La respuesta espera a que el relleno termine (su hablaFin, o 4 s como tope): nunca se encola detrás.
       AS.rellenoActivo = true; AS.rellenoEspera = new Promise(function(res){ AS.rellenoFin = res; }); clearTimeout(AS.tmrRellenoTope); AS.tmrRellenoTope = setTimeout(function(){ if(AS.rellenoActivo){ asBit('relleno: 4 s sin hablaFin, sigue la respuesta'); asRellenoTermino(); } }, 4000);
       asBit('relleno (' + t.length + ' letras)');
-      try{ Promise.resolve(S.hablar({ texto: t, idioma: asIdioma(), preferida: true })).then(fin, function(){ fin({ ok: false }); }); }catch(e){ fin({ ok: false }); } setTimeout(fin, 4000); return; }
-    if(window.speechSynthesis){ try{ const u = new SpeechSynthesisUtterance(t); u.lang = asIdiomaWeb(); const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */ speechSynthesis.speak(u); }catch(e){} }
+      try{ Promise.resolve(S.hablar({ texto: t, idioma: asIdiomaVoz(), preferida: true })).then(fin, function(){ fin({ ok: false }); }); }catch(e){ fin({ ok: false }); } setTimeout(fin, 4000); return; }
+    if(window.speechSynthesis){ try{ const u = new SpeechSynthesisUtterance(t); u.lang = asIdiomaVozWeb(); const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */ speechSynthesis.speak(u); }catch(e){} }
   }
   function asCallar(){
     clearTimeout(AS.tmrHabla); clearTimeout(AS.tmrRelleno); AS.hablaHasta = 0; AS.esperaFin = false; AS.finPendiente = false; AS.textoTanda = '';
@@ -53798,7 +53930,8 @@ body.idi-en [data-solo-es]{display:none !important;}
           chunk.split('\n').forEach(function(line){
             if(!line.startsWith('data:')) return;
             let o = null; try{ o = JSON.parse(line.slice(5).trim()); }catch(e){ return; }
-            if(o && typeof o.t === 'string') onTexto(o.t);
+            if(o && typeof o.i === 'string' && /^(es|en)$/.test(o.i)) AS.idiomaResp = o.i;   // (Voz) el idioma de ESTA respuesta, para decirla
+            if(o && typeof o.t === 'string') onTexto(o.t, typeof o.d === 'string' ? o.d : null);   // (Voz) `d` = cómo se dice (servidor nuevo)
             if(o && typeof o.g === 'string' && window.Cara){ try{ Cara.gesto(o.g); }catch(err){} }
             if(o && o.fin){ fin = o.fin; status = o.status || 200; }
           });
@@ -53874,17 +54007,19 @@ body.idi-en [data-solo-es]{display:none !important;}
     // Siri-like: si el modelo tarda, a los 1.6 s dice algo corto para que no sienta el silencio.
     clearTimeout(AS.tmrRelleno);
     AS.tmrRelleno = setTimeout(function(){ if(AS.estado === 'pensando' && AS.enviando) asDecirSuave(asRelleno()); }, 1600);
-    let dicho = '', pendiente = '', primerTrozo = 0;
+    let dicho = '', pendiente = '', primerTrozo = 0, visto = '', conD = false;
     // Frase por frase solo donde la cola de voz existe: web (speechSynthesis) o aparato 17+ (el plugin con
     // `vozInfo` es el que entiende `encolar`). Un aparato viejo cortaria cada frase con la siguiente.
     const Sv = asPlugin(); const porFrases = !isNative() || !!(Sv && Sv.vozInfo);
     const filtroCara = window.Cara ? Cara.filtroDeTrozos() : null;
-    const onTexto = function(t){
+    const onTexto = function(t, d){
       // La etiqueta [gesto:x] del modelo va a la cara, nunca a la voz (puede llegar partida en varios trozos).
       if(filtroCara){ const f = filtroCara(t); if(f.gesto){ try{ Cara.gesto(f.gesto); }catch(err){} } t = f.texto; if(!t) return; }
       if(!primerTrozo){ primerTrozo = Date.now() - t0; clearTimeout(AS.tmrRelleno); }
-      pendiente += t;
-      asMostrarRespuesta(dicho + pendiente);
+      // (Voz, 25 oct) La pantalla enseña `t` (para leer); la voz dice `d` cuando el servidor lo manda (para oír).
+      visto += t;
+      if(typeof d === 'string' && d){ conD = true; if(window.Cara){ try{ d = Cara.limpiarEtiqueta(d).texto; }catch(err){} } pendiente += d; } else pendiente += t;
+      asMostrarRespuesta(visto);
       if(!porFrases) return;
       const f = asFrasesCompletas(pendiente);
       // (R1) Todas las oraciones completas de este trozo en UNA llamada: si la voz Premium tarda en arrancar, el aparato 19
@@ -53913,7 +54048,11 @@ body.idi-en [data-solo-es]{display:none !important;}
       const nav = (esGal || esIdioma) ? null : j.navegar;
       // Lo que falto por decir (lo que no llego por el stream, o el remate sin punto).
       const norm = function(x){ return String(x || '').replace(/\s+/g, ' ').trim(); };
-      const faltante = asFaltante(final, dicho);
+      // (Voz) Lo que se oye: `dicho` del servidor si lo dicho hasta ahora salió de él (o todavía no se dijo nada).
+      let paraOir = final;
+      if(typeof j.dicho === 'string' && j.dicho.trim() && (conD || !norm(dicho))){ paraOir = j.dicho; if(window.Cara){ try{ paraOir = Cara.limpiarEtiqueta(paraOir).texto; }catch(err){} } }
+      if(j.idioma === 'es' || j.idioma === 'en') AS.idiomaResp = j.idioma;
+      const faltante = asFaltante(paraOir, dicho);
       if(faltante) await asDecir(faltante, !!norm(dicho));
       AS.enviando = false;
       asAlTerminarDeHablar(function(){
@@ -54425,8 +54564,8 @@ body.idi-en [data-solo-es]{display:none !important;}
       // Fase 2a: lo guardado (una visita) trae a dónde ir; se abre DESPUÉS de decir "Listo", nunca con una tarjeta en espera.
       const navC = (!j.confirmacion && j.navegar) ? j.navegar : null;
       // (R43) la tarjeta del grupo: la MISMA acción de siempre (armar las hojas y abrir Mensajes al grupo)
-      if(navC && navC.pantalla === 'labor_log_mandar'){ asHablar(j.texto || 'Listo.', function(){ asCerrar(); laborMandarHojas(navC).catch(function(e){ alert('No se pudo mandar el labor log.\n\n' + ((e && e.message) || e)); }); }); return; }
-      asHablar(j.texto || 'Listo.', function(){ if(navC){ asNavegar(navC); return; } asSeguirOyendo(); });
+      if(navC && navC.pantalla === 'labor_log_mandar'){ asHablar(j.dicho || j.texto || 'Listo.', function(){ asCerrar(); laborMandarHojas(navC).catch(function(e){ alert('No se pudo mandar el labor log.\n\n' + ((e && e.message) || e)); }); }); return; }
+      asHablar(j.dicho || j.texto || 'Listo.', function(){ if(navC){ asNavegar(navC); return; } asSeguirOyendo(); });
       return;
     }catch(e){
       $$('#asTarjeta button').forEach(b => { b.disabled = false; });
@@ -54767,12 +54906,14 @@ body.idi-en [data-solo-es]{display:none !important;}
   function asCmdInterpretar(texto, norm){
     const l = (norm || function(t){ return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim(); })(texto);
     if(!l) return null;
-    if(AS_CMD_LLAMAR.test(l) && !AS_CMD_PREGUNTA.test(l)) return { tipo: 'contactar', canal: 'llamada', quien: asCmdQuien(l) };
+    if(AS_CMD_LLAMAR.test(l) && !AS_CMD_PREGUNTA.test(l) && !/\b(se llama|se yama|que se llama|me llamo|como se llama|llamado|llamada de)\b/.test(l)) return { tipo: 'contactar', canal: 'llamada', quien: asCmdQuien(l) };   // (R47) "cliente nuevo se llama Rosa" no es llamar
     if(AS_CMD_MENSAJE.test(l) && !AS_CMD_PREGUNTA.test(l) && /\b(mensaje|texto|text|message|sms)\b/.test(l)) return { tipo: 'contactar', canal: 'mensaje', quien: asCmdQuien(l) };
     let destino = '';
     for(let i = 0; i < AS_CMD_PANTALLAS.length; i++){ if(AS_CMD_PANTALLAS[i][0].test(l)){ destino = AS_CMD_PANTALLAS[i][1]; break; } }
     if(!destino) return null;
     if(AS_CMD_COMPUESTO.test(l)) return null;
+    // (R25) "ábreme el secado de johnson": la hoja de ESA casa la abre la función (sabe las casas y los permisos)
+    if(AS_CMD_FORMS[destino] && AS_CMD_VERBO_ABRIR.test(l) && /\b(secado|lecturas|drying|readings|equipo|equipment|conteo|materiales|materials|comunicacion|communication|contenidos|contents|moisture map|mapa de humedad)\b\s+(de|del|de la|for|at|en)\s+\S+/.test(l)) return null;
     if(AS_CMD_DE_ALGUIEN.test(l) || AS_CMD_DE_ALGUIEN_EN.test(l)) return null;   // (R25 Candado) "abre la ficha de horas de Aníbal": la de OTRA persona la decide la función (rol)
     if(AS_CMD_PREGUNTA.test(l) && !AS_CMD_VERBO_ABRIR.test(l)) return null;     // "cuántas horas llevo", "what is the drying": son preguntas, van al modelo
     if(AS_CMD_FORMS[destino] && AS_CMD_VERBO_LLENAR.test(l) && !AS_CMD_VERBO_ABRIR.test(l) && !AS_CMD_VER.test(l)) return { tipo: 'formulario', form: destino };
