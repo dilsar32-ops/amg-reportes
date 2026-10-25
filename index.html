@@ -10599,7 +10599,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-24-R41';
+  const APP_BUILD = '2026-10-24-R42';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -53306,7 +53306,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   function asMostrarRespuesta(t){ const e = $('#asRespuesta'); if(e) e.textContent = t || ''; }
   function asAbrir(){
     if(!signedIn()) return;
-    AS.abierto = true; AS.historial = []; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asTranscribir('');
+    AS.abierto = true; AS.historial = []; AS.dictado = null; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asTranscribir('');
     const p = $('#asPanel'); if(p){ p.hidden = false; p.classList.toggle('as-prueba-on', AS.sandbox); }
     asEstado('esperando', '');
     { const v = $('#asVersion'); if(v) v.textContent = 'Versión ' + String(APP_BUILD).replace(/^\d{4}-\d{2}-\d{2}-/, '') + ' · ' + String(APP_BUILD).slice(0, 10); }
@@ -53747,7 +53747,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     let tmr = null; const armar = function(){ if(!ctl) return; clearTimeout(tmr); tmr = setTimeout(function(){ try{ ctl.abort(); }catch(e){} }, 35000); };
     armar();
     let res;
-    try{ res = await authFetch('/functions/v1/asistente', Object.assign({ method:'POST', headers: cloudHeaders(), body: JSON.stringify(Object.assign({ idiomaApp: asEn() ? 'en' : 'es', capacidades: ['galeria', 'idioma', 'reporte'] }, quiereStream ? Object.assign({ stream:true }, body) : body)) }, ctl ? { signal: ctl.signal } : {})); }
+    try{ res = await authFetch('/functions/v1/asistente', Object.assign({ method:'POST', headers: cloudHeaders(), body: JSON.stringify(Object.assign({ idiomaApp: asEn() ? 'en' : 'es', capacidades: ['galeria', 'idioma', 'reporte', 'dictado'] }, quiereStream ? Object.assign({ stream:true }, body) : body)) }, ctl ? { signal: ctl.signal } : {})); }
     catch(e){ clearTimeout(tmr); throw e; }
     const ct = (res.headers.get('content-type') || '');
     if(quiereStream && res.ok && /text\/event-stream/.test(ct) && res.body && res.body.getReader){
@@ -53797,9 +53797,11 @@ body.idi-en [data-solo-es]{display:none !important;}
     for(; i < frases.length; i++){ const kf = k(frases[i]); if(!kf) continue; if(resto.startsWith(kf)) resto = resto.slice(kf.length); else break; }
     return frases.slice(i).join(' ').trim();
   }
-  async function asEnviar(texto, desdeTeclado){
+  async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
+    // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
+    const dictando = !!AS.dictado;
     // (R40) Con la galería abierta: "la siguiente", "la segunda", "ciérrala" se resuelven aquí
     if(AS_GAL.p && !AS.conf && !AS.pregunta && asGalPorVoz(texto)){ asTranscribir(texto); asSeguirOyendo(); return; }
     // (22 oct) Con un preview en pantalla: "sí/ok" y "no/cancela" lo resuelven aquí; una corrección larga sigue al modelo.
@@ -53827,11 +53829,11 @@ body.idi-en [data-solo-es]{display:none !important;}
       if(asEsSi(low)) return asConfirmar();
       if(asEsNo(low)) return asCancelar();
     }
-    if(!AS.conf && asEsAdios(texto)){ asTranscribir(texto); asPararOido(); asMostrarRespuesta('Aquí estoy.'); asHablar('Aquí estoy.', function(){ asReposar(); }); return; }
+    if(!AS.conf && !dictando && asEsAdios(texto)){ asTranscribir(texto); asPararOido(); asMostrarRespuesta('Aquí estoy.'); asHablar('Aquí estoy.', function(){ asReposar(); }); return; }
     // (Brújula) "quiero sacar medidas" / "hacer el plano": todo en el teléfono (ubicación + abrir), sin ir al modelo.
-    if(!AS.conf){ const med = asEsMedir(texto); if(med){ asTranscribir(texto); asPararOido(); return asMedirAqui(med.que, { nivel: med.nivel, cliente: med.cliente }); } }
-    if(!AS.conf){ const cmd = asCmdInterpretar(texto, asMedirNorm); if(cmd){ asTranscribir(texto); asPararOido(); return asComando(cmd); } }
-    asTranscribir(texto); asEstado('pensando', 'Un momento…'); AS.enviando = true; asMostrarRespuesta('');
+    if(!AS.conf && !dictando){ const med = asEsMedir(texto); if(med){ asTranscribir(texto); asPararOido(); return asMedirAqui(med.que, { nivel: med.nivel, cliente: med.cliente }); } }
+    if(!AS.conf && !dictando){ const cmd = asCmdInterpretar(texto, asMedirNorm); if(cmd && !(AS.sandbox && cmd.tipo === 'formulario' && cmd.form === 'equipo')){ asTranscribir(texto); asPararOido(); return asComando(cmd); } }
+    if(!oculto) asTranscribir(texto); asEstado('pensando', 'Un momento…'); AS.enviando = true; asMostrarRespuesta('');
     asCallar();
     const t0 = Date.now();
     // Siri-like: si el modelo tarda, a los 1.6 s dice algo corto para que no sienta el silencio.
@@ -53855,10 +53857,11 @@ body.idi-en [data-solo-es]{display:none !important;}
       if(f.listas.length){ const junto = f.listas.join(' '); asDecir(junto, true); dicho += junto + ' '; pendiente = f.resto; }
     };
     try{
-      const r = await asLlamar({ texto: texto, historial: AS.historial, sandbox: AS.sandbox }, onTexto);
+      const r = await asLlamar(Object.assign({ texto: texto, historial: AS.historial, sandbox: AS.sandbox }, AS.dictado ? { dictado: AS.dictado } : {}), onTexto);
       const j = r.json || {};
       if(!(r.ok && j.ok)) throw new Error(j.error || ('HTTP ' + r.status));
       AS.historial = j.historial || AS.historial;
+      if('dictado' in j) AS.dictado = j.dictado || null; else if(dictando) AS.dictado = null;
       AS.ultMs = Date.now() - t0; AS.ultPrimerTrozo = primerTrozo;
       let final = String(j.texto || (j.confirmacion ? j.confirmacion.resumen + '. ¿Lo registro?' : 'No entendí. Dímelo otra vez.'));
       if(window.Cara){ try{ const l = Cara.limpiarEtiqueta(final); final = l.texto; const g = j.confirmacion ? 'pregunta' : (j.gesto || l.gesto || Cara.gestoDelTexto(final)); if(g) Cara.gesto(g, undefined, { texto: final, dinero: !!j.confirmacion }); }catch(err){} }
@@ -54783,6 +54786,11 @@ body.idi-en [data-solo-es]{display:none !important;}
   }
   function asCmdAbrirForm(form, t){
     try{ mcVisto(t, 'lumi'); }catch(e){}
+    // (R42) "quiero llenar el equipo": la casa ya está; Lumi se queda oyendo el dictado (la hoja se abre solo si dice "ábreme la hoja")
+    if(form === 'equipo'){
+      AS.dictado = { v: 1, tipo: 'equipo', casa: null, esperandoCasa: true, filas: [], nCuartos: 1 };
+      AS.pregunta = null; AS.enviando = false; try{ asPararOido(); }catch(e){} return asEnviar(t.cliente || t.nombre || asMedirDireccion(t), false, true);
+    }
     const m = 'Listo. ' + asCmdNombrePantalla(form) + ' de ' + (t.cliente || asMedirDireccion(t)) + '.';
     asCmdDecir(m, function(){ asNavegar({ pantalla: 'formulario', form, trabajo: t }); });
   }
@@ -55136,7 +55144,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     const mandar = function(){ const t = (ent && ent.value || '').trim(); if(!t) return; ent.value = ''; asCallar(); asPararOido().then(function(){ asEnviar(t, true); }); };
     if(env) env.addEventListener('click', mandar);
     if(ent) ent.addEventListener('keydown', function(ev){ if(ev.key === 'Enter'){ ev.preventDefault(); mandar(); } });
-    const sb = $('#asSandbox'); if(sb) sb.addEventListener('change', function(){ AS.sandbox = !!sb.checked; AS.historial = []; asQuitarTarjeta(); const p = $('#asPanel'); if(p) p.classList.toggle('as-prueba-on', AS.sandbox); asMostrarRespuesta(AS.sandbox ? 'Modo prueba: nombres inventados, nada se guarda.' : 'Datos reales.'); });
+    const sb = $('#asSandbox'); if(sb) sb.addEventListener('change', function(){ AS.sandbox = !!sb.checked; AS.historial = []; AS.dictado = null; asQuitarTarjeta(); const p = $('#asPanel'); if(p) p.classList.toggle('as-prueba-on', AS.sandbox); asMostrarRespuesta(AS.sandbox ? 'Modo prueba: nombres inventados, nada se guarda.' : 'Datos reales.'); });
     // Chrome carga las voces tarde.
     if(window.speechSynthesis && speechSynthesis.addEventListener) speechSynthesis.addEventListener('voiceschanged', function(){ if(AS.abierto) asRevisarVoz(); });
     const vya = $('#asVozYa'); if(vya) vya.addEventListener('click', function(){ asRevisarVoz(); });
