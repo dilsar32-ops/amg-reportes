@@ -10599,7 +10599,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-24-R40';
+  const APP_BUILD = '2026-10-24-R41';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -53747,7 +53747,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     let tmr = null; const armar = function(){ if(!ctl) return; clearTimeout(tmr); tmr = setTimeout(function(){ try{ ctl.abort(); }catch(e){} }, 35000); };
     armar();
     let res;
-    try{ res = await authFetch('/functions/v1/asistente', Object.assign({ method:'POST', headers: cloudHeaders(), body: JSON.stringify(Object.assign({ idiomaApp: asEn() ? 'en' : 'es', capacidades: ['galeria'] }, quiereStream ? Object.assign({ stream:true }, body) : body)) }, ctl ? { signal: ctl.signal } : {})); }
+    try{ res = await authFetch('/functions/v1/asistente', Object.assign({ method:'POST', headers: cloudHeaders(), body: JSON.stringify(Object.assign({ idiomaApp: asEn() ? 'en' : 'es', capacidades: ['galeria', 'idioma', 'reporte'] }, quiereStream ? Object.assign({ stream:true }, body) : body)) }, ctl ? { signal: ctl.signal } : {})); }
     catch(e){ clearTimeout(tmr); throw e; }
     const ct = (res.headers.get('content-type') || '');
     if(quiereStream && res.ok && /text\/event-stream/.test(ct) && res.body && res.body.getReader){
@@ -53867,7 +53867,10 @@ body.idi-en [data-solo-es]{display:none !important;}
       // (R40) LA GALERÍA: se pinta aquí mismo, mientras habla; una respuesta nueva sin galería la quita
       const esGal = !!(j.navegar && j.navegar.pantalla === 'galeria');
       if(esGal) asGaleriaMostrar(j.navegar.payload); else if(AS_GAL.p) asGaleriaQuitar();
-      const nav = esGal ? null : j.navegar;
+      // (R41) el idioma de la APP: se cambia aquí mismo (lo mismo que tocar Español / English en Ajustes) y Lumi sigue abierta
+      const esIdioma = !!(j.navegar && j.navegar.pantalla === 'idioma' && /^(es|en)$/.test(String(j.navegar.idioma || '')));
+      if(esIdioma){ try{ if(window.__idioma && window.__idioma.poner) window.__idioma.poner(j.navegar.idioma); }catch(err){ console.warn('idioma por voz', err); } asBit('idioma de la app: ' + j.navegar.idioma); }
+      const nav = (esGal || esIdioma) ? null : j.navegar;
       // Lo que falto por decir (lo que no llego por el stream, o el remate sin punto).
       const norm = function(x){ return String(x || '').replace(/\s+/g, ' ').trim(); };
       const faltante = asFaltante(final, dicho);
@@ -54861,6 +54864,17 @@ body.idi-en [data-solo-es]{display:none !important;}
       if(t && t.estado === 'abierto'){ cliLlenar(document.getElementById('ct-client'), c.nombre); cliLlenar(document.getElementById('ct-address'), c.direccion); if(c.telefono) cliLlenar(document.getElementById('ct-phone'), c.telefono); ctAquiPintar(); }
     }
   }
+  // (R41) "Manda el equipo a CompanyCam" / "bájame el PDF del secado": abre ESE reporte (con lo que tiene la pantalla) y toca su botón,
+  // el MISMO que el dedo: Enviar a CompanyCam hace sus propias preguntas antes de mandar; Descargar baja/comparte el PDF.
+  const AS_REPORTE_TAB = { equipo: 'equipment', secado: 'drying', materiales: 'materials', comunicacion: 'comms', contenidos: 'contenidos', medidas: 'measurements', plano: 'floorplan', labor: 'labor' };
+  async function asReporte(nav){
+    const tab = AS_REPORTE_TAB[String((nav && nav.form) || '')]; if(!tab) return;
+    if(!isManager() && !asCmdPermitida(tab === 'labor' ? 'labor' : tab === 'measurements' || tab === 'floorplan' ? 'plano_y_medidas' : String(nav.form))){ try{ goMenu(); }catch(e){} return; }
+    if(tab === 'labor'){ if(typeof laborFormOpen !== 'undefined') laborFormOpen = true; showTab('labor'); } else AS_CMD_AZULEJO(tab);
+    await new Promise(function(r){ setTimeout(r, 450); });
+    const b = nav.accion === 'companycam' ? document.querySelector('[data-cc="' + tab + '"]') : (document.querySelector('[data-pdf="' + tab + '"]') || document.querySelector('[data-bajar="' + tab + '"]'));
+    if(b && b.click) b.click();
+  }
   // Llamar / mensaje: abre el marcador o Mensajes del iPhone (la persona aún toca "Llamar" / "Enviar").
   function asCmdContactarYa(nav){
     const tel = String((nav && nav.telefono) || '').replace(/[^\d+]/g, ''); if(tel.length < 7) return;
@@ -54870,7 +54884,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // ---- abrir pantallas: por los MISMOS botones y funciones que usa el dedo ----
   async function asIrA(nav){
     const p = (nav && nav.pantalla) || 'manager';
-    if(!isManager() && p !== 'medir_aqui' && !/^(pantalla|formulario|contactar)$/.test(p)){ asIrACrew(nav); return; }   // la cuadrilla: solo sus azulejos (el servidor ya filtró)
+    if(!isManager() && p !== 'medir_aqui' && !/^(pantalla|formulario|contactar|reporte)$/.test(p)){ asIrACrew(nav); return; }   // la cuadrilla: solo sus azulejos (el servidor ya filtró)
     // La MISMA puerta de Pagos que el azulejo del hub (una sola funcion, carpetas_manager_test lo vigila).
     const pagos = function(vista){ abrirPagos(vista, 'manager'); };
     try{
@@ -54917,6 +54931,7 @@ body.idi-en [data-solo-es]{display:none !important;}
         case 'pantalla': await asCmdIr(nav); break;
         case 'formulario': await asCmdIrForm(nav); break;
         case 'contactar': asCmdContactarYa(nav); break;
+        case 'reporte': await asReporte(nav); break;
         case 'contenidos': { const b = $('#mgrGoContenidos'); if(b) b.click(); break; }
         case 'codigos': showTab('mgrcodes'); pushBack('mgrrest'); break;
         case 'precio_cliente': abrirMgrMore('rates', 'mgrrest'); break;
@@ -55128,7 +55143,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     asPintarEsfera();
   })();
   // Gancho para las pruebas y para la copia de prueba.
-  window.__as = { abrir: asAbrir, cerrar: asCerrar, enviar: asEnviar, galeria: asGaleriaMostrar, galeriaQuitar: asGaleriaQuitar, hojaLabor: asHojaLaborHtml, galeriaVoz: asGalPorVoz, galeriaGrande: asGalGrandeMostrar, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, mandarHojas: laborMandarHojas, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
+  window.__as = { abrir: asAbrir, cerrar: asCerrar, enviar: asEnviar, galeria: asGaleriaMostrar, galeriaQuitar: asGaleriaQuitar, hojaLabor: asHojaLaborHtml, galeriaVoz: asGalPorVoz, galeriaGrande: asGalGrandeMostrar, reporte: asReporte, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, mandarHojas: laborMandarHojas, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
 
 })();
 </script>
