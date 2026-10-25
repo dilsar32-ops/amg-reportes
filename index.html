@@ -4237,6 +4237,10 @@ body.med-pp-abierto{overflow:hidden;}
   .as-gal-lista{display:grid; grid-template-columns:1fr; gap:8px;}
   .as-gal-item{display:block; width:100%; text-align:left; background:#0e171d; border:1px solid #233038; border-radius:12px; padding:12px; min-height:56px; color:#fff; cursor:pointer; font:inherit;}
   .as-gal-item.aviso{border-color:#6b5520;}
+  /* (R43) "enséñame el de hoy y mándalo al grupo": la tarjeta va DENTRO de la galería, arriba de Regresar, para ver la hoja y decidir */
+  .as-gal-conf{margin:10px 0 0; padding:12px; border:1px solid #2f5d86; border-radius:12px; background:#0e1a24;}
+  .as-gal-conf-t{color:#fff; font-size:15px; line-height:1.35; margin-bottom:10px;}
+  .as-gal-conf-b{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
   .as-gal-item b{display:block; font-size:16px;}
   .as-gal-item span.sub{display:block; font-size:13px; color:#9fb3bd; margin:2px 0 6px; overflow-wrap:anywhere;}
   .as-gal-item .as-gal-chips{display:flex; flex-wrap:wrap; gap:6px;}
@@ -4393,6 +4397,7 @@ body.idi-en [data-solo-es]{display:none !important;}
       <div class="as-gal-tit" id="asGalTit"></div>
       <div class="as-gal-cuerpo" id="asGalCuerpo"></div>
       <p class="as-gal-cuenta" id="asGalCuenta" hidden></p>
+      <div class="as-gal-conf" id="asGalConf" hidden><div class="as-gal-conf-t" id="asGalConfT"></div><div class="as-gal-conf-b"><button type="button" class="btn btn-outline" id="asGalConfNo">Cancelar</button><button type="button" class="btn btn-accent" id="asGalConfSi">Mandar al grupo</button></div></div>
       <div class="as-gal-btns"><button type="button" class="btn btn-outline" id="asGalRegresar">Regresar</button></div>
       <div class="as-gal-grande" id="asGalGrande" hidden>
         <div class="as-gal-tit" id="asGalGrandeTit"></div>
@@ -10599,7 +10604,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-24-R42';
+  const APP_BUILD = '2026-10-25-R44';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -45683,9 +45688,14 @@ body.idi-en [data-solo-es]{display:none !important;}
   if($('#g-save')) $('#g-save').addEventListener('click', saveGasto);
   if($('#p-save')) $('#p-save').addEventListener('click', savePago);
 
+  // (R45, decisión del dueño) Gastos de la cuadrilla PENDIENTES hasta que el manager los apruebe. Solo existe después de correr
+  // sql/lumi-gastos-aprobar-02 (columna approved_at): sin ella, todo queda como siempre (cuenta todo, nadie ve "por aprobar").
+  const gastoPorAprobar = r => !!r && ('approved_at' in r) && r.approved_at == null;
+  const gastoCuenta = r => !gastoPorAprobar(r);
   function gastoRowHtml(r, mgr){
     const open = !r.reimbursed_at && r.paid_by_kind !== 'e';
-    const st = r.reimbursed_at ? '<span class="matchstatus ok">Devuelto ✓ ' + finDate(r.reimbursed_at) + (r.reimbursed_note ? ' · ' + esc(r.reimbursed_note) : '') + '</span>'
+    const st = gastoPorAprobar(r) ? '<span class="matchstatus partial">' + (mgr ? 'Por aprobar' : 'Pendiente: el manager lo aprueba') + '</span>'
+             : r.reimbursed_at ? '<span class="matchstatus ok">Devuelto ✓ ' + finDate(r.reimbursed_at) + (r.reimbursed_note ? ' · ' + esc(r.reimbursed_note) : '') + '</span>'
              : r.paid_by_kind === 'e' ? '<span class="matchstatus">Lo pagó la empresa</span>'
              : '<span class="matchstatus partial">Pendiente de devolver</span>';
     const link = r.shift_no ? ' · turno ' + r.shift_no : '';
@@ -45693,7 +45703,8 @@ body.idi-en [data-solo-es]{display:none !important;}
       + '<br><span class="when">' + esc(finDate(r.spent_on)) + ' · lo puso ' + esc(whoLabel(r.paid_by_kind, r.paid_by_name)) + link + (r.note ? ' · ' + esc(r.note) : '') + '</span><br>' + st + '</span>'
       + '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;"><span class="hrs">' + finMoney(r.amount) + '</span>'
       + (r.receipt_path ? '<button type="button" class="minibtn finFoto" data-path="' + esc(r.receipt_path) + '">📷 Recibo</button>' : '')
-      + (mgr && open ? '<button type="button" class="minibtn finDevuelto" data-gid="' + esc(r.id) + '">Devuelto</button>' : '')
+      + (mgr && gastoPorAprobar(r) ? '<button type="button" class="minibtn finAprobar" data-gid="' + esc(r.id) + '">Aprobar</button>' : '')
+      + (mgr && open && !gastoPorAprobar(r) ? '<button type="button" class="minibtn finDevuelto" data-gid="' + esc(r.id) + '">Devuelto</button>' : '')
       + (mgr && r.reimbursed_at ? '<button type="button" class="minibtn finUndoG" data-gid="' + esc(r.id) + '">Deshacer</button>' : '')
       + ((mgr || (open && String(r.created_by) === String(SES && SES.user_id))) && !r.reimbursed_at ? '<button type="button" class="minibtn finDelG" data-gid="' + esc(r.id) + '">Borrar</button>' : '')
       + '</span></div>';
@@ -45769,6 +45780,16 @@ body.idi-en [data-solo-es]{display:none !important;}
       }catch(err){
         alert('No se pudo leer ese pago: ' + ((err && err.message) || 'revise su internet'));
       }
+      return;
+    }
+    const apr = e.target.closest('.finAprobar'), aprAll = e.target.closest('.finAprobarTodo');
+    if(apr || aprAll){
+      try{
+        const ids = apr ? [apr.dataset.gid] : (aprAll.dataset.ids || '').split(',').filter(Boolean);
+        if(aprAll && !confirm('¿Aprobar los ' + ids.length + ' gasto(s)? Empiezan a contar en Finanzas y en el Cierre.')) return;
+        for(const id of ids) await finPatch('expenses', id, { approved_at: new Date().toISOString(), approved_by: SES.user_id });
+      }catch(err){ alert('No se pudo aprobar: ' + ((err && err.message) || 'revise su internet')); }
+      if(typeof reload === 'function') reload();
       return;
     }
     const dev = e.target.closest('.finDevuelto'); const undoG = e.target.closest('.finUndoG'); const delG = e.target.closest('.finDelG');
@@ -45882,7 +45903,9 @@ body.idi-en [data-solo-es]{display:none !important;}
         authFetch('/rest/v1/time_entries?select=user_id,work_date,clock_in,clock_out&work_kind=eq.mudanza&work_date=gte.' + since + '&limit=5000', { headers: cloudHeaders() }),
         authFetch('/rest/v1/casual_hours?select=casual_worker_id,work_date,reported_hours&work_kind=eq.mudanza&work_date=gte.' + since + '&limit=5000', { headers: cloudHeaders() })
       ]);
-      finExpenses = a.ok ? await a.json() : []; finPayments = b.ok ? await b.json() : []; finLogs = c.ok ? await c.json() : [];
+      const todosG = a.ok ? await a.json() : [];
+      finPorAprobar = todosG.filter(gastoPorAprobar); finExpenses = todosG.filter(gastoCuenta);   // (R45) lo pendiente no cuenta en totales ni en el Cierre
+      finPayments = b.ok ? await b.json() : []; finLogs = c.ok ? await c.json() : [];
       const te = d1.ok ? await d1.json() : [], ch = d2.ok ? await d2.json() : [];
       finClock = te.map(r => { const mins = hoursBetween(r.clock_in, r.clock_out); return { key:'c:' + r.user_id, date:String(r.work_date).slice(0, 10), h: mins === null ? 0 : mins/60 }; })
         .concat(ch.map(r => ({ key:'t:' + r.casual_worker_id, date:String(r.work_date).slice(0, 10), h: +r.reported_hours || 0 })));
@@ -45890,11 +45913,21 @@ body.idi-en [data-solo-es]{display:none !important;}
     renderFinGastos(); renderFinPagos();
     if($('#finMCierre') && !$('#finMCierre').hidden) paintCierreSelects();   // la gente y los clientes ya llegaron: repintar los selects del cierre
   }
+  let finPorAprobar = [];
+  function finPorAprobarHtml(){
+    if(!finPorAprobar.length) return '';
+    const tot = finPorAprobar.reduce((s, r) => s + (+r.amount||0), 0);
+    return '<div class="paysum" style="margin:0 0 10px;border-color:#b07a1a;"><div class="grand"><span>POR APROBAR (' + finPorAprobar.length + ')</span><span>' + finMoney(tot) + '</span></div>'
+      + '<p class="clockhint" style="margin:4px 0 6px;">Gastos que anotó la cuadrilla. No cuentan en los totales ni en el Cierre hasta que los apruebes.</p>'
+      + finPorAprobar.map(r => gastoRowHtml(r, true)).join('')
+      + '<button type="button" class="btn btn-outline finAprobarTodo" data-ids="' + esc(finPorAprobar.map(r => r.id).join(',')) + '" style="width:100%;margin-top:6px;">Aprobar todos (' + finPorAprobar.length + ')</button></div>';
+  }
   function groupBy(rows, keyFn){ const m = new Map(); rows.forEach(r => { const k = keyFn(r); if(!m.has(k)) m.set(k, []); m.get(k).push(r); }); return m; }
   function renderFinGastos(){
     const owed = $('#finGOwed'), list = $('#finGList'); if(!owed || !list) return;
     $('#finGSegOpen').classList.toggle('on', finGView === 'open'); $('#finGSegAll').classList.toggle('on', finGView === 'all');
     const mf = $('#finGMonthField'); if(mf) mf.hidden = finGView !== 'all';
+    const pa = finPorAprobarHtml();
     if(finGView === 'open'){
       const open = finExpenses.filter(r => !r.reimbursed_at && r.paid_by_kind !== 'e');
       const groups = [...groupBy(open, personKeyOf).entries()].map(([k, rows]) => ({ k, name: rows[0].paid_by_name, rows, total: rows.reduce((s, r) => s + (+r.amount||0), 0) })).sort((x, y) => y.total - x.total);
@@ -45902,6 +45935,7 @@ body.idi-en [data-solo-es]{display:none !important;}
           + '<span style="display:flex;align-items:center;gap:8px;"><span class="hrs" style="color:var(--danger);">' + finMoney(g.total) + '</span><button type="button" class="btn btn-outline finDevolverTodo" data-ids="' + g.rows.map(r => r.id).join(',') + '" data-name="' + esc(g.name) + '" data-total="' + finMoney(g.total) + '" style="width:auto; min-height:40px; padding:6px 12px; margin:0;">Ya se le devolvió</button></span></div>').join('')
           + '<div class="paysum" style="margin-top:8px;"><div class="grand"><span>TOTAL POR DEVOLVER</span><span>' + finMoney(groups.reduce((s, g) => s + g.total, 0)) + '</span></div></div>'
         : '<p class="clockhint">Nadie ha puesto dinero de su bolsillo sin que se le devuelva. Cuando el crew guarde un gasto, aparece aquí.</p>';
+      owed.innerHTML = pa + owed.innerHTML;
       list.innerHTML = open.length ? '<h2 style="margin:14px 0 6px;">Cada gasto</h2>' + open.map(r => gastoRowHtml(r, true)).join('') : '';
     } else {
       const month = ($('#finGMonth') && $('#finGMonth').value) || localToday().slice(0, 7);
@@ -45909,6 +45943,7 @@ body.idi-en [data-solo-es]{display:none !important;}
       const rows = finExpenses.filter(r => String(r.spent_on).slice(0, 7) === month);
       const fixed = rows.filter(r => FIN_FIXED.includes(r.what)), other = rows.filter(r => !FIN_FIXED.includes(r.what));
       owed.innerHTML = '<div class="paysum"><div class="line"><span>Gastos del mes (gasolina, material, etc.)</span><span>' + finMoney(other.reduce((s, r) => s + (+r.amount||0), 0)) + '</span></div><div class="line"><span>Seguro y storage</span><span>' + finMoney(fixed.reduce((s, r) => s + (+r.amount||0), 0)) + '</span></div><div class="grand"><span>TOTAL DEL MES</span><span>' + finMoney(rows.reduce((s, r) => s + (+r.amount||0), 0)) + '</span></div></div>';
+      owed.innerHTML = pa + owed.innerHTML;
       list.innerHTML = rows.length ? rows.map(r => gastoRowHtml(r, true)).join('') : '<p class="clockhint">No hay gastos en ese mes.</p>';
     }
   }
@@ -53290,7 +53325,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   const asEn = () => !!(window.__idioma && window.__idioma.actual() === 'en');
   const asIdioma = () => asEn() ? 'en-US' : 'es-MX';
   const asIdiomaWeb = () => asEn() ? 'en-US' : 'es-US';
-  const AS_SI_PALABRAS = ['yeah','yep','yup','sure','confirm','do','it','go','ahead','send','save','right','sounds','good','looks','sí','si','sip','simón','simon','claro','correcto','exacto','ajá','aja','dale','órale','orale','ok','okay','okey','yes','confirmar','confirma','confirmo','confírmalo','confirmalo','hazlo','registralo','regístralo','va','sale','bueno','listo','así','asi','es','de','acuerdo','adelante','mándalo','mandalo','seguro','cámbiala','cambiala','mándaselo','mandaselo','créalo','crealo','archívalo','archivalo'];
+  const AS_SI_PALABRAS = ['guárdalas','guardalas','guárdalos','guardalos','bien','está','esta','asi','dale pues','mándalo','mandalo','mándala','mandala','mándalos','mandalos','otra','vez','again','guárdalo','guardalo','guárdala','guardala','ándale','andale','porfa','please','yes,','yep','yup','sure','confirm','do','it','go','ahead','send','save','right','sounds','good','looks','sí','si','sip','simón','simon','claro','correcto','exacto','ajá','aja','dale','órale','orale','ok','okay','okey','yes','confirmar','confirma','confirmo','confírmalo','confirmalo','hazlo','registralo','regístralo','va','sale','bueno','listo','así','asi','es','de','acuerdo','adelante','mándalo','mandalo','seguro','cámbiala','cambiala','mándaselo','mandaselo','créalo','crealo','archívalo','archivalo'];
   const AS_NO_PALABRAS = ['nope','negative','incorrect','never','mind','stop','wait','hold','undo','no','nop','nel','negativo','incorrecto','cancela','cancelar','cancélalo','cancelalo','olvídalo','olvidalo','mejor','nada','todavía','todavia','para','espera','déjalo','dejalo'];
   function asPlugin(){ return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AsistenteVoz; }
   function asWebRec(){ return window.SpeechRecognition || window.webkitSpeechRecognition || null; }
@@ -53747,7 +53782,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     let tmr = null; const armar = function(){ if(!ctl) return; clearTimeout(tmr); tmr = setTimeout(function(){ try{ ctl.abort(); }catch(e){} }, 35000); };
     armar();
     let res;
-    try{ res = await authFetch('/functions/v1/asistente', Object.assign({ method:'POST', headers: cloudHeaders(), body: JSON.stringify(Object.assign({ idiomaApp: asEn() ? 'en' : 'es', capacidades: ['galeria', 'idioma', 'reporte', 'dictado'] }, quiereStream ? Object.assign({ stream:true }, body) : body)) }, ctl ? { signal: ctl.signal } : {})); }
+    try{ res = await authFetch('/functions/v1/asistente', Object.assign({ method:'POST', headers: cloudHeaders(), body: JSON.stringify(Object.assign({ idiomaApp: asEn() ? 'en' : 'es', capacidades: ['galeria', 'idioma', 'reporte', 'dictado', 'grupo'] }, quiereStream ? Object.assign({ stream:true }, body) : body)) }, ctl ? { signal: ctl.signal } : {})); }
     catch(e){ clearTimeout(tmr); throw e; }
     const ct = (res.headers.get('content-type') || '');
     if(quiereStream && res.ok && /text\/event-stream/.test(ct) && res.body && res.body.getReader){
@@ -53866,10 +53901,12 @@ body.idi-en [data-solo-es]{display:none !important;}
       let final = String(j.texto || (j.confirmacion ? j.confirmacion.resumen + '. ¿Lo registro?' : 'No entendí. Dímelo otra vez.'));
       if(window.Cara){ try{ const l = Cara.limpiarEtiqueta(final); final = l.texto; const g = j.confirmacion ? 'pregunta' : (j.gesto || l.gesto || Cara.gestoDelTexto(final)); if(g) Cara.gesto(g, undefined, { texto: final, dinero: !!j.confirmacion }); }catch(err){} }
       asMostrarRespuesta(final);
-      if(j.confirmacion) asMostrarTarjeta(j.confirmacion); else asQuitarTarjeta();
-      // (R40) LA GALERÍA: se pinta aquí mismo, mientras habla; una respuesta nueva sin galería la quita
+      // (R40) LA GALERÍA: se pinta aquí mismo, mientras habla; una respuesta nueva sin galería la quita.
+      // (R43) "enséñame el de hoy y mándalo al grupo": primero la galería y DESPUÉS la tarjeta (la galería no se la lleva)
       const esGal = !!(j.navegar && j.navegar.pantalla === 'galeria');
       if(esGal) asGaleriaMostrar(j.navegar.payload); else if(AS_GAL.p) asGaleriaQuitar();
+      if(j.confirmacion) asMostrarTarjeta(j.confirmacion); else if(!esGal) asQuitarTarjeta();
+      if(esGal) asGalTarjeta(j.confirmacion || null);
       // (R41) el idioma de la APP: se cambia aquí mismo (lo mismo que tocar Español / English en Ajustes) y Lumi sigue abierta
       const esIdioma = !!(j.navegar && j.navegar.pantalla === 'idioma' && /^(es|en)$/.test(String(j.navegar.idioma || '')));
       if(esIdioma){ try{ if(window.__idioma && window.__idioma.poner) window.__idioma.poner(j.navegar.idioma); }catch(err){ console.warn('idioma por voz', err); } asBit('idioma de la app: ' + j.navegar.idioma); }
@@ -54019,6 +54056,30 @@ body.idi-en [data-solo-es]{display:none !important;}
       + '<tr><td style="padding:5px 0;"><b>' + ((!mg && p.lr === 'manager') ? 'Manager' : 'Crew Leader') + '</b></td><td colspan="3" style="padding:5px 0;">' + e(p.l || it.lider) + '</td></tr></table>'
       + '<table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:12px;">' + turnos + '</table>' + mat + '</div></div>';
   }
+  // (R43, falla del dueño: "el labor log que me está mostrando viene sin el total") La hoja de la galería es la MISMA hoja que se
+  // manda al grupo: buildLaborPrintout() sobre el formulario de Labor (turnos, Shift Total, extras, gasolina, GRAND TOTAL…). Se carga
+  // el log en el formulario, se saca la hoja y el formulario se deja EXACTAMENTE como estaba (lo que la persona estaba llenando no se toca).
+  function asHojaRealHtml(it){
+    it = it || {};
+    if(typeof buildLaborPrintout !== 'function' || typeof loadPayload !== 'function' || typeof buildPayload !== 'function') return asHojaLaborHtml(it);
+    const antes = { p: null, k: formKind(), lr: lockedRate, oh: openLogHadRate, tr: loadedTr, fp: window.__forcePriced, modo: laborMode, fix: fixingLogId };
+    let html = '';
+    try{
+      antes.p = buildPayload();
+      window.__forcePriced = !!((typeof isManager === 'function' && isManager()) || document.body.classList.contains('mgr'));
+      const kind = it.empresa === 'mudanza' ? 'mudanza' : 'restauracion';
+      laborMode = kind; loadPayload(it.payload || {}, kind);
+      const node = buildLaborPrintout();
+      node.classList.remove('printout');
+      html = '<div class="as-hoja" data-no-idioma style="width:760px; background:#fff; color:#1C2530; font-family:Inter,system-ui,sans-serif;">' + node.innerHTML + '</div>';
+      if(node.parentNode) node.parentNode.removeChild(node);
+    }catch(e){ console.warn('hoja real', e); html = asHojaLaborHtml(it); }
+    finally{
+      try{ if(antes.p){ laborMode = antes.modo; loadPayload(antes.p, antes.k); } lockedRate = antes.lr; openLogHadRate = antes.oh; loadedTr = antes.tr; fixingLogId = antes.fix; if(typeof recalcGrandTotal === 'function') recalcGrandTotal(); }catch(e){ console.warn('hoja real: regresar el formulario', e); }
+      window.__forcePriced = antes.fp;
+    }
+    return html;
+  }
   // Cuánto se achica la hoja de 760 px (el ancho de la impresión) para que quepa en `ancho` (y la caja de afuera toma el alto ya achicado).
   function asGalEscalar(caja, ancho){
     const esc0 = caja && caja.querySelector('.as-gal-escala'); if(!esc0) return;
@@ -54046,7 +54107,7 @@ body.idi-en [data-solo-es]{display:none !important;}
           it.devuelto ? '<span class="as-gal-chip rojo">' + (en ? 'Sent back' : 'Devuelto') + '</span>' : '',
           it.visto === false ? '<span class="as-gal-chip ambar">' + (en ? 'Not seen' : 'Sin ver') + '</span>' : ''].join('');
         return '<button type="button" class="as-gal-mini" data-i="' + i + '" aria-label="' + esc((it.lider || '') + ' ' + (it.cliente || '') + ' ' + (it.fecha || '')) + '">'
-          + '<div class="as-gal-marco"><div class="as-gal-escala">' + asHojaLaborHtml(it) + '</div></div>'
+          + '<div class="as-gal-marco"><div class="as-gal-escala">' + asHojaRealHtml(it) + '</div></div>'
           + '<div class="as-gal-pie"><b>' + esc(asPrevFecha(it.fecha)) + '</b> · ' + esc(it.lider || '') + (it.cliente ? ' · ' + esc(it.cliente) : '') + ' ' + chips + '</div></button>';
       }).join('') + '</div>';
       cuenta.textContent = p.items.length > 1 ? (en ? 'Swipe to see the ' + p.items.length + ' sheets · tap one to see it big' : 'Pasa con el dedo las ' + p.items.length + ' hojas · toca una para verla grande') : (en ? 'Tap it to see it big' : 'Tócala para verla grande');
@@ -54065,12 +54126,22 @@ body.idi-en [data-solo-es]{display:none !important;}
     asBit('galería: ' + p.tipo + ' (' + p.items.length + ')');
     return true;
   }
-  function asGaleriaQuitar(){ const g = $('#asGal'); if(g) g.hidden = true; const gr = $('#asGalGrande'); if(gr) gr.hidden = true; AS_GAL.p = null; AS_GAL.i = -1; }
+  // (R43) la tarjeta (mandar al grupo) junto con la galería: los mismos Confirmar / Cancelar de la tarjeta de siempre
+  function asGalTarjeta(c){
+    const box = $('#asGalConf'); if(!box) return;
+    if(!c){ box.hidden = true; return; }
+    const en = asEn();
+    $('#asGalConfT').textContent = String(c.resumen || '') + (c.efecto ? ' — ' + c.efecto : '');
+    $('#asGalConfSi').textContent = c.tipo === 'grupo' ? (en ? 'Send to the group' : 'Mandar al grupo') : (en ? 'Confirm' : 'Confirmar');
+    $('#asGalConfNo').textContent = en ? 'Cancel' : 'Cancelar';
+    box.hidden = false;
+  }
+  function asGaleriaQuitar(){ const box0 = $('#asGalConf'); if(box0) box0.hidden = true; const g = $('#asGal'); if(g) g.hidden = true; const gr = $('#asGalGrande'); if(gr) gr.hidden = true; AS_GAL.p = null; AS_GAL.i = -1; }
   function asGalGrandeMostrar(i){
     const p = AS_GAL.p; if(!p || p.tipo !== 'labor_logs' || !p.items[i]) return;
     AS_GAL.i = i; const it = p.items[i], en = asEn();
     $('#asGalGrandeTit').textContent = asPrevFecha(it.fecha) + ' · ' + (it.lider || '') + (it.cliente ? ' · ' + it.cliente : '') + (it.devuelto && it.nota_devuelto ? ' — ' + (en ? 'sent back: ' : 'devuelto: ') + it.nota_devuelto : '');
-    const hoja = $('#asGalHoja'); hoja.innerHTML = '<div class="as-gal-escala">' + asHojaLaborHtml(it) + '</div>'; hoja.scrollTop = 0;
+    const hoja = $('#asGalHoja'); hoja.innerHTML = '<div class="as-gal-escala">' + asHojaRealHtml(it) + '</div>'; hoja.scrollTop = 0;
     $('#asGalAnt').disabled = i <= 0; $('#asGalSig').disabled = i >= p.items.length - 1;
     $('#asGalAbrir').hidden = !(typeof isManager === 'function' && isManager());
     $('#asGalGrande').hidden = false;
@@ -54093,6 +54164,8 @@ body.idi-en [data-solo-es]{display:none !important;}
       if(it.abrir && it.abrir.pantalla){ const nav = it.abrir; asGaleriaQuitar(); asNavegar(nav); }   // la casa en Visitas (lo mismo que tocarla en la lista)
     });
     const r = $('#asGalRegresar'); if(r) r.addEventListener('click', function(){ asGaleriaQuitar(); });
+    const cs = $('#asGalConfSi'); if(cs) cs.addEventListener('click', function(){ asGalTarjeta(null); asConfirmar(); });
+    const cn = $('#asGalConfNo'); if(cn) cn.addEventListener('click', function(){ asGalTarjeta(null); asCancelar(); });
     const v = $('#asGalVolver'); if(v) v.addEventListener('click', function(){ const gr = $('#asGalGrande'); if(gr) gr.hidden = true; AS_GAL.i = -1; });
     const a = $('#asGalAnt'); if(a) a.addEventListener('click', function(){ if(AS_GAL.i > 0) asGalGrandeMostrar(AS_GAL.i - 1); });
     const s = $('#asGalSig'); if(s) s.addEventListener('click', function(){ if(AS_GAL.p && AS_GAL.i < AS_GAL.p.items.length - 1) asGalGrandeMostrar(AS_GAL.i + 1); });
@@ -54313,7 +54386,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   function asMostrarTarjeta(c){
     AS.conf = c;
     const t = $('#asTarjeta'); if(!t) return;
-    const tipos = { pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa', visita_lecturas:'Lecturas de la casa', visita_materiales:'Materiales de la casa', visita_comunicacion:'Comunicación de la casa', cal_dia:'Calendario de AMG' };
+    const tipos = { grupo:'Mandar al grupo', pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa', visita_lecturas:'Lecturas de la casa', visita_materiales:'Materiales de la casa', visita_comunicacion:'Comunicación de la casa', cal_dia:'Calendario de AMG' };
     const metodos = { zelle:'Zelle', cheque:'Cheque', efectivo:'Efectivo', otro:'Otro' };
     const esDinero = ['pago','adelanto','descuento','extra','devolucion','ajuste'].includes(c.tipo);
     $('#asTarjetaTipo').textContent = (tipos[c.tipo] || c.tipo || 'Acción') + (c.cola ? ' · de la lista' : '') + (c.sandbox ? ' · PRUEBA' : '');
@@ -54329,6 +54402,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   function asQuitarTarjeta(){ AS.conf = null; const t = $('#asTarjeta'); if(t) t.hidden = true; asPreviewQuitar(); }
   async function asConfirmar(){
     const c = AS.conf; if(!c || AS.enviando) return;
+    try{ asGalTarjeta(null); }catch(e){}
     let escrito;
     if(c.escrito_requerido){
       const v = parseFloat(String(($('#asEscrito') || {}).value || '').replace(/[^0-9.]/g, ''));
@@ -54350,6 +54424,8 @@ body.idi-en [data-solo-es]{display:none !important;}
       AS.enviando = false;
       // Fase 2a: lo guardado (una visita) trae a dónde ir; se abre DESPUÉS de decir "Listo", nunca con una tarjeta en espera.
       const navC = (!j.confirmacion && j.navegar) ? j.navegar : null;
+      // (R43) la tarjeta del grupo: la MISMA acción de siempre (armar las hojas y abrir Mensajes al grupo)
+      if(navC && navC.pantalla === 'labor_log_mandar'){ asHablar(j.texto || 'Listo.', function(){ asCerrar(); laborMandarHojas(navC).catch(function(e){ alert('No se pudo mandar el labor log.\n\n' + ((e && e.message) || e)); }); }); return; }
       asHablar(j.texto || 'Listo.', function(){ if(navC){ asNavegar(navC); return; } asSeguirOyendo(); });
       return;
     }catch(e){
@@ -54363,6 +54439,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   }
   function asCancelar(){
     if(!AS.conf) return;
+    try{ asGalTarjeta(null); }catch(e){}
     const era = AS.conf;
     asPararOido(); asCallar();
     asQuitarTarjeta();
@@ -54650,7 +54727,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     [/\b(planos? guardados?|saved plans?)\b/, 'planos_guardados'],
     [/\b(medidas guardadas|saved measurements?)\b/, 'medidas_guardadas'],
     [/\b(plano y medidas|plan and measurements|plan & measurements)\b/, 'plano_y_medidas'],
-    [/\b(ajustes|configuracion|settings|cambiar (el )?idioma|change (the )?language)\b/, 'ajustes'],
+    [/\b(ajustes|configuracion|settings)\b/, 'ajustes'],   // (R43) "cambia el idioma" lo hace la función aquí mismo (idioma), no se abre Ajustes
     [/\b(labor logs?|mano de obra|reporte del dia|daily report)\b/, 'labor'],
     [/\b(mis horas|mi reloj|las horas|reloj|my hours|clock|time ?sheet|punch|horas|hours)\b/, 'horas'],
     [/\b(contenidos?|contents|inventario del cliente|cosas del cliente|client'?s things)\b/, 'contenidos'],
@@ -54664,18 +54741,25 @@ body.idi-en [data-solo-es]{display:none !important;}
   ];
   // Las que se LLENAN en una casa: con ubicación.
   const AS_CMD_FORMS = { secado: 1, equipo: 1, materiales: 1, comunicacion: 1, contenidos: 1 };
-  const AS_CMD_VERBO_ABRIR = /^(?:(?:oye|hey|lumi|porfa|por favor|please)\s+)*(abre|abreme|abrir|ve a|ir a|llevame|quiero ir a|pasame a|muestrame|ensename|open|go to|take me to|show me|bring up)\b/;
+  // (R43, falla del dueño: "muéstrame el labor log de hoy y mándalo al grupo" → "te abro Mano de obra") ABRIR es lo ÚLTIMO: solo cuando
+  // lo pide ("ábreme…", "open…"). "Muéstrame / enséñame / show me" es ENSEÑAR: lo hace la función (galería, el dato, la tarjeta).
+  const AS_CMD_VERBO_ABRIR = /^(?:(?:oye|hey|lumi|porfa|por favor|please)\s+)*(abre|abreme|abrir|ve a|ir a|llevame|quiero ir a|pasame a|open|go to|take me to|bring up)\b/;
+  // un pedido de dos partes ("… y mándalo al grupo", "… and send it") va completo a la función, que hace las dos en orden
+  const AS_CMD_COMPUESTO = /\b(y|and)( luego| despues| tambien| then| also)? (mandalo|mandala|mandalos|mandaselo|mandaselos|mandamelo|manda|envialo|enviala|envia|compartelo|comparte|bajame|baja|descarga|descargalo|subelo|sube|marcalo|marcala|marca|cierralo|cierralas|cierra|pagale|paga|send|share|download|upload|mark|close|pay)\b/;
   // Solo cuando la persona DICE que va a llenar ("voy a llenar el secado", "quiero…", "let's…"). Un "llena el secado" suelto o con datos dictados sigue yendo al modelo (llenar por voz con preview).
   const AS_CMD_VERBO_LLENAR = /\b(llenemos|empezar|empieza|empecemos|comenzar|comienza|voy a|vamos a|toca|hay que|necesito|quiero|start|begin|let'?s|i need to|i am going to|i'm going to|gonna)\b/;
   const AS_CMD_VER = /\b(ver|veo|mira|mirar|checar|revisar|see|view|look|check|review)\b/;     // "quiero ver el secado" es pedir el preview, no llenar
   const AS_CMD_LLAMAR = /\b(llama|llamar|llamale|llamada a|marca a|call|phone|ring)\b/;
   const AS_CMD_MENSAJE = /\b(manda(le)? (un )?(mensaje|texto)|escribe(le)?|envia(le)? (un )?(mensaje|texto)|mensaje a|texto a|text|send (a )?(text|message)|message)\b/;
   const AS_CMD_PREGUNTA = /^(cuant|que\b|cual|donde|dame|dime|hay\b|tiene|how|what|which|where|is |are |do |does |can )/;
+  // (R25 Candado) las horas / la ficha / los pagos DE alguien ("de Aníbal", "Anibal's hours") no son un atajo de pantalla
+  const AS_CMD_DE_ALGUIEN = /\b(ficha|horas|hours|pagos|payments|reloj|timesheet|saldo)\s+(de|del)\s+(?!(hoy|ayer|manana|antier|anteayer|la semana|esta semana|este mes|el mes|la quincena|la casa|esta casa|el cliente|la mudanza|trabajo|mudanza|mudanzas|restauracion|amg|mi|mis|la cuadrilla|equipo|todos|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b)[a-z]{3,}/;
+  const AS_CMD_DE_ALGUIEN_EN = /\b(?!(today|yesterday|my|this|last|the|week|month|todays|yesterdays)\b)[a-z]{3,}'?s (hours|timesheet|time sheet|payments|card)\b/;
   const AS_CMD_NOMBRES = { secado: 'Secado', equipo: 'Equipo', materiales: 'Materiales', comunicacion: 'Comunicación', contenidos: 'Contenidos' };
   // Quien viene después de "a" / "al" / "to": "llama a Johnson" -> "johnson".
   function asCmdQuien(l){
-    const m = /\b(?:llama(?:r|le)?|marca|mandale|manda|escribele|escribe|envia(?:le)?|call|text|message|phone|ring|mensaje|texto)\b(?:\s+(?:un|una|el|la)\s+(?:mensaje|texto|llamada))?\s+(?:a|al|a la|para|to)?\s*(?:el\s+cliente\s+|la\s+casa\s+de\s+|the\s+client\s+)?(.+)$/.exec(l);
-    let q = m ? m[1] : '';
+    const m = /\b(?:llama(?:r|le)?|marca|mandale|manda|escribele|escribe|envia(?:le)?|call|text|message|phone|ring|mensaje|texto)\b(?:\s+(?:un|una|el|la)?\s*(?:mensaje|texto|llamada))?\s+(?:a|al|a la|para|to)?\s*(?:el\s+cliente\s+|la\s+casa\s+de\s+|the\s+client\s+)?(.+)$/.exec(l);
+    let q = m ? m[1].replace(/\s+(que|para que|to|that|diciendo|saying)\s.*$/, '') : '';   // (R25) "mándale mensaje a Miguel que marque": el que, no el recado
     q = (' ' + q + ' ').replace(/\b(por favor|porfa|please|ahora|now|ya|de una vez|el cliente|la casa|este cliente|esta casa|the client|the house|this client|this house|aqui|here|un mensaje|a message|un texto|a text)\b/g, ' ').replace(/\s+/g, ' ').trim();
     return q.length >= 2 ? q : '';
   }
@@ -54688,6 +54772,8 @@ body.idi-en [data-solo-es]{display:none !important;}
     let destino = '';
     for(let i = 0; i < AS_CMD_PANTALLAS.length; i++){ if(AS_CMD_PANTALLAS[i][0].test(l)){ destino = AS_CMD_PANTALLAS[i][1]; break; } }
     if(!destino) return null;
+    if(AS_CMD_COMPUESTO.test(l)) return null;
+    if(AS_CMD_DE_ALGUIEN.test(l) || AS_CMD_DE_ALGUIEN_EN.test(l)) return null;   // (R25 Candado) "abre la ficha de horas de Aníbal": la de OTRA persona la decide la función (rol)
     if(AS_CMD_PREGUNTA.test(l) && !AS_CMD_VERBO_ABRIR.test(l)) return null;     // "cuántas horas llevo", "what is the drying": son preguntas, van al modelo
     if(AS_CMD_FORMS[destino] && AS_CMD_VERBO_LLENAR.test(l) && !AS_CMD_VERBO_ABRIR.test(l) && !AS_CMD_VER.test(l)) return { tipo: 'formulario', form: destino };
     if(AS_CMD_VERBO_ABRIR.test(l)) return { tipo: 'pantalla', destino };
@@ -55151,7 +55237,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     asPintarEsfera();
   })();
   // Gancho para las pruebas y para la copia de prueba.
-  window.__as = { abrir: asAbrir, cerrar: asCerrar, enviar: asEnviar, galeria: asGaleriaMostrar, galeriaQuitar: asGaleriaQuitar, hojaLabor: asHojaLaborHtml, galeriaVoz: asGalPorVoz, galeriaGrande: asGalGrandeMostrar, reporte: asReporte, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, mandarHojas: laborMandarHojas, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
+  window.__as = { abrir: asAbrir, hojaReal: asHojaRealHtml, cerrar: asCerrar, enviar: asEnviar, galeria: asGaleriaMostrar, galeriaQuitar: asGaleriaQuitar, hojaLabor: asHojaLaborHtml, galeriaVoz: asGalPorVoz, galeriaGrande: asGalGrandeMostrar, reporte: asReporte, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, mandarHojas: laborMandarHojas, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
 
 })();
 </script>
