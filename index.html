@@ -10604,7 +10604,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-27-R52';
+  const APP_BUILD = '2026-10-27-R53';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -50886,6 +50886,9 @@ body.idi-en [data-solo-es]{display:none !important;}
     const res = await ctPedir('/rest/v1/contenidos_fotos?on_conflict=trabajo_id,k', { method: 'POST', headers: ctCabeceras({ Prefer: 'resolution=merge-duplicates,return=representation' }), body: JSON.stringify(body) });
     const j = await res.json().catch(() => null);
     if(!res.ok && ctEsLimite(res, j)) throw ctErrorLimite(res);
+    // (27-oct, R53) LA MISMA FOTO DOS VECES: la nube ya tiene esta huella con OTRO número (contenidos_fotos_sha256_uniq).
+    // Caso real: Arnett Brown, la 2916 era copia exacta de la 2915 (dos toques); la cola la reintentaba sin fin y no dejaba firmar.
+    if(res.status === 409 && j && /sha256/i.test(String(j.message || '') + ' ' + String(j.details || ''))){ const e = new Error('la misma foto ya está en la nube con otro número'); e.duplicada = true; throw e; }
     if(!res.ok){ const e = new Error((j && (j.message || j.hint)) || ('HTTP ' + res.status)); e.permanente = res.status >= 400 && res.status < 500 && ![408, 429].includes(res.status); throw e; }
     const fila = Array.isArray(j) ? j[0] : null;
     if(!fila || fila.sha256 !== f.sha256) throw new Error('la nube no devolvió la foto con la misma huella');
@@ -51042,13 +51045,38 @@ body.idi-en [data-solo-es]{display:none !important;}
     if(hechas[0].status === 'rejected') throw hechas[0].reason;
     if(!ctFotoViva(t, f)) return false;                               // la quitaron mientras subía: su fila no se sube (t.borradas limpia la nube)
     const antes = ctHuellaEnvio(f);
-    await ctSubirFilaFoto(t, f);
+    try{ await ctSubirFilaFoto(t, f); }
+    catch(e){
+      if(!(e && e.duplicada)) throw e;
+      if(await ctResolverDuplicada(t, f) === 'quitada') return false;  // era una copia: ya no está en la lista
+      await ctSubirFilaFoto(t, f);                                     // era la misma fila con otro número: ya con su número
+    }
     if(f.recorte){ const rec = f.recorte; f.recorte = null; ctBorrarArchivo(rec).catch(() => {}); }
     f.enNube = true; f.dirty = ctHuellaEnvio(f) !== antes;            // la tocaron mientras subía: queda por subir
     f.subida = f.dirty ? 'tel' : 'nube'; f.error = ''; f.intentos = 0;
     ctEscribirLote(); ctPintarColaLuego(f);
     ctSoltarGrande(f, { lote: true });                                // LA NUBE LA GUARDA: la grande sale del teléfono SOLO cuando el registro con enNube quedó guardado (sin esperar aquí)
     return true;
+  }
+  // (27-oct, R53) La nube dijo "esa foto ya la tengo con otro número". Se lee cuál:
+  //  - si el teléfono tiene OTRA foto con ese número o con la misma huella, ésta es una copia repetida (la misma foto
+  //    dos veces): la de la nube es la buena y la copia sale de la lista y del disco (nada se pierde: es idéntica);
+  //  - si no, ésta ES esa fila con otro número (se renumeró): toma el número y la ruta de la nube y se vuelve a mandar.
+  async function ctResolverDuplicada(t, f){
+    const res = await ctPedir('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(t.id) + '&sha256=eq.' + encodeURIComponent(f.sha256) + '&select=k,path,sha256', { headers: ctCabeceras() });
+    const l = await res.json().catch(() => null);
+    const fila = res.ok && Array.isArray(l) ? l[0] : null;
+    if(!fila){ const e = new Error('la nube dice que la foto está repetida pero no la encuentra'); e.permanente = !res.ok && res.status >= 400 && res.status < 500; throw e; }
+    const otra = t.fotos.find(x => x !== f && (x.k === fila.k || x.sha256 === f.sha256));
+    if(otra){
+      t.fotos = t.fotos.filter(x => x !== f);
+      [f.archivo, f.vista, f.recorte, f.des && f.des.local].forEach(r => { if(r && r !== otra.archivo && r !== otra.vista) ctBorrarArchivo(r).catch(() => {}); });
+      console.warn('contenidos: la foto ' + f.k + ' era copia exacta de la ' + otra.k + ' (ya en la nube); se quitó la copia');
+      ctRenumerar(t); ctEscribirLote(); ctPintarColaLuego();
+      return 'quitada';
+    }
+    f.k = fila.k; f.path = fila.path;
+    return 'misma';
   }
   // Las fotos de UN trabajo, varias a la vez. false = hay que parar la cola (sin señal, o el servidor no deja).
   async function ctSubirFotosDe(t){
