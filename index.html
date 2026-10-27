@@ -10604,7 +10604,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-26-R50';
+  const APP_BUILD = '2026-10-27-R51';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -48713,7 +48713,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   function ctLeerTodo(){ return ctLeerLocal() || { actual: null, trabajos: {} }; }
   const ctDisco = () => (typeof fpDisco === 'function' ? fpDisco() : null);
   let CT = ctLeerTodo();
-  const ctReg = { cargado: !ctDisco(), pedida: 0, hecha: 0, enCurso: null, tm: null, reintento: null, esperas: [], despues: [], fallos: 0,
+  const ctReg = { cargado: !ctDisco(), pedida: 0, hecha: 0, enCurso: null, tm: null, tmAt: 0, vence: 0, reintento: null, esperas: [], despues: [], fallos: 0,
                   lsLleno: false, bloqueado: false, error: "" };
   let ctCargaListo = null;
   const ctCargaP = ctReg.cargado ? Promise.resolve() : new Promise(r => { ctCargaListo = r; });
@@ -48737,12 +48737,28 @@ body.idi-en [data-solo-es]{display:none !important;}
       return false;
     }
   }
-  function ctEscribir(){
+  function ctEscribir(){ return ctPedirEscritura(CT_ESPERA_MS); }
+  // (27-oct-2026, subida rápida) Lo que cambia la cola de la nube (enNube, la grande que salió, la desenfocada) se guarda
+  // AGRUPADO: antes cada foto subida escribía el registro entero (4-6 MB) dos o tres veces. Si mientras tanto la persona
+  // toca algo, su escritura (300 ms) se lleva todo junto; al irse a segundo plano se escribe ya, como siempre.
+  const CT_LOTE_MS = 2500;
+  function ctEscribirLote(){ return ctPedirEscritura(CT_LOTE_MS); }
+  function ctPedirEscritura(ms){
     if(!ctDisco()) return ctEscribirLocal();
     ctReg.pedida++;
+    const vence = Date.now() + ms;
+    if(!ctReg.vence || vence < ctReg.vence) ctReg.vence = vence;
     if(!ctReg.cargado || ctReg.bloqueado) return true;        // al terminar de cargar se escribe lo que haga falta
-    if(!ctReg.tm && !ctReg.reintento) ctReg.tm = setTimeout(ctVaciarEscritura, CT_ESPERA_MS);
+    ctProgramarEscritura();
     return true;
+  }
+  // El reloj de la escritura: manda el pedido más urgente (un toque de la persona no espera al lote de la cola).
+  function ctProgramarEscritura(){
+    if(ctReg.reintento) return;
+    const vence = ctReg.vence || (Date.now() + CT_ESPERA_MS);
+    if(ctReg.tm && ctReg.tmAt <= vence) return;
+    clearTimeout(ctReg.tm);
+    ctReg.tmAt = vence; ctReg.tm = setTimeout(ctVaciarEscritura, Math.max(0, vence - Date.now()));
   }
   // La que se puede esperar: true cuando el archivo ya tiene TODO lo que había en CT al llamarla.
   function ctEscribirYa(){
@@ -48751,13 +48767,14 @@ body.idi-en [data-solo-es]{display:none !important;}
     ctReg.pedida++;
     const seq = ctReg.pedida;
     const p = new Promise(res => ctReg.esperas.push({ seq, res }));
-    if(ctReg.cargado && !ctReg.bloqueado){ clearTimeout(ctReg.tm); ctReg.tm = null; clearTimeout(ctReg.reintento); ctReg.reintento = null; ctVaciarEscritura(); }
+    if(ctReg.cargado && !ctReg.bloqueado){ clearTimeout(ctReg.tm); ctReg.tm = null; ctReg.tmAt = 0; clearTimeout(ctReg.reintento); ctReg.reintento = null; ctVaciarEscritura(); }
     return p;
   }
   // fn corre DESPUÉS de una escritura confirmada que ya incluye el estado de ahora (nunca antes).
-  function ctDespuesDeGuardar(fn){
+  // op.lote (la cola de la nube): esa escritura puede ser la agrupada (ctEscribirLote); la regla es la misma.
+  function ctDespuesDeGuardar(fn, op){
     if(!ctDisco()){ if(ctEscribirLocal()) return Promise.resolve(fn()); ctReg.despues.push({ seq: 0, fn }); return Promise.resolve(false); }
-    ctEscribir();
+    if(op && op.lote === true) ctEscribirLote(); else ctEscribir();
     return new Promise(res => ctReg.despues.push({ seq: ctReg.pedida, fn, res }));
   }
   function ctCorrerDespues(hecha){
@@ -48808,7 +48825,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     }catch(e){ console.warn('contenidos: la copia de localStorage se queda por ahora:', (e && e.message) || e); }
   }
   function ctVaciarEscritura(){
-    ctReg.tm = null; ctReg.reintento = null;
+    ctReg.tm = null; ctReg.tmAt = 0; ctReg.reintento = null;
     if(!ctReg.cargado || ctReg.bloqueado || ctReg.enCurso) return;
     if(!(ctReg.pedida > ctReg.hecha || ctReg.esperas.length)) return;   // nada que escribir
     ctReg.enCurso = (async () => {
@@ -48818,7 +48835,7 @@ body.idi-en [data-solo-es]{display:none !important;}
         // ctDespuesDeGuardar) va con su reloj (debounce): muchos toques seguidos o muchas fotos subidas = pocas escrituras.
         for(let primera = true; primera || ctReg.esperas.length; primera = false){
           if(!(ctReg.pedida > ctReg.hecha || ctReg.esperas.length)) break;
-          const seq = ctReg.pedida;
+          const seq = ctReg.pedida; ctReg.vence = 0;            // lo pedido hasta aquí va en esta escritura
           CT.rev = (+CT.rev || 0) + 1; CT.guardado = Date.now();
           const rev = CT.rev;
           let texto = '', fallo = null;
@@ -48853,7 +48870,7 @@ body.idi-en [data-solo-es]{display:none !important;}
         }
       } finally {
         ctReg.enCurso = null;
-        if(ctReg.pedida > ctReg.hecha && !ctReg.tm && !ctReg.reintento && !ctReg.bloqueado) ctReg.tm = setTimeout(ctVaciarEscritura, CT_ESPERA_MS);
+        if(ctReg.pedida > ctReg.hecha && !ctReg.reintento && !ctReg.bloqueado) ctProgramarEscritura();
       }
     })();
     return ctReg.enCurso;
@@ -49172,17 +49189,19 @@ body.idi-en [data-solo-es]{display:none !important;}
   // y su archivo ya no existía. Ahora se pide y se suelta cuando el registro quedó en el disco (ctDespuesDeGuardar).
   const ctSoltable = f => !!(f && f.enNube && !f.dirty && !f.archivoBorrado && f.archivo && !(f.des && f.des.pendiente && ctPluginDesenfocar()));   // (21 oct 2026) la copia desenfocada sale de la grande
   const ctSoltando = new WeakSet();
-  async function ctSoltarGrande(f){
+  // op.lote (27-oct, la cola de la nube): la escritura que la deja salir puede ser la agrupada; igual, SOLO tras confirmarse.
+  async function ctSoltarGrande(f, op){
     if(!ctSoltable(f) || ctSoltando.has(f)) return false;
+    const lote = !!(op && op.lote === true);
     ctSoltando.add(f);
     try{
       return !!(await ctDespuesDeGuardar(async () => {
         if(!ctSoltable(f)) return false;                              // cambió mientras se guardaba: se queda
         try{ await ctBorrarArchivo(f.archivo); }catch(e){}
         f.archivoBorrado = true; f.soltada = 'nube';
-        ctEscribir();
+        if(lote) ctEscribirLote(); else ctEscribir();
         return true;
-      }));
+      }, lote ? { lote: true } : undefined));
     } finally { ctSoltando.delete(f); }
   }
   // Fotos que subieron con una version anterior, o con la app cerrada: al entrar se sueltan (todas tras UNA escritura).
@@ -50078,9 +50097,11 @@ body.idi-en [data-solo-es]{display:none !important;}
     try{
       await ctSubirArchivo(ctRutaDes(f.path), blob, 'image/jpeg');
       const local = f.des.local; f.des = Object.assign({}, f.des, { local: null, nube: true });
-      try{ await ctBorrarArchivo(local); }catch(e){}
+      // (27-oct) el archivo sale del teléfono solo después de guardar el registro que ya dice nube:true (si la app se
+      // cierra antes, la copia sigue en el disco y se vuelve a subir: la nube contesta "ya estaba").
+      ctDespuesDeGuardar(() => ctBorrarArchivo(local).catch(() => {}), { lote: true });
     }catch(e){ if(e && e.permanente) f.des.intentos = (f.des.intentos || 0) + 1; console.warn('contenidos: desenfocada', e); }
-    ctEscribir();
+    ctEscribirLote();
   }
   async function ctTomarFotos(files, opts){
     const t = ctActual(); if(!t || t.estado !== 'abierto' || !files || !files.length) return;
@@ -50174,14 +50195,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     const dueno = f => ctEsObjeto(f) ? f : (t.fotos.find(x => x.k === f.de) || f);
     const enVista = f => !t.cat || (t.cat === 'sin' ? !ctCarpetaDe(dueno(f)) : ctCarpetaDe(dueno(f)) === t.cat);
     $('#ct-cuenta').textContent = String(ctObjetos(t).filter(enVista).length);
-    const c = { nube: 0, sube: 0, tel: 0, err: 0 };
-    t.fotos.forEach(f => { c[ctEstadoFotoHtml(f)]++; });
-    $('#ct-estadoFotos').innerHTML = !t.fotos.length ? '' :
-      (t.fotos.length !== ctObjetos(t).length ? '<span>' + t.fotos.length + ' fotos en total</span>' : '')
-      + (c.nube ? '<span><i class="ct-dot nube" style="position:static;"></i>' + c.nube + ' en la nube</span>' : '')
-      + (c.sube ? '<span><i class="ct-dot sube" style="position:static;"></i>' + c.sube + ' subiendo</span>' : '')
-      + (c.tel ? '<span><i class="ct-dot tel" style="position:static;"></i>' + c.tel + ' en el teléfono' + (navigator.onLine === false ? ' (sin señal)' : '') + '</span>' : '')
-      + (c.err ? '<span><i class="ct-dot err" style="position:static;"></i><b>' + c.err + ' sin subir</b> <button type="button" class="minibtn" data-ct-reintentar>Reintentar</button></span>' : '');
+    $('#ct-estadoFotos').innerHTML = ctEstadoFotosHtml(t);
     grid.innerHTML = ctFotosOrdenadas(t).filter(enVista).map(f => '<div class="ct-tile' + (ctEsObjeto(f) ? '' : ' x') + '" data-k="' + f.k + '"><div class="ct-foto"><img alt="" data-ruta="' + esc(f.vista) + '"></div><span class="ct-num">' + ctEtiqueta(t, f) + '</span><i class="ct-dot ' + ctEstadoFotoHtml(f) + '"></i>' + (ctEsObjeto(f) ? ctNombreHtml(f) : '<div class="ct-nom"><em>' + esc((CT_ROLES[f.rol] || CT_ROLES.detalle).corto) + ' del #' + f.n + '</em></div>') + '</div>').join('');
     grid.querySelectorAll('img[data-ruta]').forEach(img => ctPonerImagen(img, img.dataset.ruta));
     const puedeTomar = !cerrado && !!t.cat && t.cat !== 'sin';
@@ -50196,6 +50210,36 @@ body.idi-en [data-solo-es]{display:none !important;}
     if(pie){ const c = CT_CARPETAS.find(x => x.k === t.cat); pie.hidden = !t.cat || cerrado;
       pie.innerHTML = (t.cat && !cerrado) ? '<button type="button" class="btn btn-outline btn-block" data-ct-carpeta="">&#10003; Terminé con ' + (c ? esc(c.titulo) : 'esta carpeta') + ' <span class="en">· escoger otra carpeta</span></button><p class="clockhint" style="margin:8px 0 0;">Cuando termine todas las carpetas, marque abajo lo que se hizo con cada cosa y toque <b>Continuar</b> para pasar a la firma.</p>' : ''; }
     ctPintarCerrado(t); ctPintarNombresAviso();
+  }
+  // La cuenta de arriba de la cuadrícula ("N en la nube · N subiendo · N en el teléfono").
+  function ctEstadoFotosHtml(t){
+    const c = { nube: 0, sube: 0, tel: 0, err: 0 };
+    t.fotos.forEach(f => { c[ctEstadoFotoHtml(f)]++; });
+    return !t.fotos.length ? '' :
+      (t.fotos.length !== ctObjetos(t).length ? '<span>' + t.fotos.length + ' fotos en total</span>' : '')
+      + (c.nube ? '<span><i class="ct-dot nube" style="position:static;"></i>' + c.nube + ' en la nube</span>' : '')
+      + (c.sube ? '<span><i class="ct-dot sube" style="position:static;"></i>' + c.sube + ' subiendo</span>' : '')
+      + (c.tel ? '<span><i class="ct-dot tel" style="position:static;"></i>' + c.tel + ' en el teléfono' + (navigator.onLine === false ? ' (sin señal)' : '') + '</span>' : '')
+      + (c.err ? '<span><i class="ct-dot err" style="position:static;"></i><b>' + c.err + ' sin subir</b> <button type="button" class="minibtn" data-ct-reintentar>Reintentar</button></span>' : '');
+  }
+  // (27-oct-2026) Lo que pinta la cola de la nube mientras sube (ctPintarColaLuego): SOLO el puntito y el nombre de las fotos
+  // que cambiaron y la cuenta de arriba; antes se repintaba la cuadrícula ENTERA dos veces por foto (con miles de fotos la
+  // pantalla se trababa). Al terminar cada vuelta se pinta todo, como antes.
+  function ctPintarSubidaFotos(fotos){
+    const t = ctActual(); if(!t) return;
+    const grid = $('#ct-grid');
+    if(grid && fotos && fotos.length){
+      const mias = new Set(t.fotos);
+      for(const f of fotos){
+        if(!mias.has(f)) continue;
+        const tile = grid.querySelector('.ct-tile[data-k="' + f.k + '"]'); if(!tile) continue;
+        const d = tile.querySelector('.ct-dot'); if(d) d.className = 'ct-dot ' + ctEstadoFotoHtml(f);
+        const nom = tile.querySelector('.ct-nom'); if(nom) nom.outerHTML = ctNombreHtml(f);
+      }
+    }
+    const panelFotos = document.querySelector('.tab-panel[data-tab="contenidos"] .card[data-step="fotos"]');
+    const cuenta = $('#ct-estadoFotos');
+    if(panelFotos && !panelFotos.hidden && cuenta) cuenta.innerHTML = ctEstadoFotosHtml(t);
   }
   function ctPintarEstadoFoto(f){
     const t = ctActual(); if(!t) return;
@@ -50779,11 +50823,30 @@ body.idi-en [data-solo-es]{display:none !important;}
   let ctSubiendo = false, ctFaltaSql = false, ctTelNube = true;
   function ctCabeceras(extra){ return Object.assign({ apikey: CLOUD.key, Authorization: 'Bearer ' + ((SES && SES.access_token) || CLOUD.key), 'Content-Type': 'application/json' }, extra || {}); }
   const ctYaEstaba = txt => /already exists|duplicate/i.test(String(txt || ''));
+  // (27-oct-2026, subida rápida) Cada pedido de la cola tiene tiempo límite: una foto colgada (mala señal) ya no deja la
+  // cola "subiendo…" para siempre. Y el "espere" del servidor (429 / 503, o el 400 con statusCode 429 de Storage) no es un
+  // error de la foto: la cola espera y la vuelve a intentar sin gastarle intentos (ver ctSubirFotosDe).
+  const CT_PEDIDO_MS = 45000, CT_ARCHIVO_MS = 120000;
+  async function ctPedir(ruta, opts, ms){
+    const C = (typeof AbortController === 'function') ? new AbortController() : null;
+    const tm = C ? setTimeout(() => C.abort(), ms || CT_PEDIDO_MS) : null;
+    try{ return await authFetch(ruta, C ? Object.assign({}, opts, { signal: C.signal }) : opts); }
+    catch(e){ if(C && C.signal.aborted){ const e2 = new Error('la nube no contestó a tiempo'); e2.tiempo = true; throw e2; } throw e; }
+    finally{ clearTimeout(tm); }
+  }
+  const ctEsLimite = (res, j) => !!res && (res.status === 429 || res.status === 503 || (!!j && (String(j.statusCode) === '429' || /too many requests|rate limit|slow down/i.test(String(j.message || j.error || '')))));
+  function ctErrorLimite(res, msg){
+    const e = new Error('la nube pide esperar (' + res.status + ')' + (msg ? ': ' + msg : '')); e.limite = true; e.permanente = false;
+    const ra = parseFloat((res.headers && typeof res.headers.get === 'function' && res.headers.get('Retry-After')) || '');
+    if(ra > 0) e.esperaMs = Math.min(120000, ra * 1000);
+    return e;
+  }
   async function ctSubirArchivo(path, blob, tipo){
-    const res = await authFetch('/storage/v1/object/contenidos/' + path, { method: 'POST', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token, 'Content-Type': tipo || 'image/jpeg' }, body: blob });
+    const res = await ctPedir('/storage/v1/object/contenidos/' + path, { method: 'POST', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token, 'Content-Type': tipo || 'image/jpeg' }, body: blob }, CT_ARCHIVO_MS);
     if(res.ok || res.status === 409) return true;
-    let msg = ''; try{ const j = await res.json(); msg = j.message || j.error || ''; }catch(e){}
+    let msg = '', j = null; try{ j = await res.json(); msg = j.message || j.error || ''; }catch(e){}
     if(res.status === 400 && ctYaEstaba(msg)) return true;                 // ya estaba: lo que cuenta es la fila
+    if(ctEsLimite(res, j)) throw ctErrorLimite(res, msg);
     const e = new Error('almacén ' + res.status + (msg ? ': ' + msg : '')); e.permanente = [400, 403, 413, 415].includes(res.status); throw e;
   }
   async function ctSubirFilaTrabajo(t){
@@ -50791,13 +50854,13 @@ body.idi-en [data-solo-es]{display:none !important;}
                    cc_project_id: t.cc ? String(t.cc.id) : null, cc_project_nombre: t.cc ? t.cc.nombre : null, cc_project_direccion: t.cc ? (t.cc.direccion || null) : null,
                    anterior_id: t.anterior || null };
     if(ctTelNube) body.telefono = t.telefono || null;
-    const pedir = () => authFetch('/rest/v1/contenidos_trabajos?on_conflict=id', { method: 'POST', headers: ctCabeceras({ Prefer: 'resolution=merge-duplicates,return=representation' }), body: JSON.stringify(body) });
+    const pedir = () => ctPedir('/rest/v1/contenidos_trabajos?on_conflict=id', { method: 'POST', headers: ctCabeceras({ Prefer: 'resolution=merge-duplicates,return=representation' }), body: JSON.stringify(body) });
     let res = await pedir();
     // Falta correr supabase-telefono-cliente.sql: se manda sin el telefono y no se traba la cola.
     if(res.status === 400 && 'telefono' in body){ const j0 = await res.clone().json().catch(() => null); if(j0 && /telefono/i.test(String(j0.message || '') + String(j0.hint || ''))){ ctTelNube = false; delete body.telefono; res = await pedir(); } }
     if(res.status === 404){ ctFaltaSql = true; const e = new Error('falta correr supabase-contenidos.sql'); e.permanente = true; throw e; }
     const j = await res.json().catch(() => null);
-    if(!res.ok){ const e = new Error((j && (j.message || j.hint)) || ('HTTP ' + res.status)); e.permanente = res.status >= 400 && res.status < 500 && ![408, 429].includes(res.status); throw e; }
+    if(!res.ok){ if(ctEsLimite(res, j)) throw ctErrorLimite(res); const e = new Error((j && (j.message || j.hint)) || ('HTTP ' + res.status)); e.permanente = res.status >= 400 && res.status < 500 && ![408, 429].includes(res.status); throw e; }
     const fila = Array.isArray(j) ? j[0] : null;
     if(!fila || fila.id !== t.id) throw new Error('el servidor no devolvió el trabajo');
     return fila;
@@ -50820,8 +50883,9 @@ body.idi-en [data-solo-es]{display:none !important;}
       body.nombre_ia = (f.fuente === 'ia' || f.fuente === 'ia-confirmado') ? (f.nombre || null) : null;
       body.nombre_ia_en = f.ia.en || null; body.ia_confianza = f.ia.en ? (f.ia.conf || null) : null;
     }
-    const res = await authFetch('/rest/v1/contenidos_fotos?on_conflict=trabajo_id,k', { method: 'POST', headers: ctCabeceras({ Prefer: 'resolution=merge-duplicates,return=representation' }), body: JSON.stringify(body) });
+    const res = await ctPedir('/rest/v1/contenidos_fotos?on_conflict=trabajo_id,k', { method: 'POST', headers: ctCabeceras({ Prefer: 'resolution=merge-duplicates,return=representation' }), body: JSON.stringify(body) });
     const j = await res.json().catch(() => null);
+    if(!res.ok && ctEsLimite(res, j)) throw ctErrorLimite(res);
     if(!res.ok){ const e = new Error((j && (j.message || j.hint)) || ('HTTP ' + res.status)); e.permanente = res.status >= 400 && res.status < 500 && ![408, 429].includes(res.status); throw e; }
     const fila = Array.isArray(j) ? j[0] : null;
     if(!fila || fila.sha256 !== f.sha256) throw new Error('la nube no devolvió la foto con la misma huella');
@@ -50833,7 +50897,8 @@ body.idi-en [data-solo-es]{display:none !important;}
   // (19 oct 2026) donde va el recorte del objeto en la nube: junto a la foto (la misma regla en nombrar-objetos).
   const ctRutaRecorte = (path) => String(path || '').replace(/\.jpg$/, '-r.jpg');
   async function ctBorrarEnNube(t, b){
-    const res = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(t.id) + '&k=eq.' + b.k, { method: 'DELETE', headers: ctCabeceras() });
+    const res = await ctPedir('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(t.id) + '&k=eq.' + b.k, { method: 'DELETE', headers: ctCabeceras() });
+    if(!res.ok && res.status !== 404 && ctEsLimite(res, null)) throw ctErrorLimite(res);
     if(!res.ok && res.status !== 404){ const e = new Error('HTTP ' + res.status); e.permanente = res.status >= 400 && res.status < 500 && ![408, 429].includes(res.status); throw e; }
     try{ await authFetch('/storage/v1/object/contenidos/' + b.path, { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){}
     if(/\.jpg$/.test(b.path || '')){ try{ await authFetch('/storage/v1/object/contenidos/' + ctRutaRecorte(b.path), { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){} }
@@ -50930,6 +50995,147 @@ body.idi-en [data-solo-es]{display:none !important;}
     ctEscribir();
     return r;
   }
+  // ---- (27-oct-2026, "Bodega" 2) LA SUBIDA RÁPIDA ----
+  // Con ~4,000 fotos en la cola, la nube subía ~50 fotos por minuto (con 300 ms por pedido): una foto a la vez, 3-4 pedidos
+  // en fila por foto, el registro entero (4-6 MB) escrito 2-3 veces por foto y la cuadrícula entera repintada 2 veces por foto.
+  // Ahora:
+  //  - CT_SUBIDA_HILOS fotos a la vez sobre la MISMA lista: cada foto la toma UN solo hilo (la lista se reparte en el hilo de
+  //    la página, sin carreras; `vistas` impide tomarla dos veces en la misma vuelta). Dentro de cada foto, la grande, el
+  //    recorte y la desenfocada van juntas, y la fila (contenidos_fotos) al final, como siempre;
+  //  - el registro se guarda agrupado (ctEscribirLote) y la grande sale SOLO tras la escritura CONFIRMADA que ya dice
+  //    enNube (ctSoltarGrande con lote -> ctDespuesDeGuardar);
+  //  - la pantalla se pinta agrupada (ctPintarColaLuego): a lo más ~3 veces por segundo, solo lo que cambió;
+  //  - "espere" del servidor (429 / 503, también el de Storage): todos esperan (Retry-After, o 2 s, 4 s … 60 s), se baja a
+  //    UN hilo y la foto vuelve a la lista sin gastar intentos; se sube de nuevo de a poco con lo que sí entra. Muchos
+  //    seguidos: se para hasta la siguiente vuelta (cada minuto) y no se martilla;
+  //  - sin señal / error pasajero: la foto gasta un intento (como antes); 3 seguidos o sin red = se para la vuelta.
+  //  - si la persona toca la foto MIENTRAS sube su fila, el cambio no se pierde: queda por subir (ctHuellaEnvio).
+  const CT_SUBIDA_HILOS = 4, CT_LIMITES_MAX = 6, CT_FALLOS_MAX = 3;
+  let ctOtraVuelta = false;
+  const ctDormir = ms => new Promise(r => setTimeout(r, Math.max(0, ms)));
+  // lo que la persona puede cambiar y viaja en la fila; el nombre que pone la nube (fuente 'ia') no cuenta
+  const ctHuellaEnvio = f => JSON.stringify([ctEstados(f), (f.fuente === 'persona' || f.fuente === 'ia-confirmado') ? [f.nombre || '', f.fuente, f.en || ''] : '', f.nota || '', f.nota_en || '', f.rol || 'objeto', f.de || null]);
+  const ctFotoViva = (t, f) => CT.trabajos[t.id] === t && t.estado === 'abierto' && t.fotos.includes(f);
+  // qué le falta a una foto: 'foto' (la foto y su fila), 'des' (solo la desenfocada que llegó después) o nada
+  const ctTareaFoto = f => (f.enNube && !f.dirty) ? (ctDesPorSubir(f) ? 'des' : null) : ((f.subida === 'error' && f.intentos >= 6) ? null : 'foto');
+  // La foto sin pasar por el puente en base64 (el archivo lo da el aparato directo, como las miniaturas); si no, como siempre.
+  async function ctLeerBlobRapido(ruta){
+    const C = (typeof window !== 'undefined') ? window.Capacitor : null, F = ctDisco();
+    if(F && C && typeof C.convertFileSrc === 'function' && typeof F.getUri === 'function' && typeof fetch === 'function'){
+      try{
+        const uri = (await F.getUri({ path: ruta, directory: 'DATA' })).uri;
+        const r = await fetch(encodeURI(C.convertFileSrc(uri)));
+        if(r.ok){ const b = await r.blob(); if(b && b.size > 0) return b; }
+      }catch(e){}
+    }
+    return ctLeerBlob(ruta);
+  }
+  // Una foto: la grande, el recorte y la desenfocada juntas; la fila al final. true = quedó en la nube.
+  async function ctSubirUnaFoto(t, f){
+    if(!f.path) f.path = SES.company_id + '/' + t.id + '/' + String(f.k).padStart(3, '0') + '.jpg';
+    const partes = [f.enNube ? Promise.resolve(true) : ctLeerBlobRapido(f.archivo).then(b => ctSubirArchivo(f.path, b, 'image/jpeg'))];
+    // (19 oct 2026) el recorte del objeto, junto a la foto (<path>-r.jpg): la nube lo nombra con él. Nunca detiene la foto.
+    if(!f.enNube && f.recorte && ctEsObjeto(f)){ const rec = f.recorte; partes.push(ctLeerBlobRapido(rec).then(b => ctSubirArchivo(ctRutaRecorte(f.path), b, 'image/jpeg')).catch(e => { console.warn('contenidos: recorte', e); })); }
+    if(ctDesPorSubir(f)) partes.push(ctSubirDes(f));                  // (21 oct 2026) la copia desenfocada (<path>-d.jpg); nunca detiene la foto
+    const hechas = await Promise.allSettled(partes);
+    if(hechas[0].status === 'rejected') throw hechas[0].reason;
+    if(!ctFotoViva(t, f)) return false;                               // la quitaron mientras subía: su fila no se sube (t.borradas limpia la nube)
+    const antes = ctHuellaEnvio(f);
+    await ctSubirFilaFoto(t, f);
+    if(f.recorte){ const rec = f.recorte; f.recorte = null; ctBorrarArchivo(rec).catch(() => {}); }
+    f.enNube = true; f.dirty = ctHuellaEnvio(f) !== antes;            // la tocaron mientras subía: queda por subir
+    f.subida = f.dirty ? 'tel' : 'nube'; f.error = ''; f.intentos = 0;
+    ctEscribirLote(); ctPintarColaLuego(f);
+    ctSoltarGrande(f, { lote: true });                                // LA NUBE LA GUARDA: la grande sale del teléfono SOLO cuando el registro con enNube quedó guardado (sin esperar aquí)
+    return true;
+  }
+  // Las fotos de UN trabajo, varias a la vez. false = hay que parar la cola (sin señal, o el servidor no deja).
+  async function ctSubirFotosDe(t){
+    const st = { i: 0, devueltas: [], vistas: new Set(), parar: false, hilos: CT_SUBIDA_HILOS, fallos: 0, limites: 0, exitos: 0, pausaHasta: 0 };
+    const tomar = () => {
+      if(st.devueltas.length) return st.devueltas.shift();
+      const lib = f => !st.vistas.has(f) && !!ctTareaFoto(f);
+      while(st.i < t.fotos.length){ const f = t.fotos[st.i++]; if(lib(f)){ st.vistas.add(f); return f; } }
+      const f = t.fotos.find(lib);                                    // la lista cambió de orden mientras subía (ctRenumerar) o llegaron fotos nuevas
+      if(f){ st.vistas.add(f); return f; }
+      return null;
+    };
+    const una = async f => {
+      if(!ctFotoViva(t, f)) return;
+      const tarea = ctTareaFoto(f); if(!tarea) return;
+      if(tarea === 'des'){ await ctSubirDes(f); ctPintarColaLuego(f); return; }
+      f.subida = 'subiendo'; ctPintarColaLuego(f);
+      try{
+        await ctSubirUnaFoto(t, f);
+        st.fallos = 0; st.limites = 0; st.exitos++;
+        if(st.hilos < CT_SUBIDA_HILOS && st.exitos % 4 === 0){ st.hilos++; lanzar(); }   // lo que sí entra: de a un hilo más
+      }catch(e){
+        if(e && e.limite){                                            // el servidor pide esperar: no es culpa de la foto
+          f.subida = 'tel'; st.limites++; st.exitos = 0; st.hilos = 1;
+          st.pausaHasta = Math.max(st.pausaHasta, Date.now() + (e.esperaMs || Math.min(60000, 2000 * Math.pow(2, st.limites - 1))));
+          if(st.limites > CT_LIMITES_MAX) st.parar = true; else st.devueltas.push(f);
+          ctEscribirLote(); ctPintarColaLuego(f);
+          return;
+        }
+        f.intentos = (f.intentos || 0) + 1; f.error = String((e && e.message) || e).slice(0, 140);
+        f.subida = ((e && e.permanente) || f.intentos >= 6) ? 'error' : 'tel';
+        ctEscribirLote(); ctPintarColaLuego(f);
+        if(!(e && e.permanente)){                                     // sin señal o servidor ocupado
+          st.fallos++;
+          if(st.fallos >= CT_FALLOS_MAX || navigator.onLine === false) st.parar = true;
+          else st.pausaHasta = Math.max(st.pausaHasta, Date.now() + 1500 * st.fallos);
+        }
+      }
+    };
+    let vivos = 0, terminar = null;
+    const fin = new Promise(r => { terminar = r; });
+    const hilo = async () => {
+      try{
+        for(;;){
+          if(st.parar || vivos > st.hilos || navigator.onLine === false) return;
+          const espera = st.pausaHasta - Date.now(); if(espera > 0){ await ctDormir(espera); continue; }
+          const f = tomar(); if(!f) return;
+          try{ await una(f); }catch(e){ console.error('contenidos: subir foto', e); }
+        }
+      } finally { vivos--; if(!vivos) terminar(); }
+    };
+    function lanzar(){ vivos++; hilo(); }
+    for(let n = 0; n < st.hilos; n++) lanzar();
+    await fin;
+    return !st.parar;
+  }
+  // La pantalla mientras sube: agrupada (a lo más ~3 veces por segundo), solo las fotos que cambiaron y la cuenta.
+  const CT_PINTAR_MS = 350;
+  const ctPorPintar = new Set(); let ctPintarTm = null, ctPintadoAt = 0;
+  function ctPintarColaLuego(f){
+    if(f) ctPorPintar.add(f);
+    if(ctPintarTm) return;
+    ctPintarTm = setTimeout(ctPintarColaYa, Math.max(0, ctPintadoAt + CT_PINTAR_MS - Date.now()));
+  }
+  function ctPintarColaYa(){
+    clearTimeout(ctPintarTm); ctPintarTm = null; ctPintadoAt = Date.now();
+    const fotos = [...ctPorPintar]; ctPorPintar.clear();
+    try{
+      if(typeof ctPintarSubidaFotos === 'function') ctPintarSubidaFotos(fotos);
+      if(typeof ccPintarEstado === 'function') ccPintarEstado();
+    }catch(e){ console.warn('contenidos: pintar la cola', e); }
+  }
+  // Que la pantalla no se apague mientras sube una cola grande (Screen Wake Lock de la página; no hay plugin nativo).
+  // Si el iPhone no lo tiene, no pasa nada. Se suelta al terminar; al irse a segundo plano lo suelta el sistema.
+  let ctDespierto = null, ctDespiertoQuiere = false;
+  async function ctMantenerDespierto(si){
+    ctDespiertoQuiere = !!si;
+    try{
+      if(si){
+        const W = (typeof navigator !== 'undefined' && navigator.wakeLock && typeof navigator.wakeLock.request === 'function') ? navigator.wakeLock : null;
+        if(!W || ctDespierto || document.visibilityState !== 'visible') return;
+        const w = await W.request('screen');
+        if(!ctDespiertoQuiere){ try{ await w.release(); }catch(e){} return; }
+        ctDespierto = w;
+        if(typeof w.addEventListener === 'function') w.addEventListener('release', () => { if(ctDespierto === w) ctDespierto = null; });
+      } else if(ctDespierto){ const w = ctDespierto; ctDespierto = null; await w.release(); }
+    }catch(e){ ctDespierto = null; }
+  }
   function ctResumenCola(){
     let pend = 0, err = 0;
     Object.values(CT.trabajos).forEach(t => { if(t.estado !== 'abierto') return; t.fotos.forEach(f => { if(f.subida === 'error' && f.intentos >= 6) err++; else if(!f.enNube || f.dirty) pend++; }); });
@@ -50938,9 +51144,11 @@ body.idi-en [data-solo-es]{display:none !important;}
   async function ctProcesarCola(){
     if(!ctReg.cargado) return;                                         // (26-oct) el registro todavía se está leyendo del archivo
     ctDesenfocarCola().catch(() => {});                                // (21 oct 2026) las copias desenfocadas que quedaron en la fila
-    if(ctSubiendo || !signedIn() || navigator.onLine === false) return;
+    if(ctSubiendo){ ctOtraVuelta = true; return; }                       // (27-oct) lo que llegó mientras subía: otra vuelta al terminar
+    if(!signedIn() || navigator.onLine === false) return;
     const lista = ctTrabajosPendientes(); if(!lista.length) return;
-    ctSubiendo = true;
+    ctSubiendo = true; ctOtraVuelta = false;
+    let paro = true;
     try{
       for(const t of lista){
         if(t.estado === 'abierto' && (!t.fila || t.cambios)){
@@ -50956,34 +51164,21 @@ body.idi-en [data-solo-es]{display:none !important;}
           try{ await ctBorrarEnNube(t, b); t.borradas = t.borradas.filter(x => x !== b); ctEscribir(); }
           catch(e){ if(e.permanente){ t.borradas = t.borradas.filter(x => x !== b); ctEscribir(); } else return; }
         }
-        if(t.estado === 'abierto') for(const f of t.fotos){
-          if(f.enNube && !f.dirty){ if(ctDesPorSubir(f)) await ctSubirDes(f); continue; }   // (21 oct 2026) la copia desenfocada que llegó después
-          if(f.subida === 'error' && f.intentos >= 6) continue;
-          f.subida = 'subiendo'; ctPintarEstadoFoto(f); if(typeof ccPintarEstado === 'function') ccPintarEstado();
-          try{
-            if(!f.path) f.path = SES.company_id + '/' + t.id + '/' + String(f.k).padStart(3, '0') + '.jpg';
-            if(!f.enNube) await ctSubirArchivo(f.path, await ctLeerBlob(f.archivo), 'image/jpeg');
-            // (19 oct 2026) el recorte del objeto, junto a la foto (<path>-r.jpg): la nube lo nombra con él. Nunca detiene la foto.
-            // (21 oct 2026) tambien con nombre de Apple: la nube lo renombra con Claude y el recorte cuesta menos y se ve mejor.
-            if(!f.enNube && f.recorte && ctEsObjeto(f)){ try{ await ctSubirArchivo(ctRutaRecorte(f.path), await ctLeerBlob(f.recorte), 'image/jpeg'); }catch(e){ console.warn('contenidos: recorte', e); } }
-            if(ctDesPorSubir(f)) await ctSubirDes(f);                     // (21 oct 2026) la copia desenfocada (<path>-d.jpg), igual que el recorte
-            await ctSubirFilaFoto(t, f);
-            if(f.recorte){ try{ await ctBorrarArchivo(f.recorte); }catch(e){} f.recorte = null; }
-            f.enNube = true; f.dirty = false; f.subida = 'nube'; f.error = ''; f.intentos = 0;
-            ctEscribir(); ctPintarEstadoFoto(f);
-            ctSoltarGrande(f);                                          // LA NUBE LA GUARDA: la grande sale del telefono, pero solo cuando el registro con enNube quedó guardado (sin esperar aquí)
-          }catch(e){
-            f.intentos = (f.intentos || 0) + 1; f.error = String(e.message || e).slice(0, 140);
-            f.subida = (e.permanente || f.intentos >= 6) ? 'error' : 'tel';
-            ctEscribir(); ctPintarEstadoFoto(f);
-            if(!e.permanente) return;                                   // sin señal o servidor ocupado: despues
-          }
+        // (27-oct-2026) las fotos: varias a la vez (ctSubirFotosDe); sin señal o con el servidor pidiendo esperar, se para aquí
+        if(t.estado === 'abierto'){
+          if(t.fotos.filter(f => ctTareaFoto(f) === 'foto').length >= 10) ctMantenerDespierto(true);
+          if(!(await ctSubirFotosDe(t))) return;
         }
         if(t.estado === 'firmado' && t.pdfPendiente){ try{ await ctSubirPdf(t); }catch(e){ t.error = String(e.message || e); console.error('contenidos: pdf', e); } }
         if(t.estado === 'firmado' && t.ccCompletoPendiente) await ctAnotarCompleto(t);
       }
+      paro = false;
     } finally {
       ctSubiendo = false; ctEscribir();
+      clearTimeout(ctPintarTm); ctPintarTm = null; ctPorPintar.clear();
+      ctMantenerDespierto(false);
+      if(ctOtraVuelta && !paro) setTimeout(ctProcesarCola, 1500);
+      ctOtraVuelta = false;
       if(typeof ccPintarEstado === 'function') ccPintarEstado();
       const panel = document.querySelector('.tab-panel[data-tab="contenidos"]');
       if(panel && panel.classList.contains('active')) ctPintar();
