@@ -10604,7 +10604,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-27-R51';
+  const APP_BUILD = '2026-10-27-R52';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -50900,9 +50900,10 @@ body.idi-en [data-solo-es]{display:none !important;}
     const res = await ctPedir('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(t.id) + '&k=eq.' + b.k, { method: 'DELETE', headers: ctCabeceras() });
     if(!res.ok && res.status !== 404 && ctEsLimite(res, null)) throw ctErrorLimite(res);
     if(!res.ok && res.status !== 404){ const e = new Error('HTTP ' + res.status); e.permanente = res.status >= 400 && res.status < 500 && ![408, 429].includes(res.status); throw e; }
-    try{ await authFetch('/storage/v1/object/contenidos/' + b.path, { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){}
-    if(/\.jpg$/.test(b.path || '')){ try{ await authFetch('/storage/v1/object/contenidos/' + ctRutaRecorte(b.path), { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){} }
-    if(/\.jpg$/.test(b.path || '')){ try{ await authFetch('/storage/v1/object/contenidos/' + ctRutaDes(b.path), { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){} }
+    // (27-oct, R52) también con tiempo límite: un borrado colgado dejaba la cola "subiendo…" para siempre y no se podía firmar
+    try{ await ctPedir('/storage/v1/object/contenidos/' + b.path, { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){}
+    if(/\.jpg$/.test(b.path || '')){ try{ await ctPedir('/storage/v1/object/contenidos/' + ctRutaRecorte(b.path), { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){} }
+    if(/\.jpg$/.test(b.path || '')){ try{ await ctPedir('/storage/v1/object/contenidos/' + ctRutaDes(b.path), { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){} }
   }
   function ctTrabajosPendientes(){
     return Object.values(CT.trabajos).filter(t => (t.estado === 'abierto' && (!t.fila || t.cambios || (t.borradas || []).length || t.fotos.some(f => ((!f.enNube || f.dirty) && !(f.subida === 'error' && f.intentos >= 6)) || (f.enNube && ctDesPorSubir(f) && navigator.onLine !== false))))
@@ -50926,7 +50927,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   async function ctFilasNube(id){
     let cols = CT_COLS_NUBE; const out = [];
     for(let off = 0, v = 0; v < 60; v++){
-      const res = await authFetch('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(id) + '&order=k.asc&limit=1000&offset=' + off + '&' + cols, { headers: ctCabeceras() });
+      const res = await ctPedir('/rest/v1/contenidos_fotos?trabajo_id=eq.' + encodeURIComponent(id) + '&order=k.asc&limit=1000&offset=' + off + '&' + cols, { headers: ctCabeceras() });   // (27-oct, R52) con tiempo límite: corre dentro de la cola
       if(res.status === 400 && cols === CT_COLS_NUBE && off === 0){ cols = CT_COLS_NUBE_MIN; v--; continue; }   // una columna que falta en la base
       if(!res.ok){ const e = new Error('HTTP ' + res.status); e.permanente = res.status >= 400 && res.status < 500 && ![401, 408, 429].includes(res.status); throw e; }
       const pag = await res.json().catch(() => null);
