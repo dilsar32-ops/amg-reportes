@@ -31,19 +31,33 @@
  .sig .x{position:absolute;right:8px;top:8px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:13px}
  .done{text-align:center;padding:28px 10px} .done .ok{width:70px;height:70px;border-radius:50%;background:rgba(30,132,73,.12);color:var(--ok);font-size:38px;line-height:70px;margin:0 auto 10px}
  .err{background:#fff4f2;border-color:#f3c4bd}
+ /* (27-oct-2026) de 4 en 4: cuadrícula de 2 x 2; tocar una foto la abre en grande */
+ .rej{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+ .it{border:1px solid var(--line);border-radius:12px;padding:6px;background:#fff;min-width:0}
+ .it .foto{aspect-ratio:1;border-radius:9px;cursor:zoom-in}
+ .it .foto img{object-fit:cover}
+ .it .nom{margin-top:6px;font-size:14.5px;line-height:1.25;overflow-wrap:anywhere} .it .nom span{font-size:12.5px}
+ .it .pills{gap:4px;margin-top:4px} .it .pill{font-size:10px;padding:3px 7px}
+ .it .nota{font-size:12.5px;margin-top:4px}
+ .it .xs{gap:5px;margin-top:5px} .it .xs div{width:42px} .it .xs small{font-size:9.5px}
+ .pag{font-weight:700;font-size:15px;margin-bottom:10px} .pag span{font-weight:400;color:var(--soft);font-size:13px}
+ .grande{position:fixed;inset:0;background:rgba(10,14,20,.94);z-index:9;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px}
+ .grande img{max-width:100%;max-height:78vh;object-fit:contain;border-radius:8px}
+ .grande p{color:#fff;margin:12px 0 0;text-align:center;font-weight:600} .grande button{margin-top:14px;min-height:44px;padding:0 22px;border-radius:12px;border:0;font:600 16px system-ui}
  .leg{font-size:12px;color:var(--soft);margin-top:10px}
  [hidden]{display:none !important}
 </style></head><body>
 <div class="top"><b><span class="co">Restoration Doctor</span> · Contents inventory</b><small id="sub">Loading…</small></div>
 <main>
- <section class="card" id="intro"><h2>Please review each photo <span class="es">/ Revise cada foto</span></h2>
-  <p class="hint">Look at every item one by one. At the end you will read the authorization and sign. <span class="es">Vea cada objeto uno por uno; al final lee la autorización y firma.</span></p></section>
+ <section class="card" id="intro"><h2>Please review every photo <span class="es">/ Revise todas las fotos</span></h2>
+  <p class="hint">You will see 4 items at a time. Tap a photo to see it larger. At the end you will read the authorization and sign. <span class="es">Verá 4 objetos a la vez; toque una foto para verla en grande. Al final lee la autorización y firma.</span></p></section>
  <section class="card" id="ver" hidden>
-  <div class="foto" id="foto"><span class="cnt" id="cnt"></span><img id="img" alt="" hidden><span id="sinImg"></span></div>
-  <div class="nom" id="nom"></div><div class="pills" id="pills"></div><div class="nota" id="nota"></div><div class="xs" id="xs"></div>
+  <div class="pag" id="cnt"></div>
+  <div class="rej" id="rej"></div>
   <div class="bar"><i id="barra"></i></div>
   <div class="nav"><button class="btn" id="atras">◀ Back <span class="es">/ Atrás</span></button><button class="btn p" id="sig">Next ▶ <span class="es">/ Siguiente</span></button></div>
  </section>
+ <div class="grande" id="grande" hidden><img id="gImg" alt=""><p id="gTxt"></p><button type="button" id="gCerrar">Close / Cerrar</button></div>
  <section class="card" id="firma" hidden>
   <h2>Authorization <span class="es">/ Autorización</span></h2>
   <div class="aut" id="txtEn"></div><div class="aut es" id="txtEs"></div>
@@ -65,7 +79,7 @@
   let D = null, i = 0, visto = 0, inicio = new Date().toISOString();
   const COLOR = { agua:'#1f6fb5', seco:'#9a7a1f', moho:'#5b7d2a', fuego:'#b3401f', estructural:'#7a6a58', danado:'#c2520a', limpiado:'#1e8449', empacado:'#5b4bc4', devuelto:'#2e5f8a', tirado:'#c0392b', pendiente:'#b7791f' };
   function demoDatos(){
-    const o = (n, en, es, marcas, nota) => ({ n, nombre_en: en, nombre: es, marcas, nota_en: nota || '', url: '', extras: [] });
+    const o = (n, en, es, marcas, nota) => ({ n, nombre_en: en, nombre: es, marcas, nota_en: nota || '', url: q.get('demofotos') ? 'demo/' + n + '.jpg' : '', extras: [] });
     return { empresa: 'Restoration Doctor', cliente: 'John Smith', direccion: '12 Oak Ln, Vienna VA', fecha: '2026-10-11', vence: '2026-10-18',
       objetos: [o(1, 'sofa', 'Sofá', [['Water damage','agua'],['Cleaned','limpiado'],['Packed','empacado']], 'wet'), o(2, 'rug', 'Alfombra', [['Water damage','agua'],['Already damaged','danado'],['Discarded','tirado']]), o(3, 'chair', 'Silla', [['Water damage','agua'],['Pending','pendiente']]), o(4, 'books', 'Libros', [['Dry','seco'],['Packed','empacado']]), o(5, 'curtain', 'Cortina', [['Mold','moho'],['Pending','pendiente']]), o(6, 'lamp', 'Lámpara', [['Fire damage','fuego'],['Discarded','tirado']])],
       texto: { en: 'I, {nombre}, confirm that I reviewed on my own device, one by one, the 6 photographs of the 6 items listed in this document, sent to me by Restoration Doctor through a link, numbered 1 through 6, and that I reviewed the status marked on each one. An item may carry more than one mark; each mark is counted separately. I authorize Restoration Doctor to dispose of (discard) the 2 items marked DISCARDED, and I understand they cannot be recovered. I confirm that the 0 items marked RETURNED were handed back to me. The 1 items marked CLEANED were treated by Restoration Doctor. The 2 items marked PACKED were packed by Restoration Doctor for storage or transport. The 1 items marked ALREADY DAMAGED already had that damage before Restoration Doctor handled them, as seen in their photographs. The 3 items in the WATER DAMAGE folder showed damage caused by water. The 1 items in the DRY CONTENTS folder were not wet. The 1 items in the MOLD CONTENTS folder showed mold or microbial growth. The 1 items in the FIRE DAMAGE folder showed fire, smoke or soot damage. The 2 items marked PENDING remain undecided in this document. Item names are for reference only; the photograph is what identifies each item.',
@@ -73,17 +87,31 @@
                leyenda_en: 'Item names were suggested automatically from each photograph and reviewed by the crew where indicated; they are not a verification. The photograph is the evidence.' } };
   }
   function pintarSub(){ $('#sub').textContent = D.cliente + ' · ' + D.direccion + ' · ' + D.fecha + ' · ' + D.objetos.length + ' items'; }
+  const POR = 4;   // (27-oct-2026) objetos por pantalla
+  const nombreHtml = o => '#' + o.n + ' ' + esc(o.nombre_en || o.nombre) + (o.nombre && o.nombre_en && o.nombre.toLowerCase() !== o.nombre_en.toLowerCase() ? ' <span>/ ' + esc(o.nombre) + '</span>' : '');
   function pintarFoto(){
-    const o = D.objetos[i]; $('#cnt').textContent = 'Photo ' + (i + 1) + ' of ' + D.objetos.length;
-    const img = $('#img'); if(o.url){ img.src = o.url; img.hidden = false; $('#sinImg').textContent = ''; } else { img.hidden = true; $('#sinImg').textContent = 'photo #' + o.n; }
-    $('#nom').innerHTML = '#' + o.n + ' ' + esc(o.nombre_en || o.nombre) + (o.nombre && o.nombre_en && o.nombre.toLowerCase() !== o.nombre_en.toLowerCase() ? ' <span>/ ' + esc(o.nombre) + '</span>' : '');
-    $('#pills').innerHTML = o.marcas.map(m => '<span class="pill" style="background:' + (COLOR[m[1]] || '#555') + '">' + esc(m[0]).toUpperCase() + '</span>').join('');
-    $('#nota').textContent = o.nota_en ? 'Note: ' + o.nota_en : '';
-    $('#xs').innerHTML = (o.extras || []).map(x => '<div><div class="foto">' + (x.url ? '<img src="' + esc(x.url) + '" alt="">' : '') + '</div><small>' + esc(x.rol_en || 'detail') + '</small></div>').join('');
-    visto = Math.max(visto, i + 1); $('#barra').style.width = Math.round(100 * visto / D.objetos.length) + '%';
+    const total = D.objetos.length, hasta = Math.min(i + POR, total);
+    $('#cnt').innerHTML = 'Items ' + (i + 1) + (hasta > i + 1 ? '–' + hasta : '') + ' of ' + total + ' <span>/ Objetos ' + (i + 1) + (hasta > i + 1 ? '–' + hasta : '') + ' de ' + total + '</span>';
+    $('#rej').innerHTML = D.objetos.slice(i, hasta).map((o, k) => '<div class="it">'
+      + '<div class="foto" data-g="' + (i + k) + '">' + (o.url ? '<img src="' + esc(o.url) + '" alt="" loading="eager">' : '<span>photo #' + o.n + '</span>') + '</div>'
+      + '<div class="nom">' + nombreHtml(o) + '</div>'
+      + '<div class="pills">' + o.marcas.map(m => '<span class="pill" style="background:' + (COLOR[m[1]] || '#555') + '">' + esc(m[0]).toUpperCase() + '</span>').join('') + '</div>'
+      + (o.nota_en ? '<div class="nota">Note: ' + esc(o.nota_en) + '</div>' : '')
+      + ((o.extras || []).length ? '<div class="xs">' + o.extras.map((x, z) => '<div><div class="foto" data-g="' + (i + k) + '" data-x="' + z + '">' + (x.url ? '<img src="' + esc(x.url) + '" alt="">' : '') + '</div><small>' + esc(x.rol_en || 'detail') + '</small></div>').join('') + '</div>' : '')
+      + '</div>').join('');
+    // las 4 que siguen ya se van cargando
+    D.objetos.slice(hasta, hasta + POR).forEach(o => { if(o.url){ const im = new Image(); im.src = o.url; } });
+    visto = Math.max(visto, hasta); $('#barra').style.width = Math.round(100 * visto / total) + '%';
     $('#atras').disabled = i === 0;
-    const ult = i === D.objetos.length - 1; $('#sig').innerHTML = ult ? 'Continue to sign ▶ <span class="es">/ Firmar</span>' : 'Next ▶ <span class="es">/ Siguiente</span>';
+    const ult = hasta >= total; $('#sig').innerHTML = ult ? 'Continue to sign ▶ <span class="es">/ Firmar</span>' : 'Next ▶ <span class="es">/ Siguiente</span>';
   }
+  $('#rej').addEventListener('click', e => {
+    const f = e.target.closest('[data-g]'); if(!f) return;
+    const o = D.objetos[+f.dataset.g], x = f.dataset.x != null ? (o.extras || [])[+f.dataset.x] : null, url = x ? x.url : o.url; if(!url) return;
+    $('#gImg').src = url; $('#gTxt').innerHTML = nombreHtml(o) + (x ? ' · ' + esc(x.rol_en || 'detail') : ''); $('#grande').hidden = false;
+  });
+  $('#gCerrar').addEventListener('click', () => { $('#grande').hidden = true; $('#gImg').removeAttribute('src'); });
+  $('#grande').addEventListener('click', e => { if(e.target.id === 'grande'){ $('#grande').hidden = true; $('#gImg').removeAttribute('src'); } });
   function pintarFirma(){
     const n = $('#nombre').value.trim() || D.cliente || '____________';
     $('#txtEn').innerHTML = esc(D.texto.en.replace('{nombre}', n)).replace(esc(n), '<b>' + esc(n) + '</b>');
@@ -100,8 +128,8 @@
   $('#borrar').addEventListener('click', () => { trazos = []; redibujar(); habilitar(); });
   function habilitar(){ $('#aceptar').disabled = !(trazos.some(t => t.length > 1) && $('#nombre').value.trim()); }
   $('#nombre').addEventListener('input', () => { pintarFirma(); habilitar(); });
-  $('#sig').addEventListener('click', () => { if(i < D.objetos.length - 1){ i++; pintarFoto(); window.scrollTo(0, 0); } else { $('#ver').hidden = true; $('#firma').hidden = false; pintarFirma(); setTimeout(medir, 50); window.scrollTo(0, 0); } });
-  $('#atras').addEventListener('click', () => { if(i > 0){ i--; pintarFoto(); } });
+  $('#sig').addEventListener('click', () => { if(i + POR < D.objetos.length){ i += POR; pintarFoto(); window.scrollTo(0, 0); } else { $('#ver').hidden = true; $('#firma').hidden = false; pintarFirma(); setTimeout(medir, 50); window.scrollTo(0, 0); } });
+  $('#atras').addEventListener('click', () => { if(i > 0){ i = Math.max(0, i - POR); pintarFoto(); window.scrollTo(0, 0); } });
   $('#volver').addEventListener('click', () => { $('#firma').hidden = true; $('#ver').hidden = false; });
   $('#aceptar').addEventListener('click', async () => {
     const b = $('#aceptar'); b.disabled = true; b.textContent = 'Saving…';
