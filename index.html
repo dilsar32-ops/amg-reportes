@@ -10604,7 +10604,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-27-R53';
+  const APP_BUILD = '2026-10-30-R54';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -53920,6 +53920,18 @@ body.idi-en [data-solo-es]{display:none !important;}
   const AS_SI_PALABRAS = ['ya','igual','guárdalas','guardalas','guárdalos','guardalos','bien','está','esta','asi','dale pues','mándalo','mandalo','mándala','mandala','mándalos','mandalos','otra','vez','again','guárdalo','guardalo','guárdala','guardala','ándale','andale','porfa','please','yes,','yep','yup','sure','confirm','do','it','go','ahead','send','save','right','sounds','good','looks','sí','si','sip','simón','simon','claro','correcto','exacto','ajá','aja','dale','órale','orale','ok','okay','okey','yes','confirmar','confirma','confirmo','confírmalo','confirmalo','hazlo','registralo','regístralo','va','sale','bueno','listo','así','asi','es','de','acuerdo','adelante','mándalo','mandalo','seguro','cámbiala','cambiala','mándaselo','mandaselo','créalo','crealo','archívalo','archivalo'];
   const AS_NO_PALABRAS = ['nope','negative','incorrect','never','mind','stop','wait','hold','undo','no','nop','nel','negativo','incorrecto','cancela','cancelar','cancélalo','cancelalo','olvídalo','olvidalo','mejor','nada','todavía','todavia','para','espera','déjalo','dejalo'];
   function asPlugin(){ return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AsistenteVoz; }
+  // (30 oct 2026, su pedido) MIENTRAS LUMI ESTÁ ABIERTA LA PANTALLA NO SE APAGA: una búsqueda o una respuesta larga se interrumpía
+  // cuando el teléfono se dormía. En el aparato lo hace el plugin (pantalla{despierta}); en Safari, el Wake Lock del navegador.
+  // Si la app se va al fondo y vuelve con Lumi abierta, se vuelve a pedir.
+  function asPantalla(on){
+    const S = asPlugin();
+    if(isNative() && S && typeof S.pantalla === 'function'){ try{ S.pantalla({ despierta: !!on }).catch(function(){}); }catch(e){} }
+    else if(navigator.wakeLock){
+      if(on){ try{ navigator.wakeLock.request('screen').then(function(l){ AS.wakeLock = l; }).catch(function(){}); }catch(e){} }
+      else if(AS.wakeLock){ try{ AS.wakeLock.release(); }catch(e){} AS.wakeLock = null; }
+    }
+  }
+  document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'visible' && AS.abierto) asPantalla(true); });
   function asWebRec(){ return window.SpeechRecognition || window.webkitSpeechRecognition || null; }
   // Solo "si" o "no" de verdad. "sí, pero 250" NO es un si: va al modelo.
   function asEsSi(l){ const w = l.split(' ').filter(Boolean); return w.length > 0 && w.length <= 4 && w.every(x => AS_SI_PALABRAS.includes(x)) && !w.every(x => ['es','de','así','asi','va'].includes(x)); }
@@ -53941,6 +53953,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     asAnimar();
     asRevisarVoz();
     const Sp = asPlugin(); if(isNative() && Sp){ try{ asEnganchar(Sp); }catch(err){} }
+    asPantalla(true);   // (30 oct) la pantalla no se apaga mientras Lumi está abierta
     // Saluda por el nombre de pila (una vez, al abrir) y se queda oyendo.
     // (pendiente 1, 21 oct) Y dice el resumen del día (logs sin ver, pagos por confirmar, casas con equipo), que la nube
     // arma sin modelo; se pide mientras saluda y se dice después, a lo más una vez cada 30 minutos.
@@ -53968,6 +53981,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   }
   function asCerrar(){
     AS.abierto = false; AS.pregunta = null; asPararOido(); asCallar(); asPreviewQuitar(); try{ asGaleriaQuitar(); }catch(e){}
+    asPantalla(false);
     if(window.Cara){ try{ Cara.hablando(false); Cara.estado('reposo'); }catch(err){} }
     const p = $('#asPanel'); if(p) p.hidden = true;
     if(AS.anim) cancelAnimationFrame(AS.anim); AS.anim = null;
