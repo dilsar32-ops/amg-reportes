@@ -16,10 +16,20 @@
      Cara.filtroDeTrozos() -> fn(trozo) -> {texto, gesto}   lo mismo pero por trozos de SSE
      Cara.gestoDe(evento) / Cara.gestoDelTexto(texto)        reglas automáticas sin modelo
      Cara.puntos(nombre, lado) -> 24 nodos [u,v] de la forma del ojo  (para pruebas)
+   Ronda 4 (cabeza viva):
+     Cara.asentir(veces)             "sí" con la cabeza (también solo al guardar: gesto 'exito')
+     Cara.negar()                    "no" suave (cancelar)
+     Cara.ladear('izq'|'der'|grados, ms)   ladea la cabeza (pregunta / confundido lo hacen solos)
+     Cara.mirar('izq'|'der'|'arriba'|'abajo'|'frente', ms)   voltea la cabeza 10-18° y los ojos se van a ese lado
+     Cara.voltear()                  regresa al frente con un rebote (escuchar/hablar lo hace solo)
+     Cara.guinar()                   guiño (solo: ~1 de cada 10 'contento' sin dinero; ver gesto(…, ms, {texto|dinero}))
+     Cara.sorpresa(ms, luego, msLuego)   sorpresa breve con saltito (p. ej. tarjeta grande) y después otro gesto
+     Cara.config({sueno: ms, azar: fn})  para pruebas (sueño tras 60 s en reposo)
    Sin DOM (Node) nada lanza: montar devuelve null y el estado se guarda igual.
 
-   Batería: nada corre a 60 fps por JS. Las formas cambian por transiciones CSS; el único
-   requestAnimationFrame vive mientras HABLA (boca, 18 fps) y se apaga solo.
+   Batería: nada corre a 60 fps por JS. Las formas cambian por morph a ≤ 15 pasos/s solo mientras cambian; la
+   cabeza, las orejas, las ondas y las luces son capas HTML que mueve el compositor; el único
+   requestAnimationFrame vive mientras HABLA (boca, 12 fps) y se apaga solo.
    ============================================================================ */
 (function (raiz) {
   'use strict';
@@ -48,6 +58,8 @@
     confundido_a: oval(.86, .9, 2, 0),
     confundido_b: oval(.64, .3, 3, .2),
     punto:        oval(.2, .22, 2, 0),
+    sueno:        oval(.86, .3, 2.6, .2),                                   // entrecerrados, caídos (lleva rato sin nada)
+    apretado:     oval(.8, .1, 2, .08),                                     // bostezo
     parpadeo:     oval(.82, .06, 2, .05),
     // contento: domo arriba y panza cóncava (anime): arriba semicírculo, abajo sube en el centro
     contento:     { a: .95, top: function (x) { return -.98 * Math.sqrt(Math.max(0, 1 - Math.pow(x / .95, 2))) + .06; },
@@ -71,6 +83,7 @@
       case 'o': return { d: 'M' + (c - 9) + ' ' + y + 'C' + (c - 9) + ' ' + (y - 14) + ' ' + (c + 9) + ' ' + (y - 14) + ' ' + (c + 9) + ' ' + y + 'C' + (c + 9) + ' ' + (y + 14) + ' ' + (c - 9) + ' ' + (y + 14) + ' ' + (c - 9) + ' ' + y + 'Z', relleno: false };
       case 'triste': return { d: 'M' + (c - 14) + ' ' + (y + 6) + 'Q' + c + ' ' + (y - 10) + ' ' + (c + 14) + ' ' + (y + 6), relleno: false };
       case 'confundido': return { d: 'M' + (c - 12) + ' ' + (y - 3) + 'Q' + c + ' ' + (y + 6) + ' ' + (c + 12) + ' ' + (y + 2), relleno: false };
+      case 'bostezo': { var hb = Math.max(2, (apertura == null ? 1 : apertura) * 13), wb = 9; return { d: 'M' + (c - wb) + ' ' + y + 'C' + (c - wb) + ' ' + (y - hb) + ' ' + (c + wb) + ' ' + (y - hb) + ' ' + (c + wb) + ' ' + y + 'C' + (c + wb) + ' ' + (y + hb) + ' ' + (c - wb) + ' ' + (y + hb) + ' ' + (c - wb) + ' ' + y + 'Z', relleno: true }; }
       case 'linea': return { d: 'M' + (c - 9) + ' ' + y + 'L' + (c + 9) + ' ' + y, relleno: false };
       default: return null;
     }
@@ -87,15 +100,20 @@
     triste:      { ojos: ['triste', 'triste'],             boca: 'triste',     parpadea: false },
     confundido:  { ojos: ['confundido_a', 'confundido_b'], boca: 'confundido', parpadea: false },
     exito:       { ojos: ['contento', 'contento'],         boca: 'nada',       parpadea: false },
-    sin_senal:   { ojos: ['punto', 'punto'],               boca: 'nada',       parpadea: false }
+    sin_senal:   { ojos: ['punto', 'punto'],               boca: 'nada',       parpadea: false },
+    sueno:       { ojos: ['sueno', 'sueno'],               boca: 'nada',       parpadea: false }     // interno: no se pide, llega solo
   };
+  var PUBLICOS = ['reposo', 'escuchando', 'buscando', 'hablando', 'pregunta', 'contento', 'sorprendido', 'triste', 'confundido', 'exito', 'sin_senal'];
+  // Pose de la cabeza que acompaña a cada estado (grados): bx = hacia adelante(-)/atrás(+), bz = ladeo.
+  var POSE_ESTADO = { escuchando: { bx: -4, bz: 5 }, pregunta: { bz: 7 }, confundido: { bz: -8 }, triste: { bx: -7 }, sorprendido: { bx: 5 },
+    contento: { bx: 2 }, exito: { bx: 2 }, sueno: { bx: -6, bz: 3 }, sin_senal: { bx: -5 } };
   var ALIAS = { esperando: 'reposo', neutral: 'reposo', pensando: 'buscando', confirmar: 'pregunta', duda: 'pregunta',
     error: 'triste', lo_siento: 'triste', 'lo siento': 'triste', feliz: 'contento', alegre: 'contento', sorpresa: 'sorprendido',
     confuso: 'confundido', guardado: 'exito', 'éxito': 'exito', offline: 'sin_senal', 'sin señal': 'sin_senal', sin_señal: 'sin_senal', 'sin senal': 'sin_senal' };
   var MS_GESTO = { contento: 1800, sorprendido: 1500, triste: 2400, confundido: 1900, exito: 1700, pregunta: 2600, buscando: 1500, sin_senal: 2600, escuchando: 1500, hablando: 1500 };
   function llano(x) { return String(x || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s-]+/g, '_'); }
   var ALIAS_LLANO = {}; Object.keys(ALIAS).forEach(function (k) { ALIAS_LLANO[llano(k)] = ALIAS[k]; });
-  function normal(n) { n = llano(n); if (ESTADOS[n]) return n; return ALIAS_LLANO[n] || null; }
+  function normal(n) { n = llano(n); if (PUBLICOS.indexOf(n) >= 0) return n; return ALIAS_LLANO[n] || null; }
 
   function puntos(nombre, lado) { return puntosOjo(nombre, lado || 'der'); }
 
@@ -121,7 +139,7 @@
   function svgTexto(id, silueta) {
     var S = SILUETAS[silueta] || SILUETAS.A, s = [];
     var U = function (n) { return 'url(#' + id + n + ')'; };
-    s.push('<svg viewBox="0 0 ' + VB_W + ' ' + VB_H + '" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">');
+    s.push('<svg class="cara-casco" viewBox="0 0 ' + VB_W + ' ' + VB_H + '" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">');
     s.push('<defs>',
       // casco: luz principal arriba-izquierda (radial), relleno frío abajo-derecha, oclusión hacia el borde
       '<radialGradient id="' + id + 'cascoLuz" cx=".34" cy=".22" r=".9"><stop offset="0" style="stop-color:var(--cara-casco-1)"/><stop offset=".55" style="stop-color:var(--cara-casco-2)"/><stop offset="1" style="stop-color:var(--cara-casco-3)"/></radialGradient>',
@@ -135,25 +153,14 @@
       '<radialGradient id="' + id + 'visor" cx=".5" cy=".15" r="1"><stop offset="0" style="stop-color:var(--cara-visor-1)"/><stop offset=".55" style="stop-color:var(--cara-visor-2)"/><stop offset="1" style="stop-color:var(--cara-visor-3)"/></radialGradient>',
       '<linearGradient id="' + id + 'visorOcl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity=".5"/><stop offset=".25" stop-color="#000" stop-opacity="0"/><stop offset=".8" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".45"/></linearGradient>',
       '<pattern id="' + id + 'malla" width="2.1" height="2.1" patternUnits="userSpaceOnUse"><path d="M0 0H2.1M0 0V2.1" stroke="#000" stroke-opacity=".16" stroke-width=".35"/></pattern>',
-      // orejas: metal cepillado + aro turquesa + luz del aro
-      '<linearGradient id="' + id + 'metal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a5063"/><stop offset=".12" stop-color="#20242f"/><stop offset=".3" stop-color="#3b4150"/><stop offset=".5" stop-color="#171a23"/><stop offset=".7" stop-color="#353b49"/><stop offset=".88" stop-color="#1b1e28"/><stop offset="1" stop-color="#3a3f4e"/></linearGradient>',
-      '<linearGradient id="' + id + 'aro" x1="0" y1="0" x2="1" y2="0"><stop offset="0" style="stop-color:var(--cara-aro-2)"/><stop offset=".5" style="stop-color:var(--cara-aro)"/><stop offset="1" style="stop-color:var(--cara-aro-2)"/></linearGradient>',
-      '<radialGradient id="' + id + 'aroluz" cx=".5" cy=".5" r=".5"><stop offset="0" style="stop-color:var(--cara-aro)" stop-opacity=".95"/><stop offset=".5" style="stop-color:var(--cara-aro)" stop-opacity=".35"/><stop offset="1" style="stop-color:var(--cara-aro)" stop-opacity="0"/></radialGradient>',
       '<linearGradient id="' + id + 'luzmetal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a6174"/><stop offset="1" stop-color="#20242f"/></linearGradient>',
       '<radialGradient id="' + id + 'sombra" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#000" stop-opacity=".55"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>',
       '</defs>');
     s.push('<ellipse class="cara-sombra" cx="120" cy="207" rx="96" ry="9" fill="' + U('sombra') + '"/>');
     s.push('<g class="cara-cuerpo">');
     s.push(S.antena.replace(/%/g, id));
-    // orejas (detrás del casco)
-    var oreja = function (lado, x, xa) {
-      return '<g class="cara-oreja ' + lado + '"><rect class="cara-aro-luz" x="' + (x - 7) + '" y="80" width="36" height="74" rx="12" fill="' + U('aroluz') + '"/>' +
-        '<rect x="' + x + '" y="86" width="22" height="60" rx="7" fill="' + U('metal') + '"/>' +
-        '<rect x="' + x + '" y="86" width="22" height="60" rx="7" fill="none" stroke="#000" stroke-opacity=".45" stroke-width="1"/>' +
-        '<rect class="cara-aro" x="' + xa + '" y="86" width="5" height="60" fill="' + U('aro') + '"/>' +
-        '<rect x="' + (x + 2) + '" y="88" width="18" height="2" rx="1" fill="#fff" fill-opacity=".18"/></g>';
-    };
-    s.push(oreja('izq', 0, 7), oreja('der', 218, 228));
+    // (ronda 4) las orejas ya no van aquí: son capas HTML aparte (svgOreja) para moverlas y encenderlas con la
+    // voz sin repintar el casco.
     // casco: base + relleno frío + borde (oclusión arriba, luz de canto abajo) + ceja + especular
     s.push('<path d="' + S.casco + '" fill="' + U('cascoLuz') + '"/>');
     s.push('<path d="' + S.casco + '" fill="' + U('cascoFrio') + '"/>');
@@ -210,18 +217,44 @@
       '<rect class="cara-corre" x="' + (BOCA.cx - 7) + '" y="' + (BOCA.cy - 2) + '" width="14" height="4" rx="2" style="fill:rgb(var(--cara-led))"/>' +
       '</svg>';
   }
+  // Oreja en su propio svg chico (viewBox recortado alrededor de la oreja): metal cepillado + aro turquesa.
+  var OREJA = { izq: { vb: -8, x: 0, xa: 7 }, der: { vb: 210, x: 218, xa: 228 } };
+  function svgOreja(id, lado) {
+    var O = OREJA[lado], k = id + 'or' + lado;
+    return '<svg viewBox="' + O.vb + ' 78 38 76" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><defs>' +
+      '<linearGradient id="' + k + 'metal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a5063"/><stop offset=".12" stop-color="#20242f"/><stop offset=".3" stop-color="#3b4150"/><stop offset=".5" stop-color="#171a23"/><stop offset=".7" stop-color="#353b49"/><stop offset=".88" stop-color="#1b1e28"/><stop offset="1" stop-color="#3a3f4e"/></linearGradient>' +
+      '<linearGradient id="' + k + 'aro" x1="0" y1="0" x2="1" y2="0"><stop offset="0" style="stop-color:var(--cara-aro-2)"/><stop offset=".5" style="stop-color:var(--cara-aro)"/><stop offset="1" style="stop-color:var(--cara-aro-2)"/></linearGradient></defs>' +
+      '<rect x="' + O.x + '" y="86" width="22" height="60" rx="7" fill="url(#' + k + 'metal)"/>' +
+      '<rect x="' + O.x + '" y="86" width="22" height="60" rx="7" fill="none" stroke="#000" stroke-opacity=".45" stroke-width="1"/>' +
+      '<rect class="cara-aro" x="' + O.xa + '" y="86" width="5" height="60" fill="url(#' + k + 'aro)"/>' +
+      '<rect x="' + (O.x + 2) + '" y="88" width="18" height="2" rx="1" fill="#fff" fill-opacity=".18"/></svg>';
+  }
   function svgReflejo(id, silueta) {
     var S = SILUETAS[silueta] || SILUETAS.A;
     return '<svg class="cara-capa cara-capa-reflejo" viewBox="0 0 ' + VB_W + ' ' + VB_H + '" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><defs>' +
-      '<radialGradient id="' + id + 'vidrio" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff" stop-opacity=".06"/><stop offset=".6" stop-color="#fff" stop-opacity=".025"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>' +
       '<linearGradient id="' + id + 'bordeInt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9fd8ff" stop-opacity=".55"/><stop offset=".5" stop-color="#9fd8ff" stop-opacity=".08"/><stop offset="1" stop-color="#9fd8ff" stop-opacity=".3"/></linearGradient>' +
-      '<clipPath id="' + id + 'clipref"><path d="' + S.visor + '"/></clipPath></defs>' +
-      // (ronda 2b) sin franja diagonal: al dueño le cruzaba la cara. Queda un brillo suave de vidrio en la esquina
-      // superior-izquierda (radial, ≤ .06, sin bordes) que se corre un pelo con el cabeceo, y el borde interior.
-      '<g clip-path="url(#' + id + 'clipref)"><g class="cara-reflejo"><ellipse cx="78" cy="52" rx="62" ry="30" transform="rotate(-18 78 52)" fill="url(#' + id + 'vidrio)"/></g></g>' +
+      '</defs>' +
+      // (ronda 2b) sin franja diagonal. (ronda 4) el brillo suave de vidrio (≤ .06) es un div HTML (.cara-brillo) que se
+      // corre con el giro de la cabeza sin repintar; aquí solo queda el borde interior del visor.
       '<path d="' + S.visor + '" fill="none" stroke="url(#' + id + 'bordeInt)" stroke-width="1.4"/></svg>';
   }
-  function svgTodo(id, silueta) { return svgTexto(id, silueta) + svgOjos(id, silueta) + svgBoca(id) + svgReflejo(id, silueta); }
+  function pct(v, de) { return (v / de * 100).toFixed(2) + '%'; }
+  // HTML: .cara > .cara-resp (respira) > .cara-gesto (asentir/negar/saltito) > .cara-cabeza (giro 3D) >
+  //   orejas (capas HTML detrás) + casco (svg) + .cara-rostro (ojos y boca: se corren hacia donde voltea) +
+  //   brillo del vidrio + borde del visor + luz de estado + ondas de escuchar.
+  // Las transformaciones 3D van en divs HTML (WebKit las aplana en <g>); todo lo que se mueve seguido es un
+  // elemento HTML con transform/opacity (compositor): nada de eso repinta un svg.
+  function htmlCara(id, silueta) {
+    var S = SILUETAS[silueta] || SILUETAS.A, luz = 'left:' + pct(S.luz[0], VB_W) + ';top:' + pct(S.luz[1], VB_H);
+    var oreja = function (lado) { return '<div class="cara-oreja-caja ' + lado + '"><div class="cara-oreja-luz"></div>' + svgOreja(id, lado) + '<div class="cara-aro-on"></div></div>'; };
+    var ondas = function (lado) { return '<div class="cara-ondas ' + lado + '"><i class="cara-onda"></i><i class="cara-onda"></i><i class="cara-onda"></i></div>'; };
+    return '<div class="cara-resp"><div class="cara-gesto"><div class="cara-cabeza">' + oreja('izq') + oreja('der') + svgTexto(id, silueta) +
+      '<div class="cara-rostro">' + svgOjos(id, silueta) + svgBoca(id) + '</div>' +
+      '<div class="cara-brillo"></div>' + svgReflejo(id, silueta) +
+      '<div class="cara-luz-halo" style="' + luz + '"></div><div class="cara-luz-on" style="' + luz + '"></div>' +
+      ondas('izq') + ondas('der') + '</div></div></div>';
+  }
+  function svgTodo(id, silueta) { return htmlCara(id, silueta); }
 
   // ---------------------------------------------------------------- instancias
   var instancias = [], seq = 0;
@@ -284,12 +317,7 @@
     if (quieto) el.classList.add('cara-quieta');
     if (op.color) el.setAttribute('data-color', op.color); else el.removeAttribute('data-color');
     el.setAttribute('data-silueta', op.silueta === 'B' ? 'B' : 'A');
-    var S = SILUETAS[op.silueta === 'B' ? 'B' : 'A'];
-    // HTML: .cara > .cara-resp (respira) > .cara-cabeza (cabeceo 3D) > svg casco + svg ojos + svg boca + svg reflejo + luz.
-    // Las transformaciones 3D van en divs HTML (WebKit las aplana en <g>); los ojos y la boca son svg aparte:
-    // WebKit repinta TODO el svg donde algo cambia, y así cambiar la boca no repinta el casco.
-    el.innerHTML = '<div class="cara-resp"><div class="cara-cabeza">' + svgTexto(id, op.silueta) + svgOjos(id, op.silueta) + svgBoca(id) + svgReflejo(id, op.silueta) +
-      '<div class="cara-luz-halo" style="left:' + (S.luz[0] / VB_W * 100).toFixed(2) + '%;top:' + (S.luz[1] / VB_H * 100).toFixed(2) + '%"></div></div></div>';
+    el.innerHTML = htmlCara(id, op.silueta === 'B' ? 'B' : 'A');
     this.cabeza = el.querySelector('.cara-cabeza');
     this.capasLed = el.querySelectorAll('.cara-capa-led'); this.capaOjos = el.querySelector('.cara-capa-ojos');
     this.lagrimas = el.querySelectorAll('.cara-lagrima'); this.corre = el.querySelector('.cara-corre');
@@ -298,7 +326,11 @@
     this.ojos = el.querySelector('.cara-ojos'); this.sq = el.querySelector('.cara-ojos-sq');
     this.bocaG = el.querySelector('.cara-boca-g'); this.boca = el.querySelector('.cara-boca'); this.bocaBloom = el.querySelector('.cara-boca-bloom');
     this.formaBoca = null;
+    // lo que se mueve con la voz (solo capas HTML; ver pintarNivel)
+    this.nv = { cajas: el.querySelectorAll('.cara-oreja-caja'), luces: el.querySelectorAll('.cara-oreja-luz'), aros: el.querySelectorAll('.cara-aro-on'),
+      halo: el.querySelector('.cara-luz-halo'), ondas: el.querySelectorAll('.cara-ondas'), puesto: false };
     el.__cara = this;
+    escribirPoseEn(this);
     if (op.entrada === false || quieto) this.aplicar(estadoVisible(), true);
     else this.encender();
   }
@@ -311,7 +343,7 @@
     setTimeout(function () { el.classList.remove('cara-apagada'); }, 30);
     setTimeout(function () { if (el.__cara === self) self.aplicar(estadoVisible(), false); }, 420);
     setTimeout(function () { if (el.__cara === self) self.mirar(-6, 3); }, 1000);
-    setTimeout(function () { if (el.__cara === self) { self.parpadear(1); self.mirar(0, 0); self.cabecear(); } }, 1450);
+    setTimeout(function () { if (el.__cara === self) { self.parpadear(1); self.mirar(0, 0); cabecear(); } }, 1450);
   };
   Instancia.prototype.ojosA = function (izq, der, deGolpe) {
     if (this.oIzq.nombre !== izq) this.oIzq.morfar(izq, deGolpe);
@@ -332,18 +364,7 @@
     this.ojosA(d.ojos[0], d.ojos[1], deGolpe);
     this.bocaA(d.boca === 'habla' ? 'habla' : d.boca, d.boca === 'habla' ? (quieto ? .5 : .12) : 0);
     this.ojos.style.transform = '';
-    if (cambia && !deGolpe) this.cabecear();
-  };
-  // Cabeceo: gira 2-4° (perspective en el div) y regresa solo; el reflejo del visor se corre un pelo al revés.
-  Instancia.prototype.cabecear = function (ry, rx) {
-    if (quieto || !this.cabeza) return;
-    var self = this;
-    ry = ry == null ? (Math.random() < .5 ? -1 : 1) * (2.2 + Math.random() * 1.8) : ry;
-    rx = rx == null ? (Math.random() - .5) * 3 : rx;
-    this.el.style.setProperty('--cara-ry', ry.toFixed(1) + 'deg'); this.el.style.setProperty('--cara-rx', rx.toFixed(1) + 'deg');
-    this.el.style.setProperty('--cara-rfx', (-ry * 1.1).toFixed(1) + 'px');
-    clearTimeout(this.tmrCab);
-    this.tmrCab = setTimeout(function () { self.el.style.setProperty('--cara-ry', '0deg'); self.el.style.setProperty('--cara-rx', '0deg'); self.el.style.setProperty('--cara-rfx', '0px'); }, 850);
+    return cambia;
   };
   // Parpadeo = scaleY de cada ojo (clase CSS con transición corta), con un squash leve del par.
   Instancia.prototype.parpadear = function (veces) {
@@ -358,31 +379,171 @@
     };
     cerrar();
   };
+  // Mirada de los ojos (viewBox): mueve la capa entera de los ojos (elemento HTML: compositor, no repinta).
   Instancia.prototype.mirar = function (dx, dy) {
-    this.ojos.style.transform = (dx || dy) ? 'translate(' + dx + 'px,' + dy + 'px)' : '';
-    if (!quieto && this.cabeza) { this.el.style.setProperty('--cara-ry', (dx * .45).toFixed(1) + 'deg'); this.el.style.setProperty('--cara-rx', (-dy * .4).toFixed(1) + 'deg'); this.el.style.setProperty('--cara-rfx', (-dx * .5).toFixed(1) + 'px'); }
+    this.capaOjos.style.transform = (dx || dy) ? 'translate(' + pct(dx, VB_W) + ',' + pct(dy, VB_H) + ')' : '';
+  };
+  Instancia.prototype.anim = function (nombre, ms) {
+    var g = this.el.querySelector('.cara-gesto'), el = this.el; if (!g) return;
+    clearTimeout(this.tmrAnim);
+    g.className = 'cara-gesto'; void g.offsetWidth;          // reinicia la animación aunque sea la misma
+    g.className = 'cara-gesto cara-g-' + nombre;
+    this.tmrAnim = setTimeout(function () { g.className = 'cara-gesto'; }, ms + 60);
+    return el;
   };
   // Pupila (brillo) corrida: buscando
   Instancia.prototype.pupila = function (dx, dy) { this.oIzq.mira = [dx, dy]; this.oDer.mira = [dx, dy]; if (this.oIzq.pts) this.oIzq.pintar(this.oIzq.pts); if (this.oDer.pts) this.oDer.pintar(this.oDer.pts); };
 
   // ---------------------------------------------------------------- estado global (todas las caras montadas van juntas)
-  function estadoVisible() { return GESTO || ESTADO_BASE; }
+  var SUENO = false, BOSTEZANDO = false;
+  function estadoVisible() { return GESTO || (SUENO && ESTADO_BASE === 'reposo' ? 'sueno' : ESTADO_BASE); }
   function repintar(deGolpe) {
-    var e = estadoVisible();
-    for (var i = 0; i < instancias.length; i++) instancias[i].aplicar(e, deGolpe);
+    var e = estadoVisible(), cambio = false;
+    for (var i = 0; i < instancias.length; i++) cambio = instancias[i].aplicar(e, deGolpe) || cambio;
     if (e === 'hablando') { if (!HABLA.on) habla(true); } else if (HABLA.on) habla(false);
+    var b = POSE_ESTADO[e] || {}; POSE.bx = b.bx || 0; POSE.bz = b.bz || 0;
+    if (cambio && !deGolpe) cabecear(); else escribirPose();
+    for (var k = 0; k < instancias.length; k++) pintarNivel(instancias[k], NIVEL);
     programarParpadeo();
     lazo(e);
+    armarSueno();
+  }
+
+  // ---------------------------------------------------------------- la cabeza (ronda 4)
+  // POSE (grados): ry/rx = hacia dónde voltea (mirar), rz = ladeo pedido, cy/cx = cabeceo chico al cambiar de gesto,
+  // bx/bz = la pose del estado (escuchando se inclina hacia el que habla). Todo se escribe como variables CSS en .cara
+  // y lo mueve el compositor (transiciones de transform en divs HTML).
+  var POSE = { ry: 0, rx: 0, rz: 0, cy: 0, cx: 0, bx: 0, bz: 0 }, MODO = { ult: null, tmr: null }, ULT_ANIM = null;
+  var CFG = { sueno: 60000, azar: Math.random };
+  var tmrMiraLado = null, tmrLadeo = null, tmrCab = null, tmrSueno = null, tmrBostezo = null, GUINOS = 0, ULT_GUINO = -1e9;
+  function azar() { try { return CFG.azar(); } catch (e) { return Math.random(); } }
+  function poseTotal() { return { ry: POSE.ry + POSE.cy, rx: POSE.rx + POSE.cx + POSE.bx, rz: POSE.rz + POSE.bz }; }
+  function escribirPoseEn(I) {
+    var t = poseTotal(), st = I.el.style;
+    st.setProperty('--cara-ry', t.ry.toFixed(1) + 'deg'); st.setProperty('--cara-rx', t.rx.toFixed(1) + 'deg'); st.setProperty('--cara-rz', t.rz.toFixed(1) + 'deg');
+    // el rostro (ojos y boca) se corre hacia donde voltea, como dibujado sobre un vidrio curvo; el brillo, al revés
+    st.setProperty('--cara-fx', pct(t.ry * .6, VB_W)); st.setProperty('--cara-fy', pct(-t.rx * .5, VB_H));
+    st.setProperty('--cara-rfx', (-t.ry * .7).toFixed(1) + 'px');
+  }
+  function escribirPose(modo) {
+    if (modo) {
+      MODO.ult = modo; clearTimeout(MODO.tmr);
+      for (var i = 0; i < instancias.length; i++) { instancias[i].el.classList.remove('cara-rebote', 'cara-lento'); instancias[i].el.classList.add('cara-' + modo); }
+      MODO.tmr = setTimeout(function () { for (var j = 0; j < instancias.length; j++) instancias[j].el.classList.remove('cara-rebote', 'cara-lento'); }, 1300);
+    }
+    for (var k = 0; k < instancias.length; k++) escribirPoseEn(instancias[k]);
+  }
+  // Cabeceo chico (2-4°) al cambiar de gesto; regresa solo.
+  function cabecear() {
+    if (quieto) { escribirPose(); return; }
+    POSE.cy = (azar() < .5 ? -1 : 1) * (2.2 + azar() * 1.8); POSE.cx = (azar() - .5) * 3; escribirPose();
+    clearTimeout(tmrCab); tmrCab = setTimeout(function () { POSE.cy = 0; POSE.cx = 0; escribirPose(); }, 850);
+  }
+  var LADOS = { izq: [-1, 0], der: [1, 0], arriba: [0, 1], abajo: [0, -1] };
+  // Voltea la cabeza 10-18° hacia un lado (los ojos se van para allá) y regresa sola después de `ms` (0 = se queda).
+  function mirarLado(lado, ms, grados, modo) {
+    despertar();
+    lado = String(lado || 'frente').toLowerCase();
+    if (lado === 'izquierda') lado = 'izq'; if (lado === 'derecha') lado = 'der';
+    if (lado === 'frente' || !LADOS[lado]) { voltear(); return lado === 'frente'; }
+    var L = LADOS[lado], g = grados || (10 + azar() * 8);
+    clearTimeout(tmrMiraLado);
+    POSE.ry = L[0] * g; POSE.rx = L[1] * g * .6;
+    escribirPose(modo || 'lento');
+    for (var i = 0; i < instancias.length; i++) instancias[i].mirar(L[0] * 7, -L[1] * 6);
+    if (ms !== 0) tmrMiraLado = setTimeout(function () { regresar(false); }, ms || 2000);
+    return true;
+  }
+  function regresar(rebote) {
+    clearTimeout(tmrMiraLado);
+    var habia = POSE.ry || POSE.rx;
+    POSE.ry = 0; POSE.rx = 0;
+    if (LAZO.estado !== 'buscando') for (var i = 0; i < instancias.length; i++) instancias[i].mirar(0, 0);
+    escribirPose(habia ? (rebote ? 'rebote' : 'lento') : null);
+  }
+  // Regresa al frente con un rebote, como quien voltea a ver al que le habla.
+  function voltear() { despertar(); regresar(true); return true; }
+  function ladear(lado, ms) {
+    despertar();
+    var g = typeof lado === 'number' ? lado : (String(lado || '').toLowerCase().indexOf('izq') === 0 ? -9 : 9);
+    POSE.rz = Math.max(-16, Math.min(16, g)); escribirPose();
+    clearTimeout(tmrLadeo); tmrLadeo = setTimeout(function () { POSE.rz = 0; escribirPose(); }, ms || 1600);
+    return true;
+  }
+  var MS_ANIM = { asentir: 760, negar: 900, salto: 560, bostezo: 2000 };
+  function anim(nombre, veces) {
+    ULT_ANIM = nombre;
+    if (quieto) return true;
+    var ms = MS_ANIM[nombre] || 700;
+    for (var i = 0; i < instancias.length; i++) instancias[i].anim(nombre, ms);
+    if (veces > 1) setTimeout(function () { anim(nombre, veces - 1); }, ms);
+    return true;
+  }
+  function asentir(veces) { despertar(); return anim('asentir', Math.max(1, Math.min(3, veces || 1))); }
+  function negar() { despertar(); return anim('negar', 1); }
+  function guinar() {
+    GUINOS++; ULT_GUINO = Date.now();
+    for (var i = 0; i < instancias.length; i++) (function (I) { I.el.classList.add('cara-guino'); setTimeout(function () { I.el.classList.remove('cara-guino'); }, 240); })(instancias[i]);
+    return true;
+  }
+  // El guiño: solo en 'contento', ~1 de cada 10, nunca con dinero ni errores, y no dos seguidos (20 s).
+  var RE_DINERO = /\$\s?\d|\bd[oó]lares?\b|\bpag(o|a|ue|aste|ar)\b|adelanto|descuento|tarifa|\bdebe|cobr|monto|zelle|cheque|efectivo/i;
+  function tocaGuino(n, op) {
+    if (n !== 'contento') return false;
+    op = op || {};
+    if (op.dinero || op.error || op.guino === false) return false;
+    if (RE_DINERO.test(String(op.texto || ''))) return false;
+    if (Date.now() - ULT_GUINO < 20000) return false;
+    return op.guino === true || azar() < .1;
+  }
+  function sorpresa(ms, luego, msLuego) {
+    ms = ms || 900;
+    gesto('sorprendido', ms); anim('salto', 1);
+    if (luego) { clearTimeout(tmrGesto); tmrGesto = setTimeout(function () { gesto(luego, msLuego); }, ms); }
+    return true;
+  }
+  // Sueño: tras 60 s en reposo sin nada, los ojos se entrecierran y bosteza de vez en cuando; cualquier cosa lo despierta.
+  function armarSueno() {
+    clearTimeout(tmrSueno);
+    if (SUENO || GESTO || ESTADO_BASE !== 'reposo') return;
+    tmrSueno = setTimeout(dormir, CFG.sueno);
+  }
+  function dormir() {
+    if (GESTO || ESTADO_BASE !== 'reposo') return;
+    SUENO = true; repintar(false); bostezar();
+  }
+  function bostezar() {
+    clearTimeout(tmrBostezo);
+    if (!SUENO) return;
+    BOSTEZANDO = true; anim('bostezo', 1);
+    var pasos = [.35, .7, 1, 1, 1, 1, 1, 1, .6, .3], k = 0;
+    for (var i = 0; i < instancias.length; i++) instancias[i].ojosA('apretado', 'apretado');
+    var tic = function () {
+      if (!SUENO) { BOSTEZANDO = false; return; }
+      if (k < pasos.length) { for (var j = 0; j < instancias.length; j++) instancias[j].bocaA('bostezo', pasos[k]); k++; tmrBostezo = setTimeout(tic, 150); return; }
+      BOSTEZANDO = false; repintar(false);
+      tmrBostezo = setTimeout(bostezar, 20000 + azar() * 15000);
+    };
+    tmrBostezo = setTimeout(tic, 120);
+  }
+  function despertar() {
+    clearTimeout(tmrSueno);
+    if (!SUENO) return false;
+    SUENO = false; BOSTEZANDO = false; clearTimeout(tmrBostezo);
+    return true;
   }
   // Lazos de buscar / lágrimas / apagado: por temporizador a 5-7 pasos por segundo (se ve "de LED") y
   // NO por animación CSS dentro del svg (WebKit repinta todo el dibujo a 60 fps: 27 % de CPU medido).
   var LAZO = { tmr: null, paso: 0, estado: null };
-  var BUSCAR_PASOS = [[0, 0], [-4, -1], [-9, -2], [-13, -3], [-13, -3], [-13, -3], [-9, -2], [-3, -1], [3, -1], [9, -2], [13, -2], [13, -2], [13, -2], [8, -1], [3, 0], [0, 0]];
+  // Buscando = pensar: primero mira ARRIBA, luego a un lado y al otro, arriba-derecha y de regreso.
+  // [ojos dx, ojos dy (viewBox), cabeza ry, cabeza rx (grados), pasos de 160 ms]
+  var BUSCAR_FASES = [[0, -9, 0, 7, 6], [-12, -3, -9, 2, 6], [12, -3, 9, 2, 6], [5, -8, 4, 6, 4], [0, 0, 0, 0, 2]];
   function lazo(e) {
     if (LAZO.estado === e && LAZO.tmr) return;
     clearInterval(LAZO.tmr); LAZO.tmr = null; LAZO.estado = e; LAZO.paso = 0;
     var i, k;
     for (i = 0; i < instancias.length; i++) { var I = instancias[i]; I.corre.style.opacity = ''; I.corre.style.transform = ''; for (k = 0; k < I.lagrimas.length; k++) { I.lagrimas[k].style.opacity = ''; I.lagrimas[k].style.transform = ''; } for (k = 0; k < I.capasLed.length; k++) I.capasLed[k].style.opacity = ''; I.capaOjos.style.transform = ''; if (I.oIzq.mira[0] || I.oIzq.mira[1]) I.pupila(0, 0); }
+    if (LAZO.cabeza) { LAZO.cabeza = false; POSE.ry = 0; POSE.rx = 0; escribirPose(); }      // buscando movía la cabeza: regresa
     if (!instancias.length) return;
     if (quieto) {   // sin movimiento: posición fija
       if (e === 'buscando') for (i = 0; i < instancias.length; i++) instancias[i].corre.style.opacity = '.8';
@@ -398,9 +559,10 @@
       for (j = 0; j < instancias.length; j++) {
         var I = instancias[j];
         if (e === 'buscando') {
-          // los ojos miran a los lados (la capa entera se mueve: compositor) y el brillo se corre como pupila
-          var d = BUSCAR_PASOS[p % BUSCAR_PASOS.length]; I.capaOjos.style.transform = 'translate(' + (d[0] / VB_W * 100).toFixed(2) + '%,' + (d[1] / VB_H * 100).toFixed(2) + '%)';
-          I.pupila(d[0] * .45, d[1] * .3);
+          // al empezar cada fase: los ojos (capa HTML, con transición) y la cabeza van a su lugar; el brillo se corre
+          // como pupila (un repintado por fase, no por paso)
+          var fase = faseBuscar(p);
+          if (fase) { I.mirar(fase[0], fase[1]); I.pupila(fase[0] * .45, fase[1] * .3); if (j === 0) { LAZO.cabeza = true; POSE.ry = fase[2]; POSE.rx = fase[3]; escribirPose(); } }
           I.corre.style.opacity = '.9'; I.corre.style.transform = 'translateX(' + ((p % 6 < 3 ? (p % 6) : 6 - (p % 6)) * 6 - 9) + 'px)';
         } else if (e === 'triste') {
           for (n = 0; n < 4; n++) { var f = ((p + (n % 2 ? 4 : 0)) % 9) / 8; I.lagrimas[n].style.opacity = f < .1 ? '0' : String((1 - f).toFixed(2)); I.lagrimas[n].style.transform = 'translateY(' + (f * 26).toFixed(1) + 'px)'; }
@@ -410,27 +572,71 @@
       }
     }, cada);
   }
+  function faseBuscar(p) {
+    var total = 0, i; for (i = 0; i < BUSCAR_FASES.length; i++) total += BUSCAR_FASES[i][4];
+    var q = (p - 1) % total, acc = 0;
+    for (i = 0; i < BUSCAR_FASES.length; i++) { if (q === acc) return BUSCAR_FASES[i]; acc += BUSCAR_FASES[i][4]; }
+    return null;
+  }
   function estado(nombre) {
     var n = normal(nombre); if (!n) return false;
+    despertar();
     ESTADO_BASE = n;
     if (GESTO) { clearTimeout(tmrGesto); GESTO = null; }      // un estado nuevo cancela el gesto pasajero
+    // escuchar o hablar con la cabeza volteada: regresa al frente con un rebote, como quien voltea a ver
+    if ((n === 'escuchando' || n === 'hablando') && (POSE.ry || POSE.rx) && !LAZO.cabeza) regresar(true);
     repintar(false);
-    if (n === 'exito') entradaDoble();
+    if (n === 'exito') { entradaDoble(); asentir(1); }
     return true;
   }
-  function gesto(nombre, ms) {
+  // op (opcional): {texto, dinero, error, guino} — solo decide el guiño de 'contento'.
+  function gesto(nombre, ms, op) {
     var n = normal(nombre);
+    despertar();
     if (!n || n === 'reposo') { if (GESTO) { clearTimeout(tmrGesto); GESTO = null; repintar(false); } return !!n; }
     clearTimeout(tmrGesto);
     GESTO = n; repintar(false);
-    if (n === 'exito') entradaDoble();
+    if (n === 'exito') { entradaDoble(); asentir(1); }
+    if (tocaGuino(n, op)) { ULT_GUINO = Date.now(); GUINO_PEND++; setTimeout(guinar, 380); }
     tmrGesto = setTimeout(function () { GESTO = null; repintar(false); }, ms || MS_GESTO[n] || 1800);
     return true;
   }
+  var GUINO_PEND = 0;
   function entradaDoble() { if (quieto) return; for (var i = 0; i < instancias.length; i++) instancias[i].parpadear(2); }
+  // El nivel del micrófono llega ~15 veces/s: solo se escribe si cambió de verdad (≥ .03) y como mucho 20 veces/s.
+  // MEDIDO (simulador, ronda 4): poner el nivel como variable CSS en la raíz .cara costaba 6-8 % de CPU, porque al
+  // cambiar una variable heredada WebKit recalcula y REPINTA todos los svg de adentro aunque no la usen. Por eso el
+  // nivel se escribe como opacity/transform en línea SOLO en las 6 capas HTML que lo usan (orejas, aros, luz, ondas).
+  var NIVEL_ESCRITO = -1, NIVEL_T = 0;
+  function pintarNivel(I, v) {
+    var N = I.nv, k;
+    if (!N) return;
+    if (estadoVisible() !== 'escuchando') {
+      if (!N.puesto) return;
+      N.puesto = false;
+      for (k = 0; k < N.cajas.length; k++) N.cajas[k].style.transform = '';
+      for (k = 0; k < N.luces.length; k++) N.luces[k].style.opacity = '';
+      for (k = 0; k < N.aros.length; k++) N.aros[k].style.opacity = '';
+      for (k = 0; k < N.ondas.length; k++) N.ondas[k].style.opacity = '';
+      if (N.halo) { N.halo.style.opacity = ''; N.halo.style.transform = ''; }
+      return;
+    }
+    N.puesto = true;
+    if (!quieto) for (k = 0; k < N.cajas.length; k++) N.cajas[k].style.transform = 'translateX(' + ((k === 0 ? -9 : 9) * v).toFixed(1) + '%) scale(' + (1.04 + .14 * v).toFixed(3) + ')';
+    for (k = 0; k < N.luces.length; k++) N.luces[k].style.opacity = (.35 + .65 * v).toFixed(2);
+    for (k = 0; k < N.aros.length; k++) N.aros[k].style.opacity = (.7 + .3 * v).toFixed(2);
+    for (k = 0; k < N.ondas.length; k++) N.ondas[k].style.opacity = (.45 + .55 * v).toFixed(2);
+    if (N.halo) { N.halo.style.opacity = (.65 + .35 * v).toFixed(2); if (!quieto) N.halo.style.transform = 'translate(-50%,-50%) scale(' + (1.15 + .8 * v).toFixed(3) + ')'; }
+  }
   function nivel(v) {
     v = Math.max(0, Math.min(1, +v || 0)); NIVEL = v;
-    for (var i = 0; i < instancias.length; i++) instancias[i].el.style.setProperty('--cara-nivel', v.toFixed(2));
+    if (v > .1 && despertar()) repintar(false);
+    if (v > .15 && (POSE.ry || POSE.rx) && !LAZO.cabeza && estadoVisible() === 'escuchando') regresar(true);
+    var ahora = Date.now();
+    if (Math.abs(v - NIVEL_ESCRITO) < .03 && v !== 0) return;
+    if (ahora - NIVEL_T < 50 && v !== 0) return;
+    NIVEL_ESCRITO = v; NIVEL_T = ahora;
+    for (var i = 0; i < instancias.length; i++) pintarNivel(instancias[i], v);
   }
 
   // ---------------------------------------------------------------- parpadeo y mirada (temporizadores, no rAF)
@@ -444,12 +650,20 @@
       for (var i = 0; i < instancias.length; i++) instancias[i].parpadear(Math.random() < .12 ? 2 : 1);
       programarParpadeo();
     }, 3000 + Math.random() * 3000);
-    // la mirada sigue un punto al azar cada 4-8 s (ojos + un giro leve de la cabeza) y vuelve
+    // en reposo, cada 5-9 s: la mitad de las veces voltea la cabeza 10-18° a un lado (y regresa sola), las otras
+    // solo mira con los ojos a un punto al azar. Todo por transiciones del compositor.
     if (d && d.mira) tmrMirada = setTimeout(function () {
-      var dx = (Math.random() < .5 ? -1 : 1) * (4 + Math.random() * 6), dy = (Math.random() - .5) * 5;
-      for (var i = 0; i < instancias.length; i++) instancias[i].mirar(+dx.toFixed(1), +dy.toFixed(1));
-      setTimeout(function () { for (var i = 0; i < instancias.length; i++) instancias[i].mirar(0, 0); }, 900 + Math.random() * 700);
-    }, 4000 + Math.random() * 4000);
+      if (hayDOM && document.hidden) { programarParpadeo(); return; }
+      var r = azar();
+      if (r < .5) mirarLado(azar() < .5 ? 'izq' : 'der', 1500 + azar() * 1700, 10 + azar() * 8, 'lento');
+      else if (r < .58) mirarLado('arriba', 1200, 8, 'lento');
+      else {
+        var dx = (azar() < .5 ? -1 : 1) * (4 + azar() * 6), dy = (azar() - .5) * 5;
+        for (var i = 0; i < instancias.length; i++) instancias[i].mirar(+dx.toFixed(1), +dy.toFixed(1));
+        setTimeout(function () { if (!POSE.ry && !POSE.rx) for (var i = 0; i < instancias.length; i++) instancias[i].mirar(0, 0); }, 900 + azar() * 700);
+      }
+      programarParpadeo();
+    }, 5000 + azar() * 4000);
   }
 
   // ---------------------------------------------------------------- boca al hablar (rAF a ~18 fps, solo mientras habla)
@@ -517,6 +731,7 @@
     return {
       el: el,
       estado: estado, gesto: gesto, nivel: nivel, hablando: hablando, parallax: parallax,
+      asentir: asentir, negar: negar, ladear: ladear, mirar: mirarLado, voltear: voltear, guinar: guinar, sorpresa: sorpresa,
       encender: function () { if (el.__cara) el.__cara.encender(); },
       desmontar: function () { desmontar(el); }
     };
@@ -524,10 +739,10 @@
   function desmontar(el) {
     if (!el || !el.__cara) return false;
     var i = instancias.indexOf(el.__cara); if (i >= 0) instancias.splice(i, 1);
-    clearTimeout(el.__cara.tmrCab);
-    el.innerHTML = ''; el.classList.remove('cara', 'cara-chica', 'cara-quieta', 'cara-cerrando', 'cara-apagada'); el.removeAttribute('data-estado'); el.removeAttribute('data-silueta');
+    clearTimeout(el.__cara.tmrAnim);
+    el.innerHTML = ''; el.classList.remove('cara', 'cara-chica', 'cara-quieta', 'cara-cerrando', 'cara-apagada', 'cara-rebote', 'cara-lento', 'cara-guino'); el.removeAttribute('data-estado'); el.removeAttribute('data-silueta');
     delete el.__cara;
-    if (!instancias.length) { clearTimeout(tmrParpadeo); clearTimeout(tmrMirada); clearInterval(LAZO.tmr); LAZO.tmr = null; if (HABLA.on) habla(false); }
+    if (!instancias.length) { clearTimeout(tmrParpadeo); clearTimeout(tmrMirada); clearTimeout(tmrMiraLado); clearTimeout(tmrBostezo); clearInterval(LAZO.tmr); LAZO.tmr = null; if (HABLA.on) habla(false); }
     return true;
   }
   if (hayDOM && document.addEventListener) document.addEventListener('visibilitychange', function () { if (!document.hidden) programarParpadeo(); });
@@ -589,8 +804,11 @@
     limpiarEtiqueta: limpiarEtiqueta, filtroDeTrozos: filtroDeTrozos, gestoDe: gestoDe, gestoDelTexto: gestoDelTexto,
     puntos: puntos, normal: normal, svg: svgTodo, N_NODOS: N_NODOS,
     path: function (n, lado) { var c = lado === 'izq' ? OJO_IZQ : OJO_DER; return pathDe(aVB(puntosOjo(n, lado || 'der'), c.cx, c.cy)); }, mezcla: mezcla,
-    actual: function () { return { base: ESTADO_BASE, gesto: GESTO, visible: estadoVisible(), nivel: NIVEL, hablando: HABLA.on, instancias: instancias.length }; },
-    ESTADOS: Object.keys(ESTADOS), GESTOS_MODELO: GESTOS_MODELO, COLORES: ['celeste', 'menta', 'ambar', 'violeta'], SILUETAS: ['A', 'B']
+    asentir: asentir, negar: negar, ladear: ladear, mirar: mirarLado, voltear: voltear, guinar: guinar, sorpresa: sorpresa,
+    config: function (c) { c = c || {}; if (c.sueno) CFG.sueno = +c.sueno; if (typeof c.azar === 'function') CFG.azar = c.azar; if (c.azar === null) CFG.azar = Math.random; if (c.reiniciarGuino) ULT_GUINO = -1e9; armarSueno(); return { sueno: CFG.sueno }; },
+    actual: function () { var t = poseTotal(); return { base: ESTADO_BASE, gesto: GESTO, visible: estadoVisible(), nivel: NIVEL, hablando: HABLA.on, instancias: instancias.length,
+      pose: { ry: POSE.ry, rx: POSE.rx, rz: POSE.rz, bx: POSE.bx, bz: POSE.bz, total: t }, sueno: SUENO, guinos: GUINO_PEND, ultimoAnim: ULT_ANIM, ultimoModo: MODO.ult }; },
+    ESTADOS: PUBLICOS.slice(), GESTOS_MODELO: GESTOS_MODELO, COLORES: ['celeste', 'menta', 'ambar', 'violeta'], SILUETAS: ['A', 'B']
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Cara;
   if (raiz) raiz.Cara = Cara;
