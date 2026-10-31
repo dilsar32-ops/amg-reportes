@@ -10664,7 +10664,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-31-R63';
+  const APP_BUILD = '2026-10-31-R64';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -52039,6 +52039,23 @@ body.idi-en [data-solo-es]{display:none !important;}
   const clientesLeer = () => { try{ const l = JSON.parse(localStorage.getItem(CLIENTES_KEY) || '[]'); return Array.isArray(l) ? l.filter(c => c && clienteVence(c) > Date.now()) : []; }catch(e){ return []; } };
   const clientesEscribir = l => { try{ localStorage.setItem(CLIENTES_KEY, JSON.stringify(l)); return true; }catch(e){ almacenLleno('los clientes'); return false; } };
   const cliNorm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // (31 oct 2026, el dueño: "si entra a CompanyCam, cómo buscar los clientes automáticamente") Lumi dice "abre CompanyCam en Anderson":
+  // se busca el cliente en la lista de Clientes, se pregunta a CompanyCam por su proyecto y se abre ESE proyecto. Si no sale, se abre
+  // CompanyCam a secas y se avisa.
+  async function ccAbrirProyectoDe(nombre, urlBase){
+    const q = cliNorm(nombre);
+    const cli = clientesLeer().find(c => c && c.nombre && (cliNorm(c.nombre) === q || cliNorm(c.nombre).split(' ').includes(q) || q.split(' ').every(w => cliNorm(c.nombre).includes(w)))) || null;
+    let r = null;
+    try{ showOverlay('Buscando a ' + (cli ? cli.nombre : nombre) + ' en CompanyCam…'); r = await ccLlamar({ accion: 'buscar_proyecto', nombre: cli ? cli.nombre : nombre, direccion: cli ? (cli.direccion || '') : '' }); }
+    catch(e){ r = null; }
+    hideOverlay();
+    const p = r && (r.seguro || (Array.isArray(r.candidatos) && r.candidatos[0])) || null;
+    if(p && p.id){ abrirEnSafari('https://app.companycam.com/projects/' + encodeURIComponent(String(p.id))); return true; }
+    try{ if(typeof asDecir === 'function') asDecir('No encontré el proyecto de ' + nombre + ' en CompanyCam. Te abro CompanyCam.'); }catch(e){}
+    abrirEnSafari(String(urlBase || 'https://app.companycam.com'));
+    return false;
+  }
+  window.__ccAbrirProyectoDe = ccAbrirProyectoDe;
 
   // ---- sacar nombre y direccion de las lineas leidas. Puras, para probarlas. ----
   const CLI_ESTADOS = new Set('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR'.split(' '));
@@ -54727,7 +54744,7 @@ body.idi-en [data-solo-es]{display:none !important;}
         // (2c-b) Las hojas al grupo: Lumi espera el "sí" (la pregunta ya la dijo el modelo) y el teléfono abre Mensajes.
         if(nav && nav.pantalla === 'labor_log_mandar'){ AS.pregunta = { tipo: 'labor_grupo', nav }; asSeguirOyendo(); return; }
         // (31 oct) "abre CompanyCam": la página o app de afuera, en Safari (o en la app instalada si abre así)
-        if(nav && nav.pantalla === 'abrir_url' && nav.url){ asCerrar(); abrirEnSafari(String(nav.url)); return; }
+        if(nav && nav.pantalla === 'abrir_url' && nav.url){ asCerrar(); if(nav.cc_buscar && typeof ccAbrirProyectoDe === 'function'){ ccAbrirProyectoDe(String(nav.cc_buscar), String(nav.url)); return; } abrirEnSafari(String(nav.url)); return; }
         if(nav){ asNavegar(nav); return; }
         asSeguirOyendo();   // siempre vuelve a oír (también tras una pregunta escrita, salvo con el teclado abierto)
       });
@@ -55783,7 +55800,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // ---- abrir pantallas: por los MISMOS botones y funciones que usa el dedo ----
   async function asIrA(nav){
     const p = (nav && nav.pantalla) || 'manager';
-    if(p === 'abrir_url' && nav.url){ abrirEnSafari(String(nav.url)); return; }   // (31 oct) una página de afuera
+    if(p === 'abrir_url' && nav.url){ if(nav.cc_buscar && typeof ccAbrirProyectoDe === 'function'){ ccAbrirProyectoDe(String(nav.cc_buscar), String(nav.url)); return; } abrirEnSafari(String(nav.url)); return; }   // (31 oct) una página de afuera; con cc_buscar, el proyecto del cliente
     if(!isManager() && p !== 'medir_aqui' && !/^(pantalla|formulario|contactar|reporte)$/.test(p)){ asIrACrew(nav); return; }   // la cuadrilla: solo sus azulejos (el servidor ya filtró)
     // La MISMA puerta de Pagos que el azulejo del hub (una sola funcion, carpetas_manager_test lo vigila).
     const pagos = function(vista){ abrirPagos(vista, 'manager'); };
