@@ -10663,7 +10663,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-31-R60';
+  const APP_BUILD = '2026-10-31-R61';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -44482,6 +44482,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     $('#doorSignOut').hidden = !(signedIn() || cses);
     $$('[data-door="manager"]').forEach(el => { el.hidden = signedIn() && !isManager(); });   // una cuenta de crew no se vuelve manager sin cerrar sesion
     if(typeof asPintarEsfera === 'function') asPintarEsfera();   // la esfera del asistente, solo para el manager (20 oct 2026)
+    if(typeof asBuenosDiasAuto === 'function'){ const forzar = /[?&]abrir=buenosdias\b/.test(location.search); setTimeout(function(){ asBuenosDiasAuto(forzar).then(function(h){ if(h && forzar){ try{ history.replaceState(null, '', location.pathname); }catch(e){} } }); }, 900); }
   }
   $('#doorSignOut').addEventListener('click', async ()=>{
     if(!autorizarCierre()) return;
@@ -54006,7 +54007,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   function asEstado(e, pista){ if(AS.estado !== e) asBit('estado ' + e); AS.estado = e; const p = $('#asPanel'); if(p) p.dataset.estado = e; const h = $('#asPista'); if(h && pista !== undefined) h.textContent = pista || ''; if(window.Cara){ try{ Cara.estado({ esperando:'reposo', pensando:'buscando' }[e] || e); }catch(err){} } }
   function asTranscribir(t){ const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; }
   function asMostrarRespuesta(t){ const e = $('#asRespuesta'); if(e) e.textContent = t || ''; }
-  function asAbrir(){
+  function asAbrir(opts){
     if(!signedIn()) return;
     AS.abierto = true; AS.historial = []; AS.dictado = null; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asTranscribir('');
     const p = $('#asPanel'); if(p){ p.hidden = false; p.classList.toggle('as-prueba-on', AS.sandbox); }
@@ -54017,6 +54018,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     asRevisarVoz();
     const Sp = asPlugin(); if(isNative() && Sp){ try{ asEnganchar(Sp); }catch(err){} }
     asPantalla(true);   // (30 oct) la pantalla no se apaga mientras Lumi está abierta
+    if(opts && opts.sinSaludo) return;   // (31 oct) los buenos días traen su propio saludo
     // Saluda por el nombre de pila (una vez, al abrir) y se queda oyendo.
     // (pendiente 1, 21 oct) Y dice el resumen del día (logs sin ver, pagos por confirmar, casas con equipo), que la nube
     // arma sin modelo; se pide mientras saluda y se dice después, a lo más una vez cada 30 minutos.
@@ -54031,6 +54033,26 @@ body.idi-en [data-solo-es]{display:none !important;}
     });
   }
   const AS_RESUMEN_CADA_MS = 30 * 60 * 1000;
+  // (31 oct 2026, el dueño: "si entro por la mañana a Field Reports, Lumi me habla: la hora, buenos días, recordatorios y lo de los labor
+  // logs") LOS BUENOS DÍAS: la primera vez del día que el manager abre la app entre las 4 y las 12, Lumi se abre sola y habla
+  // (el servidor arma el texto: hora, clima, recordatorios y el resumen del día). También con el enlace ?abrir=buenosdias (atajos de
+  // iPhone, p. ej. al apagar la alarma) a cualquier hora, y diciéndole "buenos días".
+  function asBuenosDiasTexto(){
+    const reloj = { iso: new Date().toISOString(), zona: (Intl.DateTimeFormat().resolvedOptions() || {}).timeZone || '' };
+    return asLlamar({ buenos_dias: true, sandbox: false, reloj: reloj, idiomaApp: asEn() ? 'en' : 'es' }).then(function(r){ return r && r.ok && r.json && r.json.ok ? String(r.json.texto || '').trim() : ''; }).catch(function(){ return ''; });
+  }
+  async function asBuenosDiasAuto(forzar){
+    if(!signedIn() || !isManager() || !cloudOn() || AS.abierto) return false;
+    const h = new Date().getHours(), hoy = new Date().toISOString().slice(0, 10);
+    let ya = ''; try{ ya = localStorage.getItem('asBuenosDiasDia') || ''; }catch(e){}
+    if(!forzar && (ya === hoy || h < 4 || h >= 12)) return false;
+    try{ localStorage.setItem('asBuenosDiasDia', hoy); }catch(e){}
+    const t = await asBuenosDiasTexto(); if(!t) return false;
+    asAbrir({ sinSaludo: true }); asMostrarRespuesta(t); asBit('buenos días: ' + t.length + ' letras');
+    asHablar(t, asSeguirOyendo);
+    return true;
+  }
+  window.__asBuenosDias = asBuenosDiasAuto;
   function asPedirResumen(){
     let ultimo = 0; try{ ultimo = +(localStorage.getItem('asResumenAt') || 0); }catch(e){}
     if(Date.now() - ultimo < AS_RESUMEN_CADA_MS || !cloudOn()) return Promise.resolve('');
