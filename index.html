@@ -10696,7 +10696,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-31-R71';
+  const APP_BUILD = '2026-10-31-R72';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -30864,6 +30864,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     // A fresh render wipes injected handles - re-inject (no-op outside
     // the Move tool).
     fpRenderEditHandles();
+    fpPintarSeleccionCuarto();                 // (R72) y el área azul del cuarto escogido
   }
   // A room's voice-logged equipment (from the native scan-time voice
   // assistant), as a short display line - the English half of the
@@ -32216,10 +32217,29 @@ body.idi-en [data-solo-es]{display:none !important;}
     $('#floorplanRoomDetail').hidden = false;
     fpExpandDrawer();
     $('#floorplanRoomDetail').scrollIntoView({behavior:'smooth', block:'nearest'});
+    fpPintarSeleccionCuarto();
   }
   function closeFloorplanRoomDetail(){
     fpSelectedRoomPanelIdx = null;
     $('#floorplanRoomDetail').hidden = true;
+    fpPintarSeleccionCuarto();
+  }
+  // (31 oct 2026, R72) EL ÁREA AZUL DEL CUARTO ESCOGIDO, como en Scanova 360 (él: "ese azul que se mueve cuando se ve el espacio
+  // de cada cuarto, cuando uno le cliquea, debe también estar en Field Reports al editar el plano"). Al tocar un cuarto en el
+  // editor, su piso se pinta azul tenue con borde azul, encima del dibujo; no recibe toques. Se vuelve a pintar en cada dibujo.
+  function fpPintarSeleccionCuarto(){
+    document.querySelectorAll('#floorplanSvgWrap .fp-capa-sel').forEach(g => g.remove());
+    if(!fpEditMode || fpSelectedRoomPanelIdx == null || !floorplanData) return;
+    const room = (floorplanData.rooms||[])[fpSelectedRoomPanelIdx]; if(!room) return;
+    let pg = null; try{ pg = fpOrderedRoomPolygon(room); }catch(e){}
+    if(!pg || pg.length < 3) return;
+    document.querySelectorAll('#floorplanSvgWrap svg').forEach(svg => {
+      const s = +svg.dataset.fpScale, mx = +svg.dataset.fpMinx, my = +svg.dataset.fpMiny;
+      if(!(s > 0) || !isFinite(mx) || !isFinite(my)) return;
+      if(svg.dataset.fpRoomIdx != null && Number(svg.dataset.fpRoomIdx) !== fpSelectedRoomPanelIdx) return;
+      const pts = pg.map(q => ((q.x - mx) * s).toFixed(1) + ',' + ((q.y - my) * s).toFixed(1)).join(' ');
+      svg.insertAdjacentHTML('beforeend', `<g class="fp-capa-sel" pointer-events="none"><polygon points="${pts}" fill="rgba(37,99,235,.10)" stroke="#2563eb" stroke-width="3" vector-effect="non-scaling-stroke"/></g>`);
+    });
   }
   $('#fpRoomDetailClose').addEventListener('click', closeFloorplanRoomDetail);
 
