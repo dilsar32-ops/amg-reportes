@@ -10696,7 +10696,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-31-R70';
+  const APP_BUILD = '2026-10-31-R71';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -25694,12 +25694,18 @@ body.idi-en [data-solo-es]{display:none !important;}
           // Honest guess: Laundry if a washer/dryer sits in the pocket.
           // (31 oct, R70) En un BAÑO el rincón es la tina o la regadera, no un clóset (él: "a veces pone que es closet"):
           // con tina adentro se llama "Shower"; con inodoro o lavabo adentro, o en un baño sin nada, no se rotula.
-          const adentro = cat => (room.objects||[]).some(o => o.category === cat && !o._removed && o.center && Math.hypot(o.center.x-cx, o.center.y-cy) <= Math.max(depth, width));
+          // Decide el mueble MÁS CERCANO al rincón (en un baño chico la tina y el lavamanos caben los dos en el radio).
           const esBano = /bath|ba[ñn]o|powder|restroom|shower|regadera/i.test(room.roomName || '');
+          let cercano = null, dCercano = Math.max(depth, width);
+          (room.objects||[]).forEach(o => {
+            if(o._removed || !o.center || !['washerDryer','bathtub','toilet','sink'].includes(o.category)) return;
+            const dd = Math.hypot(o.center.x-cx, o.center.y-cy);
+            if(dd <= dCercano){ dCercano = dd; cercano = o.category; }
+          });
           let name = 'Closet';
-          if(adentro('washerDryer')) name = 'Laundry';
-          else if(adentro('bathtub')) name = 'Shower';
-          else if(adentro('toilet') || adentro('sink') || esBano) continue;
+          if(cercano === 'washerDryer') name = 'Laundry';
+          else if(cercano === 'bathtub') name = 'Shower';
+          else if(cercano === 'toilet' || cercano === 'sink' || esBano) continue;
           found.push({ name, cx: Math.round(cx*100)/100, cy: Math.round(cy*100)/100,
                        w: Math.round(width*100)/100, d: Math.round(depth*100)/100, _suggested: true, conPuerta: puertaEnLaBoca || undefined });
         }
