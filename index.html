@@ -10663,7 +10663,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-31-R61';
+  const APP_BUILD = '2026-10-31-R62';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -43182,7 +43182,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     // se ha corrido, PostgREST contesta 400 y se vuelve a pedir SIN ellas, para
     // que la bandeja nunca se quede vacia por una migracion que falta.
     const base = 'id,created_at,crew_leader,log_date,payload,seen,archived_at,work_kind,client_id';
-    const extra = ',returned_at,returned_by,return_note,edited_at,edit_count';
+    const extra = ',returned_at,returned_by,return_note,edited_at,edit_count,sent_group_at';
     const pedir = cols => authFetch(
       '/rest/v1/labor_logs?select=' + cols + '&work_kind=eq.' + encodeURIComponent(kind) + '&'
       + filter + '&order=created_at.desc&limit=100',
@@ -43323,6 +43323,7 @@ body.idi-en [data-solo-es]{display:none !important;}
         <span class="when">${esc(r.log_date||'')} · ${(r.payload&&r.payload.s?r.payload.s.length:0)} turno(s)</span>
         ${r.returned_at ? '<span class="when" style="color:var(--pick);font-weight:700;">\u21a9 Se lo mandó a corregir</span>'
           : (r.edited_at ? '<span class="when" style="color:var(--green);font-weight:700;">\u2713 Corregido por ' + esc(r.crew_leader || 'quien lo mandó') + '</span>' : '')}
+        ${r.sent_group_at ? '<span class="when" style="color:var(--green);font-weight:700;">\u2713 Enviado al grupo ' + esc(String(r.sent_group_at).slice(0, 10)) + '</span>' : (r.archived_at && !mg ? '<span class="when" style="color:#d9a021;font-weight:700;">Archivado \u00b7 sin enviar al grupo</span>' : '')}
       </button>`).join('');
     colocarPanel();
   }
@@ -54724,6 +54725,8 @@ body.idi-en [data-solo-es]{display:none !important;}
         if(nav && nav.pantalla === 'materiales_llenar'){ asMaterialesLlenar(nav); return; }
         // (2c-b) Las hojas al grupo: Lumi espera el "sí" (la pregunta ya la dijo el modelo) y el teléfono abre Mensajes.
         if(nav && nav.pantalla === 'labor_log_mandar'){ AS.pregunta = { tipo: 'labor_grupo', nav }; asSeguirOyendo(); return; }
+        // (31 oct) "abre CompanyCam": la página o app de afuera, en Safari (o en la app instalada si abre así)
+        if(nav && nav.pantalla === 'abrir_url' && nav.url){ asCerrar(); abrirEnSafari(String(nav.url)); return; }
         if(nav){ asNavegar(nav); return; }
         asSeguirOyendo();   // siempre vuelve a oír (también tras una pregunta escrita, salvo con el teclado abierto)
       });
@@ -55779,6 +55782,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // ---- abrir pantallas: por los MISMOS botones y funciones que usa el dedo ----
   async function asIrA(nav){
     const p = (nav && nav.pantalla) || 'manager';
+    if(p === 'abrir_url' && nav.url){ abrirEnSafari(String(nav.url)); return; }   // (31 oct) una página de afuera
     if(!isManager() && p !== 'medir_aqui' && !/^(pantalla|formulario|contactar|reporte)$/.test(p)){ asIrACrew(nav); return; }   // la cuadrilla: solo sus azulejos (el servidor ya filtró)
     // La MISMA puerta de Pagos que el azulejo del hub (una sola funcion, carpetas_manager_test lo vigila).
     const pagos = function(vista){ abrirPagos(vista, 'manager'); };
@@ -55944,6 +55948,8 @@ body.idi-en [data-solo-es]{display:none !important;}
       // 5. la marca (solo si de verdad salió)
       let marcado = false;
       if(estado === 'enviado' || estado === 'compartido') marcado = await (deps.marcar || laborMarcarMandado)(id);
+      // (31 oct, el dueño) el que ya se mandó al grupo se ARCHIVA solo (queda en Archivados con '✓ Enviado al grupo')
+      if(marcado && !row.archived_at){ try{ await authFetch('/rest/v1/labor_logs?id=eq.' + encodeURIComponent(id), { method: 'PATCH', headers: Object.assign(cloudHeaders(), { 'Prefer': 'return=minimal' }), body: JSON.stringify({ archived_at: new Date().toISOString() }) }); inboxRows = inboxRows.filter(function(x){ return String(x.id) !== String(id); }); }catch(e){} }
       return { estado, hojas: imagenes.length, recibos: recibos.length, marcado };
     } finally { overlay(''); }
   }
