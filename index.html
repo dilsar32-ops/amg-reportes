@@ -10604,7 +10604,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-10-30-R56';
+  const APP_BUILD = '2026-10-30-R57';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -55823,14 +55823,19 @@ body.idi-en [data-solo-es]{display:none !important;}
       const kind = row.work_kind === 'mudanza' ? 'mudanza' : 'restauracion';
       // 2. las hojas (el formulario se pinta con el reporte y se imprime a JPG, igual que CompanyCam)
       if(deps.loadPayload || typeof loadPayload === 'function'){ if(typeof laborMode !== 'undefined') laborMode = kind; (deps.loadPayload || loadPayload)(row.payload || {}, kind); }
-      const hojas = await (deps.hojas || function(){ return ccHojasDelReporte('labor'); })();
+      // (30 oct, el dueño: "¿por qué va sin precio?") la hoja del grupo va CON precio, igual que la de la galería de Lumi: el manager manda
+      // la hoja completa (Shift Total, extras, GRAND TOTAL). Se fuerza el precio solo mientras se saca la hoja.
+      const fpAntes = window.__forcePriced; window.__forcePriced = true;
+      let hojas; try{ hojas = await (deps.hojas || function(){ return ccHojasDelReporte('labor'); })(); } finally{ window.__forcePriced = fpAntes; }
       const imagenes = (hojas && hojas.imagenes) || [];
       if(!imagenes.length) throw new Error('no salió ninguna hoja');
       // 3. los recibos
       const recibos = await (deps.recibos || laborRecibosDe)(row.client_id);
       const base = 'labor-log-' + String(row.log_date || '').slice(0, 10) + '-' + String(row.crew_leader || '').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 20);
       const archivos = imagenes.map(function(d, i){ return { blob: asDataUrlABlob(d), nombre: base + (imagenes.length > 1 ? '-p' + (i + 1) : '') + '.jpg' }; }).concat(recibos);
-      const texto = 'Labor log ' + String(row.crew_leader || '') + ' · ' + String(row.log_date || '').slice(0, 10) + (recibos.length ? ' · ' + recibos.length + ' recibo(s)' : '');
+      // (30 oct, el dueño: "no debería de llevar ese texto") el mensaje va SIN texto: solo la hoja (y los recibos). El título queda para la hoja de compartir.
+      const titulo = 'Labor log ' + String(row.crew_leader || '') + ' · ' + String(row.log_date || '').slice(0, 10);
+      const texto = '';
       overlay('Abriendo Mensajes…');
       let estado = 'nada';
       const nativo = deps.isNative ? deps.isNative() : isNative();
@@ -55846,7 +55851,7 @@ body.idi-en [data-solo-es]{display:none !important;}
         if(estado !== 'enviado' && estado !== 'cancelado'){
           // Sin plugin v2 o sin números del grupo (o falló): la hoja de compartir de iOS con TODOS los JPG; él escoge el grupo.
           const Share = deps.Share || (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Share);
-          try{ await Share.share({ title: texto, text: texto, files: uris, dialogTitle: 'Mandar al grupo / Send to group' }); estado = 'compartido'; }
+          try{ await Share.share({ title: titulo, files: uris, dialogTitle: 'Mandar al grupo / Send to group' }); estado = 'compartido'; }
           catch(e){ estado = /cancel/i.test(String((e && e.message) || e)) ? 'cancelado' : 'fallo'; if(estado === 'fallo') throw e; }
         }
       } else {
