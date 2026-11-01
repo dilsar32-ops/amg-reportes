@@ -8255,17 +8255,23 @@ body.idi-en [data-solo-es]{display:none !important;}
       el.classList.toggle('idi-off', !solo);
     }
     const SALTAR = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1 };
+    // (1-nov-2026) EL PAPEL NO SE TRADUCE. Los PDF (class="printout": Measurements, Equipment, Moisture, Labor, Contents,
+    // Floor Plan…) y la hoja de la vista previa (.prev-sheet, "Así se va a mandar") van al seguro y se escriben en inglés.
+    // Este motor los traducía al español cuando la app está en español: "Wall" → "Pared", "Crew Leader" → "Líder de
+    // Cuadrilla", "Room" → "Cuarto" ("Ceiling" no está en el diccionario y por eso sí salía bien). Se dejan como se escriben.
+    const IDI_FUERA = '[data-no-idioma], .printout, .prev-sheet';
+    const idiFuera = el => !!(el && el.closest && el.closest(IDI_FUERA));
     function procesar(raiz){
       if(!raiz) return;
-      if(raiz.nodeType === 3){ if(!SALTAR[raiz.parentNode && raiz.parentNode.nodeName] && !(raiz.parentNode && raiz.parentNode.closest && raiz.parentNode.closest('[data-no-idioma]'))) textoNodo(raiz); return; }
-      if(raiz.nodeType !== 1 || SALTAR[raiz.nodeName] || (raiz.closest && raiz.closest('[data-no-idioma]'))) return;
+      if(raiz.nodeType === 3){ if(!SALTAR[raiz.parentNode && raiz.parentNode.nodeName] && !idiFuera(raiz.parentNode)) textoNodo(raiz); return; }
+      if(raiz.nodeType !== 1 || SALTAR[raiz.nodeName] || idiFuera(raiz)) return;
       if(raiz.classList.contains('en')) span(raiz);
       raiz.querySelectorAll('.en').forEach(span);
       atributos(raiz);
       raiz.querySelectorAll('[placeholder],[title],[aria-label]').forEach(atributos);
       const w = document.createTreeWalker(raiz, NodeFilter.SHOW_TEXT);
       let n; while((n = w.nextNode())){
-        const p = n.parentNode; if(!p || SALTAR[p.nodeName] || (p.closest && p.closest('[data-no-idioma]'))) continue;
+        const p = n.parentNode; if(!p || SALTAR[p.nodeName] || idiFuera(p)) continue;
         textoNodo(n);
       }
     }
@@ -11234,7 +11240,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-01-R92';
+  const APP_BUILD = '2026-11-01-R93';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -20330,6 +20336,16 @@ body.idi-en [data-solo-es]{display:none !important;}
   // campo, "Artículo / Item"), y en el papel del seguro la columna diría
   // "Item" en vez de "Kitchen".
   const MED_SUPERFICIE_EN = { floor:'Floor', wall:'Wall', ceiling:'Ceiling', kitchen:'Kitchen', bathroom:'Bathroom', materiales:'Materials' };
+  // (1-nov-2026) EL PAPEL VA EN INGLÉS, venga como venga lo guardado: una superficie que quedó en español (o con la
+  // etiqueta "Pared / Wall") se vuelve a su palabra en inglés. Un solo mapa para todos los PDF. Lo guardado no se toca.
+  const MED_SUPERFICIE_ES_EN = { 'Piso':'Floor', 'Pared':'Wall', 'Techo':'Ceiling', 'Cocina':'Kitchen', 'Baño':'Bathroom', 'Materiales':'Materials' };
+  function medSuperficieEn(v){
+    const s = String(v == null ? '' : v).trim();
+    if(!s) return '';
+    if(MED_SUPERFICIE_EN[s.toLowerCase()]) return MED_SUPERFICIE_EN[s.toLowerCase()];
+    const solo = s.indexOf(' / ') > 0 ? s.split(' / ')[0].trim() : s;        // "Pared / Wall" → "Pared"
+    return MED_SUPERFICIE_ES_EN[solo] || MED_SUPERFICIE_ES_EN[s] || (s.indexOf(' / ') > 0 ? s.split(' / ')[1].trim() : s);
+  }
   const MEASURE_SECTIONS = {
     floor: { labelEn:'Floor', labelEs:'Piso', options: [
       {value:'Laminate', label:'Laminate / Laminado'},
@@ -24066,7 +24082,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     [['floor', floorContainer], ['wall', wallContainer],
      ['ceiling', ceilingContainer], ['kitchen', kitchenContainer], ['bathroom', bathroomContainer], ['materiales', materialesContainer]].forEach(([seccion, container]) => {
       if(!container) return;
-      const superficie = MED_SUPERFICIE_EN[seccion] || seccion;
+      const superficie = medSuperficieEn(seccion);
       $$('.measure-card', container).forEach(card => {
         // Una tarjeta que NADIE ha tocado (sin nivel, sin cuarto, y con su
         // corte vacío) no se muestra: `resetMeasurements` crea una por sección,
@@ -24380,7 +24396,7 @@ body.idi-en [data-solo-es]{display:none !important;}
           const conResta = restas.length > 0;
           html += `<tr>
             <td style="${MED_TD} font-weight:700;${conResta ? ' border-bottom:none;' : ''}">${esc(mt.material)}</td>
-            <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;${conResta ? ' border-bottom:none;' : ''}">${esc(mt.superficie)}</td>
+            <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;${conResta ? ' border-bottom:none;' : ''}">${esc(medSuperficieEn(mt.superficie))}</td>
             <td style="${MED_TD} text-align:center; font-weight:700;${conResta ? ' border-bottom:none;' : ''}">${esc(qu.qty)}</td>
             <td style="${MED_TD} text-align:center; font-weight:700;${conResta ? ' border-bottom:none;' : ''}">${esc(medUnidadCorta(qu.unidad))}${falta}</td>
           </tr>`;
@@ -24414,7 +24430,7 @@ body.idi-en [data-solo-es]{display:none !important;}
         const falta = pt.faltaAlto ? '<div style="color:#B42318; font-size:10px; font-weight:700;">' + (qu.qty || qu.unidad ? '+ missing height' : 'missing height') + '</div>' : '';
         html += `<tr>
             <td style="${MED_TD} font-weight:700;">${esc(pt.material)}</td>
-            <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;">${esc(pt.superficie)}</td>
+            <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;">${esc(medSuperficieEn(pt.superficie))}</td>
             <td style="${MED_TD} text-align:center; font-weight:700;">${esc(qu.qty)}</td>
             <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medUnidadCorta(qu.unidad))}${falta}</td>
             <td style="${MED_TD} text-align:center; color:#6B7684; font-size:11px;">${pt.cuartos}</td>
@@ -40565,7 +40581,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     const client = esc(($('#d-client') || {}).value || '');
     const clientPhone = esc((($('#d-phone') || {}).value) || '');
     const room = esc($('#d-room').value);
-    const surface = SURFACE_LABELS[surfaceSelect.value] || 'Floor';
+    const surface = medSuperficieEn(SURFACE_LABELS[surfaceSelect.value] || surfaceSelect.value) || 'Floor';
     const material = esc(currentMaterialEn());
     const tech = esc($('#d-tech').value);
     const pm = esc($('#d-pm').value);
@@ -48372,7 +48388,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   function medVistaPreviaHtml(t){
     const cortes = medCortesDeTrabajo(t).map(c => ({
       nivel: c.nivel, cuarto: c.cuarto, seccion: c.seccion,
-      superficie: MED_SUPERFICIE_EN[c.seccion] || c.seccion,
+      superficie: medSuperficieEn(c.seccion),
       material: c.material, a: c.a, b: c.b, sqft: c.sqft, linear: c.linear, piezas: c.piezas || 0,
       menos: c.menos || 0, menosQue: c.menosQue || '',      // (20-oct) la resta sale igual en la vista previa
       todoNivel: !!c.todoNivel,                            // (20-oct) y "Whole level"
