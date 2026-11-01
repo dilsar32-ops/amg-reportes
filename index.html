@@ -11080,7 +11080,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-01-R83';
+  const APP_BUILD = '2026-11-01-R84';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -50977,6 +50977,21 @@ body.idi-en [data-solo-es]{display:none !important;}
     }catch(e){ if(e && e.permanente) f.des.intentos = (f.des.intentos || 0) + 1; console.warn('contenidos: desenfocada', e); }
     ctEscribirLote();
   }
+  // (R84, 1-nov-2026, con su sí) LA COPIA CHICA EN LA NUBE (<path>-t.jpg, ~20 KB): la miniatura de 320 px que el teléfono ya hace al
+  // tomar la foto (f.vista) sube junto a la foto. El PDF firmado que arma la nube la usa en vez de pedirle a Supabase que achique cada
+  // foto (render/image: el plan trae 100 al mes y el inventario de 5,210 fotos usó 3,245; el panel avisa que el proyecto puede quedar
+  // lento o solo para leer). Solo los objetos (las extras no salen en el PDF). Nunca detiene la foto; un error de verdad cuenta y a la
+  // 4a se deja (la nube usa la original si es chica). Las fotos que ya estaban en la nube sin su copia la suben solas (tarea 'mini').
+  const ctRutaMini = (path) => String(path || '').replace(/\.jpg$/, '-t.jpg');
+  const ctMiniPorSubir = f => !!(f && f.vista && !f.miniNube && ctEsObjeto(f) && (f.miniIntentos || 0) < 4);
+  async function ctSubirMini(f){
+    if(!ctMiniPorSubir(f) || !f.path) return;
+    let blob = null;
+    try{ blob = await ctLeerBlobRapido(f.vista); }catch(e){ f.miniIntentos = 4; ctEscribirLote(); return; }   // ya no está en el teléfono: la nube usa la original
+    try{ await ctSubirArchivo(ctRutaMini(f.path), blob, 'image/jpeg'); f.miniNube = true; }
+    catch(e){ if(e && e.permanente) f.miniIntentos = (f.miniIntentos || 0) + 1; console.warn('contenidos: copia chica', e); }
+    ctEscribirLote();
+  }
   async function ctTomarFotos(files, opts){
     const t = ctActual(); if(!t || t.estado !== 'abierto' || !files || !files.length) return;
     if(ctTomando){ alert('Espere: todavía se están guardando las fotos anteriores.'); return; }
@@ -51782,9 +51797,10 @@ body.idi-en [data-solo-es]{display:none !important;}
     try{ await ctPedir('/storage/v1/object/contenidos/' + b.path, { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){}
     if(/\.jpg$/.test(b.path || '')){ try{ await ctPedir('/storage/v1/object/contenidos/' + ctRutaRecorte(b.path), { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){} }
     if(/\.jpg$/.test(b.path || '')){ try{ await ctPedir('/storage/v1/object/contenidos/' + ctRutaDes(b.path), { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){} }
+    if(/\.jpg$/.test(b.path || '')){ try{ await ctPedir('/storage/v1/object/contenidos/' + ctRutaMini(b.path), { method: 'DELETE', headers: { apikey: CLOUD.key, Authorization: 'Bearer ' + SES.access_token } }); }catch(e){} }   // (R84) la copia chica
   }
   function ctTrabajosPendientes(){
-    return Object.values(CT.trabajos).filter(t => (t.estado === 'abierto' && (!t.fila || t.cambios || (t.borradas || []).length || t.fotos.some(f => ((!f.enNube || f.dirty) && !(f.subida === 'error' && f.intentos >= 6)) || (f.enNube && ctDesPorSubir(f) && navigator.onLine !== false))))
+    return Object.values(CT.trabajos).filter(t => (t.estado === 'abierto' && (!t.fila || t.cambios || (t.borradas || []).length || t.fotos.some(f => ((!f.enNube || f.dirty) && !(f.subida === 'error' && f.intentos >= 6)) || (f.enNube && (ctDesPorSubir(f) || ctMiniPorSubir(f)) && navigator.onLine !== false))))
                                                 || (t.estado === 'firmado' && (t.pdfPendiente || t.ccCompletoPendiente)));
   }
   // ---- (26-oct-2026, Bodega) LO QUE LA NUBE TIENE Y EL TELÉFONO NO ----
@@ -51895,8 +51911,8 @@ body.idi-en [data-solo-es]{display:none !important;}
   // lo que la persona puede cambiar y viaja en la fila; el nombre que pone la nube (fuente 'ia') no cuenta
   const ctHuellaEnvio = f => JSON.stringify([ctEstados(f), (f.fuente === 'persona' || f.fuente === 'ia-confirmado') ? [f.nombre || '', f.fuente, f.en || ''] : '', f.nota || '', f.nota_en || '', f.rol || 'objeto', f.de || null]);
   const ctFotoViva = (t, f) => CT.trabajos[t.id] === t && t.estado === 'abierto' && t.fotos.includes(f);
-  // qué le falta a una foto: 'foto' (la foto y su fila), 'des' (solo la desenfocada que llegó después) o nada
-  const ctTareaFoto = f => (f.enNube && !f.dirty) ? (ctDesPorSubir(f) ? 'des' : null) : ((f.subida === 'error' && f.intentos >= 6) ? null : 'foto');
+  // qué le falta a una foto: 'foto' (la foto y su fila), 'des' (solo la desenfocada que llegó después), 'mini' (solo su copia chica, R84) o nada
+  const ctTareaFoto = f => (f.enNube && !f.dirty) ? (ctDesPorSubir(f) ? 'des' : (ctMiniPorSubir(f) ? 'mini' : null)) : ((f.subida === 'error' && f.intentos >= 6) ? null : 'foto');
   // La foto sin pasar por el puente en base64 (el archivo lo da el aparato directo, como las miniaturas); si no, como siempre.
   async function ctLeerBlobRapido(ruta){
     const C = (typeof window !== 'undefined') ? window.Capacitor : null, F = ctDisco();
@@ -51916,6 +51932,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     // (19 oct 2026) el recorte del objeto, junto a la foto (<path>-r.jpg): la nube lo nombra con él. Nunca detiene la foto.
     if(!f.enNube && f.recorte && ctEsObjeto(f)){ const rec = f.recorte; partes.push(ctLeerBlobRapido(rec).then(b => ctSubirArchivo(ctRutaRecorte(f.path), b, 'image/jpeg')).catch(e => { console.warn('contenidos: recorte', e); })); }
     if(ctDesPorSubir(f)) partes.push(ctSubirDes(f));                  // (21 oct 2026) la copia desenfocada (<path>-d.jpg); nunca detiene la foto
+    if(ctMiniPorSubir(f)) partes.push(ctSubirMini(f));                // (R84) la copia chica para el PDF de la nube (<path>-t.jpg); nunca detiene la foto
     const hechas = await Promise.allSettled(partes);
     if(hechas[0].status === 'rejected') throw hechas[0].reason;
     if(!ctFotoViva(t, f)) return false;                               // la quitaron mientras subía: su fila no se sube (t.borradas limpia la nube)
@@ -51950,7 +51967,7 @@ body.idi-en [data-solo-es]{display:none !important;}
       ctRenumerar(t); ctEscribirLote(); ctPintarColaLuego();
       return 'quitada';
     }
-    f.k = fila.k; f.path = fila.path;
+    f.k = fila.k; f.path = fila.path; f.miniNube = false; f.miniIntentos = 0;   // (R84) su copia chica, a la ruta de la nube
     return 'misma';
   }
   // Las fotos de UN trabajo, varias a la vez. false = hay que parar la cola (sin señal, o el servidor no deja).
@@ -51968,6 +51985,7 @@ body.idi-en [data-solo-es]{display:none !important;}
       if(!ctFotoViva(t, f)) return;
       const tarea = ctTareaFoto(f); if(!tarea) return;
       if(tarea === 'des'){ await ctSubirDes(f); ctPintarColaLuego(f); return; }
+      if(tarea === 'mini'){ await ctSubirMini(f); ctPintarColaLuego(f); return; }
       f.subida = 'subiendo'; ctPintarColaLuego(f);
       try{
         await ctSubirUnaFoto(t, f);
