@@ -2117,6 +2117,12 @@
   .msg-pet-form-cab{display:flex; align-items:center; gap:10px; font-size:17px; line-height:22px;}
   .msg-pet-form-cab .msg-pet-ico{width:34px; height:34px;}
   .msg-pet-form-cab .msg-pet-ico svg{width:19px; height:19px;}
+  .msg-root .msg-pet-l[hidden]{display:none;}   /* la regla de .msg-pet-l (display:block) le ganaba al [hidden] de arriba por especificidad */
+  .msg-pet-fecha{margin-left:auto; flex:none; font-size:13px; line-height:16px; color:var(--wa-sub); white-space:nowrap;}
+  .msg-root .msg-tec-ocultar{display:none; position:absolute; right:12px; bottom:8px; z-index:6; width:48px; height:36px; margin:0; padding:0; border:0; border-radius:12px; background:rgba(44,44,46,.94); color:var(--wa-text); box-shadow:0 2px 10px rgba(0,0,0,.35); cursor:pointer;}
+  .msg-root.teclado .msg-lista:not([hidden]) .msg-tec-ocultar{display:grid; place-items:center;}
+  .msg-root.teclado .msg-lista-cuerpo{padding-bottom:56px;}   /* que lo último del formulario pueda subir por encima del ▾ */
+  .msg-root.teclado .msg-lista:has(> .msg-pie:not([hidden])) .msg-tec-ocultar{display:none;}   /* con el ◀ Mensajes abajo (Nuevo chat / grupo) el ▾ no se encima */
   .msg-root .msg-pet-l{display:block; margin:12px 2px 0; color:var(--wa-sub); font-size:13px; line-height:16px; font-weight:400; text-transform:none; letter-spacing:0;}
   .msg-root .msg-pet-form input[type="text"], .msg-root .msg-pet-form textarea, .msg-root .msg-anuncio-texto{display:block; width:100%; margin:6px 0 0; box-sizing:border-box; box-shadow:none; border:0; border-radius:10px; background:var(--wa-field); color:var(--wa-text); padding:10px 12px; font-family:inherit; font-size:17px; font-weight:400; line-height:22px; outline:none; resize:none; -webkit-appearance:none; appearance:none;}
   .msg-root .msg-pet-form .msg-pet-monto{font-size:22px; font-weight:600;}
@@ -11291,7 +11297,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-01-R97';
+  const APP_BUILD = '2026-11-01-R98';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -27935,7 +27941,57 @@ body.idi-en [data-solo-es]{display:none !important;}
     if(sig){ sig.focus(); try{ sig.scrollIntoView({ block: 'center', behavior: 'smooth' }); }catch(err){} }
     else el.blur();
   });
-  window.__teclado = { elegible: tecElegible, siguiente: tecSiguiente };
+  // (1-nov-2026, su queja en Mensajes: "el teclado nunca se va") En el iPhone un botón o un hueco NO toman el foco: el campo se queda
+  // enfocado y WKWebView deja el teclado arriba. Como en las apps normales: tocar fuera de un campo (azulejo, tarjeta, hueco, botón) lo
+  // suelta. Fuera de esto: el editor del plano y el minimapa (#fpStage, #fmWrap), Lumi (#asPanel), las listas de sugerencias que viven
+  // mientras el campo tiene foco (direcciones, selector de cliente), el nombre de la cámara de Contents y sus botones (ellos ya detienen
+  // el pointerdown para no perder el foco). En un botón se suelta al click (no al pointerdown): si el teclado se cierra antes de que
+  // suelte el dedo, el botón se mueve y el toque se pierde.
+  const TEC_CAMPO = 'input, textarea, select, option, label, [contenteditable=""], [contenteditable="true"]';
+  const TEC_NO_SOLTAR = '#fpStage, #fmWrap, #fmSvgWrap, #asPanel, .msg-barra, .addrsuglist, .clisuglist, .sc-cuerpo, .sc-bus, .ct-cam-nombre, [data-cam-nom-cancelar], [data-cam-nom-guardar], .lcab-ver';
+  const TEC_BOTON = 'button, a, [role="button"], .btn, .minibtn, summary';
+  const tecEditable = el => !!(el && el !== document.body && el.closest && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable));
+  function tecSoltar(){ const a = document.activeElement; if(tecEditable(a)){ try{ a.blur(); }catch(e){} return true; } return false; }
+  function tecFuera(e){
+    const a = document.activeElement; if(!tecEditable(a)) return false;
+    const t = e.target; if(!t || !t.closest || t === a) return false;
+    if(t.closest(TEC_CAMPO) || t.closest(TEC_NO_SOLTAR) || a.closest(TEC_NO_SOLTAR)) return false;
+    return true;
+  }
+  // Deslizar en el iPhone = pointerdown y luego pointercancel (nunca click): por eso NO se suelta en el pointerdown; se suelta al
+  // soltar el dedo sin haberse movido (pointerup a menos de 8 px) o al click. En un botón solo al click.
+  let tecToque = null;
+  document.addEventListener('pointerdown', e => { tecToque = (e.target && e.target.closest && !e.target.closest(TEC_BOTON) && tecFuera(e)) ? { x: e.clientX || 0, y: e.clientY || 0 } : null; }, true);
+  document.addEventListener('pointercancel', () => { tecToque = null; }, true);
+  document.addEventListener('pointerup', e => { const t = tecToque; tecToque = null; if(!t) return; if(Math.abs((e.clientX || 0) - t.x) > 8 || Math.abs((e.clientY || 0) - t.y) > 8) return; if(tecFuera(e)) tecSoltar(); }, true);
+  document.addEventListener('click', e => { if(tecFuera(e)) tecSoltar(); }, true);
+  // (1-nov-2026, su 3ª queja) con el teclado abierto la página seguía bajando y el campo quedaba tapado. Como iOS: mientras un campo
+  // tiene foco, lo que se desliza recibe un relleno abajo del alto del teclado (window.visualViewport) y el campo se trae a la vista
+  // encima del teclado (a un tercio); en cada cambio del visor se vuelve a acomodar; al soltar el foco el relleno se quita. Mensajes
+  // tiene lo suyo (msgTeclado: la capa toma el alto del visor) y el editor del plano y Lumi quedan fuera.
+  const TEC = { foco: null, scroller: null, altoSin: 0, relleno: null, subio: false };
+  const tecMedir = () => window.__tecVisorFake || (window.visualViewport ? { alto: window.visualViewport.height, top: window.visualViewport.offsetTop } : { alto: window.innerHeight, top: 0 });
+  function tecScroller(el){ for(let p = el.parentElement; p && p !== document.body; p = p.parentElement){ const cs = getComputedStyle(p); if(/(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 2) return p; } return document.scrollingElement || document.documentElement; }
+  function tecQuitarRelleno(){ const r = TEC.relleno; TEC.relleno = null; TEC.foco = null; if(r){ r.el.style.paddingBottom = r.antes; r.el.removeAttribute('data-tec-relleno'); } }
+  function tecAjustar(){
+    const a = document.activeElement, m = tecMedir();
+    if(!tecEditable(a)){ TEC.altoSin = Math.max(TEC.altoSin, m.alto); tecQuitarRelleno(); return; }
+    if(a.closest(TEC_NO_SOLTAR) || a.closest('.msg-root')){ tecQuitarRelleno(); return; }
+    const sin = TEC.altoSin || document.documentElement.clientHeight || 0, kb = Math.max(0, sin - m.alto);
+    if(kb < 80){ tecQuitarRelleno(); return; }
+    if(TEC.foco !== a){ TEC.foco = a; TEC.scroller = tecScroller(a); TEC.subio = false; }
+    const sc = TEC.scroller, esDoc = sc === document.scrollingElement || sc === document.documentElement, el = esDoc ? document.body : sc;
+    if(!TEC.relleno || TEC.relleno.el !== el){ if(TEC.relleno){ TEC.relleno.el.style.paddingBottom = TEC.relleno.antes; TEC.relleno.el.removeAttribute('data-tec-relleno'); } TEC.relleno = { el, antes: el.style.paddingBottom }; el.setAttribute('data-tec-relleno', '1'); }
+    el.style.paddingBottom = kb + 'px';
+    if(!esDoc && m.top > 0 && !TEC.subio){ const r0 = a.getBoundingClientRect(); if(r0.top >= m.top && r0.bottom <= m.top + m.alto){ TEC.subio = true; try{ window.scrollTo(0, 0); }catch(e){} } }   // la página corrida vuelve a 0 una sola vez por foco, y solo con el campo ya a la vista (que no pelee con iOS)
+    const r = a.getBoundingClientRect(), arriba = m.top + 8, abajo = m.top + m.alto - 12;
+    if(r.bottom > abajo || r.top < arriba){ const d = r.top - (m.top + Math.max(8, (m.alto - r.height) / 3)); if(esDoc) window.scrollBy(0, d); else sc.scrollTop += d; }
+  }
+  const tecLuego = (f, ms) => { if(typeof setTimeout === 'function') setTimeout(f, ms); };
+  document.addEventListener('focusin', e => { if(!tecEditable(e.target)) return; tecAjustar(); tecLuego(tecAjustar, 300); tecLuego(tecAjustar, 650); });
+  document.addEventListener('focusout', () => { tecLuego(tecAjustar, 120); });
+  if(window.visualViewport){ ['resize', 'scroll'].forEach(ev => window.visualViewport.addEventListener(ev, tecAjustar)); }
+  window.__teclado = { elegible: tecElegible, siguiente: tecSiguiente, soltar: tecSoltar, fuera: tecFuera, ajustar: tecAjustar, estado: TEC };
   window.__aqui = { forms: AQUI_FORMS, estado: AQUI_ESTADO, decidir: aquiDecidir, pintar: aquiPintar, buscar: aquiBuscar, alEntrar: aquiAlEntrar };
   // ===== (23 oct 2026) SELECTOR DE CLIENTE: un solo bloque para todos los formularios (su OK: "constrúyelo, en el labor log dentro de cada turno") =====
   // Arriba un buscador con un "+"; abajo "Estás aquí" (la casa más cercana, de un toque) y "Tus clientes" (los que esta persona más usa: window.misClientes).
@@ -58288,12 +58344,15 @@ body.idi-en [data-solo-es]{display:none !important;}
   const msgIcoChico = (k, n) => String(MSG_ICO[k] || '').replace(/width="\d+" height="\d+"/, 'width="' + n + '" height="' + n + '"');
   // (R82) el título grande de cada pestaña (Chats se sigue llamando Mensajes arriba, como en el resto de la app y en "◀ Mensajes")
   const MSG_PESTANAS = { chats: 'Mensajes', grupos: 'Grupos', llamadas: 'Llamadas', peticiones: 'Peticiones' };
-  // (R82, fr-14) lo que se pide a la oficina: su icono, si lleva cantidad ('si' / 'opc'), qué se pregunta y qué falta si viene vacío
+  // (R82, fr-14) lo que se pide a la oficina: su icono, si lleva cantidad ('si'), qué se pregunta (que: '' = no se pregunta nada),
+  // si se pregunta la casa y qué falta si viene vacío. (1-nov-2026, su queja con captura: preguntarle a un trabajador "¿para qué?"
+  // o "¿de qué casa?" un adelanto es absurdo y ofensivo.) Cada petición pregunta SOLO lo suyo: adelanto y pago = cuánto; herramienta
+  // = cuál; reporte = qué pasa (y la casa, opcional). La fecha va sola: hoy, se enseña arriba y viaja en created_at.
   const MSG_PET = {
-    adelanto:    { t: 'Adelanto',    titulo: 'Pedir un adelanto',     ico: 'dinero',  monto: 'si',  que: '¿Para qué? (opcional)',      falta: '' },
-    pago:        { t: 'Pago',        titulo: 'Pedir un pago',         ico: 'recibo',  monto: 'opc', que: '¿De qué trabajo o semana?',  falta: 'Escriba de qué es el pago.' },
-    herramienta: { t: 'Herramienta', titulo: 'Pedir una herramienta', ico: 'llave',   monto: '',    que: '¿Qué herramienta necesita?', falta: 'Escriba qué herramienta necesita.' },
-    reporte:     { t: 'Reporte',     titulo: 'Mandar un reporte',     ico: 'reporte', monto: '',    que: '¿Qué pasó?',                 falta: 'Escriba qué pasó.', foto: true }
+    adelanto:    { t: 'Adelanto',    titulo: 'Pedir un adelanto',     ico: 'dinero',  monto: 'si', que: '',                  casa: false, falta: '' },
+    pago:        { t: 'Pago',        titulo: 'Pedir un pago',         ico: 'recibo',  monto: 'si', que: '',                  casa: false, falta: '' },
+    herramienta: { t: 'Herramienta', titulo: 'Pedir una herramienta', ico: 'llave',   monto: '',   que: '¿Qué herramienta?', casa: false, falta: 'Escriba qué herramienta necesita.' },
+    reporte:     { t: 'Reporte',     titulo: 'Mandar un reporte',     ico: 'reporte', monto: '',   que: '¿Qué pasa?',        casa: true,  falta: 'Escriba qué pasa.', foto: true }
   };
   // La pestaña Peticiones: lo que se escribe (el formulario, el anuncio) vive aquí fijo; las listas las pinta msgPintarPeticiones.
   // Orden del trabajador: anuncios, pedir, mis peticiones. La oficina: pendientes y el anuncio arriba (el CSS les cambia el orden).
@@ -58303,12 +58362,12 @@ body.idi-en [data-solo-es]{display:none !important;}
     + '<div class="msg-pet-anuncios-caja"><div class="msg-sec-t msg-pet-anuncios-t" hidden>Anuncios</div><div class="msg-pet-anuncios"></div></div>'
     + '<div class="msg-pet-pedir" hidden><div class="msg-sec-t">Pedir a la oficina</div><div class="msg-pet-tiles">'
     +   Object.keys(MSG_PET).map(k => '<button type="button" class="msg-pet-tile" data-msg-pedir="' + k + '"><span class="msg-pet-ico ' + k + '">' + MSG_ICO[MSG_PET[k].ico] + '</span><span>' + MSG_PET[k].t + '</span></button>').join('') + '</div>'
-    +   '<div class="msg-pet-form" hidden><div class="msg-pet-form-cab"><span class="msg-pet-ico msg-pet-form-ico"></span><b class="msg-pet-form-t"></b></div>'
+    +   '<div class="msg-pet-form" hidden><div class="msg-pet-form-cab"><span class="msg-pet-ico msg-pet-form-ico"></span><b class="msg-pet-form-t"></b><span class="msg-pet-fecha"><span class="msg-pet-fecha-h">Hoy</span><span class="msg-pet-fecha-d" data-no-idioma></span></span></div>'
     +     '<label class="msg-pet-l msg-pet-l-monto"><span class="msg-pet-monto-t">¿Cuánto?</span><input type="text" class="msg-pet-monto" inputmode="decimal" autocomplete="off" placeholder="$0"></label>'
-    +     '<label class="msg-pet-l"><span class="msg-pet-texto-t"></span><textarea class="msg-pet-texto" rows="2" maxlength="600"></textarea></label>'
-    +     '<label class="msg-pet-l"><span>¿De qué casa? (opcional)</span><input type="text" class="msg-pet-casa" list="msgCasas" autocomplete="off"></label>'
+    +     '<label class="msg-pet-l msg-pet-l-texto"><span class="msg-pet-texto-t"></span><textarea class="msg-pet-texto" rows="2" maxlength="600"></textarea></label>'
+    +     '<label class="msg-pet-l msg-pet-l-casa"><span>¿En qué casa? (opcional)</span><input type="text" class="msg-pet-casa" list="msgCasas" autocomplete="off"></label>'
     +     '<div class="msg-pet-foto" hidden><button type="button" class="msg-pet-foto-btn">' + MSG_ICO.fotoChica + '<span>Agregar foto</span></button><img class="msg-pet-foto-prev" alt="" hidden><button type="button" class="msg-pet-foto-quitar" aria-label="Quitar foto" hidden>✕</button><input type="file" class="msg-pet-foto-in" accept="image/*" hidden></div>'
-    +     '<div class="msg-grupo-btns"><button type="button" class="btn btn-outline msg-pet-cancelar">Cancelar</button><button type="button" class="btn msg-pet-mandar">Mandar a la oficina</button></div></div></div>'
+    +     '<div class="msg-grupo-btns"><button type="button" class="btn btn-outline msg-pet-cancelar">Cancelar</button><button type="button" class="btn msg-pet-mandar">Enviar</button></div></div></div>'
     + '<p class="msg-pet-aviso" role="status"></p>'
     + '<div class="msg-pet-lista-caja"><div class="msg-sec-t msg-pet-lista-t">Mis peticiones</div><div class="msg-pet-lista"></div></div></div>';
   const MSG_HTML = '<section class="msg-lista"><div class="msg-lista-cuerpo">'
@@ -58333,7 +58392,9 @@ body.idi-en [data-solo-es]{display:none !important;}
     +   '<button type="button" class="msg-tab" data-msg-tab="grupos">' + MSG_ICO.tabGrupos + '<span class="msg-tab-t">Grupos</span><span class="msg-tab-n"></span></button>'
     +   '<button type="button" class="msg-tab on" data-msg-tab="chats">' + MSG_ICO.tabChats + '<span class="msg-tab-t">Chats</span><span class="msg-tab-n"></span></button>'
     +   '<button type="button" class="msg-tab" data-msg-tab="peticiones" hidden>' + MSG_ICO.tabPeticiones + '<span class="msg-tab-t">Peticiones</span><span class="msg-tab-n"></span></button>'
-    + '</nav></section>'
+    + '</nav>'
+    // (1-nov-2026) ▾ para esconder el teclado, como la barra de iOS: sale solo mientras se escribe (.msg-root.teclado)
+    + '<button type="button" class="msg-tec-ocultar" aria-label="Ocultar teclado"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button></section>'
     // (R86, fr-15) la hoja de la foto (la mía o la del grupo), como la de WhatsApp: tomar, escoger, quitar
     + '<div class="msg-hoja" hidden><div class="msg-hoja-panel" role="dialog" aria-modal="true" aria-labelledby="msgHojaT"><div class="msg-hoja-cab"><span class="msg-hoja-av"></span><b class="msg-hoja-t" id="msgHojaT">Mi foto</b></div>'
     +   '<button type="button" class="msg-hoja-op" data-msg-foto-op="tomar">' + MSG_ICO.cam + '<span>Tomar foto</span></button>'
@@ -59024,7 +59085,16 @@ body.idi-en [data-solo-es]{display:none !important;}
   // aprueba o niega (con una nota si quiere) y manda anuncios a todo el equipo. Pintar otra vez (cada 15 s) no borra lo que se escribe.
   const msgDinero = n => '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: (+n % 1) ? 2 : 0, maximumFractionDigits: 2 });
   const msgPetSinTipo = m => String(m.texto || '').replace(/^(?:Adelanto de |Pago de |Pago · |Herramienta: |Reporte: )/, '');
-  const msgPetEstadoTxt = m => m.estado === 'aprobada' ? 'Aprobada' : (m.estado === 'negada' ? 'Negada' : (m.estado === 'hecha' ? (m.peticion === 'reporte' ? 'Visto' : 'Lista') : 'Pendiente'));
+  // (1-nov-2026) en la fila de la lista, un adelanto o pago de antes ("Adelanto de $150 · para la renta") se enseña sin el motivo
+  const msgPetTextoFila = (m, ofi) => { const t = ofi ? String(m.texto || '') : msgPetSinTipo(m); return (m.peticion === 'adelanto' || m.peticion === 'pago') ? t.replace(/ · .*$/, '') : t; };
+  // (1-nov-2026) la fecha de la petición, que va sola: "Hoy, 1 nov · 3:12 PM", "Ayer, 31 oct", "28 oct" (Hoy/Ayer se traducen; el resto no)
+  function msgPetFechaHtml(iso){
+    const d = new Date(iso), hoy = new Date(), ayer = new Date(); ayer.setDate(hoy.getDate() - 1); if(isNaN(d)) return '';
+    const dia = fechaCorta(d.getTime()), cual = d.toDateString() === hoy.toDateString() ? 'Hoy' : (d.toDateString() === ayer.toDateString() ? 'Ayer' : '');
+    const hora = cual === 'Hoy' ? ' · ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    return (cual ? '<span>' + cual + '</span>' : '') + '<span data-no-idioma>' + esc((cual ? ', ' : '') + dia + hora) + '</span>';
+  }
+  const msgPetEstadoTxt = m => m.estado === 'aprobada' ? 'Aprobada' : (m.estado === 'negada' ? 'No aprobada' : (m.estado === 'hecha' ? (m.peticion === 'reporte' ? 'Visto' : 'Lista') : 'Pendiente'));
   // Peticiones: cuántas esperan a la oficina (manager) o cuántas cosas nuevas tengo (anuncios y respuestas desde que la vi)
   function msgPetNuevas(){
     if(msgSoyOficina()) return MSG.lista.filter(m => m.tipo === 'peticion' && (m.estado || 'pendiente') === 'pendiente' && !m.borrado_at).length;
@@ -59052,16 +59122,16 @@ body.idi-en [data-solo-es]{display:none !important;}
     const id = esc(m.id);
     return '<div class="msg-pet-acc">' + (m.peticion === 'reporte'
       ? '<button type="button" class="msg-pet-si" data-msg-estado="hecha" data-msg-pet-id="' + id + '">Visto</button>'
-      : '<button type="button" class="msg-pet-no" data-msg-estado="negada" data-msg-pet-id="' + id + '">Negar</button><button type="button" class="msg-pet-si" data-msg-estado="aprobada" data-msg-pet-id="' + id + '">Aprobar</button>') + '</div>';
+      : '<button type="button" class="msg-pet-no" data-msg-estado="negada" data-msg-pet-id="' + id + '">No aprobar</button><button type="button" class="msg-pet-si" data-msg-estado="aprobada" data-msg-pet-id="' + id + '">Aprobar</button>') + '</div>';
   }
   // una petición en la lista: el trabajador ve el tipo; la oficina, quién la pidió (y sus botones si está pendiente). Tocar abre la plática.
   function msgPetFilaHtml(m, ofi){
     const d = MSG_PET[m.peticion] || MSG_PET.reporte, est = m.estado || 'pendiente';
     return '<div class="msg-pet-fila" data-msg-con="' + esc(ofi ? msgKeyDe(m) : msgOtro(m)) + '"><span class="msg-pet-ico ' + esc(m.peticion || 'reporte') + '">' + MSG_ICO[d.ico] + '</span><div class="msg-pet-c">'
       + '<div class="msg-pet-1"><b>' + esc(ofi ? (msgMio(m) ? 'Tú' : m.de_nombre) : d.t) + '</b><span class="msg-pet-est ' + esc(est) + '">' + esc(msgPetEstadoTxt(m)) + '</span></div>'
-      + '<div class="msg-pet-x">' + esc(ofi ? (m.texto || '') : msgPetSinTipo(m)) + '</div>'
+      + '<div class="msg-pet-x">' + esc(msgPetTextoFila(m, ofi)) + '</div>'
       + (m.estado_nota ? '<div class="msg-pet-nota">' + esc(m.estado_nota) + '</div>' : '')
-      + '<div class="msg-pet-3">' + (m.casa ? esc(m.casa) + ' · ' : '') + esc(msgHoraCorta(m.created_at)) + '</div>'
+      + '<div class="msg-pet-3">' + (m.casa ? esc(m.casa) + ' · ' : '') + msgPetFechaHtml(m.created_at) + '</div>'
       + (ofi && est === 'pendiente' && !msgMio(m) ? msgPetBotones(m) : '') + '</div></div>';
   }
   // un anuncio: tocarlo abre "Todo el equipo" (el temporal no escribe ahí: para él no se abre)
@@ -59096,8 +59166,11 @@ body.idi-en [data-solo-es]{display:none !important;}
     const ic = f.querySelector('.msg-pet-form-ico'); ic.className = 'msg-pet-ico msg-pet-form-ico ' + MSG.pedir; ic.innerHTML = MSG_ICO[d.ico];
     f.querySelector('.msg-pet-form-t').textContent = d.titulo;
     f.querySelector('.msg-pet-l-monto').hidden = !d.monto;
-    f.querySelector('.msg-pet-monto-t').textContent = d.monto === 'si' ? '¿Cuánto?' : '¿Cuánto? (opcional)';
-    f.querySelector('.msg-pet-texto-t').textContent = d.que;
+    f.querySelector('.msg-pet-monto-t').textContent = '¿Cuánto?';
+    f.querySelector('.msg-pet-l-texto').hidden = !d.que;
+    f.querySelector('.msg-pet-texto-t').textContent = d.que || '';
+    f.querySelector('.msg-pet-l-casa').hidden = !d.casa;
+    f.querySelector('.msg-pet-fecha-d').textContent = ', ' + fechaCorta(Date.now());   // la fecha va sola: hoy (created_at en la nube)
     f.querySelector('.msg-pet-foto').hidden = !(d.foto && msgFotosOk());
     ['.msg-pet-monto', '.msg-pet-texto', '.msg-pet-casa'].forEach(s => { f.querySelector(s).value = ''; });
     msgPetFotoQuitar(); msgPetAviso('');
@@ -59113,23 +59186,24 @@ body.idi-en [data-solo-es]{display:none !important;}
     const f = root.querySelector('.msg-pet-form'), btn = f.querySelector('.msg-pet-mandar'); if(btn.disabled) return;
     const crudo = String(f.querySelector('.msg-pet-monto').value || '').replace(/[^\d.]/g, '');
     const monto = d.monto && crudo ? Math.round(parseFloat(crudo) * 100) / 100 : null;
-    const que = String(f.querySelector('.msg-pet-texto').value || '').trim().slice(0, 600), casa = String(f.querySelector('.msg-pet-casa').value || '').trim().slice(0, 120) || null;
-    if(d.monto === 'si' && !(monto > 0)){ msgPetAviso('Escriba cuánto necesita.'); f.querySelector('.msg-pet-monto').focus(); return; }
+    const que = d.que ? String(f.querySelector('.msg-pet-texto').value || '').trim().slice(0, 600) : '';
+    const casa = d.casa ? (String(f.querySelector('.msg-pet-casa').value || '').trim().slice(0, 120) || null) : null;
+    if(d.monto === 'si' && !(monto > 0)){ msgPetAviso('Escriba cuánto.'); f.querySelector('.msg-pet-monto').focus(); return; }
     if(monto != null && !(monto >= 0 && monto < 100000)){ msgPetAviso('Revise la cantidad.'); return; }
-    if(d.falta && !que){ msgPetAviso(d.falta); f.querySelector('.msg-pet-texto').focus(); return; }
+    if(d.que && d.falta && !que){ msgPetAviso(d.falta); f.querySelector('.msg-pet-texto').focus(); return; }
     if(!cloudOn()){ msgPetAviso('No se pudo mandar. Revise su internet.'); return; }
+    tecSoltar();   // (1-nov-2026) al enviar el teclado se va
     btn.disabled = true; msgPetAviso('Mandando…');
     try{
-      const of = await msgOficina(); if(!of.length){ msgPetAviso('No hay un manager que la reciba.'); return; }
+      const of = await msgOficina(); if(!of.length){ msgPetAviso('No se pudo mandar, intente otra vez.'); return; }
       const cuanto = monto != null ? msgDinero(monto) : '';
-      const texto = tipo === 'adelanto' ? `Adelanto de ${cuanto}` + (que ? ` · ${que}` : '')
-        : tipo === 'pago' ? (monto != null ? `Pago de ${cuanto}` : 'Pago') + (que ? ` · ${que}` : '')
+      const texto = tipo === 'adelanto' ? `Adelanto de ${cuanto}` : tipo === 'pago' ? `Pago de ${cuanto}`
         : tipo === 'herramienta' ? `Herramienta: ${que}` : `Reporte: ${que}`;
       const adjuntos = MSG.petFoto ? [await msgSubirFoto(MSG.petFoto.blob)] : [];
       const fila = await msgEnviar(texto, { para: 'c:' + of[0].id, tipo: 'peticion', peticion: tipo, monto, casa, adjuntos });
       if(fila && !MSG.lista.some(x => x.id === fila.id)) MSG.lista.unshift(fila);
       MSG.pedir = null; msgPetFotoQuitar(); if(!MSG.con) msgPintarGente();
-      msgPetAviso('Listo: la oficina ya tiene su petición.');
+      msgPetAviso('Se mandó a la oficina.');   // solo cuando de verdad salió (la fila ya está en Mis peticiones)
     }catch(e){ msgPetAviso('No se pudo mandar. Revise su internet.'); }
     finally{ btn.disabled = false; }
   }
@@ -59271,6 +59345,7 @@ body.idi-en [data-solo-es]{display:none !important;}
       casa, texto, responde_a: responde, adjuntos: adj ? [{ tipo: 'imagen', local: adj.url, ancho: adj.ancho, alto: adj.alto }] : [], created_at: new Date().toISOString(), leido_at: null };
     MSG.pend.push(tmp); MSG.respondiendo = null; MSG.adjunto = null;
     ta.value = ''; ta.style.height = ''; aviso.textContent = ''; msgPintarCitaBarra(); msgPintarAdjunto(); msgPintarBotones(); msgPintarChat();
+    try{ ta.focus(); }catch(e){}   // (1-nov-2026) la caja sigue lista para el siguiente, como WhatsApp
     const box = root.querySelector('.msg-burbujas'); if(box) box.scrollTop = box.scrollHeight;
     try{
       const adjuntos = adj ? [await msgSubirFoto(adj.blob)] : [];
@@ -59450,7 +59525,8 @@ body.idi-en [data-solo-es]{display:none !important;}
     const box = root.querySelector('.msg-burbujas'); if(box && MSG.con && (recien || MSG.pegadoAbajo !== false)){ box.scrollTop = box.scrollHeight; MSG.pegadoAbajo = true; }
     // (R82) en la lista: lo que se está escribiendo sube a un tercio de lo que se ve (y lo que sigue del formulario, debajo). Probado
     // en la app del simulador: el iPhone lo deja pegado al teclado (visor corrido 280) y lo demás del formulario quedaba tapado.
-    if(!MSG.con && recien){ const cu = root.querySelector('.msg-lista-cuerpo'); if(cu && cu.contains(foco)){ const r = foco.getBoundingClientRect(), c = cu.getBoundingClientRect(); if(r.top > c.top + c.height * 0.5 || r.top < c.top + 12) cu.scrollTop += r.top - c.top - Math.max(12, (c.height - r.height) / 3); } }
+    // (1-nov-2026, su queja: "la página se baja hasta abajo y ya no veo dónde escribo") en cada cambio del visor, no solo al abrir
+    if(!MSG.con){ const cu = root.querySelector('.msg-lista-cuerpo'); if(cu && cu.contains(foco)){ const r = foco.getBoundingClientRect(), c = cu.getBoundingClientRect(); if(recien || r.bottom > c.bottom - 8 || r.top > c.top + c.height * 0.5 || r.top < c.top + 12) cu.scrollTop += r.top - c.top - Math.max(12, (c.height - r.height) / 3); } }
   }
   function msgTecladoSoltar(){
     const el = MSG.tecladoEl; MSG.tecladoEl = null;
@@ -59537,10 +59613,11 @@ body.idi-en [data-solo-es]{display:none !important;}
         if(e.target.closest('.msg-pie-btn')){ msgAtrasPie(); return; }
         const pe = e.target.closest('[data-msg-estado]'); if(pe){ e.stopPropagation(); msgPetEstado(pe.dataset.msgPetId, pe.dataset.msgEstado); return; }
         const pd = e.target.closest('[data-msg-pedir]'); if(pd){
+          tecSoltar();   // (1-nov-2026, su queja) cambiar de tipo no deja el teclado arriba; se abre solo al tocar un campo
           MSG.pedir = MSG.pedir === pd.dataset.msgPedir ? null : pd.dataset.msgPedir; msgPintarPedir();
-          const d = MSG.pedir ? MSG_PET[MSG.pedir] : null; if(d){ const i = root.querySelector(d.monto === 'si' ? '.msg-pet-monto' : '.msg-pet-texto'); if(i) i.focus(); }
           return; }
-        if(e.target.closest('.msg-pet-cancelar')){ MSG.pedir = null; msgPetFotoQuitar(); msgPintarPedir(); return; }
+        if(e.target.closest('.msg-tec-ocultar')){ tecSoltar(); return; }
+        if(e.target.closest('.msg-pet-cancelar')){ tecSoltar(); MSG.pedir = null; msgPetFotoQuitar(); msgPintarPedir(); return; }
         if(e.target.closest('.msg-pet-mandar')){ msgPedir(); return; }
         if(e.target.closest('.msg-anuncio-mandar')){ msgMandarAnuncio(); return; }
         if(e.target.closest('.msg-pet-foto-btn')){ root.querySelector('.msg-pet-foto-in').click(); return; }
