@@ -4721,6 +4721,15 @@ body.med-pp-abierto{overflow:hidden;}
   .as-tarjeta-monto{font-size:34px; font-weight:800; margin:2px 0;}
   .as-tarjeta-monto.chico{font-size:17px; font-weight:600; line-height:1.35;}
   .as-tarjeta-det{font-size:15px; color:#ddd; line-height:1.4;}
+  /* (1-nov-2026) el preview de los gastos (la foto del recibo y su línea) y el botón Copiar de Lumi */
+  .as-vista{display:flex; flex-direction:column; gap:8px; margin:10px 0 2px;}
+  .as-vista[hidden]{display:none !important;}
+  .as-vista-fila{display:flex; align-items:center; gap:10px; padding:6px; border-radius:10px; background:rgba(255,255,255,.06); text-align:left;}
+  .as-vista-foto{flex:none; width:64px; height:64px; border-radius:8px; object-fit:cover; background:#2a2a2a; cursor:pointer;}
+  .as-vista-sin{flex:none; width:64px; height:64px; border-radius:8px; display:grid; place-items:center; background:#2a2a2a; color:#999; font-size:11px; text-align:center; line-height:1.2;}
+  .as-vista-linea{font-size:14.5px; line-height:1.35; color:#eee;}
+  .as-copiar{margin:8px auto 0; display:block; min-height:44px; padding:8px 18px;}
+  .as-copiar[hidden]{display:none !important;}
   .as-tarjeta-escrito{margin-top:10px;}
   .as-tarjeta-escrito[hidden]{display:none !important;}
   .as-tarjeta-escrito label{display:block; font-size:13px; color:var(--danger); margin-bottom:4px;}
@@ -4929,11 +4938,14 @@ body.idi-en [data-solo-es]{display:none !important;}
     <div class="as-charla">
       <p class="as-tu" id="asTu"></p>
       <p class="as-resp" id="asRespuesta"></p>
+      <div class="as-vista" id="asVista" hidden></div>
+      <button type="button" class="btn btn-outline as-copiar" id="asCopiarBtn" hidden></button>
     </div>
     <div class="as-tarjeta" id="asTarjeta" hidden>
       <div class="as-tarjeta-tipo" id="asTarjetaTipo"></div>
       <div class="as-tarjeta-monto" id="asTarjetaMonto"></div>
       <div class="as-tarjeta-det" id="asTarjetaDet"></div>
+      <div class="as-vista" id="asTarjetaVista" hidden></div>
       <div class="as-tarjeta-escrito" id="asEscritoBox" hidden><label for="asEscrito">Más de $5,000: teclea el monto exacto para confirmar</label><input type="number" id="asEscrito" inputmode="decimal" step="0.01" placeholder="0.00"></div>
       <div class="as-tarjeta-btns"><button type="button" class="btn btn-ghost" id="asCancelar">Cancelar</button><button type="button" class="btn btn-accent" id="asConfirmarBtn">Confirmar</button></div>
     </div>
@@ -11279,7 +11291,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-01-R95';
+  const APP_BUILD = '2026-11-01-R96';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -43958,9 +43970,9 @@ body.idi-en [data-solo-es]{display:none !important;}
     return ok;
   }
   // Sin horas abiertas y con un gasto aprobado: "Marcar como pagado" le paga el gasto
-  async function pagarSoloGastos(lista, total){
+  async function pagarSoloGastos(lista, total, yaConfirmado){
     const quien = (TEAM_PROFILES && TEAM_PROFILES[personKey] && TEAM_PROFILES[personKey].name) || (lista[0] && lista[0].paid_by_name) || $('#personName').textContent || '';
-    if(!confirm((lista.length === 1 ? '¿Marcar como pagado el gasto de ' + quien + ': ' + money(total) + '?' : '¿Marcar como pagados los ' + lista.length + ' gastos de ' + quien + ': ' + money(total) + '?') + '\n\n'
+    if(!yaConfirmado && !confirm((lista.length === 1 ? '¿Marcar como pagado el gasto de ' + quien + ': ' + money(total) + '?' : '¿Marcar como pagados los ' + lista.length + ' gastos de ' + quien + ': ' + money(total) + '?') + '\n\n'
       + lista.map(g => grdDia(g.spent_on) + ' · ' + money(+g.amount || 0) + (g.note ? ' · ' + String(g.note).slice(0, 40) : '')).join('\n'))) return;
     const btn = $('#payMark'); btn.disabled = true;
     const stamp = new Date().toISOString();
@@ -43970,10 +43982,11 @@ body.idi-en [data-solo-es]{display:none !important;}
     await loadTeamEntries();
     if(!$('#personCard').hidden) renderPerson();
   }
-  async function markPaid(){
+  async function markPaid(op){
+    const lumi = !!(op && op.desdeLumi), lumiMonto = lumi ? Math.round((+op.monto || 0) * 100) / 100 : null;   // (1-nov) la tarjeta de Lumi ya se confirmó
     const allOpen = personRows().filter(r => !r.paid_at);
     const gastosP = (personPaidView || typeof gastosDe !== 'function') ? [] : gastosDe(personKey).slice(), G = gastosP.length ? gastosSuma(personKey) : 0;
-    if(!allOpen.length){ if(G) await pagarSoloGastos(gastosP, G); return; }
+    if(!allOpen.length){ if(G) await pagarSoloGastos(gastosP, G, lumi && Math.abs(G - lumiMonto) < 0.01); return; }
     const any  = teamRows.find(r => (r.user_id || nameOf(r)) === personKey);
     const rate = rateOf(personKey);
     const mgR  = mgRateCrew(personKey);
@@ -44007,7 +44020,8 @@ body.idi-en [data-solo-es]{display:none !important;}
     // sube lo que se le entrega hoy. El aviso tiene que decir esa cifra, no la
     // de las horas peladas - antes preguntaba "$500" y guardaba "$580".
     const extraCredit = partialPaid < -0.005 ? Math.round(-partialPaid*100)/100 : 0;
-    if(!confirm((partialPaid > 0
+    // Lumi: la tarjeta dijo este mismo total y ya se confirmó; si cambió algo (otro pago, otra hora), se pregunta como siempre
+    if(!(lumi && Math.abs(remaining - lumiMonto) < 0.01 && !skipped) && !confirm((partialPaid > 0
           ? (G ? `Total de estas horas y sus gastos: ${money(debe)}.` : `Total de estas horas: ${money(debe)}.`) + '\nYa le dio ' + money(partialPaid) + ' en pagos parciales.\n\n'
             + 'Le falta darle ' + money(remaining) + ' para cerrar todo.'
           : extraCredit
@@ -56079,6 +56093,7 @@ body.idi-en [data-solo-es]{display:none !important;}
       let final = String(j.texto || (j.confirmacion ? j.confirmacion.resumen + '. ¿Lo registro?' : 'No entendí. Dímelo otra vez.'));
       if(window.Cara){ try{ const l = Cara.limpiarEtiqueta(final); final = l.texto; const g = j.confirmacion ? 'pregunta' : (j.gesto || l.gesto || Cara.gestoDelTexto(final)); if(g) Cara.gesto(g, undefined, { texto: final, dinero: !!j.confirmacion }); }catch(err){} }
       asMostrarRespuesta(final);
+      asCopiar(j.copiar || null); asVistaPintar($('#asVista'), j.vista || null);   // (1-nov) el número / el código copiados; el recibo
       // (R40) LA GALERÍA: se pinta aquí mismo, mientras habla; una respuesta nueva sin galería la quita.
       // (R43) "enséñame el de hoy y mándalo al grupo": primero la galería y DESPUÉS la tarjeta (la galería no se la lleva)
       const esGal = !!(j.navegar && j.navegar.pantalla === 'galeria');
@@ -56573,12 +56588,14 @@ body.idi-en [data-solo-es]{display:none !important;}
     if(AS.enPuerta) asPuertaAbrirPanel();   // (R88) confirmar necesita pantalla: sale de la puerta
     AS.conf = c;
     const t = $('#asTarjeta'); if(!t) return;
-    const tipos = { grupo:'Mandar al grupo', pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa', visita_lecturas:'Lecturas de la casa', visita_materiales:'Materiales de la casa', visita_comunicacion:'Comunicación de la casa', cal_dia:'Calendario de AMG' };
+    asVistaPintar($('#asTarjetaVista'), c.vista || null);   // (1-nov) el recibo y su línea
+    const tipos = { marcar_pagado:'Marcar como pagado', aprobar_gastos:'Aprobar gastos', grupo_gastos:'Mandar al grupo', mensaje:'Mensaje', grupo:'Mandar al grupo', pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa', visita_lecturas:'Lecturas de la casa', visita_materiales:'Materiales de la casa', visita_comunicacion:'Comunicación de la casa', cal_dia:'Calendario de AMG' };
     const metodos = { zelle:'Zelle', cheque:'Cheque', efectivo:'Efectivo', otro:'Otro' };
     const esDinero = ['pago','adelanto','descuento','extra','devolucion','ajuste'].includes(c.tipo);
     $('#asTarjetaTipo').textContent = (tipos[c.tipo] || c.tipo || 'Acción') + (c.cola ? ' · de la lista' : '') + (c.sandbox ? ' · PRUEBA' : '');
     const monto = $('#asTarjetaMonto');
     if(esDinero){ monto.textContent = '$' + (Math.round((+c.monto || 0) * 100) / 100).toFixed(2); monto.classList.remove('chico'); $('#asTarjetaDet').textContent = 'A ' + (c.persona || '') + (c.metodo ? ' · ' + (metodos[c.metodo] || c.metodo) : '') + (c.fecha ? ' · ' + c.fecha : '') + (c.efecto ? ' · ' + c.efecto : ''); }
+    else if(c.tipo === 'marcar_pagado'){ monto.textContent = '$' + (Math.round((+c.monto || 0) * 100) / 100).toFixed(2); monto.classList.remove('chico'); $('#asTarjetaDet').textContent = 'A ' + (c.persona || '') + ' · ' + (c.efecto || ''); }
     else if(c.tipo === 'tarifa'){ monto.textContent = '$' + (Math.round((+c.monto || 0) * 100) / 100).toFixed(2) + '/hora'; monto.classList.remove('chico'); $('#asTarjetaDet').textContent = c.resumen || ''; }
     else { monto.textContent = c.resumen || ''; monto.classList.add('chico'); $('#asTarjetaDet').textContent = c.efecto || ''; }
     const eb = $('#asEscritoBox'); if(eb){ eb.hidden = !c.escrito_requerido; } const ei = $('#asEscrito'); if(ei) ei.value = '';
@@ -56586,7 +56603,32 @@ body.idi-en [data-solo-es]{display:none !important;}
     t.hidden = false;
     if(window.Cara){ try{ if(esDinero && Math.abs(+c.monto || 0) >= 1000 && Cara.sorpresa) Cara.sorpresa(900, 'pregunta', 4000); else Cara.gesto('pregunta', 4000); }catch(err){} }
   }
-  function asQuitarTarjeta(){ AS.conf = null; const t = $('#asTarjeta'); if(t) t.hidden = true; asPreviewQuitar(); }
+  function asQuitarTarjeta(){ AS.conf = null; const t = $('#asTarjeta'); if(t) t.hidden = true; asPreviewQuitar(); asVistaPintar($('#asTarjetaVista'), null); }
+  // (1-nov-2026, el dueño: "que ella pueda dar un preview de la imagen del recibo y del texto") cada gasto con su foto (se toca y se
+  // ve grande) y la MISMA línea corta que va al grupo. Sin foto: lo dice.
+  function asVistaPintar(box, vista){
+    if(!box) return;
+    const l = Array.isArray(vista) ? vista.filter(x => x && x.linea).slice(0, 6) : [];
+    box.hidden = !l.length; if(!l.length){ box.innerHTML = ''; return; }
+    box.innerHTML = l.map(x => '<div class="as-vista-fila">' + (x.ruta ? '<img class="as-vista-foto" alt="Recibo" data-as-recibo="' + esc(x.ruta) + '">' : '<span class="as-vista-sin">sin foto</span>')
+      + '<span class="as-vista-linea">' + esc(x.linea) + '</span></div>').join('');
+    box.querySelectorAll('img[data-as-recibo]').forEach(img => { if(typeof signedReceiptUrl !== 'function' || !signedIn()) return;
+      signedReceiptUrl(img.dataset.asRecibo).then(u => { img.src = u; }).catch(() => { img.replaceWith(Object.assign(document.createElement('span'), { className: 'as-vista-sin', textContent: 'sin foto' })); }); });
+  }
+  // (1-nov-2026, el dueño: "cópiame el número de Ariel... ella ya me tiene que haber copiado eso") en el aparato nuevo lo copia
+  // el iPhone (Portapapeles, solo escribe); si no se puede sin un toque, queda el botón "Copiar" (un toque y listo).
+  async function asCopiar(c){
+    const b = $('#asCopiarBtn'); if(b){ b.hidden = true; b.onclick = null; }
+    if(!c || !c.texto) return;
+    const texto = String(c.texto).slice(0, 500);
+    const P = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Portapapeles;
+    let hecho = false;
+    try{ if(P && P.copiar){ const r = await P.copiar({ texto }); hecho = !!(r && r.ok); } }catch(e){}
+    if(!hecho){ try{ if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(texto); hecho = true; } }catch(e){} }
+    if(b){ b.textContent = hecho ? 'Copiado ✓ ' + texto : 'Copiar ' + texto; b.hidden = false;
+      b.onclick = function(){ try{ navigator.clipboard.writeText(texto).then(function(){ b.textContent = 'Copiado ✓ ' + texto; }, function(){}); }catch(e){} try{ if(P && P.copiar) P.copiar({ texto }).then(function(){ b.textContent = 'Copiado ✓ ' + texto; }); }catch(e){} }; }
+    asBit('copiar: ' + (hecho ? 'listo' : 'con botón'));
+  }
   async function asConfirmar(){
     const c = AS.conf; if(!c || AS.enviando) return;
     try{ asGalTarjeta(null); }catch(e){}
@@ -57765,6 +57807,9 @@ body.idi-en [data-solo-es]{display:none !important;}
         case 'pagos_crew': pagos('crew'); break;
         case 'pagos_temporales': pagos('temporales'); break;
         case 'pagos_trabajadores': pagos('trabajadores'); break;
+        case 'marcar_pagado':   // (1-nov) "marca a Ariel como pagado": su ficha y "Marcar como pagado" (sin preguntar otra vez si el total es el mismo)
+          pagos('crew'); await loadTeamEntries(); if(nav.persona_id){ openPerson(nav.persona_id); await markPaid({ desdeLumi: true, monto: +nav.monto || 0 }); }
+          break;
         case 'horas_de_persona':
           if(nav.tipo === 'crew'){ pagos('crew'); await loadTeamEntries(); if(nav.persona_id) openPerson(nav.persona_id); }
           else { pagos('temporales'); await loadCasualTeam(); if(nav.persona_id) openCasualPerson(nav.persona_id); }
@@ -58014,6 +58059,7 @@ body.idi-en [data-solo-es]{display:none !important;}
     const tit = $('#asPanel .as-titulo'); let toques = 0, tmrToques = null;
     if(tit) tit.addEventListener('click', function(){ toques++; clearTimeout(tmrToques); tmrToques = setTimeout(function(){ toques = 0; }, 1500); if(toques < 5) return; toques = 0; const on = !asInterrumpirOn(); try{ localStorage.setItem('asInterrumpir', on ? '1' : '0'); }catch(e){} asEstado(AS.estado, 'Interrumpir hablando: ' + (on ? 'prendido' : 'apagado') + (on && !AS.interrumpirPlugin ? ' (este aparato aún no lo entiende)' : '')); });
     const ok = $('#asConfirmarBtn'); if(ok) ok.addEventListener('click', asConfirmar);
+    ['#asVista', '#asTarjetaVista'].forEach(function(sel){ const v = $(sel); if(v) v.addEventListener('click', function(ev){ const im = ev.target.closest && ev.target.closest('img[data-as-recibo]'); if(im && typeof openReceipt === 'function') openReceipt(im.dataset.asRecibo); }); });
     const no = $('#asCancelar'); if(no) no.addEventListener('click', asCancelar);
     const pOk = $('#asPrevOk'); if(pOk) pOk.addEventListener('click', function(){ asPreviewAccion('ok'); });
     const pNo = $('#asPrevCancelar'); if(pNo) pNo.addEventListener('click', function(){ asPreviewAccion('no'); });
@@ -59663,7 +59709,8 @@ body.idi-en [data-solo-es]{display:none !important;}
   if($('#casualTileMensajes')) $('#casualTileMensajes').addEventListener('click', () => setTimeout(() => msgEntrar(document.querySelector('[data-casual-pan="mensajes"] .msg-root')), 60));
   // ===== fin de Mensajes =====
   window.__as = { abrir: asAbrir, hojaReal: asHojaRealHtml, cerrar: asCerrar, enviar: asEnviar, galeria: asGaleriaMostrar, galeriaQuitar: asGaleriaQuitar, hojaLabor: asHojaLaborHtml, galeriaVoz: asGalPorVoz, galeriaGrande: asGalGrandeMostrar, reporte: asReporte, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, mandarHojas: laborMandarHojas, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
-  Object.assign(window.__as, { puerta: { toque: asPuertaToque, pintar: asPuertaPintar, abrirPanel: asPuertaAbrirPanel }, estadoPoner: asEstado, respuesta: asMostrarRespuesta, tarjeta: asMostrarTarjeta, reposar: asReposar });   // (R88) ganchos de Lumi en la puerta para las pruebas y el simulador
+  Object.assign(window.__as, { puerta: { toque: asPuertaToque, pintar: asPuertaPintar, abrirPanel: asPuertaAbrirPanel }, estadoPoner: asEstado, respuesta: asMostrarRespuesta, tarjeta: asMostrarTarjeta, reposar: asReposar });
+  Object.assign(window.__as, { copiar: asCopiar, vista: function(v){ asVistaPintar($('#asVista'), v); }, irA: asIrA });   // (1-nov) para las pruebas: copiar, el recibo, marcar pagado   // (R88) ganchos de Lumi en la puerta para las pruebas y el simulador
 
 })();
 </script>
