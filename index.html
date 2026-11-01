@@ -11291,7 +11291,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-01-R96';
+  const APP_BUILD = '2026-11-01-R97';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -58376,12 +58376,14 @@ body.idi-en [data-solo-es]{display:none !important;}
   // la Asistente…) recibía de la nube TODAS las pláticas de la compañía y se le mezclaban en sus chats. Aquí cada quien se queda
   // con lo suyo: lo que mandó, lo que le mandaron, lo de todo el equipo y lo de sus grupos (fr-16 hace lo mismo en la nube).
   const msgGrupoMio = g => !!g && !!SES && (g.creado_por === SES.user_id || (g.miembros || []).some(x => x && x.user_id === SES.user_id));
+  // (fr-17) en un grupo se ve desde que uno entró ("que solo vea de ahí en adelante"); lo que uno mandó, siempre
+  const msgDesdeEnGrupo = g => { const yo = g && (g.miembros || []).find(x => x && x.user_id === SES.user_id); return yo && yo.agregado_at ? String(yo.agregado_at) : ''; };
   const msgMeToca = m => !!m && !!SES && (m.de_user_id === SES.user_id || m.para_user_id === SES.user_id || !!m.para_todos
-    || (!!m.para_grupo_id && MSG.grupos.some(g => g.id === m.para_grupo_id)));
+    || (!!m.para_grupo_id && MSG.grupos.some(g => g.id === m.para_grupo_id && (!msgDesdeEnGrupo(g) || new Date(m.created_at) >= new Date(msgDesdeEnGrupo(g))))));
   async function msgCargarGrupos(){
     try{
       if(msgEsCasual()){ const r = await msgRpcCasual('casual_grupos'); MSG.grupos = (r || []).map(g => ({ id: g.id, nombre: g.nombre, creado_por: null, foto_path: g.foto_path || '', miembros: Array.isArray(g.miembros) ? g.miembros : [] })); }
-      else { const res = await authFetch('/rest/v1/mensajes_grupos?select=id,nombre,creado_por,' + (msgFotosPerfilOk() ? 'foto_path,' : '') + 'mensajes_grupo_miembros(user_id,casual_id,nombre)&order=created_at.desc&limit=100', { headers: cloudHeaders() }); if(!res.ok) throw new Error('HTTP ' + res.status); MSG.grupos = (await res.json()).map(g => ({ id: g.id, nombre: g.nombre, creado_por: g.creado_por, foto_path: g.foto_path || '', miembros: g.mensajes_grupo_miembros || [] })).filter(msgGrupoMio); }
+      else { const res = await authFetch('/rest/v1/mensajes_grupos?select=id,nombre,creado_por,' + (msgFotosPerfilOk() ? 'foto_path,' : '') + 'mensajes_grupo_miembros(user_id,casual_id,nombre,agregado_at)&order=created_at.desc&limit=100', { headers: cloudHeaders() }); if(!res.ok) throw new Error('HTTP ' + res.status); MSG.grupos = (await res.json()).map(g => ({ id: g.id, nombre: g.nombre, creado_por: g.creado_por, foto_path: g.foto_path || '', miembros: g.mensajes_grupo_miembros || [] })).filter(msgGrupoMio); }
       MSG.gruposOk = true;
     }catch(e){ MSG.grupos = []; MSG.gruposOk = false; }
   }
