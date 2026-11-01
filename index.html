@@ -11222,7 +11222,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-01-R90';
+  const APP_BUILD = '2026-11-01-R91';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -26144,6 +26144,71 @@ body.idi-en [data-solo-es]{display:none !important;}
   // ("Closet", or "Laundry" when a washer/dryer sits inside) and stays
   // renamable; a rename is matched back by position on re-detection so
   // geometry edits never silently revert it.
+  // RÓTULO DE UN RINCÓN (1 nov 2026, R91). UNA regla para los dos caminos que encuentran rincones (el de las paredes,
+  // floorplanDetectSubAreas, y el del láser, room.lidarNooks) y para los textos del editor, para que digan lo mismo.
+  // Casos reales que salían mal: un baño todavía sin nombre ("Room 2") con inodoro y lavabo -> "Closet"; el lavabo que
+  // RoomPlan le apuntó al cuarto VECINO -> "Closet"; baño con la tina en el nicho del láser -> no se dibujaba nada.
+  //   - Se buscan los muebles ADENTRO del rectángulo del rincón (+0.5 ft) en TODOS los cuartos del nivel, no solo en los
+  //     de este cuarto (el escáner reparte los muebles por donde cayó su centro).
+  //   - Es baño si el nombre lo dice O si el cuarto tiene inodoro / lavabo / tina / regadera.
+  //   - tina o regadera -> "Shower"; lavabo -> "Vanity"; inodoro -> sin rótulo; lavadora -> "Laundry"; fuera de un baño ->
+  //     "Closet", como siempre.
+  //   - Baño SIN mueble adentro (el Master Bathroom con su walk-in): es "Closet" si tiene tamaño de clóset (fondo y boca
+  //     >= 2.5 ft, o >= 8 sq ft), o si tiene una puerta/paso que entra a él, o si RoomPlan vio estantes/almacenaje adentro.
+  //     Solo el nicho chico y vacío (una repisa empotrada) se queda sin rótulo, como parte del baño.
+  // Nunca toca la geometría ni las áreas: solo decide el texto. Devuelve '' cuando no va rótulo.
+  // `rect` es { polygon:[{x,y}...], widthFt?, depthFt? } (nicho del láser) o { cx, cy, w, d, u:{x,y} (a lo largo de la
+  // boca), v:{x,y} (al fondo), conPuerta? } (rincón de las paredes).
+  const FP_ES_BANO_RE = /bath|ba[ñn]o|powder|restroom|shower|regadera/i;
+  const FP_MUEBLE_BANO = { tina: /bathtub|shower|tub|tina|regadera/i, lavabo: /sink|lavabo|lavamanos|vanity/i, inodoro: /toilet|inodoro|wc/i, lavadora: /washerDryer|washer|dryer|lavadora|secadora/i,
+    almacen: /storage|shelf|shelves|wardrobe|closet|estante|ropero/i };
+  function fpTipoDeMueble(o){
+    if(!o || o._removed || o._hidden) return null;
+    const c = String(o.category || '');
+    for(const t in FP_MUEBLE_BANO) if(FP_MUEBLE_BANO[t].test(c)) return t;
+    return null;
+  }
+  function fpRotuloDeRincon(room, rect, data){
+    const nivel = (room && room.level) || 1;
+    const cuartos = ((data && data.rooms) || (room ? [room] : [])).filter(r => r && !r.deleted && ((r.level || 1) === nivel));
+    if(room && !cuartos.includes(room)) cuartos.push(room);
+    // El rectángulo del rincón como polígono (+0.5 ft de margen: el centro del mueble cae pegado a la pared).
+    let poly = null;
+    if(rect && Array.isArray(rect.polygon) && rect.polygon.length >= 3){
+      const pts = rect.polygon.filter(p => p && isFinite(p.x) && isFinite(p.y));
+      const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length, cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+      poly = pts.map(p => { const dx = p.x - cx, dy = p.y - cy, L = Math.hypot(dx, dy) || 1; return { x: p.x + dx / L * 0.5, y: p.y + dy / L * 0.5 }; });
+    }else if(rect && isFinite(rect.cx) && isFinite(rect.cy)){
+      const u = rect.u || { x: 1, y: 0 }, v = rect.v || { x: 0, y: 1 };
+      const hw = (rect.w || 0) / 2 + 0.5, hd = (rect.d || 0) / 2 + 0.5;
+      poly = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([a, b]) => ({ x: rect.cx + u.x * a + v.x * b, y: rect.cy + u.y * a + v.y * b }));
+    }
+    if(!poly) return '';
+    const adentro = { tina: false, lavabo: false, inodoro: false, lavadora: false, almacen: false };
+    let muebleDeBano = false;   // en este cuarto hay inodoro / lavabo / tina: es un baño aunque nadie lo haya nombrado
+    cuartos.forEach(r => (r.objects || []).forEach(o => {
+      const t = fpTipoDeMueble(o);
+      if(!t) return;
+      if(r === room && t !== 'lavadora' && t !== 'almacen') muebleDeBano = true;
+      if(o.center && fpPointInPolygon(o.center, poly)) adentro[t] = true;
+    }));
+    const esBano = FP_ES_BANO_RE.test((room && room.roomName) || '') || muebleDeBano;
+    if(adentro.tina) return 'Shower';
+    if(adentro.lavabo) return 'Vanity';
+    if(adentro.inodoro) return '';
+    if(adentro.lavadora) return 'Laundry';
+    if(!esBano) return 'Closet';
+    // Baño sin mueble adentro: ¿tiene tamaño o señas de clóset?
+    let w = rect.w || rect.widthFt || 0, d = rect.d || rect.depthFt || 0;
+    if(!(w > 0 && d > 0) && Array.isArray(rect.polygon)){
+      const xs = rect.polygon.map(p => p.x), ys = rect.polygon.map(p => p.y);
+      const a = Math.max(...xs) - Math.min(...xs), b = Math.max(...ys) - Math.min(...ys);
+      w = Math.max(a, b); d = Math.min(a, b);
+    }
+    const tamanoDeCloset = (w >= 2.5 && d >= 2.5) || w * d >= 8;
+    const conPuerta = !!rect.conPuerta || cuartos.some(r => [].concat(r.doors || [], r.openings || []).some(o => o && !o._removed && o.position && fpPointInPolygon(o.position, poly)));
+    return (tamanoDeCloset || conPuerta || adentro.almacen) ? 'Closet' : '';
+  }
   function floorplanDetectSubAreas(data){
     // Every door/passage on the plan (any room's copy, windows excluded):
     // a U-shaped pocket with a DOOR inside it is a doorway vestibule you
@@ -26228,20 +26293,11 @@ body.idi-en [data-solo-es]{display:none !important;}
             Math.hypot(q.cx - cx, q.cy - cy) <= Math.max(1.5, Math.max(width, depth)/2));
           if(hasDoor && !namedBefore) continue;
           // Honest guess: Laundry if a washer/dryer sits in the pocket.
-          // (31 oct, R70) En un BAÑO el rincón es la tina o la regadera, no un clóset (él: "a veces pone que es closet"):
-          // con tina adentro se llama "Shower"; con inodoro o lavabo adentro, o en un baño sin nada, no se rotula.
-          // Decide el mueble MÁS CERCANO al rincón (en un baño chico la tina y el lavamanos caben los dos en el radio).
-          const esBano = /bath|ba[ñn]o|powder|restroom|shower|regadera/i.test(room.roomName || '');
-          let cercano = null, dCercano = Math.max(depth, width);
-          (room.objects||[]).forEach(o => {
-            if(o._removed || !o.center || !['washerDryer','bathtub','toilet','sink'].includes(o.category)) return;
-            const dd = Math.hypot(o.center.x-cx, o.center.y-cy);
-            if(dd <= dCercano){ dCercano = dd; cercano = o.category; }
-          });
-          let name = 'Closet';
-          if(cercano === 'washerDryer') name = 'Laundry';
-          else if(cercano === 'bathtub') name = 'Shower';
-          else if(cercano === 'toilet' || cercano === 'sink' || esBano) continue;
+          // (31 oct, R70) En un BAÑO el rincón es la tina o la regadera, no un clóset (él: "a veces pone que es closet").
+          // (1 nov, R91) La decisión vive en fpRotuloDeRincon (la misma regla que los nichos del láser y el editor):
+          // muebles adentro del rincón en TODOS los cuartos del nivel; baño por nombre O por sus muebles; '' = sin rótulo.
+          const name = fpRotuloDeRincon(room, { cx, cy, w: width, d: depth, u: { x: bcux, y: bcuy }, v: { x: abux, y: abuy }, conPuerta: puertaEnLaBoca }, data);
+          if(!name) continue;                                   // sin rótulo = no es un sub-espacio (lo nombrado a mano sobrevive más abajo)
           found.push({ name, cx: Math.round(cx*100)/100, cy: Math.round(cy*100)/100,
                        w: Math.round(width*100)/100, d: Math.round(depth*100)/100, _suggested: true, conPuerta: puertaEnLaBoca || undefined });
         }
@@ -33140,8 +33196,10 @@ body.idi-en [data-solo-es]{display:none !important;}
       const room = (floorplanData.rooms||[])[Number(nkG.dataset.roomIdx)];
       const nk = room && (room.lidarNooks||[])[Number(nkG.dataset.nookIdx)];
       if(nk){
-        if(!fpEditMode){ fpFlashHint('Closet que marcó el láser · ' + fpFeetInches(nk.widthFt||0) + ' x ' + fpFeetInches(nk.depthFt||0) + ' - abra Editar plano para quitarlo.'); return; }
-        if(confirm('¿Quitar este closet que marcó el láser?')){
+        // (1 nov, R91) El editor dice lo mismo que el dibujo: la regla general fpRotuloDeRincon (Closet / Shower / Vanity / nicho).
+        const queEs = fpRotuloDeRincon(room, { polygon: nk.polygon || [], widthFt: nk.widthFt, depthFt: nk.depthFt }, floorplanData) || 'Nicho';
+        if(!fpEditMode){ fpFlashHint(queEs + ' que marcó el láser · ' + fpFeetInches(nk.widthFt||0) + ' x ' + fpFeetInches(nk.depthFt||0) + ' - abra Editar plano para quitarlo.'); return; }
+        if(confirm('¿Quitar este ' + queEs.toLowerCase() + ' que marcó el láser?')){
           fpPushUndo();
           nk._removed = true;
           floorplanData._handEdited = true;
@@ -38349,17 +38407,20 @@ body.idi-en [data-solo-es]{display:none !important;}
     // (31 oct 2026, R69) LOS NICHOS DEL LÁSER: closets con fondo que RoomPlan dibujó como pared lisa. Los sacó el teléfono de
     // la huella del LiDAR (HuellaLidar.swift) y viajan en `room.lidarNooks` (pies, mismo marco que las paredes). Se dibujan como
     // un closet punteado pegado por fuera de la pared. Nunca cambian las medidas ni las paredes: son un aviso dibujado.
-    const esBanoCuarto = /bath|ba[ñn]o|powder|restroom|shower|regadera/i.test(room.roomName || '');
+    // (1 nov, R91) El texto lo decide fpRotuloDeRincon, la misma regla que los rincones de las paredes: en un baño (por nombre
+    // o por sus muebles) el nicho con tina dice "Shower", con lavabo "Vanity", y sin mueble o con inodoro se dibuja sin rótulo.
+    const cuartosDelPlano = allRooms || (typeof floorplanData !== 'undefined' && floorplanData && floorplanData.rooms) || [room];
     (room.lidarNooks || []).forEach((nk, ni) => {
-      if(!nk || nk._removed || esBanoCuarto) return;                 // (R70) quitado a mano, o un baño (es la tina, no un clóset)
+      if(!nk || nk._removed) return;                                 // (R70) quitado a mano
       const pts = (nk && nk.polygon || []).filter(p => p && isFinite(p.x) && isFinite(p.y));
       if(pts.length < 4) return;
+      const rotulo = fpRotuloDeRincon(room, { polygon: pts, widthFt: nk.widthFt, depthFt: nk.depthFt }, { rooms: cuartosDelPlano });
       const d = pts.map((p, i) => (i ? 'L' : 'M') + X(p.x).toFixed(1) + ' ' + Y(p.y).toFixed(1)).join(' ') + ' Z';
       const cx = pts.reduce((a, p) => a + X(p.x), 0) / pts.length, cy = pts.reduce((a, p) => a + Y(p.y), 0) / pts.length;
       const chico = Math.min(nk.widthFt || 9, nk.depthFt || 9) * scale < 26;
       s += `<g class="fp-nook" data-room-idx="${roomIdx}" data-nook-idx="${ni}" style="cursor:pointer;">`
         + `<path d="${d}" fill="#eef3f8" stroke="#5b6b7c" stroke-width="1.5" stroke-dasharray="6 4"/>`
-        + (chico ? '' : `<text x="${cx}" y="${cy + 5}" font-size="13" font-weight="600" fill="#5b6b7c" text-anchor="middle">Closet</text>`)
+        + (chico || !rotulo ? '' : `<text x="${cx}" y="${cy + 5}" font-size="13" font-weight="600" fill="#5b6b7c" text-anchor="middle">${rotulo}</text>`)
         + `</g>`;
     });
     // La huella entera del láser (botón Mesh del editor): puntitos grises donde el LiDAR vio algo sólido a la altura de las
