@@ -11590,7 +11590,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-01-R104';
+  const APP_BUILD = '2026-11-02-R105';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -62674,6 +62674,98 @@ body.idi-en [data-solo-es]{display:none !important;}
   if($('#mgrGoMensajes')) $('#mgrGoMensajes').addEventListener('click', () => { showTab('mensajes'); pushBack('mgrrest'); msgEntrar(document.querySelector('.tab-panel[data-tab="mensajes"] .msg-root')); });
   if($('#casualTileMensajes')) $('#casualTileMensajes').addEventListener('click', () => setTimeout(() => { msgEntrar(document.querySelector('[data-casual-pan="mensajes"] .msg-root')); try{ if(window.__casualPush) window.__casualPush.alEntrar(); }catch(e){} }, 60));
   // ===== fin de Mensajes =====
+  /*ICONO-NUMERITO:INICIO*/
+  // (Globito, 2 nov 2026) EL NUMERITO ROJO DEL ICONO DEL iPHONE. Su reporte: "el 1 se queda pegado para siempre", a toda la
+  // cuadrilla. Cada aviso mandaba badge 1 y nada lo bajaba (el aparato no tiene código para eso). Sin aparato nuevo: la app le
+  // pide a notify-manager {type:'badge', count:N} y la nube manda un aviso callado {"aps":{"badge":N}} SOLO a los teléfonos de
+  // quien lo pide. N = lo que la app enseña sin leer: Mensajes (el globito de la puerta) + Peticiones (su pestaña), cada mensaje
+  // una vez (un anuncio sin leer sale en las dos). 0 quita el numerito.
+  // CUÁNDO: al irse la app a segundo plano. Con la app enfrente iOS NO pone el numerito de un aviso (el plugin le contesta
+  // willPresent con [] porque capacitor.config no trae presentationOptions) y además cada aviso con la app enfrente dispara
+  // pushNotificationReceived (recarga bandeja y pagos). Mientras la app estuvo afuera un aviso pudo cambiar el numerito, así que al
+  // volver se lee Mensajes otra vez y solo se manda con lo leído EN ESTA VUELTA (msgIconoFresco, al terminar msgCargar). Una vez por
+  // vuelta (dos "hidden" seguidos no mandan dos veces). Solo en la app del iPhone y con los avisos prendidos; en el navegador nunca.
+  // Petición simple (texto, sin cabeceras: sin pregunta CORS previa) con keepalive, para que salga aunque la app se duerma.
+  // Tres fallas seguidas (sin la función nueva en la nube, sin señal) y se deja de intentar hasta abrir la app otra vez.
+  const ICONO = { vueltaAt: Date.now(), mandado: null, fallas: 0, apagado: false, leidaAt: 0, escuchando: false };
+  function iconoNativo(){
+    const C = window.Capacitor;
+    if(!(C && C.Plugins && C.Plugins.PushNotifications)) return false;
+    try{ return typeof C.getPlatform !== 'function' || C.getPlatform() === 'ios'; }catch(e){ return false; }
+  }
+  function iconoPushOk(){
+    try{
+      if(signedIn()) return !!(window.__cuentaPush && window.__cuentaPush.estado().ok);
+      return !!(msgEsCasual() && window.__casualPush && window.__casualPush.estado().ok);
+    }catch(e){ return false; }
+  }
+  // lo leído de la nube: de quién es y cuándo se empezó a leer. msgCargar es la única que lee Mensajes de la nube; se envuelve aquí
+  // (sin tocarla: tests/mensajes_atras_entregado_test.js la vigila tal cual). Si falla o entró otra persona, no marca nada.
+  function msgIconoFresco(d, t0){ MSG.iconoDe = d; MSG.iconoAt = t0 || Date.now(); }
+  { const msgCargar0 = msgCargar; msgCargar = async function(){ const d = MSG.dueno, t0 = Date.now(); const r = await msgCargar0.apply(this, arguments); msgIconoFresco(d, t0); return r; }; }
+  // lo que la app enseña sin leer, cada mensaje una vez (un anuncio sin leer está en Todo el equipo y en Peticiones)
+  function msgIconoTotal(){
+    if(!MSG.yo) return 0;
+    let n = msgSinLeer();
+    if(msgPetOk()){
+      n += msgPetNuevas();
+      if(!msgSoyOficina()){
+        const visto = msgPetVistoLeer(), t = x => new Date(x || 0).getTime() || 0;
+        n -= MSG.lista.filter(m => m && !m.borrado_at && m.tipo === 'anuncio' && !msgMio(m) && t(m.created_at) > visto
+          && msgEsParaMi(m) && !msgLeido(m) && msgVisible(m) && !msgArchivada(msgOtro(m))).length;
+      }
+    }
+    return Math.max(0, Math.min(999, n));
+  }
+  // quién pide: la cuenta con su sesión; el temporal con la reja de siempre (sus códigos, nombre y PIN)
+  function msgIconoCuerpo(n, d){
+    const b = { type: 'badge', count: n };
+    if(d.startsWith('c:')){ if(!(SES && SES.access_token)) return null; b.access_token = SES.access_token; return b; }
+    const s = msgSes(), cods = msgCodigos(s); if(!s || !cods.length) return null;
+    b.name = s.name; b.pin = s.pin; b.join_code = cods[0]; if(cods[1]) b.join_code_2 = cods[1];
+    return b;
+  }
+  // al irse a segundo plano: con lo leído en esta vuelta, y si este número no ha salido en esta vuelta, se manda sin esperar
+  function msgIconoAlSalir(){
+    if(ICONO.apagado || !iconoNativo() || !cloudOn()) return false;
+    const d = msgDueno(); if(!d || d !== MSG.dueno || !MSG.yo) return false;
+    if(MSG.iconoDe !== d || !(MSG.iconoAt >= ICONO.vueltaAt)) return false;   // lo leído es de antes de esta vuelta (o de otra persona)
+    if(!iconoPushOk()) return false;
+    const n = msgIconoTotal(), m = ICONO.mandado;
+    if(m && m.d === d && m.n === n && m.at >= ICONO.vueltaAt) return false;     // ya salió este mismo número en esta vuelta
+    const cuerpo = msgIconoCuerpo(n, d); if(!cuerpo) return false;
+    const yo = ICONO.mandado = { d, n, at: Date.now() };
+    let p;
+    try{ p = fetch(CLOUD.url + '/functions/v1/notify-manager', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(cuerpo), keepalive: true }); }
+    catch(e){ p = Promise.reject(e); }
+    Promise.resolve(p).then(r => { if(r && r.ok){ ICONO.fallas = 0; return; } throw new Error('HTTP ' + (r && r.status)); })
+      .catch(() => { if(ICONO.mandado === yo) ICONO.mandado = null; if(++ICONO.fallas >= 3) ICONO.apagado = true; });
+    return true;
+  }
+  // de vuelta en la app (o llegó un aviso con la app enfrente): lo leído antes ya no vale; se vuelve a leer Mensajes
+  function msgIconoAlVolver(){
+    ICONO.vueltaAt = Date.now();
+    if(ICONO.apagado || !iconoNativo() || !cloudOn() || !(signedIn() || msgEsCasual())) return false;
+    if(Date.now() - ICONO.leidaAt < 3000) return false;
+    ICONO.leidaAt = Date.now();
+    setTimeout(() => { try{ msgRevisarSinLeer(); }catch(e){} }, 400);
+    return true;
+  }
+  function msgIconoEscuchar(){
+    if(ICONO.escuchando || !iconoNativo()) return;
+    ICONO.escuchando = true;
+    try{
+      const r = window.Capacitor.Plugins.PushNotifications.addListener('pushNotificationReceived', a => {
+        if(!a || (!a.title && !a.body)) return;   // el aviso callado del numerito (sin título ni texto) no cambia nada
+        ICONO.leidaAt = 0; msgIconoAlVolver();
+      });
+      if(r && typeof r.catch === 'function') r.catch(() => {});
+    }catch(e){}
+  }
+  document.addEventListener('visibilitychange', () => { try{ if(document.visibilityState === 'hidden') msgIconoAlSalir(); else msgIconoAlVolver(); }catch(e){} });
+  msgIconoEscuchar();
+  window.__icono = { estado: () => ICONO, total: msgIconoTotal, alSalir: msgIconoAlSalir, alVolver: msgIconoAlVolver };
+  /*ICONO-NUMERITO:FIN*/
   window.__as = { abrir: asAbrir, hojaReal: asHojaRealHtml, cerrar: asCerrar, enviar: asEnviar, galeria: asGaleriaMostrar, galeriaQuitar: asGaleriaQuitar, hojaLabor: asHojaLaborHtml, galeriaVoz: asGalPorVoz, galeriaGrande: asGalGrandeMostrar, reporte: asReporte, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, mandarHojas: laborMandarHojas, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
   Object.assign(window.__as, { puerta: { toque: asPuertaToque, pintar: asPuertaPintar, abrirPanel: asPuertaAbrirPanel }, estadoPoner: asEstado, respuesta: asMostrarRespuesta, tarjeta: asMostrarTarjeta, reposar: asReposar });
   Object.assign(window.__as, { copiar: asCopiar, vista: function(v){ asVistaPintar($('#asVista'), v); }, irA: asIrA });   // (1-nov) para las pruebas: copiar, el recibo, marcar pagado   // (R88) ganchos de Lumi en la puerta para las pruebas y el simulador
