@@ -5172,6 +5172,9 @@ body.idi-en .rd-pf-idi-es, body:not(.idi-en) .rd-pf-idi-en{display:none;}   /* P
    "del cliente: qué se limpió," pasa por debajo de la flecha; la letra chica se mide contra el ancho de SU
    texto (10.44cqi = 11.6px a 390; container-type en .rd-tt) para que ningún renglón se parta en dos en un teléfono angosto (375). */
 #rdHome .rd-tile > .rd-chev{position:absolute; right:calc(8.2*var(--rdu)); top:50%; margin-top:calc(-6.5*var(--rdu));}
+/* (R109) quien entra sola a su empresa no ve la puerta al abrir: negro como el inicio de RD hasta que entra (ver c8_entrada.html) */
+html.entra-sola #authGate{background:#070707 !important;}
+html.entra-sola #authGate > *{visibility:hidden !important;}
 #rdHome .rd-tile.rd-alta{min-height:calc(101*var(--rdu));}   /* (2-nov, su cuarta maqueta) Plano y Contenidos: fila más alta, flecha al centro */
 /* los cinco íconos dibujados de su maqueta (Equipo, Plano, Secado, Materiales, Contenidos): más grandes que su cuadrito, como en su dibujo */
 #rdHome .rd-ico-xl svg{width:calc(56*var(--rdu)); height:calc(56*var(--rdu)); overflow:visible; stroke-width:1.25; transform:translateX(calc(-3*var(--rdu)));}   /* medidos en su maqueta: más grandes que su cuadrito pero con aire antes de las letras; la línea del mismo grueso que los otros íconos */
@@ -5288,6 +5291,25 @@ body.rd-perfil main > #sideBanner, body.rd-perfil main > .banner{display:none !i
 .rd-hl-eq small{font:400 11px/13px "Avenir Next", var(--sf); color:#c8cddb; white-space:nowrap;}
 .rd-hl-vacio{margin:0; padding:16px 14px; border-radius:12px; border:1px solid rgba(255,255,255,.1); background:#0d1212; font:400 15px/20px "Avenir Next", var(--sf); color:#c8cddb;}
 </style>
+<script>
+/* (2-nov-2026, R109) Su queja: "al abrir la aplicación, por un milisegundo se ve la antigua versión". Era la puerta ("¿A dónde va a
+   entrar?"): la página la pinta antes de que corra el código y, un momento después, rdAutoEntrar entra sola a la empresa recordada.
+   Aquí, antes del primer cuadro, se adivina con lo mismo que mira rdAutoEntrar (sesión de cuenta de cuadrilla + su empresa recordada):
+   si va a entrar sola, la puerta se queda en negro, del color del inicio de RD (html.entra-sola). rdPuertaVisible la regresa en cuanto
+   se sabe si entró; si no entró (sin señal, AMG apagado, la cuenta pausada) la puerta se ve como siempre. A los 3 s se quita sola. */
+(function(){
+  try{
+    var q = new URLSearchParams(location.search || ''), h = String(location.hash || '');
+    if(q.get('view') === 'trabajador' || q.get('door') || q.get('type') === 'recovery' || /type=recovery/.test(h) || /^(amgcal|cierres)$/.test(q.get('abrir') || '')) return;
+    var s = JSON.parse(localStorage.getItem('ses') || 'null');
+    if(!s || !s.access_token || !s.company_id || !s.user_id || s.role === 'manager') return;
+    var r = localStorage.getItem('empresaRecordada:v1:' + s.user_id);
+    if(r !== 'restauracion' && r !== 'mudanza') return;
+    document.documentElement.classList.add('entra-sola');
+    setTimeout(function(){ document.documentElement.classList.remove('entra-sola'); }, 3000);
+  }catch(e){}
+})();
+</script>
 </head>
 <body>
 
@@ -10709,15 +10731,21 @@ body.rd-perfil main > #sideBanner, body.rd-perfil main > .banner{display:none !i
   // de AMG, AMG apagado, la cuenta pausada). El manager se queda en su puerta (Lumi, buenos días); un aviso de calendario o de cierre
   // ya escoge su puerta (showDoor); ?view=trabajador y los temporales con PIN no entran aquí.
   function rdAutoEntrar(){
+    let va = false;
     try{
       if(VIEW_TRABAJADOR || !signedIn() || isManager()) return false;
       if(calAbrirPend || cieAbrirPend) return false;
       const r = rdEmpresaRecordada();
       if(r !== 'restauracion' && r !== 'mudanza') return false;
-      Promise.resolve(doorTap(r)).catch(() => {});
+      va = true;
+      Promise.resolve(doorTap(r)).catch(() => {}).then(rdPuertaVisible);
       return true;
     }catch(e){ return false; }
+    finally{ if(!va) rdPuertaVisible(); }
   }
+  // (R109) La puerta salió en negro desde el primer cuadro (el guardia de <head>: html.entra-sola) porque esta persona iba a entrar
+  // sola. En cuanto se sabe si entró se quita: si entró, la puerta ya no está (done); si no, se ve como siempre.
+  function rdPuertaVisible(){ try{ document.documentElement.classList.remove('entra-sola'); }catch(e){} }
 
   // ---- body.rd-home / body.rd-barra y la pestaña encendida ----
   function rdSincronizar(){
@@ -12362,7 +12390,7 @@ body.rd-perfil main > #sideBanner, body.rd-perfil main > .banner{display:none !i
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-02-R108';
+  const APP_BUILD = '2026-11-02-R109';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -51567,7 +51595,7 @@ body.rd-perfil main > #sideBanner, body.rd-perfil main > .banner{display:none !i
     // se manda ya (la nube solo necesita la sesion), no hasta que toque una puerta.
     setTimeout(() => { try{ calReportarDespiertos(); }catch(e){} }, 800);
     if(expired) authErr('Su sesión venció. Entre otra vez.');
-    if(once) doorTap(once);                                              // Cambiar de empresa -> la puerta tocada, pasando por todas las rejas
+    if(once) Promise.resolve(doorTap(once)).catch(() => {}).then(rdPuertaVisible);   // Cambiar de empresa -> la puerta tocada, pasando por todas las rejas (R109: y luego se regresa la puerta en negro)
     // Un enlace puede traer la puerta puesta (?door=restauracion | mudanza | manager): sirve para
     // mandarle a alguien el enlace de SU lado. No se salta ninguna reja: el codigo, la contrasena y
     // el desbloqueo de AMG se piden igual; solo ahorra el primer toque.
