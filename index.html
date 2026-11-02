@@ -12674,7 +12674,7 @@ body.rd-horas #rdAcc .rd-acc-h, body.rd-gastos #rdAcc .rd-acc-g{display:flex;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-02-R110';
+  const APP_BUILD = '2026-11-02-R111';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -61975,6 +61975,15 @@ body.rd-horas #rdAcc .rd-acc-h, body.rd-gastos #rdAcc .rd-acc-g{display:flex;}
   }
   const msgFotosOk = () => !!MSG.reaccionesOk && (!msgEsCasual() || !!(MSG.capas && MSG.capas.temporal_sube));
   const msgVozOk = () => !!(MSG.capas && MSG.capas.audio) && msgFotosOk() && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && typeof MediaRecorder !== 'undefined';
+  // (R111) las fotos que trae lo pegado (o soltado): primero los archivos; solo si viene vacío, los renglones de archivo (nunca
+  // los dos: así no se repite). Nunca la lectura del portapapeles por código: en el iPhone solo da PNG y pide permiso.
+  function msgFotosDePegado(dt){
+    if(!dt) return [];
+    const esFoto = f => !!f && (f.type ? /^image\//i.test(f.type) : /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(f.name || ''));
+    let l = []; try{ l = Array.from(dt.files || []); }catch(e){}
+    if(!l.length){ try{ l = Array.from(dt.items || []).filter(i => i && i.kind === 'file').map(i => { try{ return i.getAsFile(); }catch(e){ return null; } }).filter(Boolean); }catch(e){} }
+    return l.filter(esFoto);
+  }
   // con algo escrito (o una foto puesta) sale la flecha de enviar; vacía: cámara y micrófono, como WhatsApp
   function msgPintarBotones(){
     const root = MSG.root; if(!root) return; const ta = root.querySelector('.msg-texto'); if(!ta) return;
@@ -63806,7 +63815,19 @@ body.rd-horas #rdAcc .rd-acc-h, body.rd-gastos #rdAcc .rd-acc-g{display:flex;}
       box1.addEventListener('pointerup', fin1); box1.addEventListener('pointercancel', fin1);
       box1.addEventListener('contextmenu', (e) => { const b = e.target.closest('.msg-b'); if(!b || String(b.dataset.msgId).startsWith('tmp-')) return; e.preventDefault(); MSG.toqueLargoAt = Date.now(); MSG.acc = b.dataset.msgId; msgPintarChat(); });
       // (fr-11) la foto: se achica en el teléfono (1600 px) antes de subirla; la flecha ⌄ aparece al deslizar hacia arriba
-      const fotoElegida = async (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if(!f) return; try{ const blob = await ctAchicar(f, 1600, 0.82); MSG.adjunto = Object.assign({ blob, url: URL.createObjectURL(blob) }, await msgMedidas(blob)); msgPintarAdjunto(); }catch(err){ root.querySelector('.msg-aviso').textContent = 'No se pudo leer la foto.'; } };
+      const fotoPoner = async (f) => { try{ const blob = await ctAchicar(f, 1600, 0.82); MSG.adjunto = Object.assign({ blob, url: URL.createObjectURL(blob) }, await msgMedidas(blob)); msgPintarAdjunto(); }catch(err){ root.querySelector('.msg-aviso').textContent = 'No se pudo leer la foto.'; } };
+      const fotoElegida = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if(f) fotoPoner(f); };
+      // (2-nov-2026, R111, su pedido: "estoy tratando de pegar una foto y no lo pega") Con una foto copiada, el iPhone sí ofrece
+      // "Pegar" en la caja y el evento trae la foto completa (probado en el simulador: files=1 image/png), pero nadie la recogía.
+      // Ahora una foto pegada (o soltada) se vuelve la foto del mensaje, igual que escogerla en Fotos. El texto se pega como siempre.
+      const alPegarFoto = (e, dt) => {
+        const fs = msgFotosDePegado(dt); if(!fs.length) return;          // solo texto: el navegador lo pega como siempre
+        e.preventDefault();
+        if(!msgFotosOk() || MSG.editando) return;                        // sin fotos en esta cuenta, o editando (solo cambia el texto)
+        root.querySelector('.msg-adjuntar').hidden = true; fotoPoner(fs[0]);
+      };
+      ta0.addEventListener('paste', (e) => alPegarFoto(e, e.clipboardData));
+      ta0.addEventListener('drop', (e) => alPegarFoto(e, e.dataTransfer));
       root.querySelector('.msg-foto-in').addEventListener('change', fotoElegida); root.querySelector('.msg-cam-in').addEventListener('change', fotoElegida);
       const box0 = root.querySelector('.msg-burbujas'); box0.addEventListener('scroll', () => { const falta = box0.scrollHeight - box0.scrollTop - box0.clientHeight; MSG.pegadoAbajo = falta < 60; const ab = root.querySelector('.msg-abajo'); if(ab) ab.hidden = falta < 200; });
       // una foto que termina de cargar: si estaba al final, sigue al final (como WhatsApp)
