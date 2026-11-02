@@ -11590,7 +11590,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-02-R105';
+  const APP_BUILD = '2026-11-02-R106';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -62678,16 +62678,21 @@ body.idi-en [data-solo-es]{display:none !important;}
   // (Globito, 2 nov 2026) EL NUMERITO ROJO DEL ICONO DEL iPHONE. Su reporte: "el 1 se queda pegado para siempre", a toda la
   // cuadrilla. Cada aviso mandaba badge 1 y nada lo bajaba (el aparato no tiene código para eso). Sin aparato nuevo: la app le
   // pide a notify-manager {type:'badge', count:N} y la nube manda un aviso callado {"aps":{"badge":N}} SOLO a los teléfonos de
-  // quien lo pide. N = lo que la app enseña sin leer: Mensajes (el globito de la puerta) + Peticiones (su pestaña), cada mensaje
-  // una vez (un anuncio sin leer sale en las dos). 0 quita el numerito.
-  // CUÁNDO: al irse la app a segundo plano. Con la app enfrente iOS NO pone el numerito de un aviso (el plugin le contesta
-  // willPresent con [] porque capacitor.config no trae presentationOptions) y además cada aviso con la app enfrente dispara
-  // pushNotificationReceived (recarga bandeja y pagos). Mientras la app estuvo afuera un aviso pudo cambiar el numerito, así que al
-  // volver se lee Mensajes otra vez y solo se manda con lo leído EN ESTA VUELTA (msgIconoFresco, al terminar msgCargar). Una vez por
-  // vuelta (dos "hidden" seguidos no mandan dos veces). Solo en la app del iPhone y con los avisos prendidos; en el navegador nunca.
-  // Petición simple (texto, sin cabeceras: sin pregunta CORS previa) con keepalive, para que salga aunque la app se duerma.
-  // Tres fallas seguidas (sin la función nueva en la nube, sin señal) y se deja de intentar hasta abrir la app otra vez.
-  const ICONO = { vueltaAt: Date.now(), mandado: null, fallas: 0, apagado: false, leidaAt: 0, escuchando: false };
+  // quien lo pide. 0 quita el numerito.
+  // (R106, 2 nov) R105 no bastó, en sus dos teléfonos de prueba se quedó el 1. Las dos causas, vistas en la nube:
+  //  1. Prueva mandaba count:1 cada vez que salía, con todo leído (directos, grupos y Todo el equipo en 0). El 1 era de
+  //     Peticiones: un anuncio leído en la plática pero nunca visto en su pestaña. El icono ahora cuenta LO MISMO que el globito
+  //     de Mensajes (msgSinLeer): lo que él ve sin leer. Una petición es un mensaje directo a la oficina, ya va ahí.
+  //  2. Amilcar leyó el mensaje de la 1:46 y la nube nunca recibió nada: el 0 dependía de que la página se enterara de que la app
+  //     se iba (cerrarla desde el selector de apps no avisa). Ahora, con todo leído y la app enfrente, el numerito se pone en 0
+  //     AHÍ MISMO desde el teléfono: removeAllDeliveredNotifications del plugin pone applicationIconBadgeNumber = 0 (y quita los
+  //     avisos ya leídos del centro de notificaciones, como WhatsApp). Sin nube, sin esperar a que se vaya.
+  // CUÁNDO SE MANDA A LA NUBE: al irse la app a segundo plano, con el número de ahora (para sus otros teléfonos, y cuando quedan
+  // N > 0: con la app enfrente iOS no pone el numerito de un aviso, porque capacitor.config no trae presentationOptions). Solo
+  // con lo leído EN ESTA VUELTA (msgIconoFresco, al terminar msgCargar): un aviso que llegó mientras estaba afuera pudo cambiar el
+  // número. Solo en la app del iPhone y con los avisos prendidos; en el navegador nunca. Petición simple (texto, sin cabeceras:
+  // sin pregunta CORS previa) con keepalive. Tres fallas seguidas y se descansa 10 minutos (antes: hasta abrir la app otra vez).
+  const ICONO = { vueltaAt: Date.now(), mandado: null, fallas: 0, apagado: false, apagadoAt: 0, leidaAt: 0, escuchando: false, ceroAt: 0, ceroVeces: 0 };
   function iconoNativo(){
     const C = window.Capacitor;
     if(!(C && C.Plugins && C.Plugins.PushNotifications)) return false;
@@ -62699,23 +62704,21 @@ body.idi-en [data-solo-es]{display:none !important;}
       return !!(msgEsCasual() && window.__casualPush && window.__casualPush.estado().ok);
     }catch(e){ return false; }
   }
+  // tres fallas seguidas: descansa 10 minutos y vuelve a intentar
+  function iconoApagado(){
+    if(ICONO.apagado && Date.now() - ICONO.apagadoAt >= 10 * 60000){ ICONO.apagado = false; ICONO.fallas = 0; }
+    return ICONO.apagado;
+  }
   // lo leído de la nube: de quién es y cuándo se empezó a leer. msgCargar es la única que lee Mensajes de la nube; se envuelve aquí
   // (sin tocarla: tests/mensajes_atras_entregado_test.js la vigila tal cual). Si falla o entró otra persona, no marca nada.
   function msgIconoFresco(d, t0){ MSG.iconoDe = d; MSG.iconoAt = t0 || Date.now(); }
   { const msgCargar0 = msgCargar; msgCargar = async function(){ const d = MSG.dueno, t0 = Date.now(); const r = await msgCargar0.apply(this, arguments); msgIconoFresco(d, t0); return r; }; }
-  // lo que la app enseña sin leer, cada mensaje una vez (un anuncio sin leer está en Todo el equipo y en Peticiones)
-  function msgIconoTotal(){
-    if(!MSG.yo) return 0;
-    let n = msgSinLeer();
-    if(msgPetOk()){
-      n += msgPetNuevas();
-      if(!msgSoyOficina()){
-        const visto = msgPetVistoLeer(), t = x => new Date(x || 0).getTime() || 0;
-        n -= MSG.lista.filter(m => m && !m.borrado_at && m.tipo === 'anuncio' && !msgMio(m) && t(m.created_at) > visto
-          && msgEsParaMi(m) && !msgLeido(m) && msgVisible(m) && !msgArchivada(msgOtro(m))).length;
-      }
-    }
-    return Math.max(0, Math.min(999, n));
+  // (R106) el número del icono = el globito de Mensajes (msgPintarTiles enseña msgSinLeer), nada más
+  function msgIconoTotal(){ return MSG.yo ? Math.max(0, Math.min(999, msgSinLeer())) : 0; }
+  // lo leído es de esta persona y de esta vuelta
+  function msgIconoAlDia(){
+    const d = msgDueno(); if(!d || d !== MSG.dueno || !MSG.yo) return null;
+    return (MSG.iconoDe === d && MSG.iconoAt >= ICONO.vueltaAt) ? d : null;
   }
   // quién pide: la cuenta con su sesión; el temporal con la reja de siempre (sus códigos, nombre y PIN)
   function msgIconoCuerpo(n, d){
@@ -62725,27 +62728,42 @@ body.idi-en [data-solo-es]{display:none !important;}
     b.name = s.name; b.pin = s.pin; b.join_code = cods[0]; if(cods[1]) b.join_code_2 = cods[1];
     return b;
   }
-  // al irse a segundo plano: con lo leído en esta vuelta, y si este número no ha salido en esta vuelta, se manda sin esperar
+  // (R106) todo leído con la app enfrente: el numerito a 0 desde el teléfono, una vez cada vez que llega a 0. Si el plugin dice
+  // que no (al abrir, antes de que el teléfono termine de registrarse para los avisos), se vuelve a intentar 3 veces.
+  function msgIconoCero(){
+    if(!iconoNativo() || document.visibilityState === 'hidden' || !msgIconoAlDia()) return false;
+    if(msgIconoTotal() !== 0){ ICONO.ceroAt = 0; return false; }
+    if(ICONO.ceroAt >= ICONO.vueltaAt) return false;   // ya se puso en 0 en esta vuelta (con la app enfrente nada lo sube)
+    const PN = window.Capacitor.Plugins.PushNotifications;
+    if(typeof PN.removeAllDeliveredNotifications !== 'function') return false;
+    const yo = ICONO.ceroAt = Date.now();
+    const otra = () => { if(ICONO.ceroAt !== yo) return; ICONO.ceroAt = 0; if(++ICONO.ceroVeces <= 3) setTimeout(() => { try{ msgIconoCero(); }catch(e){} }, 4000); };
+    let p;
+    try{ p = PN.removeAllDeliveredNotifications(); }catch(e){ p = Promise.reject(e); }
+    Promise.resolve(p).then(() => { ICONO.ceroVeces = 0; }, otra);
+    return true;
+  }
+  // cada vez que se pinta el globito de Mensajes (al leer de la nube, al marcar leído, al volver) se mira si quedó en 0
+  { const pintar0 = msgPintarTiles; msgPintarTiles = function(){ const r = pintar0.apply(this, arguments); try{ msgIconoCero(); }catch(e){} return r; }; }
+  // al irse a segundo plano: con lo leído en esta vuelta, se manda el número de ahora (la nube no repite el mismo en 5 s)
   function msgIconoAlSalir(){
-    if(ICONO.apagado || !iconoNativo() || !cloudOn()) return false;
-    const d = msgDueno(); if(!d || d !== MSG.dueno || !MSG.yo) return false;
-    if(MSG.iconoDe !== d || !(MSG.iconoAt >= ICONO.vueltaAt)) return false;   // lo leído es de antes de esta vuelta (o de otra persona)
+    if(iconoApagado() || !iconoNativo() || !cloudOn()) return false;
+    const d = msgIconoAlDia(); if(!d) return false;   // lo leído es de antes de esta vuelta (o de otra persona)
     if(!iconoPushOk()) return false;
-    const n = msgIconoTotal(), m = ICONO.mandado;
-    if(m && m.d === d && m.n === n && m.at >= ICONO.vueltaAt) return false;     // ya salió este mismo número en esta vuelta
+    const n = msgIconoTotal();
     const cuerpo = msgIconoCuerpo(n, d); if(!cuerpo) return false;
     const yo = ICONO.mandado = { d, n, at: Date.now() };
     let p;
     try{ p = fetch(CLOUD.url + '/functions/v1/notify-manager', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(cuerpo), keepalive: true }); }
     catch(e){ p = Promise.reject(e); }
     Promise.resolve(p).then(r => { if(r && r.ok){ ICONO.fallas = 0; return; } throw new Error('HTTP ' + (r && r.status)); })
-      .catch(() => { if(ICONO.mandado === yo) ICONO.mandado = null; if(++ICONO.fallas >= 3) ICONO.apagado = true; });
+      .catch(() => { if(ICONO.mandado === yo) ICONO.mandado = null; if(++ICONO.fallas >= 3 && !ICONO.apagado){ ICONO.apagado = true; ICONO.apagadoAt = Date.now(); } });
     return true;
   }
   // de vuelta en la app (o llegó un aviso con la app enfrente): lo leído antes ya no vale; se vuelve a leer Mensajes
   function msgIconoAlVolver(){
-    ICONO.vueltaAt = Date.now();
-    if(ICONO.apagado || !iconoNativo() || !cloudOn() || !(signedIn() || msgEsCasual())) return false;
+    ICONO.vueltaAt = Date.now(); ICONO.ceroVeces = 0;
+    if(!iconoNativo() || !cloudOn() || !(signedIn() || msgEsCasual())) return false;
     if(Date.now() - ICONO.leidaAt < 3000) return false;
     ICONO.leidaAt = Date.now();
     setTimeout(() => { try{ msgRevisarSinLeer(); }catch(e){} }, 400);
@@ -62764,7 +62782,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   }
   document.addEventListener('visibilitychange', () => { try{ if(document.visibilityState === 'hidden') msgIconoAlSalir(); else msgIconoAlVolver(); }catch(e){} });
   msgIconoEscuchar();
-  window.__icono = { estado: () => ICONO, total: msgIconoTotal, alSalir: msgIconoAlSalir, alVolver: msgIconoAlVolver };
+  window.__icono = { estado: () => ICONO, total: msgIconoTotal, alSalir: msgIconoAlSalir, alVolver: msgIconoAlVolver, cero: msgIconoCero };
   /*ICONO-NUMERITO:FIN*/
   window.__as = { abrir: asAbrir, hojaReal: asHojaRealHtml, cerrar: asCerrar, enviar: asEnviar, galeria: asGaleriaMostrar, galeriaQuitar: asGaleriaQuitar, hojaLabor: asHojaLaborHtml, galeriaVoz: asGalPorVoz, galeriaGrande: asGalGrandeMostrar, reporte: asReporte, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, mandarHojas: laborMandarHojas, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
   Object.assign(window.__as, { puerta: { toque: asPuertaToque, pintar: asPuertaPintar, abrirPanel: asPuertaAbrirPanel }, estadoPoner: asEstado, respuesta: asMostrarRespuesta, tarjeta: asMostrarTarjeta, reposar: asReposar });
