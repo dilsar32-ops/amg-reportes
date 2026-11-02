@@ -11590,7 +11590,7 @@ body.idi-en [data-solo-es]{display:none !important;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-02-R106';
+  const APP_BUILD = '2026-11-02-R107';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -62685,14 +62685,18 @@ body.idi-en [data-solo-es]{display:none !important;}
   //     de Mensajes (msgSinLeer): lo que él ve sin leer. Una petición es un mensaje directo a la oficina, ya va ahí.
   //  2. Amilcar leyó el mensaje de la 1:46 y la nube nunca recibió nada: el 0 dependía de que la página se enterara de que la app
   //     se iba (cerrarla desde el selector de apps no avisa). Ahora, con todo leído y la app enfrente, el numerito se pone en 0
-  //     AHÍ MISMO desde el teléfono: removeAllDeliveredNotifications del plugin pone applicationIconBadgeNumber = 0 (y quita los
-  //     avisos ya leídos del centro de notificaciones, como WhatsApp). Sin nube, sin esperar a que se vaya.
+  //     AHÍ MISMO desde el teléfono: removeAllDeliveredNotifications del plugin pone applicationIconBadgeNumber = 0 (y quita del
+  //     centro de notificaciones TODOS los avisos de la app, no solo los de Mensajes: labor logs, cierres, calendario; todos llevan
+  //     a pantallas que se abren desde la app). Sin nube, sin esperar a que se vaya.
+  //  3. (R107, revisión) con una plática ABIERTA, lo que llegaba con el sondeo de cada 5 s salía en pantalla pero nadie lo marcaba
+  //     leído (solo msgAbrir y la entrada lo hacían): el globito y el icono se quedaban en 1 mirando el mensaje. Ahora, si la
+  //     plática está en pantalla y la app enfrente, lo nuevo se marca leído al pintarse (como WhatsApp).
   // CUÁNDO SE MANDA A LA NUBE: al irse la app a segundo plano, con el número de ahora (para sus otros teléfonos, y cuando quedan
   // N > 0: con la app enfrente iOS no pone el numerito de un aviso, porque capacitor.config no trae presentationOptions). Solo
   // con lo leído EN ESTA VUELTA (msgIconoFresco, al terminar msgCargar): un aviso que llegó mientras estaba afuera pudo cambiar el
   // número. Solo en la app del iPhone y con los avisos prendidos; en el navegador nunca. Petición simple (texto, sin cabeceras:
   // sin pregunta CORS previa) con keepalive. Tres fallas seguidas y se descansa 10 minutos (antes: hasta abrir la app otra vez).
-  const ICONO = { vueltaAt: Date.now(), mandado: null, fallas: 0, apagado: false, apagadoAt: 0, leidaAt: 0, escuchando: false, ceroAt: 0, ceroVeces: 0 };
+  const ICONO = { vueltaAt: Date.now(), mandado: null, fallas: 0, apagado: false, apagadoAt: 0, leidaAt: 0, leidaTimer: null, escuchando: false, ceroAt: 0, ceroVeces: 0 };
   function iconoNativo(){
     const C = window.Capacitor;
     if(!(C && C.Plugins && C.Plugins.PushNotifications)) return false;
@@ -62743,8 +62747,16 @@ body.idi-en [data-solo-es]{display:none !important;}
     Promise.resolve(p).then(() => { ICONO.ceroVeces = 0; }, otra);
     return true;
   }
+  // (R107) la plática abierta en pantalla, con la app enfrente: lo nuevo que trajo la nube se pinta y se marca leído
+  function msgIconoLeerAbierta(){
+    if(document.visibilityState === 'hidden' || !MSG.con || !MSG.root || !MSG.root.getClientRects().length) return false;
+    const ch = MSG.root.querySelector('.msg-chat'); if(!ch || ch.hidden) return false;
+    if(!MSG.lista.some(m => msgOtro(m) === MSG.con && msgEsParaMi(m) && !msgLeido(m) && msgVisible(m))) return false;
+    msgPintarChat(); msgMarcarLeidos(MSG.con);   // msgMarcarLeidos vuelve a pintar el globito (y aquí ya no queda nada pendiente)
+    return true;
+  }
   // cada vez que se pinta el globito de Mensajes (al leer de la nube, al marcar leído, al volver) se mira si quedó en 0
-  { const pintar0 = msgPintarTiles; msgPintarTiles = function(){ const r = pintar0.apply(this, arguments); try{ msgIconoCero(); }catch(e){} return r; }; }
+  { const pintar0 = msgPintarTiles; msgPintarTiles = function(){ const r = pintar0.apply(this, arguments); try{ if(msgIconoLeerAbierta()) return r; }catch(e){} try{ msgIconoCero(); }catch(e){} return r; }; }
   // al irse a segundo plano: con lo leído en esta vuelta, se manda el número de ahora (la nube no repite el mismo en 5 s)
   function msgIconoAlSalir(){
     if(iconoApagado() || !iconoNativo() || !cloudOn()) return false;
@@ -62764,7 +62776,12 @@ body.idi-en [data-solo-es]{display:none !important;}
   function msgIconoAlVolver(){
     ICONO.vueltaAt = Date.now(); ICONO.ceroVeces = 0;
     if(!iconoNativo() || !cloudOn() || !(signedIn() || msgEsCasual())) return false;
-    if(Date.now() - ICONO.leidaAt < 3000) return false;
+    // (R107, revisión) volvió antes de 3 s: la lectura de la vuelta anterior empezó antes de esta, ya no cuenta; se lee al cumplirse
+    const falta = 3000 - (Date.now() - ICONO.leidaAt);
+    if(falta > 0){
+      if(!ICONO.leidaTimer) ICONO.leidaTimer = setTimeout(() => { ICONO.leidaTimer = null; if(document.visibilityState === 'hidden') return; ICONO.leidaAt = Date.now(); try{ msgRevisarSinLeer(); }catch(e){} }, falta);
+      return false;
+    }
     ICONO.leidaAt = Date.now();
     setTimeout(() => { try{ msgRevisarSinLeer(); }catch(e){} }, 400);
     return true;
@@ -62778,6 +62795,9 @@ body.idi-en [data-solo-es]{display:none !important;}
         ICONO.leidaAt = 0; msgIconoAlVolver();
       });
       if(r && typeof r.catch === 'function') r.catch(() => {});
+      // (R107, revisión) el teléfono terminó de registrarse para los avisos: el plugin ya deja poner el 0 (antes decía que no)
+      const r2 = window.Capacitor.Plugins.PushNotifications.addListener('registration', () => { ICONO.ceroVeces = 0; setTimeout(() => { try{ msgIconoCero(); }catch(e){} }, 300); });
+      if(r2 && typeof r2.catch === 'function') r2.catch(() => {});
     }catch(e){}
   }
   document.addEventListener('visibilitychange', () => { try{ if(document.visibilityState === 'hidden') msgIconoAlSalir(); else msgIconoAlVolver(); }catch(e){} });
