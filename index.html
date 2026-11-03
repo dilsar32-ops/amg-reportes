@@ -5952,6 +5952,8 @@ body.rd-equipo .rde-otro > .rde-div{height:calc(24.75*var(--rdu)); margin:0 calc
 body.rd-equipo .rde-otro input{box-sizing:border-box; width:100%; height:calc(28.41*var(--rdu)); min-height:0; margin:0; padding:0 calc(10.08*var(--rdu)); border:1.5px solid #bdbdbd; border-radius:calc(6.42*var(--rdu)); background:#000; box-shadow:none; color:#fff; font:400 calc(11.91*var(--rdu))/1.2 "Avenir Next", var(--sf);}
 body.rd-equipo .rde-otro input::placeholder{color:#f2f2f2; opacity:1;}
 body.rd-equipo .rde-otro-mas{display:grid; place-items:center; width:calc(24.75*var(--rdu)); height:calc(25.21*var(--rdu)); min-height:0; margin:0 calc(3.67*var(--rdu)) 0 calc(8.25*var(--rdu)); padding:0; border:0; border-radius:calc(5.5*var(--rdu)); background:#f50a14; cursor:pointer; -webkit-tap-highlight-color:transparent;}
+body.rd-equipo .rde-lap, body.rd-equipo .rde-otro-mas{position:relative;}
+body.rd-equipo .rde-lap::after, body.rd-equipo .rde-otro-mas::after{content:''; position:absolute; left:50%; top:50%; width:44px; height:44px; margin:-22px 0 0 -22px;}   /* (R117) el área para tocar, 44 x 44 */
 body.rd-equipo .rde-otro-mas svg{width:calc(18.33*var(--rdu)); height:calc(18.33*var(--rdu)); fill:none; stroke:#fff; stroke-width:2.4; stroke-linecap:round;}
 body.rd-equipo .rde-otro-lista{position:absolute; left:calc(114.57*var(--rdu)); right:0; bottom:calc(100% - calc(5.5*var(--rdu))); z-index:5; box-sizing:border-box; max-height:calc(238.31*var(--rdu)); overflow-y:auto; padding:calc(2.75*var(--rdu)) 0; border:1.5px solid #e2e2e2; border-radius:calc(8.25*var(--rdu)); background:#060a0a; box-shadow:0 calc(4.58*var(--rdu)) calc(13.75*var(--rdu)) rgba(0,0,0,.6);}
 body.rd-equipo .rde-otro-lista[hidden]{display:none;}
@@ -13248,7 +13250,7 @@ body.rd-horas #rdAcc .rd-acc-h, body.rd-gastos #rdAcc .rd-acc-g{display:flex;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-03-R116';
+  const APP_BUILD = '2026-11-03-R117';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -30008,7 +30010,14 @@ body.rd-horas #rdAcc .rd-acc-h, body.rd-gastos #rdAcc .rd-acc-g{display:flex;}
   // tiene lo suyo (msgTeclado: la capa toma el alto del visor) y el editor del plano y Lumi quedan fuera.
   const TEC = { foco: null, scroller: null, altoSin: 0, relleno: null, subio: false };
   const tecMedir = () => window.__tecVisorFake || (window.visualViewport ? { alto: window.visualViewport.height, top: window.visualViewport.offsetTop } : { alto: window.innerHeight, top: 0 });
-  function tecScroller(el){ for(let p = el.parentElement; p && p !== document.body; p = p.parentElement){ const cs = getComputedStyle(p); if(/(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 2) return p; } return document.scrollingElement || document.documentElement; }
+  function tecScroller(el){
+    for(let p = el.parentElement; p && p !== document.body; p = p.parentElement){ const cs = getComputedStyle(p); if(/(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 2) return p; }
+    // (3-nov-2026, R117, su foto de Mano de obra) en las pantallas en columna (body.fija / body.menu) el que corre es <main> aunque
+    // todavía no se desborde: con el relleno en el body la columna se encogía, la barra subía encima del teclado con un hueco negro
+    // debajo y la página corría (el título bajo la hora), y la casilla quedaba detrás de la barra.
+    const b = document.body; if(b && (b.classList.contains('fija') || b.classList.contains('menu'))){ const m = el.closest('main'); if(m) return m; }
+    return document.scrollingElement || document.documentElement;
+  }
   function tecQuitarRelleno(){ const r = TEC.relleno; TEC.relleno = null; TEC.foco = null; if(r){ r.el.style.paddingBottom = r.antes; r.el.removeAttribute('data-tec-relleno'); } }
   function tecAjustar(){
     const a = document.activeElement, m = tecMedir();
@@ -30020,6 +30029,15 @@ body.rd-horas #rdAcc .rd-acc-h, body.rd-gastos #rdAcc .rd-acc-g{display:flex;}
     const sc = TEC.scroller, esDoc = sc === document.scrollingElement || sc === document.documentElement, el = esDoc ? document.body : sc;
     if(!TEC.relleno || TEC.relleno.el !== el){ if(TEC.relleno){ TEC.relleno.el.style.paddingBottom = TEC.relleno.antes; TEC.relleno.el.removeAttribute('data-tec-relleno'); } TEC.relleno = { el, antes: el.style.paddingBottom }; el.setAttribute('data-tec-relleno', '1'); }
     el.style.paddingBottom = kb + 'px';
+    if(!esDoc && (document.body.classList.contains('fija') || document.body.classList.contains('menu'))){
+      if(window.scrollY || m.top){ try{ window.scrollTo(0, 0); }catch(e){} }
+      const r = a.getBoundingClientRect(), mt = Math.max(0, sc.getBoundingClientRect().top), alto = tecMedir().alto;
+      // (su segunda foto: "¿por qué dejas todo ese espacio negro?") solo lo necesario, como el iPhone: si la casilla queda bajo el
+      // teclado sube hasta quedar 16 encima de él (lo de abajo sigue llenando la pantalla); si quedó bajo el título, baja
+      if(r.bottom > alto - 16 && r.height <= alto - mt - 32) sc.scrollTop += r.bottom - (alto - 16);
+      else if(r.top < mt + 8 || r.bottom > alto - 16) sc.scrollTop += r.top - (mt + 16);
+      return;
+    }
     if(!esDoc && m.top > 0 && !TEC.subio){ const r0 = a.getBoundingClientRect(); if(r0.top >= m.top && r0.bottom <= m.top + m.alto){ TEC.subio = true; try{ window.scrollTo(0, 0); }catch(e){} } }   // la página corrida vuelve a 0 una sola vez por foco, y solo con el campo ya a la vista (que no pelee con iOS)
     const r = a.getBoundingClientRect(), arriba = m.top + 8, abajo = m.top + m.alto - 12;
     if(r.bottom > abajo || r.top < arriba){ const d = r.top - (m.top + Math.max(8, (m.alto - r.height) / 3)); if(esDoc) window.scrollBy(0, d); else sc.scrollTop += d; }
