@@ -15311,7 +15311,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-03-R127';
+  const APP_BUILD = '2026-11-03-R128';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -56683,7 +56683,13 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // La cola es DUEÑA de sus archivos: las hojas del PDF de Medidas se COPIAN
   // aqui (si el trabajo se vuelve a guardar o se borra mientras espera señal,
   // se sube exactamente lo que se mando).
+  // (R126) mientras se mete una entrada, su carpeta existe y la cola todavía no la conoce: ccLimpiarHuerfanos no la toca
+  let ccEncolando = 0;
   async function ccEncolar(proyecto, tab, cliente, items, opts){
+    ccEncolando++;
+    try{ return await ccEncolarYa(proyecto, tab, cliente, items, opts); } finally { ccEncolando--; }
+  }
+  async function ccEncolarYa(proyecto, tab, cliente, items, opts){
     const F = fpDisco();
     const id = 'cc' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     const carpeta = CC_CARPETA + '/' + id;
@@ -56713,7 +56719,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     let dirs = [];
     try{ dirs = ((await F.readdir({ path: CC_CARPETA, directory: 'DATA' })).files || []).map(f => typeof f === 'string' ? f : f.name); }catch(e){ return; }
     const ids = new Set(ccLeer(CC_COLA_KEY, []).map(t => t.id));
-    for(const d of dirs){ if(d && !ids.has(d)){ try{ await F.rmdir({ path: CC_CARPETA + '/' + d, directory: 'DATA', recursive: true }); }catch(e){} } }
+    for(const d of dirs){ if(d && !ids.has(d)){ if(ccEncolando){ setTimeout(ccLimpiarHuerfanos, 60000); return; } if(ccLeer(CC_COLA_KEY, []).some(t => t.id === d)) continue; try{ await F.rmdir({ path: CC_CARPETA + '/' + d, directory: 'DATA', recursive: true }); }catch(e){} } }
   }
 
   // ---- la cola ----
@@ -56791,6 +56797,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     for(const t of listos){
       try{ await fpDisco().rmdir({ path: t.carpeta, directory: 'DATA', recursive: true }); }catch(e){}
       const subidas = t.items.filter(i => i.estado === 'hecha').length;
+      if(t.tab === 'contenidos-hojas' && typeof ctH4Salio === 'function'){ try{ ctH4Salio(t); }catch(e){ console.error('contenidos: hojas 4x4', e); } }   // (R126) una descartada no cuenta como subida
       if(subidas && t.tab !== 'contenidos-hojas') ccAviso('&#10003; ' + subidas + (subidas === 1 ? ' foto' : ' fotos') + ' en CompanyCam &middot; ' + esc(t.proyecto), 6000);
       // CONTENIDOS (11 oct 2026): subio completo -> las fotos grandes salen del telefono (quedan las miniaturas).
       if(t.tab === 'contenidos' && t.ref && subidas === t.items.length && typeof ctLiberarTrabajo === 'function'){ try{ await ctLiberarTrabajo(t.ref, 'cola'); }catch(e){ console.error('contenidos: liberar', e); } }
@@ -57482,7 +57489,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // borran del telefono y quedan las miniaturas (320 px): con ellas siguen la lista, la vista previa
   // y el PDF. Las fotos grandes siguen en CompanyCam (y en la nube hasta su propia limpieza). ----
   const CT_VISTA_BYTES = 25 * 1024;                                     // miniatura sin tamano anotado (fotos de antes): estimado
-  function ctBytesDe(t){ let grande = 0, chica = 0, liberado = 0; (t && t.fotos || []).forEach(f => { const b = +f.bytes || 0, v = +f.vbytes || CT_VISTA_BYTES; chica += v; if(f.archivoBorrado) liberado += b; else grande += b; }); return { grande, chica, liberado, total: grande + chica }; }
+  function ctBytesDe(t){ let grande = 0, chica = 0, liberado = 0; (t && t.fotos || []).forEach(f => { const b = +f.bytes || 0, v = +f.vbytes || CT_VISTA_BYTES; chica += v + (f.h4 ? (+f.h4b || 0) : 0); if(f.archivoBorrado) liberado += b; else grande += b; }); return { grande, chica, liberado, total: grande + chica }; }
   function ctMB(b){ b = +b || 0; return (b >= 10 * 1048576 ? Math.round(b / 1048576) : (b / 1048576).toFixed(1)) + ' MB'; }
   function ctEspacio(){ const r = { trabajos: 0, fotos: 0, grande: 0, chica: 0, liberado: 0 }; Object.values(CT.trabajos).forEach(t => { const b = ctBytesDe(t); r.trabajos++; r.fotos += (t.fotos || []).length; r.grande += b.grande; r.chica += b.chica; r.liberado += b.liberado; }); return r; }
   // Se libera solo lo firmado y ya mandado a CompanyCam, y solo las fotos grandes que siguen aqui.
@@ -57610,6 +57617,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     if(!x.fila){ alert('Este trabajo firmado todavía no está en la nube. Con señal sube solo; después se puede quitar del teléfono.'); ctProcesarCola(); return; }
     if(x.pdfPendiente){ alert(x.pdfNube ? ctPdfNubeTexto(x) + '\n\nCuando termine, vuelva a tocar aquí.' : 'El PDF firmado todavía se está guardando en la nube. Espere a que termine y vuelva a intentar.'); ctProcesarCola(); return; }
     if(ctEnvioPendiente(x) || (x.ccEnviado && !x.ccNube && ctEnColaCompanyCam(x))){ alert('Este trabajo todavía se está mandando a CompanyCam. Cuando termine se puede quitar del teléfono.'); return; }
+    if(typeof ctH4Faltan === 'function' && ctH4Faltan(x) && !confirm('A este inventario le faltan ' + ctH4Faltan(x) + ' hojas 4×4 por armar para CompanyCam. Si lo quita del teléfono, esas ya no se arman.\n\n¿Quitarlo de todos modos?')) return;   // (R126)
     const enCC = x.ccCompleto ? ' y en CompanyCam' : (x.ccEnviado ? ' y mandado a CompanyCam' : '');
     if(!confirm('¿Quitar del teléfono el trabajo firmado' + (x.cliente ? ' de ' + x.cliente : '') + ' (' + (x.fotos || []).length + ' fotos)?\n\nEl registro firmado y el PDF siguen en la nube' + enCC + ': el manager los ve. En este teléfono ya no se va a poder ver ni reimprimir.' + (x.ccEnviado ? '' : '\n\nOJO: todavía no se ha mandado a CompanyCam.'))) return;
     await ctOlvidarTrabajo(x);
@@ -58471,15 +58479,15 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
           let vbytes = 0;
           try{ const chica = await ctAchicar(grande, 320, 0.7); vbytes = chica.size; await ctEscribirArchivo(vista, chica); }catch(e){}
           // (R126) la copia mediana para las hojas 4x4 de CompanyCam (solo objetos; no sube a la nube; se borra al mandar las hojas)
-          let h4 = null;
-          if(rol === 'objeto'){ try{ const media = await ctAchicar(grande, CT_H4_PX, 0.82); await ctEscribirArchivo(ctRutaH4(archivo), media); h4 = ctRutaH4(archivo); }catch(e){ h4 = null; } }
+          let h4 = null, h4b = 0;
+          if(rol === 'objeto' && typeof ccDisponible === 'function' && ccDisponible()){ try{ const media = await ctAchicar(grande, CT_H4_PX, 0.82); await ctEscribirArchivo(ctRutaH4(archivo), media); h4 = ctRutaH4(archivo); h4b = media.size || 0; }catch(e){ h4 = null; h4b = 0; } }
           // (19 oct 2026) el recorte del objeto que hizo la cámara del iPhone: solo para nombrarlo (la foto del inventario es la completa).
           let recorte = null;
           if(rol === 'objeto' && f.recorte && f.recorte.size){ try{ recorte = CT_CARPETA + '/' + t.id + '/foto-' + k + '-r.jpg'; await ctEscribirArchivo(recorte, f.recorte); }catch(e){ recorte = null; } }
           let md5 = null;
           try{ const S = (typeof ccPlugin === 'function') ? ccPlugin() : null; if(S && S.md5) md5 = (await S.md5({ path: archivo })).md5 || null; }catch(e){}
           const foto = { k, archivo, vista, sha256, md5, bytes: grande.size, vbytes, tomada: new Date().toISOString(), n: 0, nombre: '', fuente: '', ia: { estado: rol === 'objeto' ? 'pendiente' : 'hecho' },
-                         rol, de: rol === 'objeto' ? null : de, estado: 'pendiente', estados: (rol === 'objeto' && cat && CT_CARPETAS.some(c => c.k === cat)) ? [cat] : [], nota: '', subida: 'tel', enNube: false, dirty: true, intentos: 0, error: '', recorte, h4 };
+                         rol, de: rol === 'objeto' ? null : de, estado: 'pendiente', estados: (rol === 'objeto' && cat && CT_CARPETAS.some(c => c.k === cat)) ? [cat] : [], nota: '', subida: 'tel', enNube: false, dirty: true, intentos: 0, error: '', recorte, h4, h4b };
           if(rol === 'objeto' && ctPluginDesenfocar()) foto.des = { pendiente: true };   // (21 oct 2026) la copia para la ficha y el PDF
           t.fotos.push(foto);
           try{ rutaAnotar({ nombre: t.cliente, direccion: t.direccion }, 'foto'); }catch(e){}   // (R33) una foto en esta casa = estuvo aquí
@@ -60039,7 +60047,11 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   //    CT_H4_EN_COLA hojas esperando en el disco; con la app en segundo plano se para y sigue al volver.
   //  - Una hoja que se empezó 3 veces sin terminar (la app se cerró armándola) detiene todo: el intento se anota en el disco ANTES de
   //    armarla (la misma válvula del PDF de R67: lo que tumbaba el teléfono con 5,210 fotos era reintentar en cada arranque).
-  //  - Al terminar se borran las copias medianas de ese trabajo.
+  //  - Lo que no es culpa de la hoja no cuenta en la válvula: sin espacio (espera 10 min), sin señal para una foto de la nube (la
+  //    hoja no sube con un cuadro gris: espera un minuto; a la 3a vez con señal ya sí), el registro que no se pudo escribir.
+  //  - Una hoja que no pudo subir para todo (Reintentar/Descartar en el aviso de CompanyCam); una descartada no se da por subida:
+  //    queda "incompleto" con su botón para rehacerla. Con la cámara o el escáner abiertos no se arma.
+  //  - Al terminar (todas subidas) se borran las copias medianas de ese trabajo; también las de un firmado que ya no las va a usar.
   const CT_H4_POR = 16, CT_H4_COLS = 4, CT_H4_PX = 900, CT_H4_EN_COLA = 3, CT_H4_TAB = 'contenidos-hojas', CT_H4_INTENTOS = 3;
   const CT_H4_W = 3400, CT_H4_H = 4400, CT_H4_PW = 612, CT_H4_PH = 792, CT_H4_M = 36;   // carta a 400 dpi; el dibujo va en puntos, como el PDF
   const ctRutaH4 = archivo => String(archivo || '').replace(/\.jpg$/i, '-h.jpg');
@@ -60052,9 +60064,11 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   function ctH4Copias(t){ const objs = ctH4Objetos(t), ks = new Set(objs.map(o => o.k)); let con = 0; (t.fotos || []).forEach(f => { if(f.h4 && ks.has(f.k)) con++; }); return { con, de: objs.length }; }
   function ctH4Toca(t){
     if(!t || t.estado !== 'firmado' || !t.firma || !t.snapshot || !t.ccEnviado || !t.ccEnviado.id) return false;
-    if(t.h4 && (t.h4.estado === 'listo' || t.h4.estado === 'fallo')) return false;
+    if(t.h4 && t.h4.estado !== 'armando') return false;                 // listo, detenido o incompleto (estos dos esperan su botón)
+    if(ctH4ConPdfHojas(t)) return false;                                // el PDF lo armó el teléfono: sus páginas ya van a CompanyCam con este mismo título
     const c = ctH4Copias(t); return c.de > 0 && c.con * 2 > c.de;      // las copias medianas viven en el teléfono que tomó las fotos: solo uno arma
   }
+  const ctH4ConPdfHojas = t => !!(t && t.pdf && Array.isArray(t.pdf.hojas) && t.pdf.hojas.length);
   function ctH4Nombre(o){ const enIngles = (o.nombre_en && (o.nombre_en_fuente || o.nombre_fuente === 'ia' || o.nombre_fuente === 'ia-confirmado')) ? o.nombre_en : ''; return enIngles || o.nombre || '(unnamed)'; }
   function ctH4Marcas(o){ const l = (Array.isArray(o.estados) && o.estados.length) ? o.estados : (o.estado ? [o.estado] : []); return l.filter(k => !!CT_H4_ESTADOS[k]); }
   // Las líneas que caben en `ancho` (como envolver del PDF): con más de `max`, la última termina en "...".
@@ -60072,20 +60086,28 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       im.onload = () => { clearTimeout(tm); res(im); }; im.onerror = () => { clearTimeout(tm); res(null); }; im.src = src;
     });
   }
+  // Una promesa con reloj: lo que dé o null (si falla o no contesta a tiempo). Con mala señal la hoja no se queda esperando para siempre.
+  const ctH4ConReloj = (p, ms) => new Promise(res => { const tm = setTimeout(() => res(null), ms); Promise.resolve(p).then(v => { clearTimeout(tm); res(v); }, () => { clearTimeout(tm); res(null); }); });
   // La foto de la tarjeta: la copia mediana; si no, la grande si sigue en el teléfono; si no, la miniatura; si este teléfono no tiene
   // nada de esa foto (la tomó otro), la copia chica de la nube (~20 KB). Nunca la grande de la nube.
+  // Devuelve { im } / { im, url }; null si la foto no está en ningún lado (la tarjeta lo dice); { red } si está en la nube pero ahora
+  // no se pudo bajar ('sin-red': sin señal o sin sesión, no cuenta; 'fallo': con señal no contestó).
   async function ctH4Foto(t, o){
     const f = (t.fotos || []).find(x => x.k === o.k);
     const locales = f ? [f.h4, (!f.archivoBorrado && f.archivo) ? f.archivo : null, f.vista].filter(Boolean) : [];
     for(const ruta of locales){ const url = await ctUrlDe(ruta); if(!url) continue; const im = await ctH4Imagen(url); if(im) return { im }; }
     const path = (f && f.path) || o.path || '';
-    if(path && signedIn() && navigator.onLine !== false){
-      try{ const b = await mcBlobDe(ctRutaMini(path)); const url = URL.createObjectURL(b); const im = await ctH4Imagen(url); if(im) return { im, url }; URL.revokeObjectURL(url); }catch(e){}
-    }
-    return null;
+    if(!path) return null;
+    if(!signedIn() || navigator.onLine === false) return { red: 'sin-red' };
+    const b = await ctH4ConReloj(mcBlobDe(ctRutaMini(path)), 15000);
+    if(!b) return { red: 'fallo' };
+    const url = URL.createObjectURL(b); const im = await ctH4Imagen(url); if(im) return { im, url };
+    URL.revokeObjectURL(url); return null;
   }
   // UNA hoja (la i, desde 0) en JPEG de 3400x4400. Las fotos se cargan y se sueltan una por una; el canvas se suelta al final.
-  async function ctH4Hoja(t, objs, i, total){
+  // Si una foto de la nube no bajó, la hoja NO se arma con el cuadro gris (se quedaría así en CompanyCam): se lanza { red } y se
+  // intenta después; solo con aceptarHuecos (ya se intentó 3 veces) sale el cuadro.
+  async function ctH4Hoja(t, objs, i, total, aceptarHuecos){
     const s = t.snapshot || {}, tr = s.trabajo || {}, empresa = s.empresa || ctEmpresa(), reg = String(t.id).slice(0, 8);
     const PW = CT_H4_PW, PH = CT_H4_PH, M = CT_H4_M, FAM = 'Helvetica, Arial, sans-serif';
     const c = document.createElement('canvas'); c.width = CT_H4_W; c.height = CT_H4_H;
@@ -60115,7 +60137,8 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
         g.strokeStyle = '#d9d9d9'; g.lineWidth = 0.5; g.strokeRect(x0, top + 2, colW, filaH - 6);
         const fx = x0 + 4, fy = top + 4;
         const foto = await ctH4Foto(t, o);
-        if(foto && foto.im.width && foto.im.height){
+        if(foto && foto.red && !aceptarHuecos) throw Object.assign(new Error('una foto de la nube no bajó'), { red: foto.red });
+        if(foto && foto.im && foto.im.width && foto.im.height){
           const esc2 = Math.min(fotoW / foto.im.width, fotoH / foto.im.height), w = foto.im.width * esc2, h = foto.im.height * esc2;
           g.drawImage(foto.im, fx + (fotoW - w) / 2, fy + (fotoH - h) / 2, w, h);
         } else {
@@ -60123,7 +60146,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
           letra(7); g.fillStyle = '#737373'; g.textAlign = 'center';
           g.fillText('Photo in the', fx + fotoW / 2, fy + fotoH / 2 - 2); g.fillText('cloud record', fx + fotoW / 2, fy + fotoH / 2 + 7);
         }
-        if(foto){ foto.im.src = ''; if(foto.url) URL.revokeObjectURL(foto.url); }
+        if(foto && foto.im){ foto.im.src = ''; if(foto.url) URL.revokeObjectURL(foto.url); }
         const extras = Array.isArray(o.fotos) ? o.fotos.length : 0;
         const titulo = '#' + String(o.n).padStart(2, '0') + '  ' + ctH4Nombre(o) + (extras ? '  (+' + extras + ' more photo' + (extras > 1 ? 's' : '') + ')' : '');
         letra(tT); let y = fy + fotoH + lT;
@@ -60144,69 +60167,137 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       return blob;
     } finally { c.width = 0; c.height = 0; }
   }
+  // Las hojas de este trabajo en la cola de CompanyCam (una entrada por hoja). "Abiertas" = todavía no subieron (pendientes o con error).
   const ctH4EnCola = t => (typeof ccLeer === 'function' ? ccLeer(CC_COLA_KEY, []) : []).filter(e => e.tab === CT_H4_TAB && e.ref === t.id);
-  const ctH4Esperando = t => ctH4EnCola(t).reduce((n, e) => n + (e.items || []).filter(it => it.estado === 'pendiente').length, 0);
+  const ctH4Abiertas = t => ctH4EnCola(t).filter(e => (e.items || []).some(it => it.estado !== 'hecha' && it.estado !== 'descartada'));
+  const ctH4ConError = t => ctH4EnCola(t).filter(e => (e.items || []).some(it => it.estado === 'error')).length;
+  const ctH4Desc = (i, total, reg) => 'Contents Inventory - signed - page ' + (i + 1) + ' of ' + total + ' - Reg. ' + reg;
+  const ctH4Pagina = e => { const m = /page (\d+) of \d+/.exec(String(((e.items || [])[0] || {}).descripcion || '')); return m ? +m[1] - 1 : -1; };
+  // Con la cámara o el escáner abiertos no se arma (el lienzo de la hoja pesa ~60 MB): sigue al cerrarlos.
+  const ctH4Ocupado = () => !!(ctCam || ctTomando || (typeof FP_ESCANEANDO !== 'undefined' && FP_ESCANEANDO));
   function ctH4Pintar(t){ const panel = document.querySelector('.tab-panel[data-tab="contenidos"]'); if(panel && panel.classList.contains('active') && ctActual() === t) ctPintarFirma(); }
-  let ctH4Corriendo = false, ctH4Tm = null;
+  // Las copias medianas salen del registro y, ya guardado eso, del disco.
+  function ctH4SoltarCopias(t){
+    const copias = (t.fotos || []).filter(f => f.h4).map(f => f.h4); if(!copias.length) return;
+    (t.fotos || []).forEach(f => { if(f.h4){ f.h4 = null; f.h4b = 0; } }); ctEscribir();
+    ctDespuesDeGuardar(async () => { for(const r of copias){ try{ await ctBorrarArchivo(r); }catch(e){} } return true; });
+  }
+  // Un firmado cuyas copias ya nunca se van a usar: hojas ya en CompanyCam, el PDF del teléfono ya mandó sus páginas, o este teléfono
+  // tomó la mitad o menos (empezó antes de R126). (Sin proyecto de CompanyCam todavía NO: se puede mandar después.)
+  function ctH4SinUso(t){
+    if(!t || t.estado !== 'firmado' || !(t.fotos || []).some(f => f.h4)) return false;
+    const h = t.h4; if(h && h.estado !== 'listo') return false;
+    if(h && h.estado === 'listo') return true;
+    const c = ctH4Copias(t); return ctH4ConPdfHojas(t) || c.con * 2 <= c.de;
+  }
+  // Cuántas hojas faltan por ARMAR (las que ya están en la cola suben solas aunque se quite el trabajo).
+  function ctH4Faltan(t){
+    if(!t || typeof ccDisponible !== 'function' || !ccDisponible()) return 0;
+    const h = t.h4;
+    if(!h) return ctH4Toca(t) ? Math.ceil(ctH4Objetos(t).length / CT_H4_POR) : 0;
+    if(h.estado === 'listo') return 0;
+    return Math.max(0, h.total - h.hechas) + (h.rehacer || []).length + (h.faltan || []).length;
+  }
+  let ctH4Corriendo = false, ctH4Tm = null, ctH4PausaHasta = 0;
   function ctH4Pronto(ms){ clearTimeout(ctH4Tm); ctH4Tm = setTimeout(() => { ctH4Tm = null; ctH4Trabajar().catch(e => console.warn('contenidos: hojas 4x4', e)); }, ms == null ? 2000 : ms); }
   async function ctH4Trabajar(){
-    if(ctH4Corriendo || !ctReg.cargado || typeof ccDisponible !== 'function' || !ccDisponible() || !signedIn() || document.visibilityState === 'hidden') return;
+    if(ctH4Corriendo || !ctReg.cargado || typeof ccDisponible !== 'function' || !ccDisponible() || !signedIn() || document.visibilityState === 'hidden' || ctH4Ocupado()) return;
+    if(Date.now() < ctH4PausaHasta){ ctH4Pronto(ctH4PausaHasta - Date.now() + 1000); return; }   // sin espacio en el teléfono: un rato
     ctH4Corriendo = true;
     try{
       for(const t of Object.values(CT.trabajos)){
-        if(document.visibilityState === 'hidden' || !signedIn()) break;
+        if(document.visibilityState === 'hidden' || !signedIn() || ctH4Ocupado()) break;
         if(ctH4Toca(t)) await ctH4DeTrabajo(t);
+        else if(ctH4SinUso(t)) ctH4SoltarCopias(t);
       }
     } finally { ctH4Corriendo = false; }
   }
   async function ctH4DeTrabajo(t){
     const objs = ctH4Objetos(t), total = Math.ceil(objs.length / CT_H4_POR), proyectoId = String(t.ccEnviado.id);
-    if(!t.h4 || t.h4.total !== total || t.h4.proyecto !== proyectoId) t.h4 = { estado: 'armando', total, hechas: 0, proyecto: proyectoId, empezo: new Date().toISOString(), intento: null };
+    if(!t.h4 || t.h4.total !== total || t.h4.proyecto !== proyectoId) t.h4 = { estado: 'armando', total, hechas: 0, proyecto: proyectoId, empezo: new Date().toISOString(), intento: null, faltan: [], rehacer: [] };
     const proyecto = { id: proyectoId, nombre: String(t.ccEnviado.nombre || '') };
     const tr = (t.snapshot && t.snapshot.trabajo) || {}, cliente = { nombre: tr.cliente || t.cliente || '', direccion: tr.direccion || t.direccion || '' };
     const reg = String(t.id).slice(0, 8), cuando = (t.firma && t.firma.firmado_at) || new Date().toISOString();
-    let esperas = 0;
-    while(t.h4.hechas < total){
-      if(document.visibilityState === 'hidden' || !signedIn()) return;
-      if(ctH4Esperando(t) >= CT_H4_EN_COLA){                            // el disco no se llena: se espera a que suban las que ya están
-        ccProcesarCola();
-        if(++esperas > 40) return;                                      // sin señal (~2 min): la siguiente vuelta sigue
-        await new Promise(r => setTimeout(r, 3000)); continue;
-      }
-      esperas = 0;
-      const i = t.h4.hechas;
+    // lo que no fue culpa de la hoja (no se pudo guardar el registro, no hay espacio, no bajó una foto) no cuenta en la válvula
+    const deshacer = () => { const v = t.h4.intento; if(v && v.n > 1) v.n--; else t.h4.intento = null; };
+    while(true){
+      if(CT.trabajos[t.id] !== t || document.visibilityState === 'hidden' || !signedIn() || ctH4Ocupado()) return;   // (lo quitaron del teléfono a la mitad: se deja)
+      if(ctH4ConError(t)) return;                                       // una hoja no pudo subir: espera a Reintentar o Descartar en el aviso de CompanyCam
+      const rehacer = Array.isArray(t.h4.rehacer) ? t.h4.rehacer : (t.h4.rehacer = []);
+      const i = t.h4.hechas < total ? t.h4.hechas : (rehacer.length ? rehacer[0] : -1);
+      if(i < 0) break;
+      const avanzar = () => { if(i === t.h4.hechas) t.h4.hechas = i + 1; else rehacer.shift(); t.h4.intento = null; t.h4.red = null; };
+      const descripcion = ctH4Desc(i, total, reg);
+      // ya está en la cola (la app se cerró entre meterla y anotarla): no se arma otra vez
+      if(ctH4EnCola(t).some(e => (e.items || []).some(it => it.descripcion === descripcion))){ avanzar(); ctEscribir(); continue; }
+      if(ctH4Abiertas(t).length >= CT_H4_EN_COLA) return;              // el disco no se llena: al subir esas, ccLimpiarTerminados vuelve aquí
+      const red = t.h4.red && t.h4.red.i === i ? t.h4.red : null;
+      if(red && Date.now() - (+red.at || 0) < 50000){ ctH4Pronto(50000 - (Date.now() - (+red.at || 0)) + 500); return; }   // una foto de la nube no bajó: un minuto entre intentos
       t.h4.intento = (t.h4.intento && t.h4.intento.i === i) ? { i, n: (+t.h4.intento.n || 0) + 1 } : { i, n: 1 };
       if(t.h4.intento.n > CT_H4_INTENTOS){
-        t.h4.estado = 'fallo'; t.h4.error = 'la hoja ' + (i + 1) + ' de ' + total + ' no se pudo armar'; ctEscribir(); ctH4Pintar(t);
-        console.warn('contenidos: hojas 4x4 de ' + t.id + ': ' + t.h4.error + '; se arman desde la oficina'); return;
+        t.h4.estado = 'fallo'; t.h4.error = 'la hoja ' + (i + 1) + ' de ' + total; ctEscribir(); ctH4Pintar(t);
+        console.warn('contenidos: hojas 4x4 de ' + t.id + ': la hoja ' + (i + 1) + ' tumbó la app ' + CT_H4_INTENTOS + ' veces'); return;
       }
       // el intento queda en el disco ANTES de armarla (si la app se cae, cuenta); si el registro no se puede escribir, no se arma
-      if(!(await Promise.race([ctDespuesDeGuardar(() => true), new Promise(r => setTimeout(() => r(false), 15000))]))) return;
+      if(!(await ctH4ConReloj(ctDespuesDeGuardar(() => true), 15000))){ deshacer(); ctH4Pronto(60000); return; }
       let dataUrl = '';
-      try{ const blob = await ctH4Hoja(t, objs, i, total); dataUrl = 'data:image/jpeg;base64,' + await blobToBase64(blob); }
-      catch(e){ console.warn('contenidos: hoja 4x4 ' + (i + 1), e); return; }   // la siguiente vuelta la intenta otra vez (y cuenta)
-      try{ await ccEncolar(proyecto, CT_H4_TAB, cliente, [{ dataUrl, descripcion: 'Contents Inventory - signed - page ' + (i + 1) + ' of ' + total + ' - Reg. ' + reg, tags: [CC_TAG, 'Contents', 'Signed inventory'], capturada: cuando }], { ref: t.id }); }
-      catch(e){ console.warn('contenidos: hoja 4x4 a la cola', e); return; }   // sin espacio en el teléfono: la siguiente vuelta
+      try{ const blob = await ctH4Hoja(t, objs, i, total, !!(red && red.n >= 3)); dataUrl = 'data:image/jpeg;base64,' + await blobToBase64(blob); }
+      catch(e){
+        if(e && e.red){                                                 // no se armó con un hueco: se intenta en un minuto (sin señal no cuenta)
+          deshacer();
+          if(e.red === 'fallo') t.h4.red = { i, n: (red ? +red.n || 0 : 0) + 1, at: Date.now() };
+          ctEscribir(); ctH4Pintar(t); ctH4Pronto(60000); return;
+        }
+        console.warn('contenidos: hoja 4x4 ' + (i + 1), e); return;     // memoria: la siguiente vuelta la intenta otra vez (y cuenta)
+      }
+      if(CT.trabajos[t.id] !== t) return;
+      try{ await ccEncolar(proyecto, CT_H4_TAB, cliente, [{ dataUrl, descripcion, tags: [CC_TAG, 'Contents', 'Signed inventory'], capturada: cuando }], { ref: t.id }); }
+      catch(e){                                                         // sin espacio en el teléfono: no es culpa de la hoja; diez minutos
+        console.warn('contenidos: hoja 4x4 a la cola', e); deshacer(); t.h4.sinEspacio = true; ctEscribir(); ctH4Pintar(t);
+        ctH4PausaHasta = Date.now() + 600000; ctH4Pronto(601000); return;
+      }
       dataUrl = '';
-      t.h4.hechas = i + 1; t.h4.intento = null; ctEscribir(); ctH4Pintar(t);
+      t.h4.sinEspacio = false; avanzar(); ctEscribir(); ctH4Pintar(t);
       ccProcesarCola();
       await new Promise(r => setTimeout(r, 300));                       // un respiro para la pantalla
     }
-    if(ctH4EnCola(t).length){ ccProcesarCola(); return; }               // todavía suben: al limpiar la cola se vuelve aquí (ccLimpiarTerminados)
-    const copias = (t.fotos || []).filter(f => f.h4).map(f => f.h4);
-    (t.fotos || []).forEach(f => { if(f.h4) f.h4 = null; });
-    t.h4.estado = 'listo'; t.h4.listo_at = new Date().toISOString(); t.h4.intento = null;
-    ctDespuesDeGuardar(async () => { for(const r of copias){ try{ await ctBorrarArchivo(r); }catch(e){} } return true; });   // las copias salen cuando el registro ya lo dice
-    ctH4Pintar(t);
+    if(ctH4EnCola(t).length) return;                                    // todavía suben: al limpiar la cola se vuelve aquí (ccLimpiarTerminados)
+    if((t.h4.faltan || []).length){ t.h4.estado = 'incompleto'; ctEscribir(); ctH4Pintar(t); return; }   // descartaron hojas en la cola: no se dice "listo"
+    t.h4.estado = 'listo'; t.h4.listo_at = new Date().toISOString(); t.h4.intento = null; t.h4.red = null;
+    ctH4SoltarCopias(t); ctEscribir(); ctH4Pintar(t);
     ccAviso('&#10003; ' + total + (total === 1 ? ' hoja' : ' hojas') + ' del inventario en CompanyCam &middot; ' + esc(proyecto.nombre), 6000);
   }
-  function ctH4Linea(t){
-    const h = t && t.h4;
-    if(!h) return ctH4Toca(t) ? '<br><span style="color:var(--pick);">Las hojas 4×4 para CompanyCam se arman en este teléfono…</span>' : '';
-    if(h.estado === 'listo') return '<br><span style="color:var(--green);">&#10003; ' + h.total + (h.total === 1 ? ' hoja' : ' hojas') + ' 4×4 en CompanyCam</span>';
-    if(h.estado === 'fallo') return '<br><span style="color:var(--pick);">&#9888; Las hojas 4×4 no se pudieron armar en este teléfono (' + esc(h.error || '') + '); la oficina las arma desde la computadora.</span>';
-    return '<br><span style="color:var(--pick);">Hojas 4×4 para CompanyCam: ' + Math.min(h.hechas, h.total) + ' de ' + h.total + '. Las arma este teléfono; déjelo con la app abierta.</span>';
+  // ccLimpiarTerminados: una hoja salió de la cola. Si salió sin subir (Descartar), se anota para no decir "listo" y poder rehacerla.
+  function ctH4Salio(e){
+    const t = e && CT.trabajos[e.ref]; if(!t || !t.h4) return;
+    if((e.items || []).every(it => it.estado === 'hecha')) return;
+    const p = ctH4Pagina(e), faltan = Array.isArray(t.h4.faltan) ? t.h4.faltan : (t.h4.faltan = []);
+    if(p >= 0 && !faltan.includes(p)){ faltan.push(p); ctEscribir(); }
   }
+  function ctH4Linea(t){
+    if(!t || typeof ccDisponible !== 'function' || !ccDisponible()) return '';
+    const h = t.h4, aviso = x => '<br><span style="color:var(--pick);">' + x + '</span>', boton = x => ' <button type="button" class="minibtn" data-ct-h4="otra">' + x + '</button>';
+    if(!h) return ctH4Toca(t) ? aviso('Las hojas 4×4 para CompanyCam se arman en este teléfono…') : '';
+    if(h.estado === 'listo') return '<br><span style="color:var(--green);">&#10003; ' + h.total + (h.total === 1 ? ' hoja' : ' hojas') + ' 4×4 en CompanyCam</span>';
+    if(h.estado === 'fallo') return aviso('&#9888; Las hojas 4×4 se detuvieron: ' + esc(h.error || '') + ' cerró la app ' + CT_H4_INTENTOS + ' veces al armarla.' + boton('Intentar otra vez'));
+    if(h.estado === 'incompleto'){ const n = (h.faltan || []).length; return aviso('&#9888; ' + n + (n === 1 ? ' hoja 4×4 se descartó y no llegó' : ' hojas 4×4 se descartaron y no llegaron') + ' a CompanyCam.' + boton(n === 1 ? 'Armarla otra vez' : 'Armarlas otra vez')); }
+    const van = 'Hojas 4×4 para CompanyCam: ' + Math.min(h.hechas, h.total) + ' de ' + h.total + '. ', err = ctH4ConError(t);
+    if(err) return aviso(van + err + (err === 1 ? ' no pudo subir' : ' no pudieron subir') + ': toque Reintentar en el aviso de CompanyCam.');
+    if(h.sinEspacio) return aviso(van + 'El teléfono no tiene espacio: libere espacio y siguen solas.');
+    if(h.red && h.red.n) return aviso(van + 'Esperando señal para bajar unas fotos chicas de la nube.');
+    return aviso(van + 'Las arma este teléfono; déjelo con la app abierta.');
+  }
+  // "Intentar otra vez" (se detuvo: UN intento más, no tres) y "Armarlas otra vez" (las que se descartaron en la cola).
+  document.addEventListener('click', ev => {
+    const b = ev.target && ev.target.closest && ev.target.closest('[data-ct-h4]'); if(!b) return;
+    const t = ctActual(); if(!t || !t.h4) return;
+    if(t.h4.estado === 'fallo'){ const v = t.h4.intento; t.h4.intento = v ? { i: v.i, n: CT_H4_INTENTOS - 1 } : null; t.h4.error = ''; }
+    else if(t.h4.estado === 'incompleto'){ t.h4.rehacer = (t.h4.rehacer || []).concat(t.h4.faltan || []).sort((a, b) => a - b); t.h4.faltan = []; }
+    else return;
+    t.h4.estado = 'armando'; t.h4.red = null; ctEscribir(); ctPintarFirma(); ctH4Pronto(0);
+  });
+  window.addEventListener('online', () => ctH4Pronto());
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') ctH4Pronto(); });
   window.__ctH4 = { hoja: ctH4Hoja, toca: ctH4Toca, objetos: ctH4Objetos, linea: ctH4Linea, trabajar: ctH4Trabajar, escribir: ctEscribirArchivo };   // para las pruebas (en el navegador escribir = memoria)
   const ctEnvioVan = n => (+(n && n.hechas) || 0) + (+(n && n.hojas_hechas) || 0);
   function ctEnvioPendiente(t){ return !!(t && t.ccNube && !t.ccCompleto && ['pendiente', 'subiendo', 'error'].includes(t.ccNube.estado)); }
