@@ -15883,7 +15883,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-04-R136';
+  const APP_BUILD = '2026-11-04-R137';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -63593,7 +63593,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // "Limpio" = la firma del formulario cuando se abrió con visAbrir, se guardó como visita o se mandó a CompanyCam (o la persona dijo "Salir
   // sin guardar"). "Sin guardar" = hay algo y la firma cambió desde entonces. Sin firma (llenado a mano desde cero): sin guardar si lo que hay
   // no es igual a la visita guardada de ese día. El número de visita (se llena solo) no cuenta.
-  const visLimpioKey = () => visOrigenKey() + ':limpio';
+  const visLimpioKey = () => visOrigenKey() + ':limpio2';   // (R137) llave nueva: las marcas viejas guardaban lo no guardado como limpio
   function visFirma(kind){
     try{
       const d = Object.assign({}, visFotoDe(kind)); delete d.visita;
@@ -63631,6 +63631,46 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   }
   const VH_TXT = { equipment: 'Lo que pusiste en Equipo todavía no se guarda.', readings: 'Lo que pusiste en Secado todavía no se guarda.',
                    comms: 'Lo que pusiste en Novedades todavía no se guarda.', materials: 'Lo que pusiste en Materiales todavía no se guarda.' };
+  // (R137) "Salir sin guardar" de verdad: lo cambiado desde la última vez que quedó limpio se quita. Vuelve a como estaba (misma casa y
+  //   mismo día); si no, a la visita de hoy guardada de esa casa; si no hay nada, en blanco. Las fotos que ya estaban se quedan (las nuevas
+  //   no) y la firma solo si ya estaba.
+  function visDescartar(kind){
+    try{
+      const f = visDeForm(kind) || {};
+      let L = null; try{ L = JSON.parse(visLimpioLeer()[kind] || 'null'); }catch(e){}
+      const misma = (a, b) => !!(a && b && a.direccion && b.direccion && a.fecha === b.fecha && visMismaCasa(visCasaDeForm(a), visCasaDeForm(b)));
+      const casaDe = x => Object.assign(visCasaDeForm(x), { nombre: x.nombre || '' });
+      let rec = null, casa = null, x = [];
+      if(L && L[1] && misma(L[0], f)){ rec = { data: L[1], fecha: L[0].fecha, dir_key: visCasaDeForm(L[0]).dir_key }; casa = casaDe(L[0]); x = L[2] || []; }
+      else if(f.direccion){
+        const g = visDeCasa(visCasaDeForm(f)).filter(v => v.kind === kind && v.fecha === f.fecha).sort((a, b) => (+a.at || 0) - (+b.at || 0)).pop();
+        if(g){ rec = g; casa = casaDe(f); }
+      }
+      const fotos = kind === 'materials' ? epPhotos : kind === 'comms' ? cPhotos : kind === 'readings' ? dPhotos : null;
+      const quedan = fotos && kind !== 'equipment' ? fotos.slice(0, +x[0] || 0) : [];
+      const pad = kind === 'materials' ? mSig : kind === 'equipment' ? eSig : null;
+      const firma = !!(pad && pad.isDrawn() && (kind === 'materials' ? x[1] : x[0])), borrar = pad && pad.clear;
+      if(firma) pad.clear = () => {};   // la firma que ya estaba no se toca
+      try{
+        if(rec){
+          const o = visOrigenLeer()[kind];
+          const anterior = visDeCasa(casa).filter(v => v.kind === kind && v.fecha < rec.fecha).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || ((+a.at || 0) - (+b.at || 0))).pop() || null;
+          visAplicar(kind, rec, true, casa, anterior);
+          if(!rec.kind) visOrigenPoner(kind, o || null);   // volvió a lo limpio: de qué versión salió no cambia
+        } else {
+          ({ equipment: resetEquipment, materials: resetMaterials, comms: resetComms, readings: resetDrying })[kind]();
+          visOrigenPoner(kind, null);
+        }
+      } finally { if(firma) pad.clear = borrar; }
+      if(quedan.length){
+        if(kind === 'materials'){ epPhotos = quedan; renderEpPhotos(); }
+        else if(kind === 'comms'){ cPhotos = quedan; renderCPhotos(); }
+        else { dPhotos = quedan; renderDPhotos(); }
+      }
+      if(kind === 'equipment' && rec && !rec.kind){ const s = document.getElementById('e-signed'); if(s) s.checked = !!x[1]; }
+      if(typeof saveDraft === 'function') saveDraft();
+    }catch(e){ try{ console.warn('visDescartar', e); }catch(_){} }
+  }
   function visHojaSalida(o){
     let v = document.getElementById('visHoja');
     if(!v){ v = document.createElement('div'); v.id = 'visHoja'; v.className = 'vh-velo'; v.setAttribute('role', 'dialog'); v.setAttribute('aria-modal', 'true'); v.setAttribute('aria-labelledby', 'vhT'); document.body.appendChild(v); }
@@ -63653,7 +63693,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       const que = b.dataset.vh;
       if(que === 'seguir'){ cerrar(); return; }
       if(que === 'si'){ const r = visRegistrar(o.kind); cerrar(); if(!r) return; o.seguir(); return; }   // si no se pudo guardar, visRegistrar dice por qué y se queda
-      cerrar(); visMarcarLimpio(o.kind); o.seguir();   // "sin guardar": lo escrito se queda en el formulario; nada se borra aquí
+      cerrar(); if(salir) visDescartar(o.kind); visMarcarLimpio(o.kind); o.seguir();   // (R137) "Salir sin guardar": lo no guardado se quita
     };
     setTimeout(() => { const s = v.querySelector('.vh-si'); if(s) s.focus(); }, 30);
   }
@@ -68395,6 +68435,46 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       const em = r.querySelector('em'), t = area(f); if(em.textContent !== t) em.textContent = t;
       [['[data-rdx-l]', f.len], ['[data-rdx-w]', f.wid]].forEach(([s, src]) => { const x = r.querySelector(s); if(x && src && x !== document.activeElement && x.value !== src.value) x.value = src.value; }); });
   }
+  // (R137) el clic de la ruleta, como las ruedas del iPhone: uno por cada número que pasa por en medio (despacio clic… clic…, con impulso
+  //   seguido como ruleta). Con el sonido del teléfono (Web Audio, sin archivos): se prende con el toque (el iPhone lo pide), se mezcla
+  //   con la música o el asistente sin cortarlos, y se duerme a los 3 segundos sin girar.
+  const RDX_SON = { ac: null, buf: null, prox: 0, ult: 0, dormir: 0, n: 0 };
+  const rdxSonSeguir = ac => { try{ const p = ac.resume(); if(p && p.catch) p.catch(() => {}); }catch(e){} };
+  function rdxSonDespertar(){
+    try{
+      if(!RDX_SON.ac){ const AC = window.AudioContext || window.webkitAudioContext; if(!AC) return; RDX_SON.ac = new AC(); }
+      const ac = RDX_SON.ac;
+      if(!RDX_SON.buf){   // el clic: un golpecito seco con su tono corto (25 ms)
+        const sr = ac.sampleRate, n = Math.round(sr * 0.025), b = ac.createBuffer(1, n, sr), d = b.getChannelData(0);
+        let pico = 0;
+        for(let k = 0; k < n; k++){ const t = k / sr;
+          d[k] = (Math.random() * 2 - 1) * Math.exp(-t / 0.0012) * 0.55 + Math.sin(2 * Math.PI * 2350 * t) * Math.exp(-t / 0.0035) * 0.5
+            + Math.sin(2 * Math.PI * 1150 * t) * Math.exp(-t / 0.005) * 0.18;
+          pico = Math.max(pico, Math.abs(d[k])); }
+        for(let k = 0; k < n; k++) d[k] /= (pico || 1);
+        RDX_SON.buf = b;
+      }
+      if(ac.state !== 'running') rdxSonSeguir(ac);
+    }catch(e){}
+  }
+  function rdxClic(n){
+    const ac = RDX_SON.ac, buf = RDX_SON.buf; if(!ac || !buf || !(n > 0)) return;
+    try{
+      if(ac.state !== 'running') rdxSonSeguir(ac);
+      const ahora = ac.currentTime;
+      for(let k = 0; k < Math.min(4, Math.ceil(n)); k++){
+        const t0 = Math.max(ahora, RDX_SON.prox); if(t0 - ahora > 0.06) break;   // muy rápido: se oye seguido, sin amontonarse
+        const s = ac.createBufferSource(), g = ac.createGain();
+        s.buffer = buf; s.playbackRate.value = 0.96 + Math.random() * 0.08;
+        g.gain.value = (t0 - RDX_SON.ult < 0.045) ? 0.3 : 0.45;   // rápido, un poco más quedito (como una ruleta)
+        s.connect(g); g.connect(ac.destination); s.start(t0);
+        RDX_SON.ult = t0; RDX_SON.prox = t0 + 0.016; RDX_SON.n++;
+      }
+      clearTimeout(RDX_SON.dormir); RDX_SON.dormir = setTimeout(() => { try{ if(ac.state === 'running') ac.suspend(); }catch(e){} }, 3000);
+    }catch(e){}
+  }
+  // un paso con el dedo (el número de arriba o el de abajo) o con las flechas: su clic si el número cambió
+  function rdxPaso(k, i, d){ const f = rdxFila(k, i), a = f ? Math.round(f.n) : 0; rdxSumar(k, i, d); if(Math.max(0, Math.min(999, a + d)) !== a) rdxClic(1); }
   // la ruleta: el número que se ve (con su pedacito de vuelta) sin repintar nada más; al soltar se guarda en su casilla de siempre
   function rdxRueda(t, v){
     const inn = t && t.querySelector('.rdx-w-in'); if(!inn) return;
@@ -68402,7 +68482,8 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     for(let k = 0; k < 5; k++){ const x = txt(r - 2 + k); if(filas[k].textContent !== x) filas[k].textContent = x; }
     const fila = (filas[2] && filas[2].offsetHeight) || 20;
     inn.style.transform = 'translateY(' + ((r - v) * fila).toFixed(2) + 'px)';
-    if(t.getAttribute('aria-valuenow') !== String(r)) t.setAttribute('aria-valuenow', String(r));
+    const antes = Number(t.getAttribute('aria-valuenow'));
+    if(antes !== r){ t.setAttribute('aria-valuenow', String(r)); if(Number.isFinite(antes)) rdxClic(Math.abs(r - antes)); }   // (R137) su clic por cada número
     t.classList.toggle('on', r > 0);
   }
   function rdxGuardar(k, i, n){
@@ -68468,6 +68549,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     // lo que ya no se pide se pone solo: la fecha de hoy y quien tiene el teléfono de líder (los dos van en la hoja)
     const d = document.getElementById('m-date'); if(d && !d.value) d.value = todayStr();
     const l = document.getElementById('m-leader'); if(l && !String(l.value || '').trim() && typeof ponerLiderSesion === 'function') try{ ponerLiderSesion(); }catch(e){}
+    if(RDX.activa) rdxActivar(null);   // (R137) al entrar, todas con candado
     rdxTodo();
   }
   (function rdxCablear(){
@@ -68491,6 +68573,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       if(!rdxEn() || !e.target.closest || (e.pointerType === 'mouse' && e.button !== 0)) return;
       const t = e.target.closest('.rdx-t[data-rdx-i]');
       if(!t){ if(!e.target.closest('.rdx-t') && RDX.activa) rdxActivar(null); return; }
+      rdxSonDespertar();   // (R137) el sonido se prende con el toque
       const activa = t.classList.contains('activa'), g0 = activa ? quieta() : null;
       const k = t.dataset.rdxK, i = +t.dataset.rdxI, f = rdxFila(k, i);
       const v = g0 ? g0.v : (f ? f.n : 0);
@@ -68514,13 +68597,14 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       if(!g.activa){ if(!g.mov) rdxActivar(g.k + ':' + g.i); return; }   // un toque prende esa ruleta
       if(!g.mov){   // un toque en la ruleta prendida: el número de arriba o el de abajo
         const w = g.t.querySelector('.rdx-w'), r = w && w.getBoundingClientRect();
-        if(r && g.x >= r.left - 6){ const c = r.top + r.height / 2; if(g.y < c - g.alto / 2) rdxSumar(g.k, g.i, -1); else if(g.y > c + g.alto / 2) rdxSumar(g.k, g.i, 1); }
+        if(r && g.x >= r.left - 6){ const c = r.top + r.height / 2; if(g.y < c - g.alto / 2) rdxPaso(g.k, g.i, -1); else if(g.y > c + g.alto / 2) rdxPaso(g.k, g.i, 1); }
         return; }
       const m = g.muestras, a = m[0], b = m[m.length - 1], dt = Math.max(1, b[0] - a[0]);
       const vel = (performance.now() - b[0] > 90) ? 0 : -(b[1] - a[1]) / dt / g.alto;   // filas por milisegundo, hacia arriba sube
       soltar(g.t, g.k, g.i, g.v, vel);
     };
-    panel.addEventListener('pointerup', () => fin(false));
+    panel.addEventListener('pointerup', () => { if(RDX.g.t) rdxSonDespertar(); fin(false); });
+    panel.addEventListener('touchend', e => { if(e.target.closest && e.target.closest('.rdx-t[data-rdx-i]')) rdxSonDespertar(); }, { passive: true });
     panel.addEventListener('pointercancel', () => fin(true));
     panel.addEventListener('contextmenu', e => { if(rdxEn() && e.target.closest && e.target.closest('.rdx-t')) e.preventDefault(); });
     // con el teclado: Enter prende la ruleta, las flechas la giran
@@ -68528,7 +68612,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       const t = e.target.closest && e.target.closest('.rdx-t[data-rdx-i]'); if(!t || !rdxEn()) return;
       const k = t.dataset.rdxK, i = +t.dataset.rdxI;
       if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); rdxActivar(k + ':' + i); return; }
-      if(e.key === 'ArrowUp' || e.key === 'ArrowDown'){ e.preventDefault(); rdxActivar(k + ':' + i); rdxSumar(k, i, e.key === 'ArrowUp' ? 1 : -1);
+      if(e.key === 'ArrowUp' || e.key === 'ArrowDown'){ e.preventDefault(); rdxSonDespertar(); rdxActivar(k + ':' + i); rdxPaso(k, i, e.key === 'ArrowUp' ? 1 : -1);
         const n = document.querySelector('.rdx-t[data-rdx-k="' + k + '"][data-rdx-i="' + i + '"]'); if(n) n.focus({ preventScroll: true }); }
     });
     panel.addEventListener('click', e => {
@@ -68607,7 +68691,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       + (d.firma ? '<span>Client signature' + (d.cliente ? ' · ' + e(d.cliente) : '') + (d.fecha ? ' · ' + e(d.fecha) : '') + '</span>' : '') + '</div>', true);
     return x + '<div class="rdsh-pie">Generated ' + e(new Date().toLocaleString('en-US')) + '</div></div>';
   }
-  window.__rdx = { todo: rdxTodo, filas: rdxFilas, sumar: rdxSumar, activar: rdxActivar, otro: rdxOtro, hoja: () => rdxHojaHtml(rdxHojaDatos()), estado: RDX };   // para las pruebas
+  window.__rdx = { todo: rdxTodo, filas: rdxFilas, sumar: rdxSumar, activar: rdxActivar, otro: rdxOtro, hoja: () => rdxHojaHtml(rdxHojaDatos()), estado: RDX, son: RDX_SON };   // para las pruebas
   window.__rds = { todo: rdsTodo, estado: RDS };
   // ===================== (3-nov-2026, R129) MAPA DE HUMEDAD DE RD: sus 6 maquetas =====================
   // Lo de siempre manda: el modo y el color son los botones de #fmToolbar (sus clics), Deshacer es #fmUndoBtn, Guardar JPG / Descargar PDF /
