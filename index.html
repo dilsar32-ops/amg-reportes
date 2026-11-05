@@ -7833,6 +7833,13 @@ html body.rd-materiales .rdx-cerrada > .rdx-res{display:block; margin:2px 0 0 ca
 html body.rd-materiales #mMatCard.rdx-cerrada > :not(.rdx-tit):not(.rdx-res), html body.rd-materiales #mEpCard.rdx-cerrada > :not(.rdx-tit):not(.rdx-res){display:none !important;}
 @media (prefers-reduced-motion: reduce){ html body.rd-materiales .rdx-chev{transition:none;} }
 
+/* (5-nov-2026, R144) el interruptor escondido del vibro (no se ve ni se toca) */
+.rdzv-vibro{position:fixed !important; left:-200px !important; top:0 !important; width:1px !important; height:1px !important; overflow:hidden !important; opacity:0 !important; pointer-events:none !important;}
+/* Mano de obra: el aviso del cliente dentro de su turno, encima de "Cliente" */
+html body.rd-labor .shift-card > .rdq-pide.on, html body.rd-labor .shift-card .rdq-pide.on{margin:4px 0 10px;}
+html body .rdq-falta .rdl-cli, html body .rdq-falta .rde-cli{border-color:#ffb020 !important; box-shadow:0 0 0 1px rgba(255,176,32,.35), 0 0 12px rgba(255,176,32,.3) !important;}
+html body .rdq-falta.rdq-parpa .rdl-cli, html body .rdq-falta.rdq-parpa .rde-cli{animation:rdq-casilla .36s ease-in-out 3;}
+
 .rdg-sin{margin-top:calc(2.75*var(--rdu)); font:400 calc(10.52*var(--rdu))/1.3 "Avenir Next", var(--sf); color:#8e92a2;}
 
 /* ---- la barra de abajo de cada pantalla (#rdAcc): Horas · Confirmar | Agregar turno; Gastos · Cámara | Galería | Enviar gasto ---- */
@@ -16280,7 +16287,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-05-R143';
+  const APP_BUILD = '2026-11-05-R144';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69659,21 +69666,41 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     materials: { b: 'rd-materiales', n: 'm-client', d: 'm-address', c: '#mJobCard', btn: '.rdx-cli', bar: ['rdxCam', 'rdxRev'] },
     drying: { b: 'rd-secado', n: 'd-client', d: 'd-address', c: '#dJobCard', btn: '.rds-cli', bar: ['rdsCam', 'rdsMas', 'rdsRev'] },
     comms: { b: 'rd-novedades', n: 'c-client', d: 'c-address', c: '#cJobCard', btn: '.rdn-cli', bar: ['rdnIzq', 'rdnDer'] },
-    contenidos: { b: 'rd-contenidos', n: 'ct-client', d: 'ct-address', c: '#ctJobCard', btn: '.rdc-cli', bar: ['rdcCam', 'rdcRev'] }
+    contenidos: { b: 'rd-contenidos', n: 'ct-client', d: 'ct-address', c: '#ctJobCard', btn: '.rdc-cli', bar: ['rdcCam', 'rdcRev'] },
+    // (R144) "en equipo no me aparece ... tiene que estar en toda la aplicación": Equipo (su aviso viejo solo salía al tocar el conteo)
+    equipment: { b: 'rd-equipo', n: 'e-clientname', d: 'e-address', c: '#eqJobCard', btn: '.rde-cli', bar: ['rdeIzq', 'rdeDer'] },
+    // y Mano de obra: cada turno lleva su cliente; el aviso sale en el turno que no lo tiene
+    labor: { b: 'rd-labor', turno: '.shift-card', d: '.s-address', zona: '.sc-turno', btn: '.rdl-cli', bar: ['rdlIzq', 'rdlDer'], libre: '.remove-shift' }
   };
   const RDQ = { reloj: 0 };
   const rdqEs = (es, en) => idiEn() ? en : es;
   function rdqActual(){ for(const k in RDQ_T){ if(document.body.classList.contains(RDQ_T[k].b)) return k; } return null; }
-  function rdqTiene(t){ const v = id => String(((document.getElementById(id) || {}).value) || '').trim(); return !!(v(t.n) || v(t.d)); }
-  // ¿este toque se detiene? (sin cliente, fuera de la tarjeta del cliente y de su ruleta)
+  const rdqVal = el => String(((el || {}).value) || '').trim();
+  // ¿tiene cliente? (una pantalla: sus casillas; Mano de obra: ese turno)
+  function rdqTiene(t, card){
+    if(t.turno) return !!(card && rdqVal(card.querySelector(t.d)));
+    return !!(rdqVal(document.getElementById(t.n)) || rdqVal(document.getElementById(t.d)));
+  }
+  const rdqPanel = k => document.querySelector('.tab-panel[data-tab="' + k + '"]');
+  // ¿este toque se detiene? (sin cliente, fuera de la tarjeta del cliente y de su ruleta). Devuelve { t, card }.
   function rdqDetiene(e){
     const k = rdqActual(); if(!k) return null;
-    const t = RDQ_T[k]; if(rdqTiene(t)) return null;
-    const el = e.target; if(!el || !el.closest) return null;
-    const b = el.closest('button'); if(b && t.bar.indexOf(b.id) >= 0 && !(typeof rdlPreviaAbierta === 'function' && rdlPreviaAbierta())) return t;
+    const t = RDQ_T[k], el = e.target; if(!el || !el.closest) return null;
+    if(typeof rdlPreviaAbierta === 'function' && rdlPreviaAbierta()) return null;
+    const b = el.closest('button');
+    if(t.turno){
+      const panel = rdqPanel(k); if(!panel) return null;
+      if(b && t.bar.indexOf(b.id) >= 0){ const sin = [...panel.querySelectorAll(t.turno)].find(c => !rdqTiene(t, c)); return sin ? { t, card: sin } : null; }
+      const card = el.closest(t.turno); if(!card || !panel.contains(card) || rdqTiene(t, card)) return null;
+      if(el.closest(t.zona) || el.closest('.sc') || el.closest('.rpt-v') || (t.libre && el.closest(t.libre))) return null;
+      return { t, card };
+    }
+    if(rdqTiene(t)) return null;
+    const card = document.querySelector(t.c);
+    if(b && t.bar.indexOf(b.id) >= 0) return card ? { t, card } : null;
     const panel = el.closest('.tab-panel[data-tab="' + k + '"]'); if(!panel) return null;
     if(el.closest(t.c) || el.closest('.sc') || el.closest('.rpt-v')) return null;
-    return t;
+    return card ? { t, card } : null;
   }
   const RDQ_IC = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.1 2.6 17.6A2 2 0 0 0 4.3 20.6h15.4a2 2 0 0 0 1.7-3L13.7 4.1a2 2 0 0 0-3.4 0z"/><path d="M12 9.6v4.4M12 17.2h.01"/></svg>';
   // el sonido del aviso (Web Audio, sin archivos, como el clic de la ruleta): tres tonos claros "din · din · din", al mismo tiempo que los
@@ -69700,34 +69727,64 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     document.querySelectorAll('.rdq-pide.on').forEach(a => a.classList.remove('on', 'rdq-late'));
     document.querySelectorAll('.rdq-falta').forEach(c => c.classList.remove('rdq-falta', 'rdq-parpa'));
   }
-  function rdqPedir(t){
-    const card = document.querySelector(t.c), btn = card && card.querySelector(t.btn); if(!card || !btn) return;
+  function rdqPedir(q){
+    const t = q.t, card = q.card, btn = card && card.querySelector(t.btn); if(!card || !btn) return;
+    if(t.b === 'rd-equipo' && typeof rdePlegar === 'function') try{ rdePlegar(false); }catch(e){}   // Datos del trabajo abierto
     let a = card.querySelector('.rdq-pide');
     if(!a){ a = document.createElement('div'); a.className = 'rdq-pide'; a.setAttribute('role', 'alert'); a.setAttribute('data-no-idioma', '');
-      a.innerHTML = RDQ_IC + '<span><b></b><span class="rdq-sub"></span></span>'; card.insertBefore(a, card.firstChild); }
+      a.innerHTML = RDQ_IC + '<span><b></b><span class="rdq-sub"></span></span>';
+      const zona = t.zona && card.querySelector(t.zona);
+      if(zona) zona.parentNode.insertBefore(a, zona); else card.insertBefore(a, card.firstChild); }
     a.style.order = '-1';   // arriba de todo en su tarjeta (la ruleta abierta sube su buscador donde estaba la casilla)
     const tb = rdqEs('Primero escoge el cliente', 'Pick the client first'), ts = rdqEs('Así todo queda en su trabajo', 'So everything goes to the right job');
     if(a.querySelector('b').textContent !== tb) a.querySelector('b').textContent = tb;
     if(a.querySelector('.rdq-sub').textContent !== ts) a.querySelector('.rdq-sub').textContent = ts;
     card.classList.add('rdq-falta'); a.classList.add('on'); a.classList.remove('rdq-late'); card.classList.remove('rdq-parpa'); void a.offsetWidth; a.classList.add('rdq-late'); card.classList.add('rdq-parpa');
+    if(card.querySelector('.rde-primero')) card.classList.remove('rde-pide');   // en Equipo, un solo aviso (el de siempre sale después por lo que falte)
     const m = card.closest('main') || document.scrollingElement;
-    const arriba = card.getBoundingClientRect().top < 60 || card.getBoundingClientRect().top > 200;
-    if(m && arriba){ try{ m.scrollTo({ top: 0, behavior: 'smooth' }); }catch(e){ m.scrollTop = 0; } }
+    const r = a.getBoundingClientRect(), fuera = r.top < 60 || r.bottom > window.innerHeight - 110;
+    if(fuera){ try{ a.scrollIntoView({ block: 'center', behavior: 'smooth' }); }catch(e){} }
     rdqSonar();   // su sonido: tres tonos, uno con cada parpadeo (él probó una voz y prefirió esto)
-    try{ if(navigator.vibrate) navigator.vibrate([60, 300, 60, 300, 60]); }catch(e){}
+    rdzvVibra(3);  // y tres vibros
     // y se abre la ruleta del cliente (si no está abierta)
     const sc = card.querySelector('.sc'), abierta = sc && sc.offsetHeight > 0 && sc.querySelector('[data-sc-rueda], .sc-fila');
-    if(!abierta) setTimeout(() => { if(!rdqTiene(t)) btn.click(); }, arriba ? 320 : 60);
+    if(!abierta) setTimeout(() => { if(!rdqTiene(t, card)) btn.click(); }, fuera ? 320 : 60);
     clearInterval(RDQ.reloj);
-    RDQ.reloj = setInterval(() => { if(rdqActual() !== Object.keys(RDQ_T).find(k => RDQ_T[k] === t) || rdqTiene(t)) rdqApagar(); }, 400);
+    RDQ.reloj = setInterval(() => { if(!document.body.classList.contains(t.b) || rdqTiene(t, card) || !card.isConnected) rdqApagar(); }, 400);
   }
   document.addEventListener('pointerdown', e => { if(rdqDetiene(e)) e.stopPropagation(); }, true);   // el dedo corre la pantalla, nada más
-  document.addEventListener('click', e => { const t = rdqDetiene(e); if(!t) return; e.preventDefault(); e.stopImmediatePropagation(); rdqPedir(t); }, true);
+  document.addEventListener('click', e => { const q = rdqDetiene(e); if(!q) return; e.preventDefault(); e.stopImmediatePropagation(); rdqPedir(q); }, true);
   document.addEventListener('focusin', e => {
-    const t = rdqDetiene(e); if(!t || !e.target.matches('input, textarea, select, [contenteditable]')) return;
-    try{ e.target.blur(); }catch(x){} rdqPedir(t);
+    const q = rdqDetiene(e); if(!q || !e.target.matches('input, textarea, select, [contenteditable]')) return;
+    e.stopImmediatePropagation(); try{ e.target.blur(); }catch(x){} rdqPedir(q);
   }, true);
 
+  // ---- (R144) UN PEQUEÑO VIBRO CON CADA TOQUE. Su pedido: "está muy silenciosa ... si toco cualquier botón o hago algo, que haga un pequeño
+  // vibro". El iPhone (iOS 18 y después) da su vibración corta al tocar un interruptor (input type=checkbox switch): aquí uno escondido
+  // se "toca" con cada botón. Sin app nueva. En Android, navigator.vibrate. Fuera de un toque iOS no vibra (así lo pide).
+  const RDZV = { lab: null, ult: 0 };
+  function rdzvUno(){
+    try{
+      if(navigator.vibrate && !/iP(hone|ad|od)/.test(navigator.userAgent) && !(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)){ navigator.vibrate(12); return; }
+      if(!RDZV.lab){
+        const l = document.createElement('label'); l.className = 'rdzv-vibro'; l.setAttribute('aria-hidden', 'true'); l.setAttribute('data-nodraft', '');
+        const i = document.createElement('input'); i.type = 'checkbox'; i.setAttribute('switch', ''); i.tabIndex = -1; i.setAttribute('data-nodraft', '');
+        l.appendChild(i); document.body.appendChild(l); RDZV.lab = l;
+      }
+      RDZV.lab.click();
+    }catch(e){}
+  }
+  // el toque escondido no le llega a nadie más (ni "tocar afuera cierra", ni el borrador): se detiene en window antes que todos;
+  // lo que hace el interruptor (su vibro) no se detiene
+  ['click', 'input', 'change'].forEach(ev => window.addEventListener(ev, e => { if(e.target && e.target.closest && e.target.closest('.rdzv-vibro')) e.stopImmediatePropagation(); }, true));
+  function rdzvVibra(n){ rdzvUno(); for(let k = 1; k < (n || 1); k++) setTimeout(rdzvUno, k * 360); }
+  const RDZV_TOQUE = 'button, a[href], [role="button"], [role="spinbutton"], [role="tab"], [role="switch"], label, select, summary, input[type="checkbox"], input[type="radio"], .rd-tile, .sc-fila';
+  document.addEventListener('click', e => {
+    const el = e.target; if(!el || !el.closest || el.closest('.rdzv-vibro')) return;
+    if(!el.closest(RDZV_TOQUE) || (el.closest('button, input, select') || {}).disabled) return;
+    const ahora = Date.now(); if(ahora - RDZV.ult < 60) return; RDZV.ult = ahora;
+    rdzvUno();
+  }, true);
   // ---- Materiales: Materiales de empaque y Protección de emergencia entran pequeñas; su flechita las abre (y cierra la otra) ----
   // Su pedido: "siempre va a estar en pequeño ... uno pucha la flechita como la de seleccionar cliente, fun, se expande".
   const RDX_CHEV = '<svg class="rdx-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
@@ -69761,7 +69818,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     panel.addEventListener('click', e => { const t = e.target.closest('.rdx-tit[data-rdx-plega]'); if(t && rdxEn()) rdxPlegaToca(t.dataset.rdxPlega); });
     panel.addEventListener('keydown', e => { const t = e.target.closest('.rdx-tit[data-rdx-plega]'); if(t && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); rdxPlegaToca(t.dataset.rdxPlega); } });
   })();
-  window.__rdq = { pedir: rdqPedir, detiene: rdqDetiene, actual: rdqActual, plegar: rdxPlegaToca, estado: RDX };   // para las pruebas
+  window.__rdq = { vibra: rdzvVibra, pedir: rdqPedir, detiene: rdqDetiene, actual: rdqActual, plegar: rdxPlegaToca, estado: RDX };   // para las pruebas
   window.__rdx = { soltarYa: rdxSoltarYa, todo: rdxTodo, filas: rdxFilas, sumar: rdxSumar, activar: rdxActivar, otro: rdxOtro, hoja: () => rdxHojaHtml(rdxHojaDatos()), estado: RDX, son: RDX_SON };   // para las pruebas
   window.__rds = { todo: rdsTodo, estado: RDS };
   // ===================== (3-nov-2026, R129) MAPA DE HUMEDAD DE RD: sus 6 maquetas =====================
