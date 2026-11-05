@@ -16548,7 +16548,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-05-R148';
+  const APP_BUILD = '2026-11-05-R149';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71513,7 +71513,16 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     if(extra.responde_a) row.responde_a = extra.responde_a;          // (fr-11) solo si hay: sin el SQL, un mensaje normal sigue saliendo
     if(extra.adjuntos && extra.adjuntos.length) row.adjuntos = extra.adjuntos;
     if(extra.tipo){ row.tipo = extra.tipo; if(extra.peticion) row.peticion = extra.peticion; if(extra.monto != null) row.monto = extra.monto; }   // (fr-14)
-    const res = await authFetch('/rest/v1/mensajes', { method: 'POST', headers: Object.assign(cloudHeaders(), { Prefer: 'return=representation' }), body: JSON.stringify(row) });
+    let res = await authFetch('/rest/v1/mensajes', { method: 'POST', headers: Object.assign(cloudHeaders(), { Prefer: 'return=representation' }), body: JSON.stringify(row) });
+    // (R149) la nube solo deja escribir en un grupo a sus miembros: el que lo creó y ya no está dentro se vuelve a meter y se manda otra vez
+    if((res.status === 401 || res.status === 403) && row.para_grupo_id){
+      const g = msgGrupoDe(key), dentro = g && (g.miembros || []).some(x => x && x.user_id === SES.user_id);
+      if(g && g.creado_por === SES.user_id && !dentro){
+        const r2 = await authFetch('/rest/v1/mensajes_grupo_miembros', { method: 'POST', headers: cloudHeaders(), body: JSON.stringify([{ grupo_id: row.para_grupo_id, user_id: SES.user_id, nombre: String(SES.full_name || SES.name || 'Yo') }]) });
+        if(r2.ok){ try{ await msgCargarGrupos(); }catch(e){} MSG.avisoVolvi = true; res = await authFetch('/rest/v1/mensajes', { method: 'POST', headers: Object.assign(cloudHeaders(), { Prefer: 'return=representation' }), body: JSON.stringify(row) }); }
+      }
+      if(!res.ok){ const e = new Error('HTTP ' + res.status); e.noMiembro = true; throw e; }
+    }
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const arr = await res.json(); return Array.isArray(arr) ? arr[0] : arr;
   }
@@ -72667,9 +72676,12 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       const res = await authFetch('/rest/v1/mensajes_grupos', { method: 'POST', headers: Object.assign(cloudHeaders(), { Prefer: 'return=representation' }), body: JSON.stringify({ company_id: SES.company_id, nombre, creado_por: SES.user_id }) });
       if(!res.ok) throw new Error('HTTP ' + res.status);
       const arr = await res.json(); const g = Array.isArray(arr) ? arr[0] : arr;
-      const miembros = [{ grupo_id: g.id, user_id: SES.user_id, nombre: String(SES.full_name || SES.name || 'Yo') }].concat(sel.map(k => { const p = MSG.gente.find(x => (x.kind + ':' + x.id) === k); return { grupo_id: g.id, user_id: k.startsWith('c:') ? k.slice(2) : null, casual_id: k.startsWith('t:') ? k.slice(2) : null, nombre: p ? p.name : '' }; }));
+      const miembros = [{ grupo_id: g.id, user_id: SES.user_id, casual_id: null, nombre: String(SES.full_name || SES.name || 'Yo') }].concat(sel.map(k => { const p = MSG.gente.find(x => (x.kind + ':' + x.id) === k); return { grupo_id: g.id, user_id: k.startsWith('c:') ? k.slice(2) : null, casual_id: k.startsWith('t:') ? k.slice(2) : null, nombre: p ? p.name : '' }; }));
       const r2 = await authFetch('/rest/v1/mensajes_grupo_miembros', { method: 'POST', headers: cloudHeaders(), body: JSON.stringify(miembros) });
-      if(!r2.ok) throw new Error('HTTP ' + r2.status);
+      if(!r2.ok){   // (R149) sin su gente el grupo no sirve (nadie puede escribir): se borra y se dice
+        try{ await authFetch('/rest/v1/mensajes_grupos?id=eq.' + encodeURIComponent(g.id), { method: 'DELETE', headers: cloudHeaders() }); }catch(x){}
+        aviso.textContent = 'No se pudo guardar quiénes van (HTTP ' + r2.status + '). Toque Crear grupo otra vez.'; return;
+      }
       pnl.hidden = true; aviso.textContent = ''; MSG.grupoNuevo = false;
       await msgCargarGrupos(); msgPintarGente(); msgAbrir('g:' + g.id);
     }catch(e){ aviso.textContent = 'No se pudo mandar. Revise su internet.'; }
@@ -72772,6 +72784,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       const fila = await msgEnviar(texto, { casa, responde_a: responde, adjuntos });
       if(fila && !MSG.lista.some(x => x.id === fila.id)) MSG.lista.unshift(fila);
       if(adj){ try{ URL.revokeObjectURL(adj.url); }catch(e){} }
+      if(MSG.avisoVolvi){ MSG.avisoVolvi = false; aviso.textContent = idiEn() ? 'This group had nobody in it: you are back in. Add your people in Members.' : 'Este grupo se había quedado sin nadie: ya te volví a poner. Agrega a tu gente en Miembros.'; }   // (R149)
     }catch(e){
       // no salió: el texto (y la foto y la cita) vuelven a la caja para intentar otra vez
       if(MSG.con === key){
@@ -72779,7 +72792,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
         if(adj && !MSG.adjunto){ MSG.adjunto = adj; msgPintarAdjunto(); }
         if(responde && !MSG.respondiendo){ MSG.respondiendo = responde; msgPintarCitaBarra(); }
       }
-      aviso.textContent = 'No se pudo mandar. Revise su internet.';
+      aviso.textContent = (e && e.noMiembro) ? (idiEn() ? 'You are not in this group. Ask its leader to add you.' : 'No estás en este grupo. Pídele al encargado que te agregue.') : 'No se pudo mandar. Revise su internet.';   // (R149) la verdad, no "sin internet"
     }
     MSG.pend = MSG.pend.filter(x => x !== tmp);
     if(MSG.con === key) msgPintarChat();
@@ -72799,7 +72812,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       const sub = await msgSubirArchivo(blob, ext, mime);
       const fila = await msgEnviar('', { responde_a: responde, adjuntos: [Object.assign({ tipo: 'audio', duracion, ondas, mime }, sub)] });
       if(fila && !MSG.lista.some(x => x.id === fila.id)) MSG.lista.unshift(fila);
-    }catch(e){ root.querySelector('.msg-aviso').textContent = 'No se pudo mandar el audio. Revise su internet.'; }
+    }catch(e){ root.querySelector('.msg-aviso').textContent = (e && e.noMiembro) ? (idiEn() ? 'You are not in this group. Ask its leader to add you.' : 'No estás en este grupo. Pídele al encargado que te agregue.') : 'No se pudo mandar el audio. Revise su internet.'; }
     MSG.pend = MSG.pend.filter(x => x !== tmp);
     if(MSG.con === key) msgPintarChat();
     msgPintarTiles();
