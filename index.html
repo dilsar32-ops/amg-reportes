@@ -4906,6 +4906,14 @@ body.med-pp-abierto{overflow:hidden;}
   .as-vista-linea{font-size:14.5px; line-height:1.35; color:#eee;}
   .as-copiar{margin:8px auto 0; display:block; min-height:44px; padding:8px 18px;}
   .as-copiar[hidden]{display:none !important;}
+  /* (4-nov-2026) el GPS: cada dirección de la respuesta de Lumi es un botón que abre Mapas de Apple con la ruta */
+  .as-mapa{display:flex; flex-direction:column; gap:8px; margin:10px 0 0;}
+  .as-mapa[hidden]{display:none !important;}
+  .as-mapa .btn.as-mapa-btn{width:100%; min-height:52px; padding:8px 16px; gap:12px; justify-content:flex-start; text-align:left; border-radius:12px;}
+  .as-mapa .as-mapa-btn svg{flex:none; width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2; stroke-linejoin:round; stroke-linecap:round;}
+  .as-mapa .as-mapa-btn span{display:flex; flex-direction:column; min-width:0;}
+  .as-mapa .as-mapa-btn b{font-size:16px; font-weight:600;}
+  .as-mapa .as-mapa-btn small{font-size:13px; font-weight:400; opacity:.8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .as-tarjeta-escrito{margin-top:10px;}
   .as-tarjeta-escrito[hidden]{display:none !important;}
   .as-tarjeta-escrito label{display:block; font-size:13px; color:var(--danger); margin-bottom:4px;}
@@ -8577,6 +8585,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       <p class="as-resp" id="asRespuesta"></p>
       <div class="as-vista" id="asVista" hidden></div>
       <button type="button" class="btn btn-outline as-copiar" id="asCopiarBtn" hidden></button>
+      <div class="as-mapa" id="asMapa" hidden></div>
     </div>
     <div class="as-tarjeta" id="asTarjeta" hidden>
       <div class="as-tarjeta-tipo" id="asTarjetaTipo"></div>
@@ -15912,7 +15921,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-04-R138';
+  const APP_BUILD = '2026-11-04-R139';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -64369,7 +64378,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // Decisión del dueño (21 oct): silueta A, color celeste, parallax sí.
   function AS_CARA_OPCIONES(tamano){ return { tamano: tamano, silueta: 'A', color: 'celeste' }; }
   function asEstado(e, pista){ if(AS.estado !== e) asBit('estado ' + e); AS.estado = e; const p = $('#asPanel'); if(p) p.dataset.estado = e; const h = $('#asPista'); if(h && pista !== undefined) h.textContent = pista || ''; if(window.Cara){ try{ Cara.estado({ esperando:'reposo', pensando:'buscando' }[e] || e); }catch(err){} } if(pista !== undefined) AS.puertaPista = pista; asPuertaPintar(); }
-  function asTranscribir(t){ const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; }
+  function asTranscribir(t){ const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; if(t) asMapa(null); }   // (4-nov) otra pregunta: el botón del GPS de antes se quita
   function asMostrarRespuesta(t){ const e = $('#asRespuesta'); if(e) e.textContent = t || ''; asPuertaPintar(); }
   // ===== (R88, 1-nov-2026, su pedido desde el iPhone) LUMI EN LA PUERTA =====
   // Tocar la esfera NO cambia de pantalla: Lumi oye y contesta ahí mismo. La esfera se pone verde oyendo, azul hablando y roja
@@ -64424,7 +64433,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   function asAbrir(opts){
     if(!signedIn()) return;
     asOyeLiberar();
-    AS.abierto = true; AS.historial = []; AS.dictado = null; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asTranscribir('');
+    AS.abierto = true; AS.historial = []; AS.dictado = null; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asMapa(null); asTranscribir('');
     const p = $('#asPanel'); if(p){ p.hidden = !!AS.enPuerta; p.classList.toggle('as-prueba-on', AS.sandbox); if(!AS.enPuerta) asPanelAlFrente(p); }   // (R88) en la puerta: sin panel, todo pasa ahí mismo; desde el menú o Mensajes, al frente
     asEstado('esperando', '');
     { const v = $('#asVersion'); if(v) v.textContent = 'Versión ' + String(APP_BUILD).replace(/^\d{4}-\d{2}-\d{2}-/, '') + ' · ' + String(APP_BUILD).slice(0, 10); }
@@ -65083,7 +65092,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     // (R88) los MENSAJES de la app: leerlos y contestarlos se hace en el teléfono (nunca en modo prueba: ahí no se manda nada de verdad)
     if(!AS.conf && !dictando && !AS.sandbox){ const mc = asMsgInterpretar(texto); if(mc && asMsgEsMio(mc)){ AS.telTexto = texto; asTranscribir(texto); asPararOido(); return asMsgEmpezar(mc); } }
     if(!AS.conf && !dictando){ const cmd = asCmdInterpretar(texto, asMedirNorm); if(cmd && !(AS.sandbox && cmd.tipo === 'formulario' && cmd.form === 'equipo')){ AS.telTexto = texto; asTranscribir(texto); asPararOido(); return asComando(cmd); } }
-    if(!oculto) asTranscribir(texto); asEstado('pensando', 'Un momento…'); AS.enviando = true; asMostrarRespuesta('');
+    if(!oculto) asTranscribir(texto); asEstado('pensando', 'Un momento…'); AS.enviando = true; asMostrarRespuesta(''); asMapa(null);
     asCallar();
     const t0 = Date.now();
     // Siri-like: si el modelo tarda, a los 1.6 s dice algo corto para que no sienta el silencio.
@@ -65120,6 +65129,8 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       if(window.Cara){ try{ const l = Cara.limpiarEtiqueta(final); final = l.texto; const g = j.confirmacion ? 'pregunta' : (j.gesto || l.gesto || Cara.gestoDelTexto(final)); if(g) Cara.gesto(g, undefined, { texto: final, dinero: !!j.confirmacion }); }catch(err){} }
       asMostrarRespuesta(final);
       asCopiar(j.copiar || null); asVistaPintar($('#asVista'), j.vista || null);   // (1-nov) el número / el código copiados; el recibo
+      asMapa(j.dictado ? null : (j.mapa || null));   // (4-nov) la dirección se toca y abre el GPS (en el dictado no: tocarlo cerraría a Lumi)
+      if(AS.enPuerta && !j.dictado && Array.isArray(j.mapa) && j.mapa.length === 1 && /(¿La abro en el GPS\?|Want me to open it in Maps\?)\s*$/.test(final)) asPuertaAbrirPanel();   // (R88) solo cuando Lumi ofrece el GPS: tocar necesita la pantalla
       // (R40) LA GALERÍA: se pinta aquí mismo, mientras habla; una respuesta nueva sin galería la quita.
       // (R43) "enséñame el de hoy y mándalo al grupo": primero la galería y DESPUÉS la tarjeta (la galería no se la lleva)
       const esGal = !!(j.navegar && j.navegar.pantalla === 'galeria');
@@ -65650,6 +65661,24 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   }
   // (1-nov-2026, el dueño: "cópiame el número de Ariel... ella ya me tiene que haber copiado eso") en el aparato nuevo lo copia
   // el iPhone (Portapapeles, solo escribe); si no se puede sin un toque, queda el botón "Copiar" (un toque y listo).
+  // (4-nov-2026, el dueño: "cuando Lumi muestre alguna dirección debe haber opción para darle clic y que abra el GPS") Cada dirección
+  // que manda el servidor (j.mapa) es un botón: Mapas de Apple con la ruta para manejar. Solo enlaces de maps.apple.com.
+  const AS_MAPA_IR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 18-8-8 18-2-8z"/></svg>';
+  function asMapa(m){
+    const box = $('#asMapa'); if(!box) return;
+    box.innerHTML = ''; box.hidden = true;
+    const lista = (Array.isArray(m) ? m : []).filter(function(x){ return x && x.direccion && /^https:\/\/maps\.apple\.com\//.test(String(x.url || '')); }).slice(0, 3);
+    if(!lista.length) return;
+    lista.forEach(function(x){
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-outline as-mapa-btn';
+      b.innerHTML = AS_MAPA_IR + '<span><b>' + (asEn() ? 'Open in Maps' : 'Abrir en el GPS') + '</b><small data-no-idioma></small></span>';
+      b.querySelector('small').textContent = String(x.direccion).slice(0, 160);
+      b.setAttribute('aria-label', (asEn() ? 'Open in Maps: ' : 'Abrir en el GPS: ') + String(x.direccion).slice(0, 160));
+      b.addEventListener('click', function(){ asBit('gps: botón'); const url = String(x.url); asCerrar(); abrirEnSafari(url); });
+      box.appendChild(b);
+    });
+    box.hidden = false;
+  }
   async function asCopiar(c){
     const b = $('#asCopiarBtn'); if(b){ b.hidden = true; b.onclick = null; }
     if(!c || !c.texto) return;
