@@ -17672,7 +17672,7 @@ html body #asPanel .as-version{order:11;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R170';
+  const APP_BUILD = '2026-11-06-R171';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67091,6 +67091,7 @@ html body #asPanel .as-version{order:11;}
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando && AS_GAL.p?.tipo==='labor_logs'){const control=asOrdenControlMac(texto,AS_GAL.p.items);if(control){asTranscribir(texto);if(control.error){asMostrarRespuesta(control.error);asHablar(control.error,asSeguirOyendo);}else{await asControlHojaMac(AS_GAL.p.items[control.index],control.action);}return;}}
     if(!dictando && AS_GAL.p?.tipo==='labor_logs'){const copy=asOrdenCopiarHoja(texto,AS_GAL.p.items);if(copy){asTranscribir(texto);if(copy.error){asMostrarRespuesta(copy.error);asHablar(copy.error,asSeguirOyendo);}else{await asCopiarHoja(AS_GAL.p.items[copy.index]);asSeguirOyendo();}return;}}
     // (R40) Con la galería abierta: "la siguiente", "la segunda", "ciérrala" se resuelven aquí
     if(AS_GAL.p && !AS.conf && !AS.pregunta && asGalPorVoz(texto)){ AS.telTexto = texto; asTelAnotar('[galería]'); asTranscribir(texto); asSeguirOyendo(); return; }
@@ -67369,6 +67370,43 @@ html body #asPanel .as-version{order:11;}
     caja.style.height = Math.round(Math.min(esc0.offsetHeight * k, w * 1.3)) + 'px';   // la parte de arriba de la hoja, como una miniatura
   }
   function asGalChips(l){ return (l || []).map(function(c){ return '<span class="as-gal-chip">' + esc(c) + '</span>'; }).join(''); }
+  async function asControlHojaMac(it,action){
+    const owner=SES.user_id+'|'+SES.company_id,companyId=SES.company_id;
+    const call=async(url,init={})=>{const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);try{const r=await authFetch(url,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('La conexión con la Mac respondió '+r.status);return r.status===204?null:await r.json();}finally{clearTimeout(timer);}};
+    let node;
+    try{
+      const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(companyId)+'&clave=eq.lumi_mac_control_device');
+      const device=rows[0]?.valor;if(!device?.available||!device.workerId)throw Error('No hay una Mac vinculada para copiar hojas.');
+      const id=crypto.randomUUID();node=document.createElement('div');node.style.cssText='position:fixed;left:-10000px;top:0;width:760px;background:white';node.innerHTML=asHojaRealHtml(it);document.body.appendChild(node);
+      const canvas=await html2canvas(node,{scale:2,backgroundColor:'#ffffff'}),blob=await new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(Error('No pude preparar la hoja')),'image/jpeg',.92));
+      const bytes=new Uint8Array(await blob.arrayBuffer());if(bytes.length>8388608)throw Error('La hoja es demasiado grande.');
+      const sha256=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');
+      const attachment={path:companyId+'/'+id+'/1-'+sha256+'.jpg',bytes:bytes.length,sha256};
+      if(owner!==SES.user_id+'|'+SES.company_id)throw Error('La cuenta cambió.');
+      await call('/storage/v1/object/lumi-mac/'+attachment.path,{method:'POST',headers:{'Content-Type':'image/jpeg','x-upsert':'false'},body:bytes});
+      const clave='lumi_control_command_'+id;
+      await call('/rest/v1/asistente_ajustes',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'return=representation'},body:JSON.stringify({company_id:companyId,clave,valor:{id,companyId,workerId:device.workerId,action,createdAt:new Date().toISOString(),attachment,state:'queued'}})});
+      asMostrarRespuesta(action==='paste_sheet'?'La Mac está preparando el pegado en el grupo vinculado. No enviará el mensaje.':'La Mac está copiando la hoja.');
+      for(let i=0;i<20;i++){
+        if(owner!==SES.user_id+'|'+SES.company_id)return;
+        const result=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(companyId)+'&clave=eq.'+clave);
+        if(owner!==SES.user_id+'|'+SES.company_id)return;
+        const state=result[0]?.valor?.state;
+        const text={copied:'La hoja ya está copiada en el portapapeles de la Mac. No envié ningún mensaje.',paste_requested:'Pedí a Mensajes pegar la hoja en el grupo vinculado. No presioné Enviar; revisa el borrador.',needs_permission:'macOS requiere activar Accesibilidad para LumiControl antes de pegar en Mensajes. No se pegó ni se envió la hoja.',needs_review:'La Mac no pudo completar la acción. Revisa la ventana y el borrador antes de repetirla.'}[state];
+        if(text){asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);return;}
+        await new Promise(r=>setTimeout(r,1000));
+      }
+      asMostrarRespuesta('La Mac todavía no confirmó la acción. No la repitas sin revisar.');
+    }catch(e){if(owner===SES.user_id+'|'+SES.company_id)asMostrarRespuesta('No pude completar la acción en la Mac: '+String(e.message||e));}
+    finally{node?.remove();}
+  }
+  function asOrdenControlMac(texto,items){
+    const t=String(texto||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[.!?¿¡]/g,'').trim();
+    const copy=/^(?:lumi )?(?:copia|copiame)\b.*\ben (?:la )?mac$/.test(t),paste=/^(?:lumi )?pega(?:me)?\b.*\ben mensajes$/.test(t);
+    if(!copy&&!paste)return null;
+    const q=t.replace(/\s+en (?:la )?(?:mac|mensajes)$/,'').replace(/\bpega(?:me)?\b/,'copia');
+    const selected=asOrdenCopiarHoja(q,items);return selected?{...selected,action:paste?'paste_sheet':'copy_sheet'}:null;
+  }
   async function asCopiarHoja(it,button){
     if(button?.disabled)return;
     if(button)button.disabled=true;
