@@ -195,6 +195,17 @@
 
 /* (24 oct 2026) el asistente de voz viejo ya no sale en el menu (lo hace Lumi). .btn trae display propio: sin esto [hidden] no lo esconde. */
 #avAbrir[hidden]{display:none !important;}
+
+/* R168: visible conversation while talking and reviewing documents. */
+#asConversacion{max-height:35vh; min-height:80px; overflow:auto; padding:12px; text-align:left; overflow-wrap:anywhere; border:1px solid #345; border-radius:12px;}
+#asConversacion p{margin:0 0 12px; white-space:pre-wrap; line-height:1.5;}
+#asConversacion strong{color:#8fd3ff;}
+#asConversacion p[data-role="user"]{color:#d3e7f1;}
+#asPanel #asTu,#asPanel #asRespuesta{display:none;}
+#asPanel .as-esfera-wrap{flex:0 0 auto; min-height:0;}
+#asPanel[data-estado] #asEsfera.as-red:not(.cara){width:72px; height:72px;}
+#asPanel:has(.as-prev:not([hidden])) .as-tu{display:none;}
+
 </style><!-- /caraCss -->
 <script id="caraJs">
 /* ============================================================================
@@ -10015,6 +10026,13 @@ html body.rd-home .rd-cab.con-wm .rd-wm-a{background:#111 !important; -webkit-ma
 html body.rd-home main, html body.rd-perfil main{font-weight:600;}
 
 </style>
+<style>
+/* Keep the conversation above the documents instead of underneath their overlay. */
+html body #asPanel .as-charla{flex:0 0 auto;}
+html body #asPanel #asGal{position:relative;inset:auto;flex:0 0 auto;min-height:320px;max-height:65vh;margin:12px 0;}
+html body #asPanel #asGal[hidden]{display:none !important;}
+html body #asPanel .as-esfera-wrap{max-height:80px;}
+</style>
 </head>
 <body>
 
@@ -10027,6 +10045,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     <p id="asPista" class="as-pista"></p>
     <div class="as-esfera-wrap"><div id="asEsfera" class="as-red" role="button" tabindex="0" aria-label="Asistente: tocar para hablar"><canvas id="asRed" aria-hidden="true"></canvas></div></div>
     <div class="as-charla">
+      <div id="asConversacion" role="log" aria-label="Conversación con Lumi" aria-live="polite"></div>
       <p class="as-tu" id="asTu"></p>
       <p class="as-resp" id="asRespuesta"></p>
       <div class="as-vista" id="asVista" hidden></div>
@@ -17638,7 +17657,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R167';
+  const APP_BUILD = '2026-11-06-R168';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -66364,8 +66383,20 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // Decisión del dueño (21 oct): silueta A, color celeste, parallax sí.
   function AS_CARA_OPCIONES(tamano){ return { tamano: tamano, silueta: 'A', color: 'celeste' }; }
   function asEstado(e, pista){ if(AS.estado !== e) asBit('estado ' + e); AS.estado = e; const p = $('#asPanel'); if(p) p.dataset.estado = e; const h = $('#asPista'); if(h && pista !== undefined) h.textContent = pista || ''; if(window.Cara){ try{ Cara.estado({ esperando:'reposo', pensando:'buscando' }[e] || e); }catch(err){} } if(pista !== undefined) AS.puertaPista = pista; asPuertaPintar(); }
-  function asTranscribir(t){ const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; if(t) asMapa(null); }   // (4-nov) otra pregunta: el botón del GPS de antes se quita
-  function asMostrarRespuesta(t){ const e = $('#asRespuesta'); if(e) e.textContent = t || ''; asPuertaPintar(); }
+  function asConversacion(role, texto){
+    const log = document.getElementById('asConversacion'); if(!log || !texto) return;
+    const nearEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+    let row = log.lastElementChild;
+    if(!row || row.dataset.role !== role){
+      row = document.createElement('p'); row.dataset.role = role;
+      const label = document.createElement('strong'); label.textContent = role === 'user' ? (asEn() ? 'You: ' : 'Tú: ') : 'Lumi: ';
+      row.appendChild(label); row.appendChild(document.createElement('span')); log.appendChild(row);
+    }
+    row.lastElementChild.textContent = texto;
+    if(nearEnd) log.scrollTop = log.scrollHeight;
+  }
+  function asTranscribir(t){ asConversacion('user', t); const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; if(t) asMapa(null); }   // (4-nov) otra pregunta: el botón del GPS de antes se quita
+  function asMostrarRespuesta(t){ asConversacion('assistant', t); const e = $('#asRespuesta'); if(e) e.textContent = t || ''; asPuertaPintar(); }
   // ===== (R88, 1-nov-2026, su pedido desde el iPhone) LUMI EN LA PUERTA =====
   // Tocar la esfera NO cambia de pantalla: Lumi oye y contesta ahí mismo. La esfera se pone verde oyendo, azul hablando y roja
   // con error; el rótulo "Lumi" dice "Escuchando…", la respuesta (hasta 3 renglones) o el error. Mismo oído, misma voz, misma
@@ -66420,6 +66451,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   function asAbrir(opts){
     if(!signedIn()) return;
     asOyeLiberar();
+    { const log = document.getElementById('asConversacion'); if(log) log.replaceChildren(); }
     AS.abierto = true; AS.historial = []; AS.dictado = null; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asMapa(null); asTranscribir('');
     const p = $('#asPanel'); if(p){ p.hidden = !!AS.enPuerta; p.classList.toggle('as-prueba-on', AS.sandbox); if(!AS.enPuerta) asPanelAlFrente(p); }   // (R88) en la puerta: sin panel, todo pasa ahí mismo; desde el menú o Mensajes, al frente
     asEstado('esperando', '');
@@ -72637,7 +72669,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     try{
       if(id === 'rdmgVisitas'){ const b = document.querySelector('.tab-panel[data-tab="mgrrest"] [data-go-tab="visitas"]'); if(b) b.click(); }
       else if(id === 'rdmgPeticiones'){ window.__msgPend = { abrir: 'mensajes', pestana: 'peticiones' }; if(typeof msgAbrirPendiente === 'function') msgAbrirPendiente(); }
-      else if(id === 'rdmgLumi'){ if(typeof asPuertaToque === 'function') asPuertaToque(); else if(typeof asAbrir === 'function') asAbrir(); }   // como en la puerta: oye y contesta aquí mismo (el cubo se ve)
+      else if(id === 'rdmgLumi'){ if(typeof asPuertaAbrirPanel === 'function') asPuertaAbrirPanel(); else if(typeof asAbrir === 'function') asAbrir(); }   // como en la puerta: oye y contesta aquí mismo (el cubo se ve)
       else if(id.indexOf('amgSeg') === 0){ const a = document.getElementById('mgrGoAmg'); if(a) a.click(); setTimeout(() => { const b = document.getElementById(id); if(b) b.click(); }, 60); }
       else { const b = document.getElementById(id); if(b) b.click(); }
       setTimeout(() => { try{ for(let k = 0; k < navStack.length; k++){ if(navStack[k] === 'mgrrest') navStack[k] = 'manager'; } updateNavButtons(); }catch(e){} }, 120);   // regresar vuelve aquí
