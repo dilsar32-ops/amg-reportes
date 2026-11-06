@@ -17638,7 +17638,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R166';
+  const APP_BUILD = '2026-11-06-R167';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67068,6 +67068,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     // Con una tarjeta esperando, un "si" o un "no" se resuelven aqui, sin molestar al modelo.
     if(AS.conf){
       const low = texto.toLowerCase().replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim();
+      if(AS.conf.tipo === 'grupo_lote_mac' && AS_GAL.p && AS_GAL.p.tipo === 'labor_logs' && asOrdenEnviarLote(low,AS_GAL.p.items.length)) return asConfirmar();
       if(asEsSi(low)) return asConfirmar();
       if(asEsNo(low)){ AS.telTexto = texto; asTelAnotar('[cancelar tarjeta]'); return asCancelar(); }
     }
@@ -67405,6 +67406,11 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     const ab = $('#asGalAbrir'); if(ab) ab.addEventListener('click', function(){ asGaleriaQuitar(); asNavegar({ pantalla: 'labor_logs' }); });
   })();
   // Por voz con la galería abierta: "la siguiente", "la anterior", "la primera", "la segunda", "ciérrala", "regresa".
+  function asOrdenEnviarLote(texto, cantidad){
+    const t=String(texto).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¡!¿?.,;:]/g,' ').replace(/\s+/g,' ').trim();
+    if(/^(envia|manda|send)( estos dos| los dos| ambos| these two| both)( al grupo| to the group)?$/.test(t)) return cantidad===2;
+    return /^(enviar|mandar|envialos|mandalos|envialos al grupo|mandalos al grupo|envia estos|manda estos|send these|send them|send them to the group)$/.test(t);
+  }
   function asGalPorVoz(texto){
     if(!AS_GAL.p) return false;
     const l = String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -67706,6 +67712,20 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       // (R43) la tarjeta del grupo: la MISMA acción de siempre (armar las hojas y abrir Mensajes al grupo)
       if(navC && navC.pantalla === 'mensajes'){ asHablar(j.dicho || j.texto || 'Listo.', function(){ asCerrar(); try{ window.__msgDesdeLumi(navC); }catch(e){} }); return; }
       if(navC && navC.pantalla === 'gastos_mandar'){ asHablar(j.dicho || j.texto || 'Listo.', function(){ asCerrar(); try{ window.__grdDesdeLumi(navC); }catch(e){ alert('No se pudieron mandar los recibos.'); } }); return; }
+      if(navC && navC.pantalla === 'labor_logs_mac'){
+        const owner=SES.user_id+'|'+SES.company_id, results=[];
+        try{
+          for(const id of navC.ids){
+            if(owner!==SES.user_id+'|'+SES.company_id) throw new Error('Cambió la cuenta. Se detuvo el lote.');
+            const result=await laborMandarHojas({id:id,requireMac:true});
+            results.push(result);
+            if(result.estado==='mac_needs_review' || result.estado==='mac_cancelled') throw new Error('Un reporte necesita revisión. Se detuvo el resto del lote.');
+          }
+          const message=results.length+' reportes registrados en la cola de la Mac. Esto todavía no confirma su entrega al grupo.';
+          asMostrarRespuesta(message); asHablar(message,asSeguirOyendo);
+        }catch(e){const message=results.length+' reportes procesados antes de detenerse. '+String(e.message||e);asMostrarRespuesta(message);asHablar(message,asSeguirOyendo);}
+        return;
+      }
       if(navC && navC.pantalla === 'labor_log_mandar'){ asHablar(j.dicho || j.texto || 'Listo.', function(){ asCerrar(); laborMandarHojas(navC).catch(function(e){ alert('No se pudo mandar el labor log.\n\n' + ((e && e.message) || e)); }); }); return; }
       asHablar(j.dicho || j.texto || 'Listo.', function(){ if(navC){ asNavegar(navC); return; } asSeguirOyendo(); });
       return;
@@ -68972,8 +68992,77 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     return out;
   }
   // nav = { id, lider, fecha, empresa, ya_mandado }. deps: para las pruebas (todo inyectable); en la app se usan las de verdad.
+function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.crypto}) {
+ const hex = b => Array.from(new Uint8Array(b),x=>x.toString(16).padStart(2,'0')).join('');
+ const sha = async b => hex(await cryptoAPI.subtle.digest('SHA-256',b));
+ async function call(url,init={}) {
+  const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),25000);
+  try{const r=await authFetch(url,{...init,signal:ctl.signal,headers:{...headers(),...init.headers}});if(!r.ok)throw Error('Mac queue HTTP '+r.status);return await r.json();}
+  finally{clearTimeout(timer);}
+ }
+ async function existing(reportId){
+  const rows=await call('/rest/v1/lumi_mac_jobs?select=id,state,report_id&company_id=eq.'+encodeURIComponent(companyId)+'&report_id=eq.'+encodeURIComponent(reportId)+'&destination=eq.labor_logs&limit=1');
+  return rows[0]||null;
+ }
+ return {
+  async enqueue(reportId,files){
+   if(!/^[a-f0-9-]{36}$/i.test(reportId)||!/^[a-f0-9-]{36}$/i.test(companyId))throw Error('Invalid report/account');
+   const prior=await existing(reportId);if(prior)return prior;
+   if(!Array.isArray(files)||files.length<1||files.length>30)throw Error('Invalid attachments');
+   const id=cryptoAPI.randomUUID(),attachments=[],bodies=[];let total=0;
+   for(const [i,file] of files.entries()){
+    const b=new Uint8Array(await file.blob.arrayBuffer());total+=b.length;
+    if(b.length<4||b.length>8388608||total>33554432||b[0]!==255||b[1]!==216||b.at(-2)!==255||b.at(-1)!==217)throw Error('Invalid JPEG or attachment size');
+    const digest=await sha(b);
+    attachments.push({sha256:digest,bytes:b.length,path:companyId+'/'+id+'/'+(i+1)+'-'+digest+'.jpg'});bodies.push(b);
+   }
+   const fingerprint=await sha(new TextEncoder().encode(attachments.map(a=>a.sha256).join('\n')));
+   for(let i=0;i<attachments.length;i++)await call('/storage/v1/object/lumi-mac/'+attachments[i].path,{method:'POST',headers:{'Content-Type':'image/jpeg','x-upsert':'false'},body:bodies[i]});
+   try{return await call('/rest/v1/rpc/lumi_mac_enqueue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({p_id:id,p_report:reportId,p_fingerprint:fingerprint,p_attachments:attachments})});}
+   catch(e){const saved=await existing(reportId);if(saved)return saved;throw e;}
+  },
+  async status(id){const rows=await call('/rest/v1/lumi_mac_jobs?select=id,state&company_id=eq.'+encodeURIComponent(companyId)+'&id=eq.'+encodeURIComponent(id));return rows[0]||null;}
+ };
+}
+
+
+  // LUMI_MAC_TRANSPORT_V1: opt-in only, after pairing/testing the worker.
+  window.__lumiMacTransport = async function(input){
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 25000);
+    let rows;
+    try{
+      const r = await authFetch('/rest/v1/asistente_ajustes?select=valor&clave=eq.grupo_labor_logs_mac&company_id=eq.' + encodeURIComponent(SES.company_id) + '&limit=1', {headers:cloudHeaders(),signal:ctl.signal});
+      if(!r.ok) throw new Error('No se pudo comprobar la conexión con la Mac. No se inició otro envío.');
+      rows = await r.json();
+    }finally{clearTimeout(timer);}
+    if(!rows[0] || rows[0].valor?.enabled !== true) return null;
+    if(SES.role !== 'manager') throw new Error('Solo el manager puede enviar mediante la Mac.');
+    const client = createLumiMacClient({authFetch,headers:cloudHeaders,companyId:SES.company_id});
+    const job = await client.enqueue(input.reportId,input.files);
+    const messages = {
+      queued:'El reporte quedó en cola para la Mac. Aún no está enviado.',
+      claimed:'La Mac está procesando el reporte. No repitas el envío.',
+      submitted:'Mensajes de la Mac aceptó el envío. No confirma que el grupo lo haya recibido.',
+      needs_review:'El envío necesita revisión. No se reenviará automáticamente.',
+      cancelled:'El envío está cancelado.'
+    };
+    const message = messages[job.state];
+    if(!message) throw new Error('Estado de envío desconocido. Revisa antes de repetir.');
+    if(typeof asMostrarRespuesta==='function') asMostrarRespuesta(message);
+    if(typeof asHablar==='function') asHablar(message);
+    return {estado:'mac_'+job.state,jobId:job.id,marcado:false};
+  };
+
   async function laborMandarHojas(nav, deps){
     deps = deps || {};
+    if(nav && nav.requireMac && !deps.macTransport){
+      deps.macTransport = async function(input){
+        if(typeof window.__lumiMacTransport !== 'function') throw new Error('La conexión de la Mac no está instalada. No se envió nada.');
+        const result = await window.__lumiMacTransport(input);
+        if(!result) throw new Error('La conexión de la Mac no está activada. No se abrió el envío manual.');
+        return result;
+      };
+    }
     const id = String(nav && nav.id || ''); if(!id) throw new Error('falta el id del labor log');
     const overlay = deps.overlay || function(t){ if(t){ if(typeof showOverlay === 'function') showOverlay(t); } else if(typeof hideOverlay === 'function') hideOverlay(); };
     overlay('Preparando las hojas…');
@@ -68998,6 +69087,13 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       // (30 oct, el dueño: "no debería de llevar ese texto") el mensaje va SIN texto: solo la hoja (y los recibos). El título queda para la hoja de compartir.
       const titulo = 'Labor log ' + String(row.crew_leader || '') + ' · ' + String(row.log_date || '').slice(0, 10);
       const texto = '';
+      // Automatic Mac path: queued/uncertain is NEVER sent/archived and never falls back to a second send.
+      const macTransport = deps.macTransport || window.__lumiMacTransport;
+      if(macTransport){
+        const queued = await macTransport({reportId:id,files:archivos});
+        if(queued) return Object.assign({hojas:imagenes.length,recibos:recibos.length},queued);
+      }
+      if(nav && nav.requireMac) throw new Error('La Mac no aceptó el reporte. No se abrió el envío manual.');
       overlay('Abriendo Mensajes…');
       let estado = 'nada';
       const nativo = deps.isNative ? deps.isNative() : isNative();
