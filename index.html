@@ -17596,7 +17596,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R162';
+  const APP_BUILD = '2026-11-06-R163';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -30111,6 +30111,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     if(extra) MED_CAMARA_ABIERTA = true;
     try{
       const result = await ARMeasure.measure(Object.assign({
+        memoryScope: SES && SES.company_id && SES.user_id ? SES.company_id + ':' + SES.user_id : '',
         modo: 'recorrido',
         // El nivel YA viene resuelto desde la pantalla: la camara no lo vuelve
         // a preguntar y lo estampa en cada medida del recorrido.
@@ -30284,6 +30285,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       const crewName = fpFirstName((SES && SES.full_name) || '');
       const roomName = fpCardRoomName(card);
       const result = await ARMeasure.measure({
+        memoryScope: SES && SES.company_id && SES.user_id ? SES.company_id + ':' + SES.user_id : '',
         section, materials, crewName, roomName,
         roomAreaSqFt: fpAreaOfScannedRoom(roomName)
       });
@@ -51106,7 +51108,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     if(res.status !== 401) return res;
     if(!(SES && SES.refresh_token)){ sessionExpired(); return res; }
     const r = await fetch(CLOUD.url + '/auth/v1/token?grant_type=refresh_token', {
-      method:'POST', headers:{'apikey':CLOUD.key,'Content-Type':'application/json'},
+      method:'POST', signal: opts && opts.signal, headers:{'apikey':CLOUD.key,'Content-Type':'application/json'},
       body: JSON.stringify({ refresh_token: SES.refresh_token })
     });
     if(!r.ok){ sessionExpired(); return res; }
@@ -51250,49 +51252,46 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   }
 
   const outbox = {
-    all(){ try{ return JSON.parse(localStorage.getItem('outbox')||'[]'); }catch(e){ return []; } },
-    set(v){ try{ localStorage.setItem('outbox', JSON.stringify(v)); }catch(e){} },
+    owned(item){ return !!(SES && SES.user_id && SES.company_id && item && item.created_by === SES.user_id && item.company_id === SES.company_id); },
+    read(){ const rows = JSON.parse(localStorage.getItem('outbox') || '[]'); if(!Array.isArray(rows) || rows.some(x => !x || typeof x !== 'object')) throw new Error('No se pudo leer la cola guardada.'); return rows; },
+    all(){ try{ return this.read().filter(x => this.owned(x)); }catch(e){ return []; } },
+    set(v){
+      if(!SES || !SES.user_id || !SES.company_id || v.some(x => !this.owned(x))) throw new Error('La cola no pertenece a esta cuenta.');
+      // Preserve the other accounts' pending work, including legacy entries with no owner.
+      // A malformed existing queue must never be replaced by an empty one.
+      const rows = this.read().filter(x => !this.owned(x)).concat(v), text = JSON.stringify(rows);
+      localStorage.setItem('outbox', text);
+      if(localStorage.getItem('outbox') !== text) throw new Error('No se pudo guardar el reporte en el teléfono.');
+    },
     add(item){ const a=this.all(); a.push(item); this.set(a); },
     remove(id){ this.set(this.all().filter(x=>x._id!==id)); }
   };
 
-  // Ask the server to hand the row back. A bare 2xx is not proof it was written -
-  // if we don't get an id, treat it as a failure and queue it.
-  // Turned off automatically if supabase-dedupe.sql has not been run yet, so
-  // the crew can still send. They just lose the duplicate protection.
-  let CLIENT_ID_READY = true;
-
+  // A retry retains its client_id. Only an actual matching row proves delivery.
   async function cloudPost(row){
-    if(!CLIENT_ID_READY && row.client_id){
-      const { client_id, ...rest } = row; row = rest;
-    }
-    const res = await authFetch('/rest/v1/labor_logs', {
-      method:'POST',
-      headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
-      body: JSON.stringify(row)
-    });
-    // 409 = this exact report is already in the database. That happens when the
-    // save worked but the reply never came back, so the app queued a retry.
-    // Treat it as delivered - sending it again would be a second day's pay.
-    if(res.status === 409) return 'duplicate';
-    // 400 with client_id means the column is not there yet - drop it and retry
-    // once, so a missing migration cannot stop the crew from sending.
-    if(res.status === 400 && row.client_id && CLIENT_ID_READY){
-      CLIENT_ID_READY = false;
-      const { client_id, ...rest } = row;
-      return cloudPost(rest);
-    }
-    // Sesion vencida / ya no es manager / fila invalida: reintentar no lo
-    // arregla. Se marca permanente para que el outbox no se atasque detras.
-    if(res.status === 401 || res.status === 403 || res.status === 422){
-      const err = new Error('HTTP ' + res.status); err.permanent = true; throw err;
-    }
-    if(!res.ok) throw new Error('HTTP ' + res.status);
-    let saved = null;
-    try{ saved = await res.json(); }catch(e){ throw new Error('respuesta vacia'); }
-    const id = Array.isArray(saved) ? (saved[0] && saved[0].id) : (saved && saved.id);
-    if(!id) throw new Error('el servidor no guardo el reporte');
-    return id;
+    const ctl = new AbortController(), timeout = setTimeout(() => ctl.abort(), 20000);
+    try{
+      const res = await authFetch('/rest/v1/labor_logs', {
+        method:'POST', signal: ctl.signal,
+        headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
+        body: JSON.stringify(row)
+      });
+      if(res.status === 409 && row.client_id){
+        const check = await authFetch('/rest/v1/labor_logs?client_id=eq.' + encodeURIComponent(row.client_id) + '&select=id,client_id,created_by,company_id', { headers: cloudHeaders(), signal: ctl.signal });
+        const rows = check.ok ? await check.json() : [];
+        const saved = Array.isArray(rows) && rows.find(x => x.id && x.client_id === row.client_id && x.created_by === row.created_by && x.company_id === row.company_id);
+        if(saved) return saved.id;
+        throw new Error('No se pudo confirmar el reporte existente.');
+      }
+      if([400,401,403,422].includes(res.status)){
+        const err = new Error('HTTP ' + res.status); err.permanent = true; throw err;
+      }
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const saved = await res.json();
+      const id = Array.isArray(saved) ? (saved[0] && saved[0].id) : (saved && saved.id);
+      if(!id) throw new Error('el servidor no guardo el reporte');
+      return id;
+    }finally{ clearTimeout(timeout); }
   }
 
   // Three things call this - app start, app becoming visible, network coming
@@ -51304,7 +51303,8 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     flushing = true;
     try{
       for(const item of outbox.all()){
-        const { _id, ...row } = item;
+        if(item._rejected || !SES || item.created_by !== SES.user_id || item.company_id !== SES.company_id) continue;
+        const { _id, _rejected, ...row } = item;
         try{
           await cloudPost(row);
           outbox.remove(_id);
@@ -51347,24 +51347,26 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       work_kind:   formKind(),
       payload:     JSON.parse(decodeURIComponent(escape(atob(buildCode().slice(4)))))
     };
+    const same = x => JSON.stringify({ u:x.created_by, c:x.company_id, l:x.crew_leader, d:x.log_date, k:x.work_kind, p:x.payload });
+    const prior = outbox.all().find(it => same(it) === same(row));
+    if(prior && !prior._rejected) return 'already-queued';
+    if(prior) row.client_id = prior.client_id;
+    const item = Object.assign({_id: row.client_id}, row);
+    // Persist before networking: closing the app during POST must not lose the ticket.
+    try{ if(prior) outbox.set(outbox.all().map(x => x._id === prior._id ? item : x)); else outbox.add(item); }
+    catch(e){ return 'storage-error'; }
+    updateOutboxBadge();
     try{
       await cloudPost(row);
-      syncShiftExpenses(row.client_id, row.payload, row.work_kind, row.log_date);
+      try{ outbox.remove(item._id); }catch(e){ /* same ticket is safe to retry */ }
+      try{ await syncShiftExpenses(row.client_id, row.payload, row.work_kind, row.log_date); }catch(e){}
+      updateOutboxBadge();
       return 'sent';
     }catch(e){
-      // Rechazado de plano (sesion vencida, ya no es manager): encolarlo solo
-      // lo dejaria atascado para siempre delante de todo lo demas.
-      if(e && e.permanent) return 'rejected';
-      // Out of signal, the crew often presses Enviar again because nothing
-      // seems to happen. Each press would queue another copy with its own
-      // ticket, and every one of them would arrive when signal returns.
-      const same = JSON.stringify({ l:row.crew_leader, d:row.log_date, k:row.work_kind, p:row.payload });
-      const already = outbox.all().some(it =>
-        JSON.stringify({ l:it.crew_leader, d:it.log_date, k:it.work_kind, p:it.payload }) === same);
-      if(already) return 'already-queued';
-
-      outbox.add(Object.assign({_id: Date.now()+'-'+Math.random().toString(36).slice(2)}, row));
-      updateOutboxBadge();
+      if(e && e.permanent){
+        try{ const a = outbox.all(); const it = a.find(x => x._id === item._id); if(it){ it._rejected = e.message; outbox.set(a); } }catch(ignore){}
+        updateOutboxBadge(); return 'rejected';
+      }
       return 'queued';
     }
   }
@@ -55541,6 +55543,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       showOverlay('Enviando… / Sending…');
       const outcome = await submitToCloud();
       hideOverlay();
+      if(outcome === 'storage-error') return alert('No se pudo guardar el reporte en el teléfono. No cierres esta pantalla. Libera espacio y vuelve a intentar.');
       // Se limpia y se sale al menu, igual que restauracion. El aviso se queda
       // en la casilla verde encima del menu hasta que la cierren.
       if(outcome === 'sent') return avisoEnviado('El manager lo ve en Mudanzas recibidas.',
@@ -55574,6 +55577,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       recalcGrandTotal();
       const outcome = await submitToCloud();
       hideOverlay();
+      if(outcome === 'storage-error') return alert('No se pudo guardar el reporte en el teléfono. No cierres esta pantalla. Libera espacio y vuelve a intentar.');
       if(outcome === 'sent'){
         if(typeof refreshInbox === 'function') refreshInbox();
         if(typeof refreshAmgCounts === 'function') refreshAmgCounts();
@@ -55591,9 +55595,11 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
       showOverlay('Enviando… / Sending…');
       const outcome = await submitToCloud();
       hideOverlay();
+      if(outcome === 'storage-error') return alert('No se pudo guardar el reporte en el teléfono. No cierres esta pantalla. Libera espacio y vuelve a intentar.');
       if(outcome === 'already-queued'){
         return alert('Este reporte ya está guardado esperando señal. No lo mande otra vez.');
       }
+      if(outcome === 'rejected') return alert('El servidor no aceptó el reporte. Conservamos lo escrito. Revisa tu sesión y los datos antes de volver a enviarlo.');
       // Se fue, o quedó en la cola esperando señal: en los dos casos el reporte
       // YA NO ES SUYO y la pantalla tiene que quedar lista para el siguiente.
       // Antes salía un aviso y el formulario se quedaba lleno: para mandar otro
@@ -58922,29 +58928,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
 
   function checkWebUpdate(){
     if(typeof isNative === 'function' && isNative()) return;
-    if(!navigator.onLine) return;
-    fetch('version.txt?cb=' + Date.now(), { cache:'no-store' }).then(r => r.ok ? r.text() : '').then(v => {
-      v = String(v || '').trim();
-      // SOLO SI ES MAS NUEVA. Antes bastaba con que fuera DISTINTA, en
-      // cualquier dirección: con el teléfono en FA y el servidor en EZ, le
-      // ofrecía "actualizar" a una versión más vieja, y el aviso volvía al
-      // recargar porque nada cambiaba.
-      // Y comparar los sellos como TEXTO tampoco alcanza (7 oct 2026): la fecha
-      // sí se ordena sola, pero la letra no — después de la Z viene la AA, y en
-      // orden alfabético "AA" va ANTES que "Z". El 30 de agosto hubo Z, AA y AB
-      // el mismo día, así que un teléfono en Z nunca se habría enterado de AA.
-      if(!v || !selloMasNuevo(v, APP_BUILD)) return;
-      let b = document.getElementById('webUpdateBar');
-      if(!b){
-        b = document.createElement('div'); b.id = 'webUpdateBar';
-        b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:400;background:#1f6f5b;color:#fff;'
-          + 'padding:calc(10px + env(safe-area-inset-top)) 14px 10px;'
-          + 'font-weight:700;display:flex;gap:10px;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.35);';
-        b.innerHTML = '<span>Hay una versión nueva de la app (' + esc(v) + ').</span><button type="button" style="background:#fff;color:#1f6f5b;border:0;border-radius:8px;padding:8px 12px;font-weight:800;">Actualizar</button>';
-        b.querySelector('button').addEventListener('click', ()=>{ const u = new URL(location.href); u.searchParams.set('cb', String(Date.now())); location.replace(u.toString()); });
-        document.body.appendChild(b);
-      }
-    }).catch(()=>{});
+    return checkForNewVersion();
   }
   (async function boot(){
     // Lo de antes de la nube, sin dueno, es de la cuenta que YA esta en este
@@ -65908,7 +65892,16 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     try{ if(typeof rdguPintarMed === 'function') rdguPintarMed(); }catch(e){}   // (R132) en RD: cada trabajo en su tarjeta, por cliente
   }
 
-  const draftKey = () => isAmgSide() ? 'draft1amg' : 'draft1';
+  const draftLegacyKey = () => isAmgSide() ? 'draft1amg' : 'draft1';
+  const draftKey = () => draftLegacyKey() + ':' + encodeURIComponent((SES && SES.company_id) || 'guest') + ':' + encodeURIComponent((SES && SES.user_id) || 'guest');
+  function readDraftForAccount(){
+    const current = localStorage.getItem(draftKey());
+    if(current) return JSON.parse(current);
+    const legacy = JSON.parse(localStorage.getItem(draftLegacyKey()) || 'null');
+    // A legacy draft can be recovered only by its recorded author. Never claim an ownerless draft.
+    if(legacy && legacy.uid && SES && legacy.uid === SES.user_id && (!legacy.company || legacy.company === SES.company_id)) return legacy;
+    return null;
+  }
   let draftReady = false;
 
   // A measurement card can itself hold a variable number of cuts, so its
@@ -66038,7 +66031,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
         vals[fieldKey(el)] = (el.type === 'checkbox' || el.type === 'radio')
           ? (el.checked ? 1 : 0) : el.value;
       });
-      (typeof lsGuardarConSitio === 'function' ? lsGuardarConSitio : (k, v) => localStorage.setItem(k, v))(draftKey(), JSON.stringify({ at: Date.now(), uid: SES && SES.user_id, side: sideKind(), rows: rowCounts(), vals, openLogId: openLogId,
+      (typeof lsGuardarConSitio === 'function' ? lsGuardarConSitio : (k, v) => localStorage.setItem(k, v))(draftKey(), JSON.stringify({ at: Date.now(), uid: SES && SES.user_id, company: SES && SES.company_id, side: sideKind(), rows: rowCounts(), vals, openLogId: openLogId,
         medJobId: (typeof medPantalla !== 'undefined' && medPantalla && medPantalla.id) || null }));
     }catch(e){
       // "nothing we can do" era falso: se puede DECIRLO. Y ahora que los planos
@@ -66051,7 +66044,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
 
   function restoreDraft(){
     let d = null;
-    try{ d = JSON.parse(localStorage.getItem(draftKey()) || 'null'); }catch(e){}
+    try{ d = readDraftForAccount(); }catch(e){}
     if(!d || !d.vals || Array.isArray(d.vals)) return;   // ignore the old format
 
     // A draft older than 3 days is almost certainly stale - a finished job the
@@ -67941,6 +67934,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     [/\b(labor logs?|mano de obra|reporte del dia|daily report)\b/, 'labor'],
     [/\b(mis horas|mi reloj|las horas|reloj|my hours|clock|time ?sheet|punch|horas|hours)\b/, 'horas'],
     [/\b(contenidos?|contents|inventario del cliente|cosas del cliente|client'?s things)\b/, 'contenidos'],
+    [/\b(mapa de humedad|moisture map)\b/, 'mapa_humedad'],
     [/\b(secado|lecturas|humedad|drying|moisture)\b/, 'secado'],
     [/\b(materiales|proteccion de emergencia|materials)\b/, 'materiales'],
     [/\b(comunicacion|comms|communication|llamadas del cliente)\b/, 'comunicacion'],
@@ -68626,7 +68620,7 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
     if(cmd.tipo === 'contactar' && !cmd.quien && AS.ultContacto && (Date.now() - AS.ultContacto.ts) < 180000) return asCmdConfirmarContacto(cmd.canal, AS.ultContacto.t);
     if(cmd.tipo === 'contactar') return asCmdContactar(cmd.canal, cmd.quien);
   }
-  const AS_CMD_NOMBRE_PANTALLA = { horas: 'Horas', labor: 'Mano de Obra', equipo: 'Equipo', secado: 'Secado', comunicacion: 'Comunicación', materiales: 'Materiales', contenidos: 'Contenidos', visitas: 'Visitas y Clientes', plano_y_medidas: 'Plano y Medidas', manual: 'el Manual', ajustes: 'Ajustes', menu: 'el menú', planos_guardados: 'Planos guardados', medidas_guardadas: 'Medidas guardadas' };
+  const AS_CMD_NOMBRE_PANTALLA = { mapa_humedad: 'Mapa de humedad', horas: 'Horas', labor: 'Mano de Obra', equipo: 'Equipo', secado: 'Secado', comunicacion: 'Comunicación', materiales: 'Materiales', contenidos: 'Contenidos', visitas: 'Visitas y Clientes', plano_y_medidas: 'Plano y Medidas', manual: 'el Manual', ajustes: 'Ajustes', menu: 'el menú', planos_guardados: 'Planos guardados', medidas_guardadas: 'Medidas guardadas' };
   const asCmdNombrePantalla = function(d){ return AS_CMD_NOMBRE_PANTALLA[d] || d; };
   // La cuadrilla no ve las pantallas del manager (el servidor ya filtra; esto es el segundo candado).
   function asCmdPermitida(d){
@@ -68732,6 +68726,11 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   async function asCmdIr(nav){
     const d = String((nav && nav.destino) || '');
     if(!asCmdPermitida(d)){ try{ goMenu(); }catch(e){} return; }
+    if(d === 'mapa_humedad'){
+      if(floorplanData && Array.isArray(floorplanData.rooms) && floorplanData.rooms.length){ const b = $('#fmOpenBtn'); if(b){ b.click(); return; } }
+      AS_CMD_AZULEJO('planomed');
+      alert(asEn() ? 'Open a saved floor plan first, then choose Moisture Map.' : 'Abre primero el plano de la casa y luego elige Mapa de humedad.'); return;
+    }
     if(AS_CMD_TABS[d]){ AS_CMD_AZULEJO(AS_CMD_TABS[d]); return; }
     if(d === 'menu'){ try{ goMenu(); }catch(e){ const b = $('#goHome'); if(b) b.click(); } return; }
     if(d === 'ajustes'){ const g = document.querySelector('[data-ajustes]'); if(g) g.click(); return; }
@@ -74038,11 +74037,12 @@ html body.rd-home main, html body.rd-perfil main{font-weight:600;}
   async function msgEliminar(id){
     const m = MSG.lista.find(x => x.id === id); if(!m || !msgMio(m)) return;
     if(!confirm('¿Eliminar este mensaje?')) return;
+    const anterior = { borrado_at:m.borrado_at, texto:m.texto, adjuntos:m.adjuntos };
     m.borrado_at = new Date().toISOString(); m.texto = ''; m.adjuntos = []; MSG.acc = null; msgPintarChat();
     try{
       if(msgEsCasual()) await msgRpcCasual('casual_mensaje_borrar', { p_mensaje: id });
       else { const r = await authFetch('/rest/v1/mensajes?id=eq.' + encodeURIComponent(id), { method: 'PATCH', headers: cloudHeaders(), body: JSON.stringify({ borrado_at: m.borrado_at, texto: '', adjuntos: [] }) }); if(!r.ok) throw new Error('HTTP ' + r.status); }
-    }catch(e){ const root = MSG.root; if(root) root.querySelector('.msg-aviso').textContent = 'No se pudo mandar. Revise su internet.'; }
+    }catch(e){ Object.assign(m, anterior); msgPintarChat(); const root = MSG.root; if(root) root.querySelector('.msg-aviso').textContent = 'No se pudo eliminar. El mensaje se conservó. Revise su internet.'; }
   }
   // mandar una fila (texto y/o foto, con cita si la hay) a la plática abierta; lo usan Enviar y Reenviar
   async function msgEnviar(texto, extra){
