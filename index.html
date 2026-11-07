@@ -18014,7 +18014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R207';
+  const APP_BUILD = '2026-11-07-R208';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67964,12 +67964,21 @@ function lumiSimpleGreeting(text){
  return /^(?:hi|hello|hey)\b/.test(t)?"Hi. I'm here to help.":'Hola. Aquí estoy para ayudarte.';
 }
 
+function lumiCapabilityHelp(text){
+ const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.,]/g,' ').replace(/\s+/g,' ').trim();
+ if(t.length>180)return null;
+ const q=t.replace(/^(?:(?:hola|hello|hi|hey)\s+)?lumi\s+/,'').replace(/^(?:dime|explicame|cuentame|tell me|explain)\s+(?:(?:brevemente|rapido|en breve|briefly)\s+)?/,'').replace(/\s+(?:por favor|please)$/,'');
+ if(!/^(?:que puedes hacer|en que me puedes ayudar|como me puedes ayudar|cuales son tus funciones|what can you do|how can you help me|what can you help me with|que puedes do|what puedes hacer)$/.test(q))return null;
+ const en=/^(?:what|how)\b/.test(q);
+ return en?"I can help you review reports, find project documents, and work with messages. With your Mac connected, I can open pages and show you screenshots. Tell me what you need, and I’ll show you the result or explain what’s missing.":'Puedo ayudarte a revisar reportes, buscar documentos de proyectos y trabajar con mensajes. Con tu Mac conectada puedo abrir páginas y mostrarte capturas. Dime qué necesitas y te muestro el resultado o te explico qué falta.';
+}
+
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
-    if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiSimpleGreeting(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
+    if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
     if(!dictando){const desktop=lumiDesktopOrder(texto)||lumiDesktopReadFollowup(texto,AS.desktopReadReceipt,SES.user_id+'|'+SES.company_id);if(desktop){if(!['read_chat','read_unread','clarify'].includes(desktop.action))AS.desktopReadReceipt=null;asTranscribir(texto);await asEscritorioMac(desktop);return;}AS.desktopReadReceipt=null;}
     if(!dictando){const followup=lumiBrowserFollowup(texto,AS.browserReceipt,SES.user_id+'|'+SES.company_id);if(followup){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,followup);asMostrarRespuesta(followup);asHablar(followup,asSeguirOyendo);return;}}
     if(!dictando){const screen=lumiScreenOrder(texto);if(screen){asTranscribir(texto);await asMostrarPantallaMac(screen);return;}}
