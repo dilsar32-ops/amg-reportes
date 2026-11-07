@@ -9341,6 +9341,8 @@ html body #dnoCard .dno-ic-llave, html body #dnoCard .dno-ic-mas{background:rgba
 #dnoCard .dno-otros{max-height:min(46vh, 340px); overflow:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain;}
 #dnoCard .dno-vacio{margin:0; padding:12px 8px; font:400 calc(13*var(--rdp, 1px))/1.3 "Avenir Next", var(--sf); color:#aeb6c4;}
 #dnoCard .dno-aviso{margin:6px 6px 4px; padding:8px 11px; border-radius:10px; border:1px solid rgba(16,110,250,.4); background:rgba(16,110,250,.1); color:#cfe2ff; font:500 calc(13*var(--rdp, 1px))/1.35 "Avenir Next", var(--sf);}
+/* con la casilla de la contrasena abierta: espacio debajo para que la tarjeta pueda subir hasta el titulo y el teclado no la tape */
+html body.dno-tecla .rd-pf{padding-bottom:75vh !important;}
 
 .rdg-sin{margin-top:calc(2.75*var(--rdu)); font:400 calc(10.52*var(--rdu))/1.3 "Avenir Next", var(--sf); color:#8e92a2;}
 
@@ -18138,7 +18140,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R229';
+  const APP_BUILD = '2026-11-07-R230';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -75556,7 +75558,6 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
         + '<button type="submit" class="dno-ok"' + (DNO.ocupado ? ' disabled' : '') + '>' + (DNO.ocupado ? dnoT('Revisando…', 'Checking…') : dnoT('Entrar', 'Enter')) + '</button>'
         + '<button type="button" class="dno-bt dno-cerrar" data-dno="cerrar" aria-label="' + dnoT('Cerrar', 'Close') + '">' + DNO_X + '</button></div>'
         + '</form>' + aviso;
-      setTimeout(() => { const i = document.getElementById('dnoClave'); if(i && !DNO.ocupado) i.focus(); }, 30);
       return;
     }
     const yo = SES.user_id;
@@ -75586,6 +75587,20 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(DNO.agregar) h += '<div class="dno-otros">' + (otros.length ? otros.map(p => fila(p, false)).join('') : '<p class="dno-vacio">' + dnoT('No hay nadie más en la cuadrilla.', 'No one else on the crew.') + '</p>') + '</div>';
     box.innerHTML = h + aviso;
   }
+  // (7-nov, su foto: "el teclado no me deja ver donde tengo que escribir mi contrasena") la tarjeta sube debajo del titulo y queda
+  // espacio abajo (body.dno-tecla), asi el teclado nunca la tapa. El foco va en el MISMO toque (si no, el iPhone no abre el teclado).
+  function dnoSubir(){
+    const card = document.getElementById('dnoCard'), sc = document.querySelector('main'); if(!card || !sc) return;
+    const cab = document.getElementById('rdmsCab') || document.querySelector('#rdmsCab, .rdms-cab');
+    const tope = cab ? Math.max(0, cab.getBoundingClientRect().bottom) : 120;
+    const d = card.getBoundingClientRect().top - (tope + 10);
+    if(Math.abs(d) > 2) sc.scrollTop = Math.max(0, sc.scrollTop + d);
+  }
+  function dnoTecla(on){
+    document.body.classList.toggle('dno-tecla', !!on);
+    if(!on) return;
+    dnoSubir(); [120, 350, 700].forEach(ms => setTimeout(() => { if(document.body.classList.contains('dno-tecla')) dnoSubir(); }, ms));
+  }
   async function dnoCargar(){
     try{
       const r = await rdConTiempo(authFetch('/rest/v1/profiles?select=id,full_name,role,status&company_id=eq.' + encodeURIComponent(SES.company_id) + '&order=full_name', { headers: cloudHeaders() }), 12000);
@@ -75612,7 +75627,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     }catch(e){ DNO.aviso = dnoT('No se pudo comprobar. Revisa tu internet.', 'Could not check. Check your internet.'); }
     if(i) i.value = '';
     DNO.ocupado = false;
-    if(bien){ DNO.abierto = Date.now(); DNO.modo = ''; DNO.aviso = ''; DNO.gente = []; dnoPintar(); dnoCargar(); }
+    if(bien){ dnoTecla(false); try{ document.activeElement && document.activeElement.blur(); }catch(e){} DNO.abierto = Date.now(); DNO.modo = ''; DNO.aviso = ''; DNO.gente = []; dnoPintar(); dnoCargar(); }
     else dnoPintar();
   }
   async function dnoCambiar(id, rol){
@@ -75637,8 +75652,8 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   document.addEventListener('click', ev => {
     const b = ev.target.closest && ev.target.closest('#dnoCard [data-dno]'); if(!b || DNO.ocupado) return;
     const a = b.dataset.dno; DNO.aviso = '';
-    if(a === 'clave'){ DNO.modo = 'clave'; dnoPintar(); }
-    else if(a === 'cerrar'){ DNO.abierto = 0; DNO.modo = ''; DNO.pide = ''; DNO.agregar = false; DNO.gente = []; dnoPintar(); }
+    if(a === 'clave'){ DNO.modo = 'clave'; dnoPintar(); const i = document.getElementById('dnoClave'); if(i){ try{ i.focus({ preventScroll: true }); }catch(e){ i.focus(); } } dnoTecla(true); }
+    else if(a === 'cerrar'){ dnoTecla(false); DNO.abierto = 0; DNO.modo = ''; DNO.pide = ''; DNO.agregar = false; DNO.gente = []; dnoPintar(); }
     else if(a === 'agregar'){ DNO.agregar = !DNO.agregar; DNO.pide = ''; dnoPintar(); }
     else if(a === 'pide'){ DNO.pide = b.dataset.id; dnoPintar(); }
     else if(a === 'no'){ DNO.pide = ''; dnoPintar(); }
@@ -75647,7 +75662,8 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   });
   document.addEventListener('submit', ev => { if(ev.target && ev.target.matches && ev.target.matches('#dnoCard [data-dno-form]')){ ev.preventDefault(); if(!DNO.ocupado) dnoEntrar(); } });
   // si la app se va al fondo, la seccion se cierra con llave
-  document.addEventListener('visibilitychange', () => { if(document.hidden && DNO.abierto){ DNO.abierto = 0; DNO.modo = ''; DNO.pide = ''; DNO.agregar = false; DNO.gente = []; dnoPintar(); } });
+  document.addEventListener('focusin', ev => { if(ev.target && ev.target.id === 'dnoClave') dnoTecla(true); });
+  document.addEventListener('visibilitychange', () => { if(document.hidden) dnoTecla(false); if(document.hidden && DNO.abierto){ DNO.abierto = 0; DNO.modo = ''; DNO.pide = ''; DNO.agregar = false; DNO.gente = []; dnoPintar(); } });
   window.__dno = DNO;
   window.__rdx = { soltarYa: rdxSoltarYa, todo: rdxTodo, filas: rdxFilas, sumar: rdxSumar, activar: rdxActivar, otro: rdxOtro, hoja: () => rdxHojaHtml(rdxHojaDatos()), estado: RDX, son: RDX_SON };   // para las pruebas
   window.__rds = { todo: rdsTodo, estado: RDS };
