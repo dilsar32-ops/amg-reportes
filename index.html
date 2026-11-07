@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R195';
+  const APP_BUILD = '2026-11-06-R196';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67824,11 +67824,21 @@ function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=
     finally{AS_DESKTOP_BUSY=false;}
   }
 
+function lumiSimpleGreeting(text){
+ const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡]/g,'');
+ if(t.length>180)return null;
+ const simple=/^(?:hola|holi|hey|hello|hi)(?:[,!.\s]+lumi)?(?:[,!.\s]+(?:como estas|how are you))?[?!.\s]*$/.test(t);
+ const requested=/^(?:hola lumi,?\s*)?saludame(?: de forma breve| en una frase corta(?: y calida)?)?\.?(?: no abras nada ni cambies datos\.)?$/.test(t);
+ if(!simple&&!requested)return null;
+ return /^(?:hi|hello|hey)\b/.test(t)?"Hi. I'm here to help.":'Hola. Aquí estoy para ayudarte.';
+}
+
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiSimpleGreeting(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
     if(!dictando){const desktop=lumiDesktopOrder(texto);if(desktop){asTranscribir(texto);await asEscritorioMac(desktop);return;}}
     if(!dictando){const followup=lumiBrowserFollowup(texto,AS.browserReceipt,SES.user_id+'|'+SES.company_id);if(followup){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,followup);asMostrarRespuesta(followup);asHablar(followup,asSeguirOyendo);return;}}
     if(!dictando){const screen=lumiScreenOrder(texto);if(screen){asTranscribir(texto);await asMostrarPantallaMac(screen);return;}}
