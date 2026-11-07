@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R193';
+  const APP_BUILD = '2026-11-06-R194';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67755,22 +67755,30 @@ function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=D
 function lumiDesktopOrder(text){
  let s=String(text||'').trim().replace(/^[¿¡]+/,'');
  if(!s||s.length>2300)return null;
- s=s.replace(/^(?:(?:oye|hey|lumi|por favor|please)[, ]+)+/i,'').replace(/^(?:(?:me )?puedes|can you|could you|necesito que|quiero que)\s+/i,'').trim();
- if(!s.includes(':'))s=s.replace(/\s*,?\s*(?:por favor|porfa|please)$/i,'').trim();
+ // Prefixes apply to the instruction, never to the supplied message body.
+ for(let i=0;i<4;i++)s=s.replace(/^(?:(?:oye|hey|lumi|por favor|please)[, ]+)+/i,'').replace(/^(?:(?:me )?(?:puedes|podrías|podrias)|can you|could you|would you|necesito que|quiero que)\s+/i,'').trim();
  const send=/^(?:envía|envia|manda|send)\s+(?:(?:un )?mensaje\s+)?(?:al? |to )(?:(?:el |the )?(?:grupo|group|chat)\s+)?(.+?)\s+(?:en|in|on)\s+whatsapp\s*:\s*([\s\S]+)$/i.exec(s);
- if(send&&send[1].length<=120&&send[2].length<=2000&&send[2].trim())return {app:'whatsapp',action:'send_message',query:send[1].trim(),text:send[2].trim()};
- s=s.replace(/[?!.]+$/,'');
+ if(send&&send[1].length<=120&&send[2].length<=2000&&send[2].trim()){
+  const body=send[2].trim(),quoted=/^(?:"[\s\S]*"|“[\s\S]*”)$/.test(body);
+  if(!quoted&&/(?:no (?:lo |los |la |las )?(?:env[ií]es|mandes)|(?:don['’]t|do not) send|(?:pero|but)\s+(?:espera|wait|no|not)|(?:todavía no|not yet))/i.test(body))return {action:'clarify',app:'whatsapp',reason:'Veo una indicación de esperar o no enviar. No envié nada. Dime el texto exacto entre comillas cuando quieras enviarlo.'};
+  return {app:'whatsapp',action:'send_message',query:send[1].trim(),text:quoted?body.slice(1,-1):body};
+ }
+ s=s.replace(/[?!.]+$/,'').replace(/\s*,?\s*(?:por favor|porfa|please)$/i,'').trim();
  if(/\b(no|not|don't|dijo|said|chrome|safari|browser|navegador|web)\b/i.test(s))return null;
- const combined=/^(?:abre|open)\s+(whatsapp|mensajes|messages)\s+(?:y|and)\s+(.+)$/i.exec(s);if(combined)s=combined[2]+' en '+combined[1];
- let m=/^(?:abre|abrir|ábreme|abreme|muestra|muéstrame|muestrame|open|show me|bring up|tráeme|traeme|trae)\s+(?:la app de |la aplicación de |the app )?(whatsapp|mensajes normales|mensajes|messages|imessage)(?: al frente| to the front)?$/i.exec(s);
+ const apps='(whatsapp|mensajes normales|mensajes|messages|imessage)';
+ const combined=new RegExp('^(?:abre|abrir|open)\\s+'+apps+'\\s+(?:y(?: luego| después| despues)?|and(?: then)?)\\s+(.+)$','i').exec(s);if(combined)s=combined[2]+' en '+combined[1];
+ let m=new RegExp('^(?:abre|abrir|ábreme|abreme|muestra|muéstrame|muestrame|open|show me|bring up|bring|tráeme|traeme|trae)\\s+(?:la app de |la aplicación de |the app )?'+apps+'(?: al frente| to the front| in front)?$','i').exec(s);
  const app=x=>/^whatsapp$/i.test(x)?'whatsapp':'messages';
  if(m)return {action:'open_app',app:app(m[1])};
- m=/^(busca|buscar|buscame|búscame|encuentra|find|search for|search|look for|abre|abrir|open|show me|muestra|muéstrame|ve al|go to)\s+(?:(?:el |the )?(?:grupo|chat|contacto|group|contact|conversation)(?: de| con| with)?\s+|a\s+)?(.+?)\s+(?:en|in|de|on)\s+(whatsapp|mensajes|messages)$/i.exec(s);
+ const reversed=new RegExp('^(busca|buscar|búscame|buscame|find|search for|search|look for)\\s+(?:en|in|on)\\s+'+apps+'\\s+(?:a\\s+|for\\s+)?(.+)$','i').exec(s);
+ if(reversed)s=reversed[1]+' '+reversed[3]+' en '+reversed[2];
+ m=new RegExp('^(busca|buscar|buscame|búscame|encuentra|find|search for|search|look for|abre|abrir|open|show me|muestra|muéstrame|ve al|go to)\\s+(?:(?:el |the )?(?:grupo|chat|contacto|group|contact|conversation)(?: de| con| with)?\\s+|a\\s+)?(.+?)\\s+(?:en|in|de|on)\\s+'+apps+'$','i').exec(s);
  if(!m||m[2].length>120||/\b(?:y env[ií]a|and send|y manda|and delete)\b/i.test(m[2]))return null;
  return {app:app(m[3]),action:/^(busca|buscar|buscame|búscame|encuentra|find|search for|search|look for)$/i.test(m[1])?'search_chats':'open_chat',query:m[2].trim()};
 }
 function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms))}){
  return {async run(order){
+  if(!['open_app','search_chats','open_chat','send_message'].includes(order?.action))throw Error('La orden necesita aclaración.');
   const s={...session()},same=()=>s.role==='manager'&&session().role==='manager'&&s.user_id===session().user_id&&s.company_id===session().company_id;
   if(!same()||!s.user_id||!s.company_id)throw Error('Esta acción requiere Manager.');
   const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(s.company_id)+'&clave=eq.lumi_local_model_device');const d=rows?.[0]?.valor;
@@ -67778,7 +67786,7 @@ function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=
   const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
   try{await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{...order,local_profile:'lumi_desktop'}})});
    const until=now()+60000;
-   while(now()<until){if(!same())throw Error('La sesión cambió.');const jobs=await call(route+'&select=state,result');if(!same())throw Error('La sesión cambió.');const job=jobs?.[0];if(job?.state==='failed')throw Error('No pude confirmar el resultado en la Mac. Revisa el chat antes de repetir un envío.');if(job?.state==='done'){const r=job.result?.data;if(!r||r.app!==order.app||!['app_front','matches','needs_choice','not_found','chat_opened','message_submitted','already_submitted'].includes(r.status))throw Error('Respuesta de la Mac no válida.');return r;}await wait(500);}
+   while(now()<until){if(!same())throw Error('La sesión cambió.');const jobs=await call(route+'&select=state,result');if(!same())throw Error('La sesión cambió.');const job=jobs?.[0];if(job?.state==='failed')throw Error('No pude confirmar el resultado en la Mac. Revisa el chat antes de repetir un envío.');if(job?.state==='done'){const r=job.result?.data;if(!r||r.app!==order.app||!['app_front','matches','needs_choice','not_found','chat_opened','message_submitted','already_submitted'].includes(r.status))throw Error('Respuesta de la Mac no válida.');const allowed={open_app:['app_front'],search_chats:['matches','not_found'],open_chat:['chat_opened','needs_choice','not_found'],send_message:['message_submitted','already_submitted','needs_choice','not_found']}[order.action];if(!allowed.includes(r.status))throw Error('La respuesta no corresponde a la orden.');if(['matches','needs_choice','not_found'].includes(r.status)&&(r.query!==order.query||!Array.isArray(r.candidates)||r.candidates.length>25))throw Error('Resultados de otra búsqueda.');if(['chat_opened','message_submitted','already_submitted'].includes(r.status)&&(typeof r.title!=='string'||!r.title.trim()))throw Error('Falta confirmar el destinatario.');return r;}await wait(500);}
    throw Error('La Mac no respondió a tiempo.');
   }finally{if(same())await call(route,{method:'DELETE'}).catch(()=>{});}
  }};
@@ -67786,6 +67794,7 @@ function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=
 
   let AS_DESKTOP_BUSY=false;
   async function asEscritorioMac(order){
+    if(order.action==='clarify'){asPararOido();asCallar();asMostrarRespuesta(order.reason);asHablar(order.reason,asSeguirOyendo);return;}
     if(AS_DESKTOP_BUSY){asMostrarRespuesta('Estoy terminando la consulta anterior.');return;}
     const owner=SES.user_id+'|'+SES.company_id,active=()=>AS.abierto&&owner===SES.user_id+'|'+SES.company_id;
     AS_DESKTOP_BUSY=true;asPararOido();asCallar();asAccionVisible('Buscando en tu Mac…','working');
