@@ -17896,7 +17896,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R184';
+  const APP_BUILD = '2026-11-06-R185';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67020,16 +67020,22 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       AS.ru = asRuNuevo(AS.pisoPrev); AS.dudosos = []; AS.rec = r; r.start(); AS.modo = 'web'; asNivelWebAbrir(); asEstado('escuchando', 'Te escucho…');
     }catch(e){ asEstado('esperando', 'No se pudo escuchar. Escribe abajo.'); }
   }
-  // El plugin no dice cuando terminaste: 1.4 s sin texto nuevo y bajito = terminaste. 8 s sin nada = reposo.
+  // Finish only after text has settled AND voice activity has stopped; ordinary pauses keep listening.
   function asVigilarSilencio(){
     clearInterval(AS.tmrSil);
     const inicio = Date.now();
     AS.tmrSil = setInterval(function(){
       if(AS.estado !== 'escuchando' || AS.modo !== 'nativo'){ clearInterval(AS.tmrSil); return; }
       const ahora = Date.now(), dicta = !!(AS.pregunta && AS.pregunta.tipo === 'msg_dictar');   // (R88) dictando un recado se piensa: más pausa
-      if(AS.texto.trim() && ahora - AS.ultTexto > (dicta ? 2300 : 1400) && (asRuSinVoz(AS.ru, ahora) >= 600 || ahora - AS.ultTexto > (dicta ? 3800 : 2600))){ clearInterval(AS.tmrSil); asPararOido().then(function(){ asEnviarVoz(AS.texto); }); }
-      else if(!AS.texto.trim() && ahora - inicio > 8000){ clearInterval(AS.tmrSil); asReposar(); }
-      else if(ahora - inicio > (dicta ? 45000 : 25000)){ clearInterval(AS.tmrSil); asPararOido().then(function(){ if(AS.texto.trim()) asEnviarVoz(AS.texto); else asReposar(); }); }
+      // Never finish a turn just because transcription stalled while voice continues.
+      const silencio = asRuSinVoz(AS.ru, ahora);
+      if(AS.micMuted || !AS.abierto){ clearInterval(AS.tmrSil); asPararOido(); return; }
+      if(AS.texto.trim() && ahora - AS.ultTexto > (dicta ? 2300 : 1400) && silencio >= (dicta ? 1400 : 1000)){
+        clearInterval(AS.tmrSil); const texto = AS.texto;
+        asPararOido().then(function(){ if(AS.abierto && !AS.micMuted) asEnviarVoz(texto); });
+      }
+      // Keep the active conversation listening through ordinary pauses.
+      else if(!AS.texto.trim() && ahora - inicio > 60000 && silencio >= 10000){ clearInterval(AS.tmrSil); asReposar(); }
     }, 200);
   }
   async function asPararOido(){
@@ -67175,7 +67181,12 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // UNA frase a la cola de la voz. encolar=true no corta lo que se esta diciendo (streaming frase por frase).
 
   // Local Qwen warm voice, selected by the account owner. No paid TTS fallback.
-/* Warm local voice. Uses the existing owner-only queue; audio is deleted after retrieval. */
+/* Owner-private voice queue; prepare the next phrase during playback. */
+function splitLumiSpeech(text){
+ const parts=String(text||'').match(/[^.!?]+[.!?]*\s*/g)||[text],chunks=[];
+ for(const part of parts){let rest=String(part).trim();while(rest){const cap=chunks.length?220:130;let take=rest.length;if(take>cap){take=rest.lastIndexOf(' ',cap);if(take<40)take=cap;}chunks.push(rest.slice(0,take).trim());rest=rest.slice(take).trim();}}
+ return chunks;
+}
 function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
  let epoch=0,chain=Promise.resolve(),current=null,cache=null;
  const owner=s=>s.user_id+'|'+s.company_id;
@@ -67190,31 +67201,32 @@ function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=
  async function speech(text,language,s,e){
   if(!active(s,e))return 'cancelled';
   const d=await device(s);if(!active(s,e))return 'cancelled';if(!d)return 'unavailable';
-  // Sentence boundaries first, hard cap for unusually long uninterrupted text.
-  const pieces=text.match(/[^.!?]+[.!?]*\s*/g)||[text],chunks=[];
-  for(const part of pieces){let rest=part.trim();while(rest.length>450){let cut=rest.lastIndexOf(' ',450);if(cut<100)cut=450;chunks.push(rest.slice(0,cut));rest=rest.slice(cut).trim();}if(rest){if(chunks.length&&chunks.at(-1).length+rest.length<450)chunks[chunks.length-1]+=' '+rest;else chunks.push(rest);}}
-  for(const chunk of chunks){
-   if(!active(s,e))return 'cancelled';
+  const chunks=splitLumiSpeech(text);
+  async function prepare(chunk){
+   if(!active(s,e))return null;
    const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
    try{
     await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:chunk,language}})});
     const deadline=now()+160000;let data=null;
     while(now()<deadline){
-     if(!active(s,e))return 'cancelled';
+     if(!active(s,e))return null;
      const rows=await call(route+'&select=state,result');const job=rows?.[0];
      if(job?.state==='failed')throw Error('Voice generation failed');
      if(job?.state==='done'){data=job.result?.data;break;}
-     await wait(650);
+     await wait(350);
     }
-    if(!active(s,e))return 'cancelled';
+    if(!active(s,e))return null;
     if(!data||data.voice!=='calida-tranquila-v1'||data.mime!=='audio/mpeg'||typeof data.audio!=='string'||data.audio.length>2200000||!Number.isFinite(data.seconds)||data.seconds<=0||data.seconds>120)throw Error('Invalid voice audio');
-    current=play(data);await current.done;current=null;
-   }finally{
-    // Never use a newly switched account to clean up another account's private job.
-    if(owner(s)===owner(session()))await call(route,{method:'DELETE'}).catch(()=>{});
-   }
+    return data;
+   }finally{if(owner(s)===owner(session()))await call(route,{method:'DELETE'}).catch(()=>{});}
   }
-  return 'played';
+  let next=chunks.length?prepare(chunks[0]):Promise.resolve(null);
+  for(let i=0;i<chunks.length;i++){
+   const data=await next;if(!data||!active(s,e))return 'cancelled';
+   next=i+1<chunks.length?prepare(chunks[i+1]):Promise.resolve(null);next.catch(()=>{});
+   current=play(data);await current.done;current=null;
+  }
+  return active(s,e)?'played':'cancelled';
  }
  return {cancel(){epoch++;current?.stop();current=null;},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const r=chain.then(()=>speech(text,language,s,e)).catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
 }
