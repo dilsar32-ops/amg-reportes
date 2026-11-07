@@ -18014,7 +18014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R211';
+  const APP_BUILD = '2026-11-07-R212';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67830,9 +67830,9 @@ function lumiDesktopReadOrder(text){
 }
 function lumiDesktopReadValid(r,order){
  if(!r||!['whatsapp','messages'].includes(r.app)||r.app!==order.app||typeof r.partial!=='boolean'||typeof r.capturedAt!=='string'||!Number.isFinite(Date.parse(r.capturedAt)))return false;
- if(r.status==='recent_list')return order.action==='list_recent'&&r.scope==='visible_chats'&&r.partial===true&&Array.isArray(r.chats)&&r.chats.length<=25&&r.chats.every(c=>typeof c.title==='string'&&!!c.title.trim()&&c.title.length<=120&&typeof c.preview==='string'&&c.preview.length<=2000);
+ if(r.status==='recent_list')return order.action==='list_recent'&&r.scope==='visible_chats'&&r.partial===true&&Array.isArray(r.chats)&&r.chats.length<=25&&r.chats.every(c=>typeof c.title==='string'&&!!c.title.trim()&&c.title.length<=120&&typeof c.preview==='string'&&c.preview.length<=2000&&(c.key===undefined||/^[a-f0-9]{64}$/.test(c.key)));
  if(r.status==='unread_list')return order.action==='read_unread'&&r.scope==='unread_previews'&&Array.isArray(r.chats)&&r.chats.length<=25&&(r.reportedTotal===null||Number.isInteger(r.reportedTotal)&&r.reportedTotal>=0)&&r.chats.every(c=>typeof c.title==='string'&&!!c.title.trim()&&c.title.length<=300&&typeof c.preview==='string'&&c.preview.length<=2000&&typeof c.truncated==='boolean'&&(c.unreadCount===null||Number.isInteger(c.unreadCount)&&c.unreadCount>0));
- if(r.status==='chat_messages')return order.action==='read_chat'&&r.scope==='visible_recent'&&typeof r.title==='string'&&!!r.title.trim()&&r.title.length<=300&&Array.isArray(r.messages)&&r.messages.length<=20&&r.messages.every(m=>typeof m.description==='string'&&!!m.description&&m.description.length<=4000&&typeof m.text==='string'&&m.text.length<=4000&&typeof m.dateLabel==='string'&&m.dateLabel.length<=300&&typeof m.outgoing==='boolean'&&typeof m.attachment==='boolean'&&typeof m.truncated==='boolean');
+ if(r.status==='chat_messages')return ['read_chat','read_listed'].includes(order.action)&&r.scope==='visible_recent'&&typeof r.title==='string'&&!!r.title.trim()&&r.title.length<=300&&Array.isArray(r.messages)&&r.messages.length<=20&&r.messages.every(m=>typeof m.description==='string'&&!!m.description&&m.description.length<=4000&&typeof m.text==='string'&&m.text.length<=4000&&typeof m.dateLabel==='string'&&m.dateLabel.length<=300&&typeof m.outgoing==='boolean'&&typeof m.attachment==='boolean'&&typeof m.truncated==='boolean');
  return false;
 }
 // Only translate the accessibility wrapper; keep the sender's actual words intact.
@@ -67910,7 +67910,7 @@ function lumiDesktopOrder(text){
 }
 function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms))}){
  return {async run(order){
-  if(!['open_app','search_chats','open_chat','send_message','read_unread','read_chat','list_recent'].includes(order?.action))throw Error('La orden necesita aclaración.');
+  if(!['open_app','search_chats','open_chat','send_message','read_unread','read_chat','list_recent','read_listed'].includes(order?.action))throw Error('La orden necesita aclaración.');
   const s={...session()},same=()=>s.role==='manager'&&session().role==='manager'&&s.user_id===session().user_id&&s.company_id===session().company_id;
   if(!same()||!s.user_id||!s.company_id)throw Error('Esta acción requiere Manager.');
   const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(s.company_id)+'&clave=eq.lumi_local_model_device');const d=rows?.[0]?.valor;
@@ -67918,7 +67918,7 @@ function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=
   const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
   try{await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{...order,local_profile:'lumi_desktop'}})});
    const until=now()+60000;
-   while(now()<until){if(!same())throw Error('La sesión cambió.');const jobs=await call(route+'&select=state,result');if(!same())throw Error('La sesión cambió.');const job=jobs?.[0];if(job?.state==='failed')throw Error(order.action==='send_message'?'No pude confirmar el envío. Revisa el chat antes de repetirlo.':['read_unread','read_chat','list_recent'].includes(order.action)?'No pude leer los mensajes de esa aplicación. No envié ninguna respuesta.':'No pude completar la acción en esa aplicación.');if(job?.state==='done'){const r=job.result?.data;if(!r||r.app!==order.app||!['app_front','matches','needs_choice','not_found','chat_opened','message_submitted','already_submitted','unread_list','chat_messages','recent_list'].includes(r.status))throw Error('Respuesta de la Mac no válida.');if(['unread_list','chat_messages','recent_list'].includes(r.status)){if(!lumiDesktopReadValid(r,order))throw Error('Lectura de mensajes no válida.');return r;}const allowed={list_recent:['recent_list'],read_unread:['unread_list'],read_chat:['chat_messages','needs_choice','not_found'],open_app:['app_front'],search_chats:['matches','not_found'],open_chat:['chat_opened','needs_choice','not_found'],send_message:['message_submitted','already_submitted','needs_choice','not_found']}[order.action];if(!allowed.includes(r.status))throw Error('La respuesta no corresponde a la orden.');if(['matches','needs_choice','not_found'].includes(r.status)&&(r.query!==order.query||!Array.isArray(r.candidates)||r.candidates.length>25))throw Error('Resultados de otra búsqueda.');if(['chat_opened','message_submitted','already_submitted'].includes(r.status)&&(typeof r.title!=='string'||!r.title.trim()))throw Error('Falta confirmar el destinatario.');return r;}await wait(500);}
+   while(now()<until){if(!same())throw Error('La sesión cambió.');const jobs=await call(route+'&select=state,result');if(!same())throw Error('La sesión cambió.');const job=jobs?.[0];if(job?.state==='failed')throw Error(order.action==='send_message'?'No pude confirmar el envío. Revisa el chat antes de repetirlo.':['read_unread','read_chat','list_recent','read_listed'].includes(order.action)?'No pude leer los mensajes de esa aplicación. No envié ninguna respuesta.':'No pude completar la acción en esa aplicación.');if(job?.state==='done'){const r=job.result?.data;if(!r||r.app!==order.app||!['app_front','matches','needs_choice','not_found','chat_opened','message_submitted','already_submitted','unread_list','chat_messages','recent_list'].includes(r.status))throw Error('Respuesta de la Mac no válida.');if(['unread_list','chat_messages','recent_list'].includes(r.status)){if(order.action==='read_listed'&&(r.listedKey!==order.key||r.listedQuery!==order.query))throw Error('Otra conversación.');if(!lumiDesktopReadValid(r,order))throw Error('Lectura de mensajes no válida.');return r;}const allowed={read_listed:['chat_messages'],list_recent:['recent_list'],read_unread:['unread_list'],read_chat:['chat_messages','needs_choice','not_found'],open_app:['app_front'],search_chats:['matches','not_found'],open_chat:['chat_opened','needs_choice','not_found'],send_message:['message_submitted','already_submitted','needs_choice','not_found']}[order.action];if(!allowed.includes(r.status))throw Error('La respuesta no corresponde a la orden.');if(['matches','needs_choice','not_found'].includes(r.status)&&(r.query!==order.query||!Array.isArray(r.candidates)||r.candidates.length>25))throw Error('Resultados de otra búsqueda.');if(['chat_opened','message_submitted','already_submitted'].includes(r.status)&&(typeof r.title!=='string'||!r.title.trim()))throw Error('Falta confirmar el destinatario.');return r;}await wait(500);}
    throw Error('La Mac no respondió a tiempo.');
   }finally{if(same())await call(route,{method:'DELETE'}).catch(()=>{});}
  }};
@@ -67931,9 +67931,10 @@ function lumiReviewOrder(input){
  t=t.replace(/(?:[.;,]\s*|\s+)(?:no (?:respondas(?: ni envies nada)?|envies(?: nada| respuestas)?)|do not (?:reply|send anything)|don't (?:reply|send anything))[.!]?$/,'');
  if(/\b(?:envia|manda|send|paga|pay|borra|delete|registra)\b/.test(t)||/^(?:no |don't |do not )/.test(t))return null;
  const messages=/(?:mensajes|messages|texts).*(?:responder|contestar|respuestas?|reply|respond|answer)\b|(?:que|what|which).*(?:contesto|respondo|should i reply)|(?:sugiere|suggest).*(?:respuesta|reply)/.test(t);
- if(!messages)return null;
+ if(!messages&&!/\b(?:a quien (?:debo|tengo que) responder|(?:hay|tengo) algo (?:pendiente de |que )contestar|who should i reply to|anything i need to answer)\b/.test(t))return null;
+ if(/\b(?:el mensaje dice|me dijo|he said|she said)\b/.test(t))return null;
  const accounts=/\b(?:cuentas|pagos pendientes|pending payments|outstanding payments)\b/.test(t);
- const wa=/\b(?:whatsapp|guasap|wasap)\b/.test(t),apple=/\b(?:apple messages|mensajes (?:normales|de apple)|imessage)\b/.test(t),ws=/\bworkspace\b/.test(t);
+ const wa=/\b(?:whatsapp|guasap|wasap)\b/.test(t),apple=/\b(?:apple messages|mensajes (?:normales|de apple)|imessage)\b|(?:en|in|on) mensajes(?:[ .!?]|$)/.test(t),ws=/\bworkspace\b/.test(t);
  const explicit=wa||apple||ws;
  return {accounts,workspace:!explicit||ws||accounts,apps:explicit?[...(wa?['whatsapp']:[]),...(apple?['messages']:[])]:['whatsapp','messages'],english:/\b(?:which|what|review|reply|messages need)\b/.test(t)&&!/[¿]|\b(?:que|revisa|mensajes)\b/.test(t)};
 }
@@ -67972,8 +67973,9 @@ async function lumiRunExternalReview({run,apps,active=()=>true,english=false,pro
     if(list.chats.filter(c=>normalized(c.title)===normalized(chat.title)).length!==1){report.errors.push(chat.title+': nombre repetido; no elegí uno al azar.');continue;}
     progress(app,chat.title);
     try{
-     const r=await run({app,action:'read_chat',query:chat.title});if(!active())throw Error('La sesión cambió.');
-     if(r.status!=='chat_messages'||normalized(r.title)!==normalized(chat.title))throw Error('No se confirmó el chat exacto');
+     const r=await run({app,action:chat.key?'read_listed':'read_chat',query:chat.title,...(chat.key?{key:chat.key}:{})});if(!active())throw Error('La sesión cambió.');
+     if(r.status==='needs_choice'){report.errors.push(chat.title+': '+(english?'multiple matches; specify the full chat name.':'hay varias coincidencias; falta identificar el chat exacto.'));continue;}
+     if(r.app!==app||r.status!=='chat_messages'||(chat.key?(r.listedKey!==chat.key||r.listedQuery!==chat.title):normalized(r.title)!==normalized(chat.title)))throw Error('No se confirmó el chat exacto');
      report.candidates.push(...lumiReviewCandidates(r,english));report.checked++;
     }catch(e){if(!active())throw e;report.errors.push(chat.title+': no pude verificar la conversación.');}
    }
@@ -68037,11 +68039,13 @@ function lumiReviewText(results,en=false){
     const parts=[];
     try{
       if(order.workspace){
+       try{
         const response=await asLlamar({texto:order.accounts?'Revisa mis cuentas y mensajes pendientes por responder':'Qué mensajes requieren respuesta',sandbox:!!AS.sandbox,historial:[]});
         if(!active())return;
         if(!response.ok||!response.json?.texto)parts.push('No pude revisar Workspace; no significa que no haya pendientes.');
         else parts.push(response.json.texto);
         asMostrarRespuesta(parts.join('\n\n'));
+       }catch(e){if(!active())return;parts.push('No pude revisar Workspace; no significa que no haya pendientes.');}
       }
       if(order.apps.length){
         if(AS.sandbox){parts.push('Modo de prueba: no abrí tus chats reales de WhatsApp ni Mensajes.');}
