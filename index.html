@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R203';
+  const APP_BUILD = '2026-11-07-R204';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67609,6 +67609,26 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
     for(; i < frases.length; i++){ const kf = k(frases[i]); if(!kf) continue; if(resto.startsWith(kf)) resto = resto.slice(kf.length); else break; }
     return frases.slice(i).join(' ').trim();
   }
+  function lumiCompanyCamDocumentsOrder(texto){
+  let t = String(texto||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¿?¡!.,]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!/^(?:(?:lumi|oye|hey|please|por favor)\s+)*(?:(?:puedes|podrias|can you|could you)\s+)?(?:busca|buscame|encuentra|encuentrame|muestrame|ensename|abre|abreme|quiero ver|find|search|show me|open|look for)\b/.test(t)) return null;
+  if (!/\b(companycam|company cam)\b/.test(t)) return null;
+  const reglas = [
+    ["Equipment Count", /\b(equipment count|conteo de equipos?|lista de equipos?)\b/g],
+    ["Measurements", /\b(measurements?|mediciones|medidas)\b/g],
+    ["Moisture Map", /\b(moisture map|mapa de humedad)\b/g],
+    ["Floor Plan", /\b(floor plan|plano|planos)\b/g],
+  ];
+  const tipos = reglas.filter(([, re]) => { re.lastIndex=0; return re.test(t); }).map(([name])=>name);
+  if (!tipos.length) return null;
+  // Read-only intent: do not reinterpret create/delete/upload requests as searches.
+  if (/\b(borra|elimina|delete|sube|upload|crea|create|haz|dibuja)\b/.test(t)) return null;
+  t=t.replace(/\b(?:en|in|con|using) (?:google )?chrome\b/g,' ');
+  for (const [,re] of reglas) { re.lastIndex=0; t=t.replace(re,' '); }
+  t=t.replace(/abre las imagenes que encuentres.*$|open the images you find.*$/g,' ')
+    .replace(/\b(puedes|podrias|can you|could you|companycam|company cam|busca|buscame|encuentra|encuentrame|muestrame|ensename|abre|abreme|quiero ver|necesito|lumi|oye|por favor|please|find|search|show me|open|look for|las fotos|las imagenes|fotos|imagenes|photos|images|el cliente|cliente|client|proyecto|project|en|in|de|del|para|for|of|from|the|el|la|los|las|y|and|a|al)\b/g,' ').replace(/\s+/g,' ').trim();
+  return { cliente: t && t.split(' ').length<=6 ? t.replace(/\b\w/g,c=>c.toUpperCase()) : null, tipos };
+}
   function asPedidoPagina(texto){
     // Parse only a direct request; never extract an action from quoted/reported speech.
     let s=String(texto||'').trim(),browser='default';
@@ -67939,6 +67959,7 @@ function lumiSimpleGreeting(text){
     if(!dictando){const desktop=lumiDesktopOrder(texto)||lumiDesktopReadFollowup(texto,AS.desktopReadReceipt,SES.user_id+'|'+SES.company_id);if(desktop){if(!['read_chat','read_unread','clarify'].includes(desktop.action))AS.desktopReadReceipt=null;asTranscribir(texto);await asEscritorioMac(desktop);return;}AS.desktopReadReceipt=null;}
     if(!dictando){const followup=lumiBrowserFollowup(texto,AS.browserReceipt,SES.user_id+'|'+SES.company_id);if(followup){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,followup);asMostrarRespuesta(followup);asHablar(followup,asSeguirOyendo);return;}}
     if(!dictando){const screen=lumiScreenOrder(texto);if(screen){asTranscribir(texto);await asMostrarPantallaMac(screen);return;}}
+    if(!dictando && SES.role==='manager'){const docs=lumiCompanyCamDocumentsOrder(texto);if(docs){asPararOido();asCallar();asTranscribir(texto);const reply=docs.cliente?'Voy a buscar esas hojas de '+docs.cliente+' en CompanyCam.':'¿De qué cliente busco esas hojas en CompanyCam?';asMostrarRespuesta(reply);asHablar(reply,asSeguirOyendo);if(docs.cliente)await ccMostrarDocumentos(docs);return;}}
     if(!dictando){const page=asPedidoPagina(texto);if(page){asTranscribir(texto);await asAbrirPaginaMac(page,texto);return;}}
     asAccionVisible('', '');
     if(!dictando && AS_GAL.p?.tipo==='labor_logs'){const control=asOrdenControlMac(texto,AS_GAL.p.items);if(control){asTranscribir(texto);if(control.error){asMostrarRespuesta(control.error);asHablar(control.error,asSeguirOyendo);}else{await asControlHojaMac(AS_GAL.p.items[control.index],control.action);}return;}}
