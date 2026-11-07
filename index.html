@@ -18080,7 +18080,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R223';
+  const APP_BUILD = '2026-11-07-R224';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67528,11 +67528,32 @@ function createLumiMediaPlayer({audio,timer=setTimeout,clear=clearTimeout}){
  }};
 }
 
+/* Native iPhone playback of the same MP3, with explicit completion and cancellation. */
+function createLumiNativePlayer({plugin,fallback,timer=setTimeout,clear=clearTimeout}){
+ let active=null,cleanup=Promise.resolve(),capability=null;
+ const capable=()=>capability||(capability=plugin.disponible().then(r=>!!r.audioLocal).catch(()=>false));
+ return{unlock(){capable();return fallback.unlock();},stop(){active?.stop();},play(data){
+  active?.stop();let stopped=false,started=false,child=null,deadline,finish;
+  const done=new Promise((resolve,reject)=>{finish=error=>{if(stopped)return;stopped=true;clear(deadline);child?.stop();if(started)cleanup=Promise.resolve(plugin.cancelarAudio()).catch(()=>{});if(active===handle)active=null;error?reject(error):resolve();};});
+  const handle={done,stop:()=>finish()};active=handle;
+  deadline=timer(()=>finish(Error('La reproducción del iPhone no respondió.')),(Math.max(1,data.seconds||1)+20)*1000);
+  (async()=>{const native=await capable();await cleanup;if(stopped)return;
+   if(native){started=true;const result=await plugin.reproducirAudio(data);started=false;if(!result?.ok)throw Error('No se completó el audio del iPhone.');}
+   else{child=fallback.play(data);await child.done;child=null;}
+   finish();
+  })().catch(e=>{e.lumiStage='playback';finish(e);});
+  return handle;
+ }};
+}
+
   let AS_VOZ_LOCAL=null,AS_AUDIO_PLAYER=null;
   function asVozLocal(){
     if(AS_VOZ_LOCAL)return AS_VOZ_LOCAL;
     const useMedia=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-    const audioPlayer=AS_AUDIO_PLAYER=useMedia?createLumiMediaPlayer({audio:()=>new Audio()}):createLumiAudioPlayer({context:()=>new (window.AudioContext||window.webkitAudioContext)(),beforeResume:()=>{try{if(navigator.audioSession)navigator.audioSession.type='playback';}catch(e){}}});
+    let audioPlayer=useMedia?createLumiMediaPlayer({audio:()=>new Audio()}):createLumiAudioPlayer({context:()=>new (window.AudioContext||window.webkitAudioContext)(),beforeResume:()=>{try{if(navigator.audioSession)navigator.audioSession.type='playback';}catch(e){}}});
+    const nativeVoice=isNative()?asPlugin():null;
+    if(useMedia&&nativeVoice)audioPlayer=createLumiNativePlayer({plugin:nativeVoice,fallback:audioPlayer});
+    AS_AUDIO_PLAYER=audioPlayer;
     AS_VOZ_LOCAL=createLumiVoice({
       stream:!useMedia,
       session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),
@@ -67564,6 +67585,7 @@ function createLumiMediaPlayer({audio,timer=setTimeout,clear=clearTimeout}){
       asPrepararAudio();
       const voice=asVozLocal();if(!encolar)voice.cancel();
       AS.vozEnVuelo=(AS.vozEnVuelo||0)+1;
+      let audioFailure='La voz 1 no está disponible ahora. Comprueba que la Mac esté conectada.';
       try{
         const result=await voice.speak(t,asVozEn()?'English':'Spanish');
         if(result!=='unavailable'){
@@ -67571,10 +67593,10 @@ function createLumiMediaPlayer({audio,timer=setTimeout,clear=clearTimeout}){
           if(result==='played'){const retry=$('#asAudioRepetir');if(retry)retry.hidden=true;asBit('voz cálida local');const notice=$('#asVozAviso');if(notice)notice.hidden=true;}
           return 0;
         }
-      }catch(error){if(error.spoken)asBit('audio interrumpido; respuesta visible en conversación');asBit('voz 1 no disponible; respuesta visible, sin cambiar de voz');}
+      }catch(error){audioFailure=error.lumiStage==='playback'?(error.code==='VOLUME_ZERO'?'Sube el volumen multimedia del iPhone.':'El dispositivo no pudo reproducir la voz. Toca Activar audio para repetir.'):'No se pudo recibir el audio de la Mac. Toca Activar audio para repetir.';asBit('voz error '+asTapar(error.message));if(error.spoken)asBit('audio interrumpido; respuesta visible en conversación');asBit('voz 1 no disponible; respuesta visible, sin cambiar de voz');}
       finally{AS.vozEnVuelo=Math.max(0,(AS.vozEnVuelo||1)-1);}
       AS.esperaFin=false; AS.finPendiente=false; AS.hablaHasta=Date.now();
-      const notice=$('#asVozAviso');if(notice){notice.textContent='La voz 1 no está disponible ahora. La respuesta sigue en la conversación.';notice.hidden=false;}asAudioRepetirBoton().hidden=false;
+      const notice=$('#asVozAviso');if(notice){notice.textContent=audioFailure+' La respuesta sigue en la conversación.';notice.hidden=false;}asAudioRepetirBoton().hidden=false;
       return 0; // Never substitute another speaker for the owner's selected voice.
     }
     const S = asPlugin();
