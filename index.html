@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R194';
+  const APP_BUILD = '2026-11-06-R195';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67302,8 +67302,15 @@ function createLumiWebEar({Recognition,language,active,onText,onError,schedule=s
   // Local Qwen warm voice, selected by the account owner. No paid TTS fallback.
 /* Owner-private voice queue; prepare the next phrase during playback. */
 function splitLumiSpeech(text){
- const parts=String(text||'').match(/[^.!?]+[.!?]*\s*/g)||[text],chunks=[];
- for(const part of parts){let rest=String(part).trim();while(rest){const cap=chunks.length?220:130;let take=rest.length;if(take>cap){take=rest.lastIndexOf(' ',cap);if(take<40)take=cap;}chunks.push(rest.slice(0,take).trim());rest=rest.slice(take).trim();}}
+ const input=String(text||'').trim(),parts=[],chunks=[];let start=0;
+ for(let i=0;i<input.length;i++){
+  if(!/[.!?]/.test(input[i])||(i+1<input.length&&!/\s/.test(input[i+1])))continue;
+  const token=input.slice(start,i+1).match(/(?:^|\s)([^\s]+)$/)?.[1]||'';
+  if(input[i]==='.'&&/^(?:Dr|Dra|Mr|Mrs|Ms|Sr|Sra|Srta|St|Ave|Rd|Blvd|No|Núm|aprox|etc|a\.m|p\.m)\.$/i.test(token))continue;
+  parts.push(input.slice(start,i+1));start=i+1;
+ }
+ if(start<input.length)parts.push(input.slice(start));
+ for(const part of parts){let rest=part.trim();while(rest){const cap=chunks.length?220:130;let take=rest.length;if(take>cap){take=rest.lastIndexOf(' ',cap);if(take<1){const next=rest.indexOf(' ');take=next<0?rest.length:next;}if(take>1200)throw Error('El texto contiene una palabra demasiado larga para pronunciarla.');}chunks.push(rest.slice(0,take).trim());rest=rest.slice(take).trim();}}
  return chunks;
 }
 function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
@@ -69944,9 +69951,9 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const client = createLumiMacClient({authFetch,headers:cloudHeaders,companyId:SES.company_id});
     const job = await client.enqueue(input.reportId,input.files);
     const messages = {
-      queued:'El reporte quedó en cola para la Mac. Aún no está enviado.',
-      claimed:'La Mac está procesando el reporte. No repitas el envío.',
-      submitted:'Mensajes de la Mac aceptó el envío. No confirma que el grupo lo haya recibido.',
+      queued:'Ya tengo el reporte listo para enviarlo. Está esperando su turno.',
+      claimed:'Estoy preparando el envío del reporte. No hace falta que lo repitas.',
+      submitted:'El reporte está en proceso de envío; todavía no tengo confirmación de entrega.',
       needs_review:'El envío necesita revisión. No se reenviará automáticamente.',
       cancelled:'El envío está cancelado.'
     };
