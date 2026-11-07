@@ -17792,7 +17792,7 @@ html body #asPanel .as-version{order:11;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R174';
+  const APP_BUILD = '2026-11-06-R175';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67210,11 +67210,62 @@ html body #asPanel .as-version{order:11;}
     for(; i < frases.length; i++){ const kf = k(frases[i]); if(!kf) continue; if(resto.startsWith(kf)) resto = resto.slice(kf.length); else break; }
     return frases.slice(i).join(' ').trim();
   }
+  function asPedidoPagina(texto){
+    let s=String(texto||'').trim().replace(/\s+(?:por favor|porfa|please)[.!]?$/i,''),browser='default';
+    const suffix=/\s+(?:en|con|in|using)\s+(?:(?:el|the)\s+)?(?:(?:navegador|browser)\s+)?(google chrome|chrome|safari|el navegador|navegador|the browser|browser)\s*[.!]?$/i.exec(s);
+    if(suffix){browser=/chrome/i.test(suffix[1])?'chrome':/safari/i.test(suffix[1])?'safari':'default';s=s.slice(0,suffix.index).trim();}
+    const m=/^(?:(?:oye|hey|lumi|por favor|please)\s*[,!]?\s+)*(?:(?:puedes|podrias|podrías|can you|could you)\s+)?(?:abre|ábreme|abreme|abrir|open|open up|entra a|ve a|llévame a|llevame a|go to|take me to)\s+(?:(?:la página de|la pagina de|la página|la pagina|el sitio|la web|the website|the page)\s+)?(.+?)(?:\s+por favor|\s+please)?$/i.exec(s);
+    if(!m)return null;
+    const target=m[1].trim(),key=target.toLowerCase().replace(/\s+/g,' ');
+    const sites={'companycam':'https://app.companycam.com/','company cam':'https://app.companycam.com/','matterport':'https://my.matterport.com/','maroport':'https://my.matterport.com/','wikipedia':'https://www.wikipedia.org/','google':'https://www.google.com/','youtube':'https://www.youtube.com/','openai':'https://openai.com/'};
+    let raw=sites[key];
+    if(!raw){
+      if(/^[a-z][a-z0-9+.-]*:/i.test(target))raw=target;
+      else if(/^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/?#]\S*)?$/i.test(target))raw='https://'+target;
+      else return null;
+    }
+    try{const u=new URL(raw);if(u.protocol!=='https:'||u.username||u.password||u.port||/\s/.test(raw)||!u.hostname.includes('.'))throw Error();return {url:u.href,browser,label:sites[key]?target:u.hostname};}
+    catch(e){return {error:'No pude abrir esa dirección. Usa un enlace https válido, sin usuario ni contraseña dentro del enlace.'};}
+  }
+  let AS_BROWSER_BUSY=false;
+  async function asAbrirPaginaMac(page){
+    if(AS_BROWSER_BUSY){asMostrarRespuesta('Ya estoy procesando una apertura.');return;}
+    if(page.error){asMostrarRespuesta(page.error);return;}
+    if(SES.role!=='manager'){asMostrarRespuesta('Esta acción requiere la sesión de Manager vinculada a la Mac.');return;}
+    AS_BROWSER_BUSY=true;asPararOido();asCallar();
+    const owner=SES.user_id+'|'+SES.company_id,companyId=SES.company_id;
+    const active=()=>owner===SES.user_id+'|'+SES.company_id;
+    const call=async(route,init={})=>{const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('La Mac no pudo recibir la orden ('+r.status+').');const body=await r.text();return body?JSON.parse(body):null;}finally{clearTimeout(timer);}};
+    try{
+      asAccionVisible('Conectando con el navegador de tu Mac…','working');
+      const devices=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(companyId)+'&clave=eq.lumi_mac_control_device');
+      if(!active())return;
+      const device=devices[0]?.valor;if(!device?.available||!device.workerId)throw Error('No hay una Mac vinculada disponible.');
+      const id=crypto.randomUUID(),clave='lumi_control_command_'+id;
+      await call('/rest/v1/asistente_ajustes',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({company_id:companyId,clave,valor:{id,companyId,workerId:device.workerId,action:'open_page',url:page.url,browser:page.browser,createdAt:new Date().toISOString(),state:'queued'}})});
+      for(let i=0;i<25;i++){
+        if(!active())return;
+        const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(companyId)+'&clave=eq.'+encodeURIComponent(clave));
+        if(!active())return;
+        const state=rows[0]?.valor?.state;
+        if(state==='browser_open_requested'){
+          const text='La Mac aceptó abrir '+page.label+' en '+(page.browser==='default'?'tu navegador predeterminado':page.browser==='chrome'?'Chrome':'Safari')+'.';
+          asAccionVisible('Apertura solicitada al navegador','done');asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);return;
+        }
+        if(state && state!=='queued')throw Error('No se confirmó la apertura. Revisa la Mac antes de repetirla.');
+        await new Promise(r=>setTimeout(r,1000));
+      }
+      throw Error('La Mac todavía no confirmó la orden. No la repetí automáticamente.');
+    }catch(e){if(active()){asAccionVisible('No se confirmó la apertura','error');asMostrarRespuesta(String(e.message||e));}}
+    finally{AS_BROWSER_BUSY=false;}
+  }
+
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando){const page=asPedidoPagina(texto);if(page){asTranscribir(texto);await asAbrirPaginaMac(page);return;}}
     asAccionVisible('', '');
     if(!dictando && AS_GAL.p?.tipo==='labor_logs'){const control=asOrdenControlMac(texto,AS_GAL.p.items);if(control){asTranscribir(texto);if(control.error){asMostrarRespuesta(control.error);asHablar(control.error,asSeguirOyendo);}else{await asControlHojaMac(AS_GAL.p.items[control.index],control.action);}return;}}
     if(!dictando && AS_GAL.p?.tipo==='labor_logs'){const copy=asOrdenCopiarHoja(texto,AS_GAL.p.items);if(copy){asTranscribir(texto);if(copy.error){asMostrarRespuesta(copy.error);asHablar(copy.error,asSeguirOyendo);}else{await asCopiarHoja(AS_GAL.p.items[copy.index]);asSeguirOyendo();}return;}}
