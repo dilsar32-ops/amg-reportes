@@ -18080,7 +18080,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R225';
+  const APP_BUILD = '2026-11-07-R226';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67405,6 +67405,8 @@ function createLumiWebEar({Recognition,language,active,onText,onError,schedule=s
 /* Owner-private voice queue; prepare the next phrase during playback. */
 /* Owner-private voice queue; prepare the next phrase during playback. */
 /* Owner-private voice queue; prepare the next phrase during playback. */
+/* Owner-private voice queue; prepare the next phrase during playback. */
+/* Owner-private voice queue; prepare the next phrase during playback. */
 function splitLumiSpeech(text){
  const input=String(text||'').trim(),parts=[],chunks=[];let start=0;
  for(let i=0;i<input.length;i++){
@@ -67433,6 +67435,8 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
   await prepareGate;
   if(!live())return 'cancelled';
   const d=await device(s);if(!live())return 'cancelled';if(!d)return 'unavailable';
+  const useStream=typeof stream==='function'?await stream():stream;
+  if(!live())return 'cancelled';
   const chunks=splitLumiSpeech(text);
   async function prepare(chunk,onPartial){
    if(!live())return null;
@@ -67449,7 +67453,7 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
       for(;seen<pieces.length;seen++){
        const part=pieces[seen];
        if(part.index!==seen||part.voice!=='calida-tranquila-v1'||part.mime!=='audio/wav'||typeof part.audio!=='string'||part.audio.length>160000||!Number.isFinite(part.seconds)||part.seconds<=0||part.seconds>2)throw Error('Invalid stream audio');
-       if(!live())return null;onPartial(part);
+       if(!live())return null;await onPartial(part);
       }
      }
      if(job?.state==='failed')throw Error('Voice generation failed');
@@ -67463,12 +67467,18 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
   }
   let startedAudio=false;
   function enqueue(data){const handle=play(data);playing.add(handle);handle.done.then(()=>{startedAudio=true;playing.delete(handle);},()=>playing.delete(handle));return handle;}
-  function preparePhrase(index){
-   const played=[];
-   const ready=prepare(chunks[index],stream?(data=>{const handle=enqueue(data);played.push(handle.done);handle.done.catch(()=>{});}):undefined);
+  function preparePhrase(index,deliveryGate=playGate){
+   const played=[];let delivery=Promise.resolve(),nextPrepared=null,ready;
+   const next=()=>nextPrepared||(nextPrepared=index+1<chunks.length?preparePhrase(index+1,ready):null);
+   ready=prepare(chunks[index],useStream?(data=>{
+    delivery=delivery.then(async()=>{await deliveryGate;if(!live())return;const handle=enqueue(data);played.push(handle.done);handle.done.catch(()=>{});
+     if(index===chunks.length-1)releaseNext();else next();
+    });return delivery;
+   }):undefined).then(async data=>{await delivery;return data;});
    ready.catch(()=>{});
-   return {ready,played};
+   return {ready,played,next};
   }
+
   try{
    let prepared=chunks.length?preparePhrase(0):null;
    for(let i=0;i<chunks.length;i++){
@@ -67480,13 +67490,13 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
     let finished;
     if(data.streamed)finished=Promise.all(prepared.played);
     else{current=enqueue(data);finished=current.done;}
-    const next=i+1<chunks.length?preparePhrase(i+1):null;
+    const next=prepared.next();
     await finished;current=null;prepared=next;
    }
    return live()?'played':'cancelled';
   }catch(error){failed=true;for(const handle of playing)handle.stop();playing.clear();if(startedAudio)error.spoken=true;throw error;}
  }
- return {cancel(){epoch++;current?.stop();current=null;for(const handle of playing)handle.stop();playing.clear();},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');let run;if(stream){run=chain.then(()=>speech(text,language,s,e));}else{const prepareGate=prepareChain,playGate=chain;let release;prepareChain=new Promise(r=>release=r);run=speech(text,language,s,e,prepareGate,playGate,release).finally(release);}const r=run.catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
+ return {cancel(){epoch++;current?.stop();current=null;for(const handle of playing)handle.stop();playing.clear();},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const prepareGate=prepareChain,playGate=chain;let release;prepareChain=new Promise(r=>release=r);const run=speech(text,language,s,e,prepareGate,playGate,release).finally(release);const r=run.catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
 }
 
 /* One audio clock; unlock synchronously from a user gesture on mobile. */
@@ -67536,7 +67546,7 @@ function createLumiMediaPlayer({audio,timer=setTimeout,clear=clearTimeout}){
 function createLumiNativePlayer({plugin,fallback,timer=setTimeout,clear=clearTimeout}){
  let active=null,cleanup=Promise.resolve(),capability=null;
  const capable=()=>capability||(capability=plugin.disponible().then(r=>!!r.audioLocal).catch(()=>false));
- return{unlock(){capable();return fallback.unlock();},stop(){active?.stop();},play(data){
+ return{unlock(){capable();return active?Promise.resolve():fallback.unlock();},stop(){active?.stop();},play(data){
   active?.stop();let stopped=false,started=false,child=null,deadline,finish;
   const done=new Promise((resolve,reject)=>{finish=error=>{if(stopped)return;stopped=true;clear(deadline);child?.stop();if(started)cleanup=Promise.resolve(plugin.cancelarAudio()).catch(()=>{});if(active===handle)active=null;error?reject(error):resolve();};});
   const handle={done,stop:()=>finish()};active=handle;
@@ -67550,16 +67560,41 @@ function createLumiNativePlayer({plugin,fallback,timer=setTimeout,clear=clearTim
  }};
 }
 
+/* Bounded native audio queue. Older installed apps keep their existing player. */
+function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUID(),timer=setTimeout,clear=clearTimeout}){
+ let capability=null,nativeReady=false,token=uuid(),sequence=0,active=new Set(),cleanup=Promise.resolve(),dispatch=Promise.resolve(),queuedSeconds=0;
+ const capable=()=>capability||(capability=Promise.resolve().then(()=>plugin.disponible()).then(r=>(nativeReady=!!r.audioStream)).catch(()=>false));
+ function stop(force=false){
+  const old=[...active];if(!old.length&&!force)return;
+  token=uuid();sequence=0;dispatch=Promise.resolve();fallback.stop();
+  cleanup=cleanup.then(()=>plugin.cancelarAudio()).catch(()=>{});
+  for(const h of old)h.finish();
+ }
+ return{supportsStreaming:capable,unlock(){capable();return nativeReady||active.size?Promise.resolve():fallback.unlock();},stop,play(data){
+  const mine=token,index=sequence++;let ended=false,deadline,resolve,reject;queuedSeconds+=data.seconds||0;
+  const done=new Promise((yes,no)=>{resolve=yes;reject=no;});
+  const handle={done,stop(){if(mine===token)stop();},finish(error){if(ended)return;ended=true;clear(deadline);active.delete(handle);queuedSeconds=Math.max(0,queuedSeconds-(data.seconds||0));if(error){error.lumiStage='playback';reject(error);}else resolve();}};
+  active.add(handle);deadline=timer(()=>{handle.finish(Error('La cola de audio del iPhone no respondió.'));if(mine===token)stop(true);},(queuedSeconds+20)*1000);
+  dispatch=dispatch.then(async()=>{
+   const native=await capable();await cleanup;if(ended||mine!==token)return;
+   const result=native?plugin.encolarAudio({...data,streamId:mine,sequence:index}):fallback.play(data).done.then(()=>({ok:true}));
+   // Do not await completion here: subsequent fragments must reach the native queue early.
+   Promise.resolve(result).then(r=>{if(!r?.ok)throw Error('La reproducción no se completó.');handle.finish();}).catch(e=>{handle.finish(e);if(mine===token)stop(true);});
+  }).catch(e=>{handle.finish(e);if(mine===token)stop(true);});
+  return handle;
+ }};
+}
+
   let AS_VOZ_LOCAL=null,AS_AUDIO_PLAYER=null;
   function asVozLocal(){
     if(AS_VOZ_LOCAL)return AS_VOZ_LOCAL;
     const useMedia=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
     let audioPlayer=useMedia?createLumiMediaPlayer({audio:()=>new Audio()}):createLumiAudioPlayer({context:()=>new (window.AudioContext||window.webkitAudioContext)(),beforeResume:()=>{try{if(navigator.audioSession)navigator.audioSession.type='playback';}catch(e){}}});
     const nativeVoice=isNative()?asPlugin():null;
-    if(useMedia&&nativeVoice)audioPlayer=createLumiNativePlayer({plugin:nativeVoice,fallback:audioPlayer});
+    if(useMedia&&nativeVoice){audioPlayer=createLumiNativePlayer({plugin:nativeVoice,fallback:audioPlayer});audioPlayer=createLumiNativeStreamPlayer({plugin:nativeVoice,fallback:audioPlayer});}
     AS_AUDIO_PLAYER=audioPlayer;
     AS_VOZ_LOCAL=createLumiVoice({
-      stream:!useMedia,
+      stream:async()=>useMedia?(audioPlayer.supportsStreaming?await audioPlayer.supportsStreaming():false):true,
       session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),
       call:async(route,init={})=>{
         const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
