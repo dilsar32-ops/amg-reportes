@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R196';
+  const APP_BUILD = '2026-11-07-R197';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67325,17 +67325,18 @@ function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=
   const value=valid?d:null;cache={owner:owner(s),at:now(),device:value};return value;
  }
  async function speech(text,language,s,e){
-  if(!active(s,e))return 'cancelled';
-  const d=await device(s);if(!active(s,e))return 'cancelled';if(!d)return 'unavailable';
+  let failed=false;const live=()=>!failed&&active(s,e);
+  if(!live())return 'cancelled';
+  const d=await device(s);if(!live())return 'cancelled';if(!d)return 'unavailable';
   const chunks=splitLumiSpeech(text);
   async function prepare(chunk,onPartial){
-   if(!active(s,e))return null;
+   if(!live())return null;
    const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
    try{
     await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:chunk,language,stream:!!onPartial}})});
     const deadline=now()+160000;let data=null,seen=0;
     while(now()<deadline){
-     if(!active(s,e))return null;
+     if(!live())return null;
      const rows=await call(route+'&select=state,result');const job=rows?.[0];
      const pieces=job?.result?.data?.chunks;
      if(onPartial&&Array.isArray(pieces)){
@@ -67343,29 +67344,40 @@ function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=
       for(;seen<pieces.length;seen++){
        const part=pieces[seen];
        if(part.index!==seen||part.voice!=='calida-tranquila-v1'||part.mime!=='audio/wav'||typeof part.audio!=='string'||part.audio.length>160000||!Number.isFinite(part.seconds)||part.seconds<=0||part.seconds>2)throw Error('Invalid stream audio');
-       if(!active(s,e))return null;onPartial(part);
+       if(!live())return null;onPartial(part);
       }
      }
      if(job?.state==='failed')throw Error('Voice generation failed');
      if(job?.state==='done'){data=job.result?.data;break;}
      await wait(350);
     }
-    if(!active(s,e))return null;
+    if(!live())return null;
     if(!data||data.voice!=='calida-tranquila-v1'||data.mime!=='audio/mpeg'||typeof data.audio!=='string'||data.audio.length>2200000||!Number.isFinite(data.seconds)||data.seconds<=0||data.seconds>120)throw Error('Invalid voice audio');
     return {...data,streamed:seen>0};
    }finally{if(owner(s)===owner(session()))await call(route,{method:'DELETE'}).catch(()=>{});}
   }
-  const firstPlays=[];
-  function enqueue(data){const handle=play(data);playing.add(handle);handle.done.then(()=>playing.delete(handle),()=>playing.delete(handle));return handle;}
-  try{
-  let next=chunks.length?prepare(chunks[0],data=>{const handle=enqueue(data);firstPlays.push(handle.done);handle.done.catch(()=>{});}):Promise.resolve(null);
-  for(let i=0;i<chunks.length;i++){
-   const data=await next;if(!data||!active(s,e))return 'cancelled';
-   next=i+1<chunks.length?prepare(chunks[i+1]):Promise.resolve(null);next.catch(()=>{});
-   if(data.streamed){await Promise.all(firstPlays);}else{current=enqueue(data);await current.done;current=null;}
+  let startedAudio=false;
+  function enqueue(data){startedAudio=true;const handle=play(data);playing.add(handle);handle.done.then(()=>playing.delete(handle),()=>playing.delete(handle));return handle;}
+  function preparePhrase(index){
+   const played=[];
+   const ready=prepare(chunks[index],data=>{const handle=enqueue(data);played.push(handle.done);handle.done.catch(()=>{});});
+   ready.catch(()=>{});
+   return {ready,played};
   }
-  return active(s,e)?'played':'cancelled';
-  }catch(error){for(const handle of playing)handle.stop();playing.clear();if(firstPlays.length)error.spoken=true;throw error;}
+  try{
+   let prepared=chunks.length?preparePhrase(0):null;
+   for(let i=0;i<chunks.length;i++){
+    const data=await prepared.ready;if(!data||!live())return 'cancelled';
+    // Every sentence streams. Queue this sentence fully before preparing the next,
+    // so cached final audio and streamed fragments can never overtake one another.
+    let finished;
+    if(data.streamed)finished=Promise.all(prepared.played);
+    else{current=enqueue(data);finished=current.done;}
+    const next=i+1<chunks.length?preparePhrase(i+1):null;
+    await finished;current=null;prepared=next;
+   }
+   return live()?'played':'cancelled';
+  }catch(error){failed=true;for(const handle of playing)handle.stop();playing.clear();if(startedAudio)error.spoken=true;throw error;}
  }
  return {cancel(){epoch++;current?.stop();current=null;for(const handle of playing)handle.stop();playing.clear();},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const r=chain.then(()=>speech(text,language,s,e)).catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
 }
