@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R187';
+  const APP_BUILD = '2026-11-06-R188';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67618,8 +67618,12 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
     try{const u=new URL(raw);if(u.protocol!=='https:'||u.username||u.password||u.port||/\s/.test(raw)||!u.hostname.includes('.'))throw Error();return {url:u.href,browser,label:sites[key]?target:u.hostname};}
     catch(e){return {error:'No pude abrir esa dirección. Usa un enlace https válido, sin usuario ni contraseña dentro del enlace.'};}
   }
+  function asRecordarAccionMac(pedido,resultado){
+    if(!pedido||!resultado)return;
+    AS.historial=(AS.historial||[]).concat([{role:'user',content:String(pedido)},{role:'assistant',content:String(resultado)}]).slice(-40);
+  }
   let AS_BROWSER_BUSY=false, AS_BROWSER_REPLY=0;
-  async function asAbrirPaginaMac(page){
+  async function asAbrirPaginaMac(page,pedido){
     if(AS_BROWSER_BUSY){asMostrarRespuesta('Ya estoy procesando una apertura.');return;}
     if(page.error){asMostrarRespuesta(page.error);return;}
     if(SES.role!=='manager'){asMostrarRespuesta('Esta acción requiere la sesión de Manager vinculada a la Mac.');return;}
@@ -67642,13 +67646,14 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
         if(state==='browser_open_requested'){
           const intro=['Abriendo ','Claro, abriendo ','Voy a abrir '][AS_BROWSER_REPLY++ % 3];
           const text=intro+page.label+(page.browser==='default'?'':' en '+(page.browser==='chrome'?'Chrome':'Safari'))+'.';
+          asRecordarAccionMac(pedido,text+' La orden de abrir '+page.url+' se ejecutó en el navegador de la Mac vinculada. No se ha comprobado aún el contenido ni la carga de la página.');
           asAccionVisible('Abriendo '+page.label,'done');asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);return;
         }
         if(state && state!=='queued')throw Error('No se confirmó la apertura. Revisa la Mac antes de repetirla.');
         await new Promise(r=>setTimeout(r,1000));
       }
       throw Error('La Mac todavía no confirmó la orden. No la repetí automáticamente.');
-    }catch(e){if(active()){asAccionVisible('No se confirmó la apertura','error');asMostrarRespuesta(String(e.message||e));}}
+    }catch(e){if(active()){asRecordarAccionMac(pedido,String(e.message||e));asAccionVisible('No se confirmó la apertura','error');asMostrarRespuesta(String(e.message||e));}}
     finally{AS_BROWSER_BUSY=false;}
   }
 
@@ -67738,7 +67743,7 @@ function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=D
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
     if(!dictando){const screen=lumiScreenOrder(texto);if(screen){asTranscribir(texto);await asMostrarPantallaMac(screen);return;}}
-    if(!dictando){const page=asPedidoPagina(texto);if(page){asTranscribir(texto);await asAbrirPaginaMac(page);return;}}
+    if(!dictando){const page=asPedidoPagina(texto);if(page){asTranscribir(texto);await asAbrirPaginaMac(page,texto);return;}}
     asAccionVisible('', '');
     if(!dictando && AS_GAL.p?.tipo==='labor_logs'){const control=asOrdenControlMac(texto,AS_GAL.p.items);if(control){asTranscribir(texto);if(control.error){asMostrarRespuesta(control.error);asHablar(control.error,asSeguirOyendo);}else{await asControlHojaMac(AS_GAL.p.items[control.index],control.action);}return;}}
     if(!dictando && AS_GAL.p?.tipo==='labor_logs'){const copy=asOrdenCopiarHoja(texto,AS_GAL.p.items);if(copy){asTranscribir(texto);if(copy.error){asMostrarRespuesta(copy.error);asHablar(copy.error,asSeguirOyendo);}else{await asCopiarHoja(AS_GAL.p.items[copy.index]);asSeguirOyendo();}return;}}
