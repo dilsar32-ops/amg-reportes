@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R188';
+  const APP_BUILD = '2026-11-06-R189';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67471,7 +67471,7 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
     };
     AS.tmrHabla = setTimeout(tic, 60);
   }
-  async function asHablar(texto, luego){ await asDecir(texto, false); asAlTerminarDeHablar(luego); }
+  async function asHablar(texto, luego){ const turno=AS.hablaEpoch=(AS.hablaEpoch||0)+1; await asDecir(texto, false); if(AS.abierto && turno===AS.hablaEpoch)asAlTerminarDeHablar(luego); }
   // (R2) RESPALDO: la voz del WebView (speechSynthesis también funciona dentro del app). Para que NUNCA se quede callada.
   function asDecirRespaldo(t, porque){
     asBit('RESPALDO voz del WebView (' + porque + '): ' + String(t || '').length + ' letras');
@@ -67499,6 +67499,7 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
     if(window.speechSynthesis){ try{ const u = new SpeechSynthesisUtterance(t); u.lang = asIdiomaVozWeb(); const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */ speechSynthesis.speak(u); }catch(e){} }
   }
   function asCallar(){
+    AS.hablaEpoch=(AS.hablaEpoch||0)+1;
     document.querySelectorAll('.lumi-screen-preview').forEach(d=>d.remove());
     if(AS_VOZ_LOCAL)AS_VOZ_LOCAL.cancel();
     clearTimeout(AS.tmrHabla); clearTimeout(AS.tmrRelleno); AS.hablaHasta = 0; AS.esperaFin = false; AS.finPendiente = false; AS.textoTanda = '';
@@ -67618,6 +67619,17 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
     try{const u=new URL(raw);if(u.protocol!=='https:'||u.username||u.password||u.port||/\s/.test(raw)||!u.hostname.includes('.'))throw Error();return {url:u.href,browser,label:sites[key]?target:u.hostname};}
     catch(e){return {error:'No pude abrir esa dirección. Usa un enlace https válido, sin usuario ni contraseña dentro del enlace.'};}
   }
+  function lumiBrowserFollowup(text,receipt,owner,now=Date.now()){
+    if(!receipt||receipt.owner!==owner||receipt.state!=='browser_open_requested'||now-receipt.at>900000||now<receipt.at)return null;
+    const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¿?!.]/g,'').trim();
+    const question=/^(?:y |and )?(?:donde (?:lo |la )?(?:abriste|abres|abrio)|where (?:did you open|did it open|was it opened))\b/.exec(t);if(!question)return null;
+    const known=/\b(company\s*cam(?:p)?|matterport|maroport|youtube|google|wikipedia)\b/.exec(t);
+    const tail=t.slice(question[0].length).trim();if(!known&&tail&&!/^(it|that|the page|eso|la pagina|esa pagina)$/.test(tail))return null;
+    const normalize=x=>String(x).toLowerCase().replace(/\s/g,'').replace('companycamp','companycam').replace('maroport','matterport');
+    if(known&&!normalize(receipt.label).includes(normalize(known[1])))return null;
+    const browser=receipt.browser==='chrome'?'Chrome':receipt.browser==='safari'?'Safari':'el navegador predeterminado';
+    return /\bwhere\b/.test(t)?'In '+(receipt.browser==='default'?'the default browser':browser)+' on your linked Mac. I have not checked the page content yet.':'En '+browser+', en tu Mac vinculada. Todavía no he revisado el contenido de la página.';
+  }
   function asRecordarAccionMac(pedido,resultado){
     if(!pedido||!resultado)return;
     AS.historial=(AS.historial||[]).concat([{role:'user',content:String(pedido)},{role:'assistant',content:String(resultado)}]).slice(-40);
@@ -67646,6 +67658,7 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
         if(state==='browser_open_requested'){
           const intro=['Abriendo ','Claro, abriendo ','Voy a abrir '][AS_BROWSER_REPLY++ % 3];
           const text=intro+page.label+(page.browser==='default'?'':' en '+(page.browser==='chrome'?'Chrome':'Safari'))+'.';
+          AS.browserReceipt={owner,label:page.label,browser:page.browser,at:Date.now(),state};
           asRecordarAccionMac(pedido,text+' La orden de abrir '+page.url+' se ejecutó en el navegador de la Mac vinculada. No se ha comprobado aún el contenido ni la carga de la página.');
           asAccionVisible('Abriendo '+page.label,'done');asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);return;
         }
@@ -67742,6 +67755,7 @@ function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=D
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando){const followup=lumiBrowserFollowup(texto,AS.browserReceipt,SES.user_id+'|'+SES.company_id);if(followup){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,followup);asMostrarRespuesta(followup);asHablar(followup,asSeguirOyendo);return;}}
     if(!dictando){const screen=lumiScreenOrder(texto);if(screen){asTranscribir(texto);await asMostrarPantallaMac(screen);return;}}
     if(!dictando){const page=asPedidoPagina(texto);if(page){asTranscribir(texto);await asAbrirPaginaMac(page,texto);return;}}
     asAccionVisible('', '');
