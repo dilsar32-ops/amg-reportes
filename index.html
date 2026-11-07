@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R186';
+  const APP_BUILD = '2026-11-06-R187';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67093,6 +67093,21 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     });
     AS.oyeHablaFin = true;
   }
+/* Browser recognizers may end sessions themselves. Preserve the turn and reopen. */
+function createLumiWebEar({Recognition,language,active,onText,onError,schedule=setTimeout,unschedule=clearTimeout}){
+ let stopped=false,rec=null,retry=null,prefix='',latest='';
+ function start(){
+  if(stopped||!active())return;
+  const r=new Recognition();rec=r;r.lang=language;r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
+  r.onresult=event=>{if(stopped||rec!==r||!active())return;let t='';for(let i=0;i<event.results.length;i++)t+=event.results[i][0].transcript+' ';latest=(prefix+' '+t).trim();onText(latest);};
+  r.onerror=event=>{if(stopped||rec!==r)return;if(event.error==='no-speech')return;stop();onError(event.error);};
+  r.onend=()=>{if(stopped||rec!==r||!active())return;prefix=latest;rec=null;retry=schedule(()=>{retry=null;start();},200);};
+  try{r.start();}catch(error){stop();onError('start-failed');}
+ }
+ function stop(){stopped=true;if(retry!==null)unschedule(retry);retry=null;const r=rec;rec=null;if(r){r.onend=r.onresult=r.onerror=null;try{r.stop();}catch{}}}
+ return {start,stop};
+}
+
   async function asEscuchar(){
     if(AS.micMuted)return;
     if(!AS.abierto || AS.estado === 'escuchando' || AS.estado === 'pensando') return;
@@ -67114,11 +67129,14 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     const R = asWebRec();
     if(!R){ asEstado('esperando', 'Este navegador no oye. Escribe abajo.'); return; }
     try{
-      const r = new R(); r.lang = asIdiomaWeb(); r.continuous = false; r.interimResults = true; r.maxAlternatives = 1;
-      r.onresult = function(ev){ if(AS.micMuted || !AS.abierto)return; let t = ''; for(let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript; AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); if(!AS.nivelWeb){ AS.nivel = 0.5 + 0.4 * Math.random(); if(window.Cara){ try{ Cara.nivel(AS.nivel); }catch(err){} } } };
-      r.onerror = function(ev){ AS.rec = null; AS.nivel = 0; asNivelWebCerrar(); if(AS.estado !== 'escuchando') return; if(ev.error === 'no-speech'){ asReposar(); return; } asEstado('esperando', ev.error === 'not-allowed' ? 'Falta el permiso del micrófono del navegador.' : 'No se pudo oír. Escribe abajo.'); };
-      r.onend = function(){ AS.rec = null; AS.nivel = 0; asNivelWebCerrar(); if(AS.estado === 'escuchando'){ if(AS.texto.trim()) asEnviarVoz(AS.texto); else asReposar(); } };
-      AS.ru = asRuNuevo(AS.pisoPrev); AS.dudosos = []; AS.rec = r; r.start(); AS.modo = 'web'; asNivelWebAbrir(); asEstado('escuchando', 'Te escucho…');
+      AS.ru = asRuNuevo(AS.pisoPrev); AS.dudosos = []; AS.modo='web'; AS.ultTexto=Date.now();
+      asEstado('escuchando', 'Te escucho…');
+      const ear=createLumiWebEar({Recognition:R,language:asIdiomaWeb(),
+        active:()=>AS.abierto&&!AS.micMuted&&AS.estado==='escuchando',
+        onText:t=>{AS.texto=t;AS.ultTexto=Date.now();asTranscribir(t);},
+        onError:error=>{AS.rec=null;AS.nivel=0;asNivelWebCerrar();clearInterval(AS.tmrSil);if(!AS.abierto||AS.micMuted)return;asEstado('esperando',error==='not-allowed'?'Falta el permiso del micrófono del navegador.':'No se pudo oír. Escribe abajo.');}
+      });
+      AS.rec=ear;ear.start();if(AS.estado==='escuchando'){asNivelWebAbrir();asVigilarSilencio();}
     }catch(e){ asEstado('esperando', 'No se pudo escuchar. Escribe abajo.'); }
   }
   // Finish only after text has settled AND voice activity has stopped; ordinary pauses keep listening.
@@ -67126,7 +67144,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     clearInterval(AS.tmrSil);
     const inicio = Date.now();
     AS.tmrSil = setInterval(function(){
-      if(AS.estado !== 'escuchando' || AS.modo !== 'nativo'){ clearInterval(AS.tmrSil); return; }
+      if(AS.estado !== 'escuchando' || !['nativo','web'].includes(AS.modo)){ clearInterval(AS.tmrSil); return; }
       const ahora = Date.now(), dicta = !!(AS.pregunta && AS.pregunta.tipo === 'msg_dictar');   // (R88) dictando un recado se piensa: más pausa
       // Never finish a turn just because transcription stalled while voice continues.
       const silencio = asRuSinVoz(AS.ru, ahora);
@@ -67289,7 +67307,7 @@ function splitLumiSpeech(text){
  return chunks;
 }
 function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
- let epoch=0,chain=Promise.resolve(),current=null,cache=null;
+ let epoch=0,chain=Promise.resolve(),current=null,cache=null,playing=new Set();
  const owner=s=>s.user_id+'|'+s.company_id;
  const active=(s,e)=>e===epoch&&owner(s)===owner(session())&&session().role==='manager';
  async function device(s){
@@ -67303,56 +67321,78 @@ function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=
   if(!active(s,e))return 'cancelled';
   const d=await device(s);if(!active(s,e))return 'cancelled';if(!d)return 'unavailable';
   const chunks=splitLumiSpeech(text);
-  async function prepare(chunk){
+  async function prepare(chunk,onPartial){
    if(!active(s,e))return null;
    const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
    try{
-    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:chunk,language}})});
-    const deadline=now()+160000;let data=null;
+    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:chunk,language,stream:!!onPartial}})});
+    const deadline=now()+160000;let data=null,seen=0;
     while(now()<deadline){
      if(!active(s,e))return null;
      const rows=await call(route+'&select=state,result');const job=rows?.[0];
+     const pieces=job?.result?.data?.chunks;
+     if(onPartial&&Array.isArray(pieces)){
+      if(pieces.length>160||pieces.length<seen)throw Error('Invalid stream sequence');
+      for(;seen<pieces.length;seen++){
+       const part=pieces[seen];
+       if(part.index!==seen||part.voice!=='calida-tranquila-v1'||part.mime!=='audio/wav'||typeof part.audio!=='string'||part.audio.length>160000||!Number.isFinite(part.seconds)||part.seconds<=0||part.seconds>2)throw Error('Invalid stream audio');
+       if(!active(s,e))return null;onPartial(part);
+      }
+     }
      if(job?.state==='failed')throw Error('Voice generation failed');
      if(job?.state==='done'){data=job.result?.data;break;}
      await wait(350);
     }
     if(!active(s,e))return null;
     if(!data||data.voice!=='calida-tranquila-v1'||data.mime!=='audio/mpeg'||typeof data.audio!=='string'||data.audio.length>2200000||!Number.isFinite(data.seconds)||data.seconds<=0||data.seconds>120)throw Error('Invalid voice audio');
-    return data;
+    return {...data,streamed:seen>0};
    }finally{if(owner(s)===owner(session()))await call(route,{method:'DELETE'}).catch(()=>{});}
   }
-  let next=chunks.length?prepare(chunks[0]):Promise.resolve(null);
+  const firstPlays=[];
+  function enqueue(data){const handle=play(data);playing.add(handle);handle.done.then(()=>playing.delete(handle),()=>playing.delete(handle));return handle;}
+  try{
+  let next=chunks.length?prepare(chunks[0],data=>{const handle=enqueue(data);firstPlays.push(handle.done);handle.done.catch(()=>{});}):Promise.resolve(null);
   for(let i=0;i<chunks.length;i++){
    const data=await next;if(!data||!active(s,e))return 'cancelled';
    next=i+1<chunks.length?prepare(chunks[i+1]):Promise.resolve(null);next.catch(()=>{});
-   current=play(data);await current.done;current=null;
+   if(data.streamed){await Promise.all(firstPlays);}else{current=enqueue(data);await current.done;current=null;}
   }
   return active(s,e)?'played':'cancelled';
+  }catch(error){for(const handle of playing)handle.stop();playing.clear();if(firstPlays.length)error.spoken=true;throw error;}
  }
- return {cancel(){epoch++;current?.stop();current=null;},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const r=chain.then(()=>speech(text,language,s,e)).catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
+ return {cancel(){epoch++;current?.stop();current=null;for(const handle of playing)handle.stop();playing.clear();},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const r=chain.then(()=>speech(text,language,s,e)).catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
+}
+
+/* Schedule decoded audio consecutively on one clock, with no HTML-audio gaps. */
+function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),c=>c.charCodeAt(0)),timer=setTimeout,clear=clearTimeout}){
+ let ctx=null,nextAt=0,decoding=Promise.resolve(),active=new Set();
+ return {play(data){
+  let source=null,stopped=false,watchdog,finish;
+  const done=new Promise((resolve,reject)=>{finish=error=>{if(stopped)return;stopped=true;clear(watchdog);try{source?.stop();}catch{}active.delete(handle);if(!active.size)nextAt=0;error?reject(error):resolve();};});
+  const handle={done,stop:()=>finish()};active.add(handle);
+  const run=decoding.then(async()=>{
+   if(stopped)return;ctx=ctx||context();if(ctx.state==='suspended')await ctx.resume();
+   const bytes=decodeBase64(data.audio);const buffer=await ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));
+   if(stopped)return;
+   source=ctx.createBufferSource();source.buffer=buffer;source.connect(ctx.destination);source.onended=()=>finish();
+   const start=Math.max(ctx.currentTime+0.12,nextAt);nextAt=start+buffer.duration;
+   watchdog=timer(()=>finish(Error('Audio playback timed out')),(nextAt-ctx.currentTime)*1000+10000);source.start(start);
+  });decoding=run.catch(error=>finish(error));
+  return handle;
+ },stop(){for(const h of [...active])h.stop();nextAt=0;}};
 }
 
   let AS_VOZ_LOCAL=null;
   function asVozLocal(){
     if(AS_VOZ_LOCAL)return AS_VOZ_LOCAL;
+    const audioPlayer=createLumiAudioPlayer({context:()=>new (window.AudioContext||window.webkitAudioContext)()});
     AS_VOZ_LOCAL=createLumiVoice({
       session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),
       call:async(route,init={})=>{
         const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
         try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('Local voice HTTP '+r.status);const t=await r.text();return t?JSON.parse(t):null;}finally{clearTimeout(timer);}
       },
-      play:data=>{
-        const bytes=Uint8Array.from(atob(data.audio),c=>c.charCodeAt(0));
-        const url=URL.createObjectURL(new Blob([bytes],{type:data.mime})),audio=new Audio(url);
-        let finish,settled=false,timer;
-        const done=new Promise((resolve,reject)=>{
-          finish=error=>{if(settled)return;settled=true;clearTimeout(timer);audio.pause();audio.removeAttribute('src');URL.revokeObjectURL(url);error?reject(error):resolve();};
-          audio.onended=()=>finish();audio.onerror=()=>finish(Error('Audio playback failed'));
-          timer=setTimeout(()=>finish(Error('Audio playback timed out')),data.seconds*1000+20000);
-          Promise.resolve(audio.play()).catch(finish);
-        });
-        return {done,stop:()=>finish()};
-      }
+      play:data=>audioPlayer.play(data)
     });
     return AS_VOZ_LOCAL;
   }
@@ -67372,7 +67412,7 @@ function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=
           if(result==='played'){asBit('voz cálida local');const notice=$('#asVozAviso');if(notice)notice.hidden=true;}
           return 0;
         }
-      }catch(error){asBit('voz cálida no disponible; respaldo del dispositivo');}
+      }catch(error){if(error.spoken){asBit('audio interrumpido; respuesta visible en conversación');return 0;}asBit('voz cálida no disponible; respaldo del dispositivo');}
       finally{AS.vozEnVuelo=Math.max(0,(AS.vozEnVuelo||1)-1);}
     }
     const S = asPlugin();
