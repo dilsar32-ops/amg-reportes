@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R201';
+  const APP_BUILD = '2026-11-07-R202';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67422,7 +67422,7 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
     asEstado('hablando', ''); if(window.Cara){ try{ Cara.hablando(true, t); }catch(err){} }
     setTimeout(asVigilarInterrupcion, 250);   // barge-in (si está prendido): también con frases encoladas del stream
     // Keep listening paused while the local model generates and plays the actual audio.
-    if(SES.role==='manager' && cloudOn()){
+    if(SES.role==='manager'){
       const voice=asVozLocal();if(!encolar)voice.cancel();
       AS.vozEnVuelo=(AS.vozEnVuelo||0)+1;
       try{
@@ -67432,8 +67432,11 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
           if(result==='played'){asBit('voz cálida local');const notice=$('#asVozAviso');if(notice)notice.hidden=true;}
           return 0;
         }
-      }catch(error){if(error.spoken){asBit('audio interrumpido; respuesta visible en conversación');return 0;}asBit('voz cálida no disponible; respaldo del dispositivo');}
+      }catch(error){if(error.spoken){asBit('audio interrumpido; respuesta visible en conversación');return 0;}asBit('voz 1 no disponible; respuesta visible, sin cambiar de voz');}
       finally{AS.vozEnVuelo=Math.max(0,(AS.vozEnVuelo||1)-1);}
+      AS.esperaFin=false; AS.finPendiente=false; AS.hablaHasta=Date.now();
+      const notice=$('#asVozAviso');if(notice){notice.textContent='La voz 1 no está disponible ahora. La respuesta sigue en la conversación.';notice.hidden=false;}
+      return 0; // Never substitute another speaker for the owner's selected voice.
     }
     const S = asPlugin();
     let ms = Math.max(900, t.length * 62);
@@ -67494,6 +67497,7 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
   async function asHablar(texto, luego){ const turno=AS.hablaEpoch=(AS.hablaEpoch||0)+1; await asDecir(texto, false); if(AS.abierto && turno===AS.hablaEpoch)asAlTerminarDeHablar(luego); }
   // (R2) RESPALDO: la voz del WebView (speechSynthesis también funciona dentro del app). Para que NUNCA se quede callada.
   function asDecirRespaldo(t, porque){
+    if(SES.role==='manager')return; // Voice 1 is exclusive, including delayed plugin errors.
     asBit('RESPALDO voz del WebView (' + porque + '): ' + String(t || '').length + ' letras');
     if(!window.speechSynthesis){ asBit('sin speechSynthesis: no hay respaldo'); return; }
     try{
