@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R189';
+  const APP_BUILD = '2026-11-06-R190';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67606,10 +67606,11 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
       s=s.replace(greeting,'').replace(/^(?:(?:me\s+)?(?:puedes|podrias|podrías)|(?:can|could|would) you|quiero que(?: me)?|necesito que(?: me)?|i(?:'|’)d like you to|i want you to|i need you to|go ahead and)\s+/i,'').trim();
       if(s===before)break;
     }
-    const m=/^(?:me abres|abre|ábreme|abreme|abrirme|abrir|abras|ponme|pon|ponerme|open up|open|pull up|bring up|entra a|entra en|ve a|llévame a|llevame a|go to|take me to|navigate to)\s+(?:(?:la página de|la pagina de|la página|la pagina|el sitio de|el sitio|la web de|la web|the website|the page)\s+)?(.+)$/i.exec(s);
+    const m=/^(?:trae al frente|tráeme al frente|traeme al frente|bring to the front|tráeme|traeme|traer|trae|bring up|bring|muestra|muéstrame|muestrame|show me|me abres|abre|ábreme|abreme|abrirme|abrir|abras|ponme|pon|ponerme|open up|open|pull up|bring up|entra a|entra en|ve a|llévame a|llevame a|go to|take me to|navigate to)\s+(?:(?:la página de|la pagina de|la página|la pagina|el sitio de|el sitio|la web de|la web|the website|the page)\s+)?(.+)$/i.exec(s);
     if(!m)return null;
-    const target=m[1].trim().replace(/,?\s+(?:por favor|porfa|please|for me)\s*[?!.]*$/i,''),key=target.toLowerCase().replace(/\s+/g,' ');
-    const sites={'companycam':'https://app.companycam.com/','company cam':'https://app.companycam.com/','matterport':'https://my.matterport.com/','maroport':'https://my.matterport.com/','wikipedia':'https://www.wikipedia.org/','google':'https://www.google.com/','youtube':'https://www.youtube.com/','openai':'https://openai.com/'};
+    const target=m[1].trim().replace(/\s+(?:al frente|enfrente|a primer plano|to the front|in front|up front)$/i,'').replace(/,?\s+(?:por favor|porfa|please|for me)\s*[?!.]*$/i,''),key=target.toLowerCase().replace(/\s+/g,' ');
+    if(/^(esta pagina|esta página|esa pagina|esa página|la anterior|this page|that page|it)$/i.test(target))return {previous:true,browser};
+    const sites={'companycam':'https://app.companycam.com/','company cam':'https://app.companycam.com/','company camp':'https://app.companycam.com/','whatsapp':'https://web.whatsapp.com/','matterport':'https://my.matterport.com/','maroport':'https://my.matterport.com/','wikipedia':'https://www.wikipedia.org/','google':'https://www.google.com/','youtube':'https://www.youtube.com/','openai':'https://openai.com/'};
     let raw=sites[key];
     if(!raw){
       if(/^[a-z][a-z0-9+.-]*:/i.test(target))raw=target;
@@ -67620,7 +67621,7 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
     catch(e){return {error:'No pude abrir esa dirección. Usa un enlace https válido, sin usuario ni contraseña dentro del enlace.'};}
   }
   function lumiBrowserFollowup(text,receipt,owner,now=Date.now()){
-    if(!receipt||receipt.owner!==owner||receipt.state!=='browser_open_requested'||now-receipt.at>900000||now<receipt.at)return null;
+    if(!receipt||receipt.owner!==owner||!['browser_open_requested','browser_front_verified'].includes(receipt.state)||now-receipt.at>900000||now<receipt.at)return null;
     const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¿?!.]/g,'').trim();
     const question=/^(?:y |and )?(?:donde (?:lo |la )?(?:abriste|abres|abrio)|where (?:did you open|did it open|was it opened))\b/.exec(t);if(!question)return null;
     const known=/\b(company\s*cam(?:p)?|matterport|maroport|youtube|google|wikipedia)\b/.exec(t);
@@ -67637,6 +67638,7 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
   let AS_BROWSER_BUSY=false, AS_BROWSER_REPLY=0;
   async function asAbrirPaginaMac(page,pedido){
     if(AS_BROWSER_BUSY){asMostrarRespuesta('Ya estoy procesando una apertura.');return;}
+    if(page.previous){const last=AS.browserReceipt;if(!last||last.owner!==SES.user_id+'|'+SES.company_id||Date.now()-last.at>900000){asMostrarRespuesta('Dime qué página quieres traer al frente.');return;}page={url:last.url,label:last.label,browser:page.browser==='default'?last.browser:page.browser};}
     if(page.error){asMostrarRespuesta(page.error);return;}
     if(SES.role!=='manager'){asMostrarRespuesta('Esta acción requiere la sesión de Manager vinculada a la Mac.');return;}
     AS_BROWSER_BUSY=true;asPararOido();asCallar();
@@ -67650,15 +67652,15 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
       const device=devices[0]?.valor;if(!device?.available||!device.workerId)throw Error('No hay una Mac vinculada disponible.');
       const id=crypto.randomUUID(),clave='lumi_control_command_'+id;
       await call('/rest/v1/asistente_ajustes',{method:'POST',headers:{'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({company_id:companyId,clave,valor:{id,companyId,workerId:device.workerId,action:'open_page',url:page.url,browser:page.browser,createdAt:new Date().toISOString(),state:'queued'}})});
-      for(let i=0;i<25;i++){
+      for(let i=0;i<45;i++){
         if(!active())return;
         const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(companyId)+'&clave=eq.'+encodeURIComponent(clave));
         if(!active())return;
         const state=rows[0]?.valor?.state;
-        if(state==='browser_open_requested'){
+        if(state==='browser_open_requested'||state==='browser_front_verified'){
           const intro=['Abriendo ','Claro, abriendo ','Voy a abrir '][AS_BROWSER_REPLY++ % 3];
-          const text=intro+page.label+(page.browser==='default'?'':' en '+(page.browser==='chrome'?'Chrome':'Safari'))+'.';
-          AS.browserReceipt={owner,label:page.label,browser:page.browser,at:Date.now(),state};
+          const text=state==='browser_front_verified' ? (/\b(open|bring|show|could|can you)\b/i.test(pedido||'')?'Here is '+page.label+' in front.':'Aquí tienes '+page.label+' al frente.') : 'Envié la orden de abrir '+page.label+', pero todavía no pude comprobar que quedó al frente.';
+          AS.browserReceipt={owner,url:page.url,label:page.label,browser:page.browser,at:Date.now(),state};
           asRecordarAccionMac(pedido,text+' La orden de abrir '+page.url+' se ejecutó en el navegador de la Mac vinculada. No se ha comprobado aún el contenido ni la carga de la página.');
           asAccionVisible('Abriendo '+page.label,'done');asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);return;
         }
