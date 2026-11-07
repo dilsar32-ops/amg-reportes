@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R199';
+  const APP_BUILD = '2026-11-07-R200';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -66851,6 +66851,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     return Promise.race([pedido, tope]);
   }
   function asCerrar(){
+    AS.requestEpoch=(AS.requestEpoch||0)+1; AS.enviando=false; clearTimeout(AS.tmrRelleno);
     asAccionVisible('', '');
     AS.abierto = false; AS.pregunta = null; asPararOido(); asCallar(); asPreviewQuitar(); try{ asGaleriaQuitar(); }catch(e){}
     asPantalla(false);
@@ -67546,16 +67547,18 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
     const quiereStream = typeof onTexto === 'function' && typeof ReadableStream !== 'undefined';
     // Si en 35 s no llega NI un byte (el servidor manda ": ping" cada 10 s), se corta aqui y no se queda colgado.
     const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    let expired=false; const deadline=setTimeout(function(){expired=true;if(ctl)ctl.abort();},45000);
+    const timeoutError=()=>new Error('Lumi tardó demasiado en responder. Puedes intentarlo otra vez.');
     let tmr = null; const armar = function(){ if(!ctl) return; clearTimeout(tmr); tmr = setTimeout(function(){ try{ ctl.abort(); }catch(e){} }, 35000); };
     armar();
     let res;
     try{ res = await authFetch('/functions/v1/asistente', Object.assign({ method:'POST', headers: cloudHeaders(), body: JSON.stringify(Object.assign({ idiomaApp: asEn() ? 'en' : 'es', capacidades: ['galeria', 'idioma', 'reporte', 'dictado', 'grupo'] }, quiereStream ? Object.assign({ stream:true }, body) : body)) }, ctl ? { signal: ctl.signal } : {})); }
-    catch(e){ clearTimeout(tmr); throw e; }
+    catch(e){ clearTimeout(tmr); clearTimeout(deadline); if(expired)throw timeoutError(); throw e; }
     const ct = (res.headers.get('content-type') || '');
     if(quiereStream && res.ok && /text\/event-stream/.test(ct) && res.body && res.body.getReader){
       const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '', fin = null, status = 200;
       for(;;){
-        let r; try{ r = await reader.read(); }catch(e){ clearTimeout(tmr); throw e; }
+        let r; try{ r = await reader.read(); }catch(e){ clearTimeout(tmr); clearTimeout(deadline); if(expired)throw timeoutError(); throw e; }
         if(r.done) break;
         armar();
         buf += dec.decode(r.value, { stream:true });
@@ -67572,12 +67575,14 @@ function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),
           });
         }
       }
-      clearTimeout(tmr);
+      clearTimeout(tmr); clearTimeout(deadline);
+      if(expired)throw timeoutError();
       if(!fin) throw new Error('se cortó la conexión');
       return { ok: status < 400 && fin.ok !== false, status, json: fin };
     }
     let json = null; try{ json = await res.json(); }catch(e){}
-    clearTimeout(tmr);
+    clearTimeout(tmr); clearTimeout(deadline);
+    if(expired)throw timeoutError();
     return { ok: res.ok, status: res.status, json };
   }
   // Lo que ya tiene punto final se dice; el resto espera al siguiente trozo. "$317.50" no es un fin de frase.
@@ -67775,7 +67780,7 @@ function lumiDesktopReadOrder(text){
  let t=String(text||'').trim().replace(/[?!.]+$/,'').replace(/\s*,?\s*(?:por favor|please)$/i,'').trim();
  t=t.replace(/(?:[.;,]\s*|\s+)(?:no respondas(?: ni env[ií]es nada)?|no env[ií]es respuestas|do not reply|don['’]t reply)$/i,'').trim().replace(/[?!.]+$/,'');
  const apps='(WhatsApp|Mensajes de Apple|Mensajes normales|Mensajes|Apple Messages|Messages|iMessage)';
- const verb='(?:revisa(?:me)?|rev[ií]same|checa|check|lee|l[eé]eme|read)(?: (?:y|and) (?:lee|l[eé]eme|read))?';
+ const verb='(?:revisa(?:me)?|rev[ií]same|checa|check|lee|l[eé]eme|leme|read)(?: (?:y|and) (?:lee|l[eé]eme|leme|read))?';
  let m=new RegExp('^'+verb+' (?:los |mis |my |the )?(?:nuevos |new |unread )?(?:mensajes|messages)(?: nuevos| pendientes| sin leer)? (?:de|en|in|on|from) '+apps+'$','i').exec(t);
  if(!m)m=new RegExp('^(?:qu[eé] mensajes (?:tengo|hay)|tengo mensajes|any new messages|do i have (?:any )?(?:new )?messages) (?:en|de|in|on) '+apps+'$','i').exec(t);
  if(m)return {app:/^whatsapp$/i.test(m[1])?'whatsapp':'messages',action:'read_unread'};
@@ -67834,7 +67839,7 @@ function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=
   const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
   try{await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{...order,local_profile:'lumi_desktop'}})});
    const until=now()+60000;
-   while(now()<until){if(!same())throw Error('La sesión cambió.');const jobs=await call(route+'&select=state,result');if(!same())throw Error('La sesión cambió.');const job=jobs?.[0];if(job?.state==='failed')throw Error('No pude confirmar el resultado en la Mac. Revisa el chat antes de repetir un envío.');if(job?.state==='done'){const r=job.result?.data;if(!r||r.app!==order.app||!['app_front','matches','needs_choice','not_found','chat_opened','message_submitted','already_submitted','unread_list','chat_messages'].includes(r.status))throw Error('Respuesta de la Mac no válida.');if(['unread_list','chat_messages'].includes(r.status)){if(!lumiDesktopReadValid(r,order))throw Error('Lectura de mensajes no válida.');return r;}const allowed={read_unread:['unread_list'],read_chat:['chat_messages','needs_choice','not_found'],open_app:['app_front'],search_chats:['matches','not_found'],open_chat:['chat_opened','needs_choice','not_found'],send_message:['message_submitted','already_submitted','needs_choice','not_found']}[order.action];if(!allowed.includes(r.status))throw Error('La respuesta no corresponde a la orden.');if(['matches','needs_choice','not_found'].includes(r.status)&&(r.query!==order.query||!Array.isArray(r.candidates)||r.candidates.length>25))throw Error('Resultados de otra búsqueda.');if(['chat_opened','message_submitted','already_submitted'].includes(r.status)&&(typeof r.title!=='string'||!r.title.trim()))throw Error('Falta confirmar el destinatario.');return r;}await wait(500);}
+   while(now()<until){if(!same())throw Error('La sesión cambió.');const jobs=await call(route+'&select=state,result');if(!same())throw Error('La sesión cambió.');const job=jobs?.[0];if(job?.state==='failed')throw Error(order.action==='send_message'?'No pude confirmar el envío. Revisa el chat antes de repetirlo.':['read_unread','read_chat'].includes(order.action)?'No pude leer los mensajes de esa aplicación. No envié ninguna respuesta.':'No pude completar la acción en esa aplicación.');if(job?.state==='done'){const r=job.result?.data;if(!r||r.app!==order.app||!['app_front','matches','needs_choice','not_found','chat_opened','message_submitted','already_submitted','unread_list','chat_messages'].includes(r.status))throw Error('Respuesta de la Mac no válida.');if(['unread_list','chat_messages'].includes(r.status)){if(!lumiDesktopReadValid(r,order))throw Error('Lectura de mensajes no válida.');return r;}const allowed={read_unread:['unread_list'],read_chat:['chat_messages','needs_choice','not_found'],open_app:['app_front'],search_chats:['matches','not_found'],open_chat:['chat_opened','needs_choice','not_found'],send_message:['message_submitted','already_submitted','needs_choice','not_found']}[order.action];if(!allowed.includes(r.status))throw Error('La respuesta no corresponde a la orden.');if(['matches','needs_choice','not_found'].includes(r.status)&&(r.query!==order.query||!Array.isArray(r.candidates)||r.candidates.length>25))throw Error('Resultados de otra búsqueda.');if(['chat_opened','message_submitted','already_submitted'].includes(r.status)&&(typeof r.title!=='string'||!r.title.trim()))throw Error('Falta confirmar el destinatario.');return r;}await wait(500);}
    throw Error('La Mac no respondió a tiempo.');
   }finally{if(same())await call(route,{method:'DELETE'}).catch(()=>{});}
  }};
@@ -67929,6 +67934,8 @@ function lumiSimpleGreeting(text){
     // (R88) los MENSAJES de la app: leerlos y contestarlos se hace en el teléfono (nunca en modo prueba: ahí no se manda nada de verdad)
     if(!AS.conf && !dictando && !AS.sandbox){ const mc = asMsgInterpretar(texto); if(mc && asMsgEsMio(mc)){ AS.telTexto = texto; asTranscribir(texto); asPararOido(); return asMsgEmpezar(mc); } }
     if(!AS.conf && !dictando){ const cmd = asCmdInterpretar(texto, asMedirNorm); if(cmd && !(AS.sandbox && cmd.tipo === 'formulario' && cmd.form === 'equipo')){ AS.telTexto = texto; asTranscribir(texto); asPararOido(); return asComando(cmd); } }
+    const requestEpoch=AS.requestEpoch=(AS.requestEpoch||0)+1;
+    const vigente=()=>AS.abierto && AS.requestEpoch===requestEpoch;
     if(!oculto) asTranscribir(texto); asEstado('pensando', 'Un momento…'); AS.enviando = true; asMostrarRespuesta(''); asMapa(null);
     asCallar();
     const t0 = Date.now();
@@ -67941,6 +67948,7 @@ function lumiSimpleGreeting(text){
     const Sv = asPlugin(); const porFrases = !isNative() || !!(Sv && Sv.vozInfo);
     const filtroCara = window.Cara ? Cara.filtroDeTrozos() : null;
     const onTexto = function(t, d){
+      if(!vigente())return;
       // La etiqueta [gesto:x] del modelo va a la cara, nunca a la voz (puede llegar partida en varios trozos).
       if(filtroCara){ const f = filtroCara(t); if(f.gesto){ try{ Cara.gesto(f.gesto); }catch(err){} } t = f.texto; if(!t) return; }
       if(!primerTrozo){ primerTrozo = Date.now() - t0; clearTimeout(AS.tmrRelleno); }
@@ -67957,6 +67965,7 @@ function lumiSimpleGreeting(text){
     try{
       AS.telTexto = null;   // (R49) lo que va a la función ya no es del teléfono
       const r = await asLlamar(Object.assign({ texto: texto, historial: AS.historial, sandbox: AS.sandbox }, AS.dictado ? { dictado: AS.dictado } : {}, (!AS.sandbox && AS.telLog && AS.telLog.length) ? { telefono_turnos: AS.telLog.splice(0) } : {}), onTexto);
+      if(!vigente())return;
       const j = r.json || {};
       if(!(r.ok && j.ok)) throw new Error(j.error || ('HTTP ' + r.status));
       AS.historial = j.historial || AS.historial;
@@ -67986,6 +67995,7 @@ function lumiSimpleGreeting(text){
       if(j.idioma === 'es' || j.idioma === 'en') AS.idiomaResp = j.idioma;
       const faltante = asFaltante(paraOir, dicho);
       if(faltante) await asDecir(faltante, !!norm(dicho));
+      if(!vigente())return;
       AS.enviando = false;
       asAlTerminarDeHablar(function(){
         // (Brújula) El modelo (herramienta medir_aqui, función v4.2) pide ubicar y abrir: la conversación sigue en el teléfono.
@@ -68005,6 +68015,7 @@ function lumiSimpleGreeting(text){
       });
       return;
     }catch(e){
+      if(!vigente())return;
       AS.enviando = false; clearTimeout(AS.tmrRelleno);
       const em = String((e && e.message) || e);
       if(window.Cara){ try{ Cara.gesto(AS_RED_RE.test(em) ? 'sin_senal' : 'triste'); }catch(err){} }
