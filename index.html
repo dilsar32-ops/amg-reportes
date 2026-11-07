@@ -17792,7 +17792,7 @@ html body #asPanel .as-version{order:11;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R175';
+  const APP_BUILD = '2026-11-06-R176';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67211,12 +67211,32 @@ html body #asPanel .as-version{order:11;}
     return frases.slice(i).join(' ').trim();
   }
   function asPedidoPagina(texto){
-    let s=String(texto||'').trim().replace(/\s+(?:por favor|porfa|please)[.!]?$/i,''),browser='default';
-    const suffix=/\s+(?:en|con|in|using)\s+(?:(?:el|the)\s+)?(?:(?:navegador|browser)\s+)?(google chrome|chrome|safari|el navegador|navegador|the browser|browser)\s*[.!]?$/i.exec(s);
-    if(suffix){browser=/chrome/i.test(suffix[1])?'chrome':/safari/i.test(suffix[1])?'safari':'default';s=s.slice(0,suffix.index).trim();}
-    const m=/^(?:(?:oye|hey|lumi|por favor|please)\s*[,!]?\s+)*(?:(?:puedes|podrias|podrías|can you|could you)\s+)?(?:abre|ábreme|abreme|abrir|open|open up|entra a|ve a|llévame a|llevame a|go to|take me to)\s+(?:(?:la página de|la pagina de|la página|la pagina|el sitio|la web|the website|the page)\s+)?(.+?)(?:\s+por favor|\s+please)?$/i.exec(s);
+    // Parse only a direct request; never extract an action from quoted/reported speech.
+    let s=String(texto||'').trim(),browser='default';
+    if(!s||s.length>4500)return null;
+    s=s.replace(/^[¿¡]+/,'');
+    // Strip conversational punctuation, but preserve punctuation inside an explicit URL.
+    if(!/https:\/\/|\bwww\./i.test(s))s=s.replace(/[?!.]+$/,'');
+    const polite=/(?:,?\s+(?:por favor|porfa|please|for me))\s*[?!.]*$/i;
+    for(let i=0;i<3&&polite.test(s);i++)s=s.replace(polite,'').trim();
+    const browserName='(google chrome|chrome|safari|(?:el |the )?(?:cualquier |any |default )?(?:navegador|browser)(?: predeterminado| por defecto| default)?)';
+    const browserPart='(?:en|con|in|using|with)\\s+(?:(?:el|the)\\s+)?(?:(?:navegador|browser)\\s+)?'+browserName;
+    const choose=value=>/chrome/i.test(value)?'chrome':/safari/i.test(value)?'safari':'default';
+    const suffix=new RegExp('\\s+'+browserPart+'\\s*[,?!.]*$','i').exec(s);
+    if(suffix){browser=choose(suffix[1]);s=s.slice(0,suffix.index).trim();}
+    // Optional greeting may precede either the browser or the request.
+    const greeting=/^(?:(?:oye|hey|lumi|por favor|please)\s*[,!]?(?:\s+|$))/i;
+    for(let i=0;i<4&&greeting.test(s);i++)s=s.replace(greeting,'').trim();
+    const prefix=new RegExp('^'+browserPart+'(?:\\s*,\\s*|\\s+)','i').exec(s);
+    if(prefix){const first=choose(prefix[1]);if(suffix&&first!==browser)return {error:'Indica un solo navegador: Chrome, Safari o el predeterminado.'};browser=first;s=s.slice(prefix[0].length).trim();}
+    for(let i=0;i<3;i++){
+      const before=s;
+      s=s.replace(greeting,'').replace(/^(?:(?:me\s+)?(?:puedes|podrias|podrías)|(?:can|could|would) you|quiero que(?: me)?|necesito que(?: me)?|i(?:'|’)d like you to|i want you to|i need you to|go ahead and)\s+/i,'').trim();
+      if(s===before)break;
+    }
+    const m=/^(?:abre|ábreme|abreme|abrir|abras|ponme|pon|ponerme|open up|open|pull up|bring up|entra a|entra en|ve a|llévame a|llevame a|go to|take me to|navigate to)\s+(?:(?:la página de|la pagina de|la página|la pagina|el sitio de|el sitio|la web de|la web|the website|the page)\s+)?(.+)$/i.exec(s);
     if(!m)return null;
-    const target=m[1].trim(),key=target.toLowerCase().replace(/\s+/g,' ');
+    const target=m[1].trim().replace(/,?\s+(?:por favor|porfa|please|for me)\s*[?!.]*$/i,''),key=target.toLowerCase().replace(/\s+/g,' ');
     const sites={'companycam':'https://app.companycam.com/','company cam':'https://app.companycam.com/','matterport':'https://my.matterport.com/','maroport':'https://my.matterport.com/','wikipedia':'https://www.wikipedia.org/','google':'https://www.google.com/','youtube':'https://www.youtube.com/','openai':'https://openai.com/'};
     let raw=sites[key];
     if(!raw){
