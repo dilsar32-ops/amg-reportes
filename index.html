@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R191';
+  const APP_BUILD = '2026-11-06-R192';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67754,8 +67754,10 @@ function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=D
 
 function lumiDesktopOrder(text){
  let s=String(text||'').trim().replace(/^[¿¡]+/,'').replace(/[?!.]+$/,'');
- if(!s||s.length>250)return null;
+ if(!s||s.length>2300)return null;
  s=s.replace(/^(?:(?:oye|hey|lumi|por favor|please)[, ]+)+/i,'').replace(/^(?:(?:me )?puedes|can you|could you|necesito que|quiero que)\s+/i,'').replace(/\s*,?\s*(?:por favor|porfa|please)$/i,'').trim();
+ const send=/^(?:envía|envia|manda|send)\s+(?:(?:un )?mensaje\s+)?(?:al? |to )(?:(?:el |the )?(?:grupo|group|chat)\s+)?(.+?)\s+(?:en|in|on)\s+whatsapp\s*:\s*([\s\S]+)$/i.exec(s);
+ if(send&&send[1].length<=120&&send[2].length<=2000&&send[2].trim())return {app:'whatsapp',action:'send_message',query:send[1].trim(),text:send[2].trim()};
  if(/\b(no|not|don't|dijo|said|chrome|safari|browser|navegador|web)\b/i.test(s))return null;
  const combined=/^(?:abre|open)\s+(whatsapp|mensajes|messages)\s+(?:y|and)\s+(.+)$/i.exec(s);if(combined)s=combined[2]+' en '+combined[1];
  let m=/^(?:abre|abrir|ábreme|abreme|muestra|muéstrame|muestrame|open|show me|bring up|tráeme|traeme|trae)\s+(?:la app de |la aplicación de |the app )?(whatsapp|mensajes normales|mensajes|messages|imessage)(?: al frente| to the front)?$/i.exec(s);
@@ -67774,7 +67776,7 @@ function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=
   const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
   try{await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{...order,local_profile:'lumi_desktop'}})});
    const until=now()+60000;
-   while(now()<until){if(!same())throw Error('La sesión cambió.');const jobs=await call(route+'&select=state,result');if(!same())throw Error('La sesión cambió.');const job=jobs?.[0];if(job?.state==='failed')throw Error('No pude completar esa acción en la Mac. No envié ningún mensaje.');if(job?.state==='done'){const r=job.result?.data;if(!r||r.app!==order.app||!['app_front','matches','needs_choice','not_found','chat_opened'].includes(r.status))throw Error('Respuesta de la Mac no válida.');return r;}await wait(500);}
+   while(now()<until){if(!same())throw Error('La sesión cambió.');const jobs=await call(route+'&select=state,result');if(!same())throw Error('La sesión cambió.');const job=jobs?.[0];if(job?.state==='failed')throw Error('No pude confirmar el resultado en la Mac. Revisa el chat antes de repetir un envío.');if(job?.state==='done'){const r=job.result?.data;if(!r||r.app!==order.app||!['app_front','matches','needs_choice','not_found','chat_opened','message_submitted','already_submitted'].includes(r.status))throw Error('Respuesta de la Mac no válida.');return r;}await wait(500);}
    throw Error('La Mac no respondió a tiempo.');
   }finally{if(same())await call(route,{method:'DELETE'}).catch(()=>{});}
  }};
@@ -67792,11 +67794,11 @@ function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=
       }});
       const result=await client.run(order);if(!active())return;
       const name=order.app==='whatsapp'?'WhatsApp':'Mensajes';
-      const text=result.status==='app_front'?'Aquí tienes '+name+' al frente.':result.status==='chat_opened'?'Aquí tienes el chat de '+result.title+' en '+name+'.':result.status==='not_found'?'No encontré chats visibles con ese nombre en '+name+'.':result.status==='needs_choice'?'Hay varias coincidencias. Elige el chat que quieres abrir.':'Encontré '+result.candidates.length+' coincidencias en '+name+'. Puedes elegir cuál abrir.';
+      const text=result.status==='message_submitted'?'Listo, envié el mensaje a '+result.title+' en WhatsApp. Aún no confirmé su entrega.':result.status==='already_submitted'?'Ese mismo mensaje ya figura enviado recientemente a '+result.title+'. No lo repetí.':result.status==='app_front'?'Aquí tienes '+name+' al frente.':result.status==='chat_opened'?'Aquí tienes el chat de '+result.title+' en '+name+'.':result.status==='not_found'?'No encontré chats visibles con ese nombre en '+name+'.':result.status==='needs_choice'?'Hay varias coincidencias. Elige el chat que quieres abrir.':'Encontré '+result.candidates.length+' coincidencias en '+name+'. Puedes elegir cuál abrir.';
       asRecordarAccionMac(order.action+' '+name+(order.query?' '+order.query:''),text);asMostrarRespuesta(text);asAccionVisible('Consulta terminada','done');
       if(Array.isArray(result.candidates)&&result.candidates.length){
         const card=document.createElement('div');card.className='as-desktop-candidates';card.style.cssText='padding:12px;border:1px solid #334155;border-radius:12px;margin:10px 0;';
-        result.candidates.forEach((candidate,index)=>{const button=document.createElement('button');button.textContent=(index+1)+'. '+candidate.label+(candidate.detail?' — '+candidate.detail:'');button.style.cssText='display:block;width:100%;text-align:left;margin:6px 0;padding:10px;';button.onclick=()=>{if(active())asEscritorioMac({...order,action:'open_chat',key:candidate.key});};card.appendChild(button);});
+        result.candidates.forEach((candidate,index)=>{const button=document.createElement('button');button.textContent=(index+1)+'. '+candidate.label+(candidate.detail?' — '+candidate.detail:'');button.style.cssText='display:block;width:100%;text-align:left;margin:6px 0;padding:10px;';button.onclick=()=>{if(active())asEscritorioMac({...order,action:order.action==='send_message'?'send_message':'open_chat',key:candidate.key});};card.appendChild(button);});
         const log=document.getElementById('asConversacion');if(log){log.appendChild(card);log.scrollTop=log.scrollHeight;}
       }
       asHablar(text,asSeguirOyendo);
