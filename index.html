@@ -17995,7 +17995,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R197';
+  const APP_BUILD = '2026-11-07-R198';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69079,7 +69079,25 @@ function lumiSimpleGreeting(text){
     return { accion, quien: n, resto: { n, o }, texto: '', pregunta };
   }
   // Lo que se pidió → { accion: 'leer'|'mandar'|'responder'|'decir'|'preguntar', quien: [palabras], texto, leerYa } o null (no es de mensajes).
+  // R198: las consultas naturales de Workspace usan la bandeja y sus marcas de lectura por persona.
+  function asMsgConsultaNatural(texto){
+    let t = asMsgNorm(texto);
+    // Una fuente externa no se puede presentar como si fuera la bandeja de Workspace.
+    if(/\b(whatsapp|imessage|sms|gmail)\b|mensajes de apple|apple messages/.test(t)) return null;
+    t = t.replace(/^(?:(?:oye|hey|ok|okay|por favor|please|lumi) )+/, '')
+      .replace(/^(?:puedes |podrias |quiero que |necesito que |could you |can you )/, '')
+      .replace(/(?: por favor| please)$/, '');
+    const soloLeer = /(?:no (?:respondas|contestes)(?: ni (?:envies|mandes)(?: nada| mensajes)?)?|no (?:envies|mandes) respuestas|(?:do not|dont) (?:reply|respond)(?: or send anything)?)$/.test(t);
+    if(soloLeer) t = t.replace(/(?: y )?(?:no (?:respondas|contestes)(?: ni (?:envies|mandes)(?: nada| mensajes)?)?|no (?:envies|mandes) respuestas|(?:do not|dont) (?:reply|respond)(?: or send anything)?)$/, '').trim();
+    t = t.replace(/ (?:de|en|from|in)(?: la app(?: de)?| la aplicacion(?: de)?| the app)? (?:workspace|field reports)$/, '')
+      .replace(/ (?:que|q) (?:tenemos|tengo)$/, '')
+      .replace(/(?:revisa|revisame|checa|chequea|check) (?:y|and) (?:leeme|lee|read)\b/, 'leeme');
+    const m = /^(revisa|revisame|checa|chequea|check|lee|leeme|leer|read|read me)(?: los| mis| my| the)?(?: nuevos| new| unread)? (?:mensajes|messages)(?: nuevos| sin leer| pendientes| new| unread)?$/.exec(t);
+    if(!m) return null;
+    return { accion: 'leer', quien: [], texto: '', leerYa: /^(lee|leeme|leer|read|read me)$/.test(m[1]), soloLeer };
+  }
   function asMsgInterpretar(texto){
+    const consulta = asMsgConsultaNatural(texto); if(consulta) return consulta;
     const P = asMsgPalabras(texto); let n = P.n, o = P.o;
     while(n.length && (AS_MSG_RELLENO.test(n[0]) || (n[0] === 'por' && n[1] === 'favor'))){ const k = n[0] === 'por' ? 2 : 1; n = n.slice(k); o = o.slice(k); }
     const l = n.join(' '); if(!l) return null;
@@ -69320,16 +69338,16 @@ function lumiSimpleGreeting(text){
   }
   function asMsgChatsSinLeer(){
     const por = new Map();
-    for(const m of (MSG.lista || [])){ if(m.borrado_at || !msgEsParaMi(m) || msgLeido(m)) continue; const k = msgOtro(m); if(!por.has(k)) por.set(k, []); por.get(k).push(m); }
+    for(const m of (MSG.lista || [])){ if(m.borrado_at || !msgEsParaMi(m) || msgLeido(m) || (typeof msgVisible === 'function' && !msgVisible(m)) || (typeof msgArchivada === 'function' && msgArchivada(msgOtro(m)))) continue; const k = msgOtro(m); if(!por.has(k)) por.set(k, []); por.get(k).push(m); }
     const orden = function(a, b){ return String(a.created_at).localeCompare(String(b.created_at)); };
     return Array.from(por.entries()).map(function(e){ return { key: e[0], ms: e[1].slice().sort(orden) }; })
       .sort(function(a, b){ return String(b.ms[b.ms.length - 1].created_at).localeCompare(String(a.ms[a.ms.length - 1].created_at)); });
   }
   async function asMsgEmpezar(mc){
-    AS.pregunta = null; asQuitarTarjeta(); AS_MSG.cola = [];
+    AS.pregunta = null; asQuitarTarjeta(); AS_MSG.cola = []; AS_MSG.soloLeer = !!mc.soloLeer;
     const en = asEn();
     asEstado('pensando', en ? 'Checking your messages…' : 'Viendo tus mensajes…');
-    try{ await asMsgDatos(); }catch(e){ return asCmdDecir(en ? "I can't get to the messages. Check your internet." : 'No puedo ver los mensajes. Revisa tu internet.', null, 'sin_senal'); }
+    try{ await asMsgDatos(); if(mc.accion === 'leer' && !MSG.lecturasOk) throw new Error('lecturas-no-disponibles'); }catch(e){ return asCmdDecir(en ? "I can't get to the messages. Check your internet." : 'No puedo ver los mensajes. Revisa tu internet.', null, 'sin_senal'); }
     if(!AS.abierto) return;
     asBit('mensajes: ' + mc.accion + (mc.quien && mc.quien.length ? ' (con nombre)' : ''));
     if(mc.accion === 'leer') return (mc.quien && mc.quien.length) ? asMsgLeerDe(mc.quien) : asMsgLeerTodos(!!mc.leerYa);
@@ -69339,6 +69357,7 @@ function lumiSimpleGreeting(text){
   function asMsgLeerTodos(leerYa){
     const en = asEn(), chats = asMsgChatsSinLeer();
     if(!chats.length){
+      if(AS_MSG.soloLeer) return asCmdDecir(en ? 'You have no unread messages in Workspace.' : 'No tienes mensajes sin leer en Workspace.', null, 'exito');
       const u = (MSG.lista || []).find(function(m){ return !m.borrado_at && msgEsParaMi(m); });
       const cuando = u ? (asMsgDia(u.created_at) === asMsgDia(new Date()) ? (en ? ' today' : ' hoy') : asMsgDia(u.created_at) === asMsgAyer() ? (en ? ' yesterday' : ' ayer') : '') : '';
       return asMedirPregunta({ tipo: 'msg_menu' }, (en ? 'You have no new messages.' : 'No tienes mensajes nuevos.') + (u ? (en ? ' The last one was from ' : ' El último fue de ') + asMsgPila(u.de_nombre) + cuando + '.' : '') + (en ? ' Do you want to send one?' : ' ¿Quieres mandar uno?'));
@@ -69355,6 +69374,7 @@ function lumiSimpleGreeting(text){
     AS_MSG.ultimoChat = c.key;
     const texto = asMsgDecirChat(asMsgNombreChat(c.key), c.ms.map(asMsgDigerir), { grupo: c.key.startsWith('g:'), todos: c.key === 'todos', mezcla: !!c.viejos, en, hoy: asMsgDia(new Date()), ayer: asMsgAyer() });
     if(!c.viejos) msgMarcarLeidos(c.key).catch(function(){});
+    if(AS_MSG.soloLeer){ const lectura = pre + texto; asMostrarRespuesta(lectura); asHablar(lectura, function(){ if(AS.abierto && AS_MSG.soloLeer) asMsgLeerSiguiente(''); }); return; }
     const r = asMsgAQuien(c.key, c.ms);
     const voz = c.ms.slice().reverse().find(function(m){ return (Array.isArray(m.adjuntos) ? m.adjuntos : []).some(function(a){ return a && a.tipo === 'audio'; }); });
     const oir = voz ? (en ? ' Say "play it" to hear the voice message.' : ' Dime «ponla» para oír la nota de voz.') : '';
