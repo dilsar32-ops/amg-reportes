@@ -18080,7 +18080,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R224';
+  const APP_BUILD = '2026-11-07-R225';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67404,6 +67404,7 @@ function createLumiWebEar({Recognition,language,active,onText,onError,schedule=s
 /* Owner-private voice queue; prepare the next phrase during playback. */
 /* Owner-private voice queue; prepare the next phrase during playback. */
 /* Owner-private voice queue; prepare the next phrase during playback. */
+/* Owner-private voice queue; prepare the next phrase during playback. */
 function splitLumiSpeech(text){
  const input=String(text||'').trim(),parts=[],chunks=[];let start=0;
  for(let i=0;i<input.length;i++){
@@ -67417,7 +67418,7 @@ function splitLumiSpeech(text){
  return chunks;
 }
 function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
- let epoch=0,chain=Promise.resolve(),current=null,cache=null,playing=new Set();
+ let epoch=0,chain=Promise.resolve(),prepareChain=Promise.resolve(),current=null,cache=null,playing=new Set();
  const owner=s=>s.user_id+'|'+s.company_id;
  const active=(s,e)=>e===epoch&&owner(s)===owner(session())&&session().role==='manager';
  async function device(s){
@@ -67427,8 +67428,9 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
   const valid=d?.userId===s.user_id&&d.voice==='calida-tranquila-v1'&&d.available&&now()-Date.parse(d.updatedAt)<180000;
   const value=valid?d:null;cache={owner:owner(s),at:now(),device:value};return value;
  }
- async function speech(text,language,s,e){
+ async function speech(text,language,s,e,prepareGate=Promise.resolve(),playGate=Promise.resolve(),releaseNext=()=>{}){
   let failed=false;const live=()=>!failed&&active(s,e);
+  await prepareGate;
   if(!live())return 'cancelled';
   const d=await device(s);if(!live())return 'cancelled';if(!d)return 'unavailable';
   const chunks=splitLumiSpeech(text);
@@ -67471,6 +67473,8 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
    let prepared=chunks.length?preparePhrase(0):null;
    for(let i=0;i<chunks.length;i++){
     const data=await prepared.ready;if(!data||!live())return 'cancelled';
+    if(i===0){await playGate;if(!live())return 'cancelled';}
+    if(i===chunks.length-1)releaseNext();
     // Every sentence streams. Queue this sentence fully before preparing the next,
     // so cached final audio and streamed fragments can never overtake one another.
     let finished;
@@ -67482,7 +67486,7 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
    return live()?'played':'cancelled';
   }catch(error){failed=true;for(const handle of playing)handle.stop();playing.clear();if(startedAudio)error.spoken=true;throw error;}
  }
- return {cancel(){epoch++;current?.stop();current=null;for(const handle of playing)handle.stop();playing.clear();},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const r=chain.then(()=>speech(text,language,s,e)).catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
+ return {cancel(){epoch++;current?.stop();current=null;for(const handle of playing)handle.stop();playing.clear();},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');let run;if(stream){run=chain.then(()=>speech(text,language,s,e));}else{const prepareGate=prepareChain,playGate=chain;let release;prepareChain=new Promise(r=>release=r);run=speech(text,language,s,e,prepareGate,playGate,release).finally(release);}const r=run.catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
 }
 
 /* One audio clock; unlock synchronously from a user gesture on mobile. */
