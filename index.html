@@ -10172,8 +10172,20 @@ html body #asPanel .as-version{order:11;}
 
 <div id="authGate">
   <!-- EL ASISTENTE DE VOZ DEL MANAGER (20 oct 2026). Solo el manager ve la esfera; vive en la puerta. -->
+<style>
+/* R177: always-visible composer, explicit microphone mute, exit in header. */
+html body #asPanel .as-texto{display:flex !important;align-items:center;}
+html body #asPanel .as-escribir{display:none !important;}
+html body #asPanel .as-cab{flex-shrink:0;}
+html body #asPanel .as-salir,html body #asPanel #asMicToggle{display:flex;align-items:center;justify-content:center;flex:0 0 44px;width:44px;min-height:44px;padding:0;border:1px solid #526174;border-radius:10px;background:#142232;color:#cfe5ff;cursor:pointer;}
+html body #asPanel .as-salir{margin-left:auto;}
+html body #asPanel #asMicToggle[aria-pressed="true"]{color:#ffb7b7;background:#34232b;}
+#asMicToggle .as-mic-slash{display:none;}
+#asMicToggle[aria-pressed="true"] .as-mic-slash{display:block;}
+html body #asPanel .as-texto input{width:0;min-width:0;}
+</style>
   <div id="asPanel" hidden data-estado="esperando">
-    <div class="as-cab"><span class="as-titulo">Asistente de voz</span><label class="as-prueba"><input type="checkbox" id="asSandbox"> Datos de prueba</label></div>
+    <div class="as-cab"><span class="as-titulo">Asistente de voz</span><label class="as-prueba"><input type="checkbox" id="asSandbox"> Datos de prueba</label><button type="button" id="asAtras" class="as-salir" aria-label="Salir de Lumi" title="Salir de Lumi"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10"/></svg></button></div>
     <div class="as-sandbox-banda">MODO PRUEBA: nombres inventados, nada se guarda de verdad.</div>
     <div class="as-estado" id="asEstadoTxt" aria-live="polite"><i></i><span id="asEstadoDicho">En espera</span></div>
     <p id="asPista" class="as-pista"></p>
@@ -10224,8 +10236,8 @@ html body #asPanel .as-version{order:11;}
     </div>
     <div class="as-voz-aviso" id="asVozAviso" hidden><span>Voz básica. Para una voz natural: Ajustes › Accesibilidad › Contenido hablado › Voces › Español › Paulina › Premium</span><button type="button" id="asVozYa">Ya la bajé</button></div>
     <button type="button" class="as-escribir" id="asEscribir">⌨︎ Escribir en vez de hablar</button>
-    <div class="as-texto"><input type="text" id="asEntrada" placeholder="O escribe aquí…" autocomplete="off" autocapitalize="sentences"><button type="button" class="btn btn-ink" id="asEnviarBtn">Enviar</button></div>
-    <div class="as-pie"><button type="button" class="as-fin" id="asAtras" aria-label="Terminar"><span class="as-fin-x"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#e8e8ed" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></span><span class="as-fin-txt">Terminar</span></button></div>
+    <div class="as-texto"><button type="button" id="asMicToggle" aria-label="Silenciar micrófono" aria-pressed="false" title="Silenciar micrófono"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0014 0v-2M12 19v3M8 22h8"/><path class="as-mic-slash" d="M3 3l18 18"/></svg></button><input type="text" id="asEntrada" placeholder="O escribe aquí…" autocomplete="off" autocapitalize="sentences"><button type="button" class="btn btn-ink" id="asEnviarBtn">Enviar</button></div>
+
     <p class="as-version" id="asVersion"></p>
     <div class="as-bit" id="asBit" hidden><div class="as-bit-cab"><b>Bitácora de voz</b><button type="button" class="btn btn-ghost" id="asBitCopiar">Copiar</button><button type="button" class="btn btn-ghost" id="asBitCerrar">Cerrar</button></div><pre id="asBitPre"></pre></div>
   </div>
@@ -17792,7 +17804,7 @@ html body #asPanel .as-version{order:11;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R176';
+  const APP_BUILD = '2026-11-06-R177';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -66682,7 +66694,26 @@ html body #asPanel .as-version{order:11;}
   function asEsAdios(t){ const l = String(t || '').toLowerCase().replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim(); return AS_ADIOS_RE.test(l); }
   function asTecladoActivo(){ const a = document.activeElement; return !!(a && (a.id === 'asEntrada' || a.id === 'asEscrito')); }
   // Después de hablar SIEMPRE vuelve a oír (también si la pregunta fue escrita), salvo con el teclado abierto.
-  function asSeguirOyendo(){ if(!AS.abierto) return; if(asTecladoActivo()){ asEstado('esperando', 'Toca la esfera para hablar.'); return; } AS.oidoReintento = false; asEscuchar(); }
+  function asMicPintar(){
+    const b=$('#asMicToggle'); if(!b)return;
+    const muted=!!AS.micMuted, label=muted?'Encender micrófono':'Silenciar micrófono';
+    b.setAttribute('aria-pressed',String(muted));b.setAttribute('aria-label',label);b.title=label;
+  }
+  async function asMicAlternar(){
+    if(AS.micBusy)return; AS.micBusy=true;
+    const control=$('#asMicToggle');if(control)control.disabled=true;
+    try{
+    AS.micMuted=!AS.micMuted;asMicPintar();
+    if(AS.micMuted){
+      AS.texto='';AS.oidoMantiene=false;
+      if(AS.estado==='escuchando')asEstado('esperando','Micrófono silenciado. Puedes escribir.');
+      await asPararOido();
+    }else if(AS.abierto && AS.estado!=='pensando'){
+      asEscuchar();
+    }
+    }finally{AS.micBusy=false;if(control)control.disabled=false;}
+  }
+  function asSeguirOyendo(){ if(!AS.abierto) return; if(AS.micMuted){ if(AS.estado!=='pensando')asEstado('esperando','Micrófono silenciado. Puedes escribir.'); return; } if(asTecladoActivo()){ asEstado('esperando', 'Toca la esfera para hablar.'); return; } AS.oidoReintento = false; asEscuchar(); }
   // Reposo: 8 s sin voz (o una despedida). Un toque en la cara la despierta.
   function asReposar(pista){ if(AS.enPuerta){ asCerrar(); return; } asPararOido(); asEstado('reposo', pista || (asOyeListo() ? 'Toca la esfera o di «Hey Lumi».' : 'Toca la esfera cuando quieras seguir.')); }   // (R88) en la puerta, el reposo es cerrar: suelta la pantalla despierta y vuelve 'Lumi'
   function asNombreDePila(){ try{ const n = String((SES && (SES.full_name || SES.name || SES.labor_alias)) || '').trim().split(/\s+/)[0]; return n ? n.charAt(0).toUpperCase() + n.slice(1) : ''; }catch(e){ return ''; } }
@@ -66766,6 +66797,7 @@ html body #asPanel .as-version{order:11;}
   }
   // Todo lo que sale del micrófono pasa por aquí antes de ir al servidor (lo escrito a mano NO).
   function asEnviarVoz(texto){
+    if(AS.micMuted || !AS.abierto)return;
     const v = asRuTexto(texto, { dudosos: AS.dudosos, ru: AS.ru });
     if(!v.ok){ if(!String(texto || '').trim()){ asReposar(); return; } asRuPedirRepetir(v.motivo); return; }
     AS.sinEntender = 0; return asEnviar(texto);
@@ -66775,6 +66807,7 @@ html body #asPanel .as-version{order:11;}
     if(AS.nivelWeb || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
     try{
       const st = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
+      if(AS.micMuted || !AS.abierto){st.getTracks().forEach(t=>t.stop());return;}
       const AC = window.AudioContext || window.webkitAudioContext; const ac = new AC(); const an = ac.createAnalyser(); an.fftSize = 1024;
       ac.createMediaStreamSource(st).connect(an); const buf = new Float32Array(an.fftSize);
       const iv = setInterval(function(){
@@ -66792,6 +66825,7 @@ html body #asPanel .as-version{order:11;}
     try{ n.st.getTracks().forEach(function(x){ x.stop(); }); }catch(e){} try{ n.ac.close(); }catch(e){}
   }
   async function asOidoNativo(S, mantenerVoz){
+    if(AS.micMuted || !AS.abierto)return;
     asOyeTomaLumi();   // (R88) su empezar reemplaza al vigía
     asEnganchar(S);
     AS.ru = asRuNuevo(AS.pisoPrev); AS.dudosos = [];
@@ -66799,6 +66833,7 @@ html body #asPanel .as-version{order:11;}
     asBit('empezar (oído)' + (mantenerVoz ? ' sin cortar la voz' : '') + ' enVuelo=' + (AS.vozEnVuelo || 0));
     await S.empezar(Object.assign({ idioma: asIdioma(), vocabulario: asVocabulario(), frases: [], pronunciaciones: [] }, mantenerVoz ? { mantenerVoz: true } : {}));
     AS.modo = 'nativo';
+    if(AS.micMuted || !AS.abierto){try{await S.parar();}catch(e){}return;}
   }
   // ---- BITÁCORA DE VOZ (R2, 21 oct 2026): para ver EN SU TELÉFONO qué pasa con la voz Premium. Últimas 40 líneas con la
   // hora en ms. Sin datos de clientes ni montos: de lo que se dice solo va el largo; en los mensajes de error los números
@@ -66866,6 +66901,7 @@ html body #asPanel .as-version{order:11;}
     AS.oyeHablaFin = true;
   }
   async function asEscuchar(){
+    if(AS.micMuted)return;
     if(!AS.abierto || AS.estado === 'escuchando' || AS.estado === 'pensando') return;
     asCallar();
     AS.texto = ''; asTranscribir('');
@@ -66874,6 +66910,7 @@ html body #asPanel .as-version{order:11;}
       try{
         asEstado('escuchando', 'Te escucho…');
         await asOidoNativo(S, false);
+        if(AS.micMuted || !AS.abierto)return;
         AS.ultTexto = Date.now(); asVigilarSilencio();
       }catch(err){
         const code = (err && (err.code || err.message)) || '';
@@ -66885,7 +66922,7 @@ html body #asPanel .as-version{order:11;}
     if(!R){ asEstado('esperando', 'Este navegador no oye. Escribe abajo.'); return; }
     try{
       const r = new R(); r.lang = asIdiomaWeb(); r.continuous = false; r.interimResults = true; r.maxAlternatives = 1;
-      r.onresult = function(ev){ let t = ''; for(let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript; AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); if(!AS.nivelWeb){ AS.nivel = 0.5 + 0.4 * Math.random(); if(window.Cara){ try{ Cara.nivel(AS.nivel); }catch(err){} } } };
+      r.onresult = function(ev){ if(AS.micMuted || !AS.abierto)return; let t = ''; for(let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript; AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); if(!AS.nivelWeb){ AS.nivel = 0.5 + 0.4 * Math.random(); if(window.Cara){ try{ Cara.nivel(AS.nivel); }catch(err){} } } };
       r.onerror = function(ev){ AS.rec = null; AS.nivel = 0; asNivelWebCerrar(); if(AS.estado !== 'escuchando') return; if(ev.error === 'no-speech'){ asReposar(); return; } asEstado('esperando', ev.error === 'not-allowed' ? 'Falta el permiso del micrófono del navegador.' : 'No se pudo oír. Escribe abajo.'); };
       r.onend = function(){ AS.rec = null; AS.nivel = 0; asNivelWebCerrar(); if(AS.estado === 'escuchando'){ if(AS.texto.trim()) asEnviarVoz(AS.texto); else asReposar(); } };
       AS.ru = asRuNuevo(AS.pisoPrev); AS.dudosos = []; AS.rec = r; r.start(); AS.modo = 'web'; asNivelWebAbrir(); asEstado('escuchando', 'Te escucho…');
@@ -69551,6 +69588,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       abrir.addEventListener('pointerdown', function(){ AS.puertaLargo = false; clearTimeout(tmr); tmr = setTimeout(function(){ tmr = null; AS.puertaLargo = true; asPuertaAbrirPanel(); }, 600); });
       ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(ev){ abrir.addEventListener(ev, fin); });
     }
+    const mic = $('#asMicToggle'); if(mic)mic.addEventListener('click',asMicAlternar); asMicPintar();
     const atras = $('#asAtras'); if(atras) atras.addEventListener('click', asCerrar);
     const esf = $('#asEsfera');
     if(esf) esf.addEventListener('click', function(){
