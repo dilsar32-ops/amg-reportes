@@ -18128,7 +18128,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R227';
+  const APP_BUILD = '2026-11-07-R228';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67467,6 +67467,16 @@ function splitLumiSpeech(text){
  for(const part of parts){let rest=part.trim();while(rest){const cap=chunks.length?220:130;let take=rest.length;if(take>cap){take=rest.lastIndexOf(' ',cap);if(take<1){const next=rest.indexOf(' ');take=next<0?rest.length:next;}if(take>1200)throw Error('El texto contiene una palabra demasiado larga para pronunciarla.');}chunks.push(rest.slice(0,take).trim());rest=rest.slice(take).trim();}}
  return chunks;
 }
+// Keep nearby sentences in one synthesis so the model does not restart at each period.
+function packLumiSpeech(text){
+ const packed=[];
+ for(const part of splitLumiSpeech(text)){
+  const i=packed.length-1,cap=i<=0?130:220;
+  if(i>=0&&packed[i].length+1+part.length<=cap)packed[i]+=' '+part;
+  else packed.push(part);
+ }
+ return packed;
+}
 function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
  let epoch=0,chain=Promise.resolve(),prepareChain=Promise.resolve(),current=null,cache=null,playing=new Set();
  const owner=s=>s.user_id+'|'+s.company_id;
@@ -67485,7 +67495,7 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
   const d=await device(s);if(!live())return 'cancelled';if(!d)return 'unavailable';
   const useStream=typeof stream==='function'?await stream():stream;
   if(!live())return 'cancelled';
-  const chunks=splitLumiSpeech(text);
+  const chunks=useStream?packLumiSpeech(text):splitLumiSpeech(text);
   async function prepare(chunk,onPartial){
    if(!live())return null;
    const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
@@ -67546,7 +67556,6 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
  }
  return {cancel(){epoch++;current?.stop();current=null;for(const handle of playing)handle.stop();playing.clear();},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const prepareGate=prepareChain,playGate=chain;let release;prepareChain=new Promise(r=>release=r);const run=speech(text,language,s,e,prepareGate,playGate,release).finally(release);const r=run.catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
 }
-
 /* One audio clock; unlock synchronously from a user gesture on mobile. */
 function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),c=>c.charCodeAt(0)),timer=setTimeout,clear=clearTimeout,beforeResume=()=>{}}){
  let ctx=null,nextAt=0,decoding=Promise.resolve(),active=new Set();
