@@ -18076,7 +18076,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R215';
+  const APP_BUILD = '2026-11-07-R216';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -66820,7 +66820,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     if(nearEnd) log.scrollTop = log.scrollHeight;
   }
   function asTranscribir(t){ asConversacion('user', t); const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; if(t) asMapa(null); }   // (4-nov) otra pregunta: el botón del GPS de antes se quita
-  function asMostrarRespuesta(t){ asConversacion('assistant', t); const e = $('#asRespuesta'); if(e) e.textContent = t || ''; asPuertaPintar(); }
+  function asMostrarRespuesta(t){ asPdfRecordar(t); asConversacion('assistant', t); const e = $('#asRespuesta'); if(e) e.textContent = t || ''; asPuertaPintar(); }
   // ===== (R88, 1-nov-2026, su pedido desde el iPhone) LUMI EN LA PUERTA =====
   // Tocar la esfera NO cambia de pantalla: Lumi oye y contesta ahí mismo. La esfera se pone verde oyendo, azul hablando y roja
   // con error; el rótulo "Lumi" dice "Escuchando…", la respuesta (hasta 3 renglones) o el error. Mismo oído, misma voz, misma
@@ -66927,6 +66927,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     return Promise.race([pedido, tope]);
   }
   function asCerrar(){
+    asPdfLimpiar();
     AS.requestEpoch=(AS.requestEpoch||0)+1; AS.enviando=false; clearTimeout(AS.tmrRelleno); AS.desktopReadReceipt=null;
     asAccionVisible('', '');
     AS.abierto = false; AS.pregunta = null; asPararOido(); asCallar(); asPreviewQuitar(); try{ asGaleriaQuitar(); }catch(e){}
@@ -68131,6 +68132,69 @@ function lumiReviewText(results,en=false){
     finally{AS_DESKTOP_BUSY=false;AS.enviando=false;}
   }
 
+function lumiPdfOrder(input){
+ const raw=String(input||'').trim();if(!raw||raw.length>65000)return null;
+ let s=raw.replace(/^(?:(?:oye|hey|lumi|por favor|please)[, ]+)+/i,'').replace(/^(?:puedes|podrías|podrias|can you|could you)\s+/i,'');
+ s=s.replace(/^(crear|hacer|generar)\b/i,x=>({crear:'crea',hacer:'haz',generar:'genera'}[x.toLowerCase()]));
+ if(!/^(?:crea(?:me)?|créame|genera(?:me)?|haz(?:me)?|make|create|generate|convierte|convert|pasa|pon)\b/i.test(s)||! /\bpdf\b/i.test(s))return null;
+ const colon=s.indexOf(':');
+ if(colon>=0){const head=s.slice(0,colon),body=s.slice(colon+1).trim();if(!/\bpdf\b/i.test(head))return null;if(/\b(?:sin|excepto|omite|without|exclude)\b/i.test(head))return {kind:'clarify',message:'Primero prepara el texto sin los datos que quieres excluir; después puedo convertirlo a PDF.'};return body?{kind:'text',text:body,title:'Documento de Lumi'}:{kind:'clarify',message:'Dime el texto que quieres incluir en el PDF.'};}
+ const n=s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[.!?¿¡]/g,'').trim();
+ if(/\b(?:sin|excepto|omite|without|exclude|envia|send|manda)\b/.test(n))return {kind:'clarify',message:'Puedo crear el PDF para revisarlo. Indícame primero el texto exacto que debe incluir; no enviaré nada automáticamente.'};
+ if(/^(?:(?:crea|creame|genera|generame|haz|hazme|make|create|generate) (?:un |a )?pdf (?:con |de |of |from )?(?:esto|eso|la ultima respuesta|el ultimo resumen|lo que me mostraste|this|that|the last response|the last summary)|(?:pasa|pon|convierte|convert) (?:esto|eso|this|that|la ultima respuesta|el ultimo resumen) (?:a|en|to|into) (?:un |a )?pdf)$/.test(n))return {kind:'last',title:'Resumen de Lumi'};
+ return {kind:'clarify',message:'Puedo crear un PDF con tu texto o con mi última respuesta. Por ejemplo: «Crea un PDF con este texto: …» o «Pon esto en PDF». Si quieres un documento nuevo, dime primero qué debe decir.'};
+}
+function lumiPdfText(raw){
+ const s=String(raw||'').normalize('NFC').replace(/\r\n?/g,'\n').replace(/\t/g,'    ').replace(/[\u2010-\u2015]/g,'-').replace(/[“”]/g,'"').replace(/[‘’]/g,"'").replace(/…/g,'...').replace(/[•●]/g,'-').replace(/€/g,'EUR');
+ if(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(s))throw Error('El texto contiene caracteres de control. Revisa el contenido.');
+ if(/[^\x20-\x7e\xa0-\xff\n]/.test(s))throw Error('Este PDF admite español e inglés. Quita emojis o caracteres no compatibles antes de crearlo.');
+ if(!s.trim())throw Error('No hay texto para convertir a PDF.');if(s.length>60000)throw Error('El texto supera 60.000 caracteres. Divídelo en documentos más cortos.');return s;
+}
+function lumiBuildPdf({text,title='Documento de Lumi',date},JsPDF){
+ if(typeof JsPDF!=='function')throw Error('El generador de PDF no está disponible. Actualiza la aplicación e inténtalo otra vez.');
+ const body=lumiPdfText(text),heading=lumiPdfText(title).replace(/\n/g,' ').slice(0,100),stamp=date||new Date().toLocaleDateString('es-US');
+ const pdf=new JsPDF({unit:'pt',format:'a4',compress:true});const w=pdf.internal.pageSize.getWidth(),h=pdf.internal.pageSize.getHeight(),margin=48,bottom=h-55;
+ pdf.setProperties({title:heading,subject:'Documento preparado en Workspace',creator:'Workspace - Lumi'});
+ let y=0;const header=()=>{pdf.setTextColor(37,69,91);pdf.setFont('helvetica','bold');pdf.setFontSize(10);pdf.text('WORKSPACE  /  LUMI',margin,35);pdf.setDrawColor(210,220,228);pdf.line(margin,43,w-margin,43);y=66;};header();
+ pdf.setFontSize(20);const titleLines=pdf.splitTextToSize(heading,w-margin*2);pdf.text(titleLines,margin,y);y+=titleLines.length*24+8;
+ pdf.setFont('helvetica','normal');pdf.setFontSize(9);pdf.setTextColor(95);pdf.text(String(stamp),margin,y);y+=27;pdf.setFontSize(11);pdf.setTextColor(30);
+ const next=()=>{pdf.addPage();header();pdf.setFont('helvetica','normal');pdf.setFontSize(11);pdf.setTextColor(30);};
+ for(const paragraph of body.split('\n')){if(!paragraph){y+=8;continue;}const lines=pdf.splitTextToSize(paragraph,w-margin*2);for(const line of lines){if(y>bottom)next();pdf.text(line,margin,y);y+=16;}y+=4;if(pdf.getNumberOfPages()>80)throw Error('El documento es demasiado largo. Divídelo en partes.');}
+ const pages=pdf.getNumberOfPages();for(let i=1;i<=pages;i++){pdf.setPage(i);pdf.setFont('helvetica','normal');pdf.setFontSize(8);pdf.setTextColor(110);pdf.text('Documento de trabajo - revisa el contenido antes de compartir',margin,h-28);pdf.text(i+' / '+pages,w-margin,h-28,{align:'right'});}
+ return {pdf,pages,name:'Lumi_'+heading.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'_').slice(0,60)+'.pdf'};
+}
+
+function asPdfLimpiar(){for(const u of AS.pdfUrls||[])URL.revokeObjectURL(u);AS.pdfUrls=[];AS.pdfSource=null;}
+function asPdfRecordar(t){if(AS.pdfBuilding)return;AS.pdfSource=t&&AS.abierto?{text:String(t),owner:SES.user_id+'|'+SES.company_id+'|'+SES.role,at:Date.now()}:null;}
+async function asCrearPdf(order,request){
+ const owner=SES.user_id+'|'+SES.company_id+'|'+SES.role,epoch=AS.requestEpoch;
+ const active=()=>AS.abierto&&SES.user_id+'|'+SES.company_id+'|'+SES.role===owner&&AS.requestEpoch===epoch;
+ asPararOido();asCallar();asTranscribir(request);AS.pdfBuilding=true;
+ try{
+  if(order.kind==='clarify'){asMostrarRespuesta(order.message);asHablar(order.message,asSeguirOyendo);return;}
+  const source=AS.pdfSource;
+  const text=order.kind==='text'?order.text:source&&source.owner===owner&&Date.now()-source.at<30*60*1000?source.text:null;
+  if(!text)throw Error('No tengo una respuesta reciente de esta sesión para convertir. Pega el texto después de «Crea un PDF con este texto:».');
+  const built=lumiBuildPdf({text,title:order.title},window.jspdf&&window.jspdf.jsPDF),blob=built.pdf.output('blob');
+  if(!active())return;
+  const url=URL.createObjectURL(blob);AS.pdfUrls=AS.pdfUrls||[];AS.pdfUrls.push(url);
+  const reply='Listo, creé el PDF de '+built.pages+' página'+(built.pages===1?'':'s')+'. Puedes revisarlo y descargarlo aquí. No lo envié a nadie.';
+  asMostrarRespuesta(reply);
+  const card=document.createElement('section');card.className='as-pdf-document';card.style.cssText='padding:14px;margin:12px 0;border:1px solid #37546a;border-radius:12px;background:#12202b;color:#fff';
+  const label=document.createElement('strong');label.textContent=built.name+' · '+built.pages+' pág.';card.appendChild(label);
+  const status=document.createElement('div');status.setAttribute('role','status');card.appendChild(status);
+  const preview=document.createElement('iframe');preview.title='Vista previa del PDF de Lumi';preview.src=url;preview.hidden=true;preview.style.cssText='width:100%;height:480px;border:0;background:white;margin-top:12px';
+  const button=(label,fn)=>{const b=document.createElement('button');b.type='button';b.className='btn btn-outline';b.textContent=label;b.style.margin='8px 8px 0 0';b.onclick=async()=>{if(!active()){status.textContent='Esta vista pertenece a otra sesión. Crea el PDF de nuevo.';return;}try{await fn();}catch(e){if(!/cancel|AbortError/i.test(String(e.name)+' '+String(e.message)))status.textContent='No pude completar esa acción. Puedes descargar el PDF.';}};card.appendChild(b);};
+  button('Ver PDF',()=>{preview.hidden=!preview.hidden;});
+  button('Descargar PDF',async()=>{if(isNative()){await saveAndShareNative(blob,built.name,'');return;}const a=document.createElement('a');a.href=url;a.download=built.name;a.click();});
+  button('Compartir PDF',async()=>{if(isNative()){await saveAndShareNative(blob,built.name,'');return;}const f=new File([blob],built.name,{type:'application/pdf'});if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:built.name});}else{status.textContent='Descarga el archivo y adjúntalo en la aplicación que prefieras.';}});
+  card.appendChild(preview);const log=document.getElementById('asConversacion');if(log){log.appendChild(card);log.scrollTop=log.scrollHeight;}
+  asHablar(reply,asSeguirOyendo);
+ }catch(e){if(active()){const message=String(e.message||e);asMostrarRespuesta(message);asHablar(message,asSeguirOyendo);}}
+ finally{AS.pdfBuilding=false;}
+}
+
+
 function lumiSimpleGreeting(text){
  const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡]/g,'');
  if(t.length>180)return null;
@@ -68154,6 +68218,7 @@ function lumiCapabilityHelp(text){
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando&&!AS.conf&&!AS.pregunta){const pdf=lumiPdfOrder(texto);if(pdf){await asCrearPdf(pdf,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const review=lumiReviewOrder(texto);if(review){await asRevisionCompleta(review,texto);return;}}
     if(!dictando){const desktop=lumiDesktopOrder(texto)||lumiDesktopReadFollowup(texto,AS.desktopReadReceipt,SES.user_id+'|'+SES.company_id);if(desktop){if(!['read_chat','read_unread','clarify'].includes(desktop.action))AS.desktopReadReceipt=null;asTranscribir(texto);await asEscritorioMac(desktop);return;}AS.desktopReadReceipt=null;}
