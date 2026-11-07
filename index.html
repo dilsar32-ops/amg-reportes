@@ -10485,6 +10485,16 @@ html body #asPanel .as-version{order:11;}
 @media(hover:hover){#asPanel .as-chat-thumb:hover{transform:translateY(-2px);border-color:#99dfff;}}
 @media(prefers-reduced-motion:reduce){#asPanel .as-esfera-wrap,#asPanel #asConversacion>p,#asPanel #asConversacion>.as-chat-docs,#asPanel .as-chat-thumb,#asActionStatus::before{animation:none!important;transition:none!important;transform:none!important;}}
 </style>
+<style id="lumi-chat-viewport-r229">
+/* One scroll surface; conversation continues behind the translucent header. */
+html body #asPanel{padding-top:env(safe-area-inset-top,0px)!important;}
+html body #asPanel .as-cab{position:absolute!important;top:env(safe-area-inset-top,0px);left:16px;right:16px;z-index:2;min-height:44px!important;pointer-events:none;background:linear-gradient(#000,rgba(0,0,0,.72),transparent);}
+html body #asPanel .as-cab button{pointer-events:auto;}
+html body #asPanel .as-charla{overflow-y:auto!important;overscroll-behavior:contain;scrollbar-width:none;-webkit-mask-image:linear-gradient(transparent,black 52px,black calc(100% - 8px),transparent);mask-image:linear-gradient(transparent,black 52px,black calc(100% - 8px),transparent);}
+html body #asPanel .as-charla::-webkit-scrollbar{display:none;}
+html body #asPanel #asConversacion{padding-top:54px!important;padding-bottom:12px!important;}
+html body #asPanel #asEsfera{width:68px!important;height:68px!important;}
+</style>
 </head>
 <body>
 
@@ -18128,7 +18138,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R228';
+  const APP_BUILD = '2026-11-07-R229';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -66875,10 +66885,19 @@ function createLumiConversationStore({storage,session,onError=()=>{}}){
     const rows=asChatStore().load();AS.historial=rows.slice(-40);
     AS_CHAT_RESTORING=true;try{for(const row of rows)asConversacion(row.role,row.content);}finally{AS_CHAT_RESTORING=false;}
   }
+  function asChatScrollBox(log){ return log.closest('.as-charla') || log; }
+  function asChatFollow(log, follow){
+    if(!follow)return;
+    const box=asChatScrollBox(log);
+    box.scrollTop=box.scrollHeight;
+    const scheduledTop=box.scrollTop;
+    requestAnimationFrame(()=>{if(Math.abs(box.scrollTop-scheduledTop)<4)box.scrollTop=box.scrollHeight;});
+  }
   function asConversacion(role, texto){
     const log = document.getElementById('asConversacion'); if(!log || !texto) return;
     if(AS_CHAT_OWNER!==asChatOwner()){asChatRestore();}
-    const nearEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+    const box=asChatScrollBox(log);
+    const nearEnd = AS_CHAT_RESTORING || role==='user' || box.scrollHeight-box.scrollTop-box.clientHeight<60;
     let row = log.lastElementChild;
     if(!row || row.dataset.role !== role){
       row = document.createElement('p'); row.dataset.role = role;
@@ -66886,7 +66905,7 @@ function createLumiConversationStore({storage,session,onError=()=>{}}){
       row.appendChild(label); row.appendChild(document.createElement('span')); log.appendChild(row);
     }
     row.lastElementChild.textContent = texto;
-    if(nearEnd) log.scrollTop = log.scrollHeight;
+    asChatFollow(log,nearEnd);
     if(!AS_CHAT_RESTORING)asChatStore().save(Array.from(log.children).filter(r=>['user','assistant'].includes(r.dataset.role)).map(r=>({role:r.dataset.role,content:r.lastElementChild?.textContent||''})));
   }
   function asTranscribir(t){ asConversacion('user', t); const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; if(t) asMapa(null); }   // (4-nov) otra pregunta: el botón del GPS de antes se quita
@@ -67657,7 +67676,7 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
         const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
         try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('Local voice HTTP '+r.status);const t=await r.text();return t?JSON.parse(t):null;}finally{clearTimeout(timer);}
       },
-      play:data=>audioPlayer.play(data)
+      play:data=>{asEstado('hablando','');return audioPlayer.play(data);}
     });
     return AS_VOZ_LOCAL;
   }
@@ -67674,7 +67693,7 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
   }
   async function asDecir(t, encolar){
     t = asParaVoz(asTrVoz(t), asEn() ? 'en' : (AS.idiomaResp || 'es')); if(!t) return 0;
-    asEstado('hablando', ''); if(window.Cara){ try{ Cara.hablando(true, t); }catch(err){} }
+    asEstado(SES.role==='manager'?'pensando':'hablando', SES.role==='manager'?'Preparando la voz…':''); if(window.Cara){ try{ Cara.hablando(true, t); }catch(err){} }
     setTimeout(asVigilarInterrupcion, 250);   // barge-in (si está prendido): también con frases encoladas del stream
     // Keep listening paused while the local model generates and plays the actual audio.
     if(SES.role==='manager'){
@@ -68053,7 +68072,7 @@ function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=D
         const button=document.createElement('button');button.textContent='Ver pantalla '+screen.index+(screen.main?' (principal)':'')+' · '+screen.width+'×'+screen.height;
         button.style.cssText='display:block;margin:8px 0;padding:10px;';button.addEventListener('click',()=>{if(active())asMostrarPantallaMac({target:String(screen.index)});});card.appendChild(button);
       }
-      log.appendChild(card);log.scrollTop=log.scrollHeight;asAccionVisible('Consulta de pantalla completada','done');asEstado('esperando','');asHablar(r.status==='captured'?'Aquí tienes la captura.':'Elige la pantalla que quieres ver.',asSeguirOyendo);
+      log.appendChild(card);asChatFollow(log,true);asAccionVisible('Consulta de pantalla completada','done');asEstado('esperando','');asHablar(r.status==='captured'?'Aquí tienes la captura.':'Elige la pantalla que quieres ver.',asSeguirOyendo);
     }catch(e){if(active()){asMostrarRespuesta(String(e.message||e));asAccionVisible('No se obtuvo la captura','error');asEstado('esperando','');}}
     finally{AS_SCREEN_BUSY=false;}
   }
@@ -68269,12 +68288,12 @@ function lumiReviewText(results,en=false){
       if(Array.isArray(result.candidates)&&result.candidates.length){
         const card=document.createElement('div');card.className='as-desktop-candidates';card.style.cssText='padding:12px;border:1px solid #334155;border-radius:12px;margin:10px 0;';
         result.candidates.forEach((candidate,index)=>{const button=document.createElement('button');button.textContent=(index+1)+'. '+candidate.label+(candidate.detail?' — '+candidate.detail:'');button.style.cssText='display:block;width:100%;text-align:left;margin:6px 0;padding:10px;';button.onclick=()=>{if(active())asEscritorioMac({...order,action:order.action==='send_message'?'send_message':order.action==='read_chat'?'read_chat':'open_chat',key:candidate.key});};card.appendChild(button);});
-        const log=document.getElementById('asConversacion');if(log){log.appendChild(card);log.scrollTop=log.scrollHeight;}
+        const log=document.getElementById('asConversacion');if(log){log.appendChild(card);asChatFollow(log,true);}
       }
       if(result.status==='unread_list' && result.chats.length){
         const card=document.createElement('div');card.className='as-desktop-read-chats';
         result.chats.forEach((chat,index)=>{const b=document.createElement('button');b.type='button';b.textContent=(index+1)+'. Leer conversación: '+chat.title;b.style.cssText='display:block;width:100%;text-align:left;margin:6px 0;padding:10px;';b.onclick=()=>{if(active())asEscritorioMac({app:order.app,action:'read_chat',query:chat.title});};card.appendChild(b);});
-        const log=document.getElementById('asConversacion');if(log){log.appendChild(card);log.scrollTop=log.scrollHeight;}
+        const log=document.getElementById('asConversacion');if(log){log.appendChild(card);asChatFollow(log,true);}
       }
       asHablar(text,asSeguirOyendo);
     }catch(error){if(active()){asMostrarRespuesta(String(error.message||error));asAccionVisible('No se completó la acción','error');asEstado('esperando','');}}
@@ -68416,7 +68435,7 @@ async function asCrearPdf(order,request){
   button('Ver PDF',()=>{ready();preview.hidden=!preview.hidden;});
   button('Descargar PDF',async()=>{ready();if(isNative()){await saveAndShareNative(blob,built.name,'');return;}const a=document.createElement('a');a.href=url;a.download=built.name;a.click();});
   button('Compartir PDF',async()=>{ready();if(isNative()){await saveAndShareNative(blob,built.name,'');return;}const f=new File([blob],built.name,{type:'application/pdf'});if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:built.name});}else{status.textContent='Descarga el archivo y adjúntalo en la aplicación que prefieras.';}});
-  card.appendChild(preview);const log=document.getElementById('asConversacion');if(log){log.appendChild(card);log.scrollTop=log.scrollHeight;}
+  card.appendChild(preview);const log=document.getElementById('asConversacion');if(log){log.appendChild(card);asChatFollow(log,true);}
   const result=compose?null:generate();
   const reply=compose?'Aquí tienes el editor del PDF. Puedes escribir el contenido, elegir una plantilla y añadir fotos; después pulsa Generar PDF para revisarlo.':'Listo, creé el PDF de '+result.pages+' página'+(result.pages===1?'':'s')+'. Puedes corregir el título y el contenido, añadir fotos y volver a generarlo aquí.';
   asMostrarRespuesta(reply);asHablar(reply,asSeguirOyendo);
@@ -68836,7 +68855,7 @@ function lumiCapabilityHelp(text){
       const copy=document.createElement('button');copy.type='button';copy.textContent='Copiar hoja';
       copy.onclick=function(){return asCopiarHoja(it,copy);};
       card.appendChild(copy);block.appendChild(card);
-    });log.appendChild(block);log.scrollTop=log.scrollHeight;asActualizarEstadoHojas(block,p.items);
+    });log.appendChild(block);asChatFollow(log,true);asActualizarEstadoHojas(block,p.items);
   }
   async function asSeguirEnvioMac(results,ids){
     if(!Array.isArray(results)||!results.length)return;
