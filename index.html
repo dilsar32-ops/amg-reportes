@@ -17896,7 +17896,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R183';
+  const APP_BUILD = '2026-11-06-R184';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67346,6 +67346,7 @@ function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=
     if(window.speechSynthesis){ try{ const u = new SpeechSynthesisUtterance(t); u.lang = asIdiomaVozWeb(); const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */ speechSynthesis.speak(u); }catch(e){} }
   }
   function asCallar(){
+    document.querySelectorAll('.lumi-screen-preview').forEach(d=>d.remove());
     if(AS_VOZ_LOCAL)AS_VOZ_LOCAL.cancel();
     clearTimeout(AS.tmrHabla); clearTimeout(AS.tmrRelleno); AS.hablaHasta = 0; AS.esperaFin = false; AS.finPendiente = false; AS.textoTanda = '';
     if(AS.rellenoActivo) asRellenoTermino();
@@ -67498,11 +67499,92 @@ function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=
     finally{AS_BROWSER_BUSY=false;}
   }
 
+function lumiScreenOrder(text){
+ let s=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.,]/g,' ').replace(/\s+/g,' ');
+ if(!s||s.length>500||/\b(no|not|don't|dont|nunca|never|cancel|cancelar)\b/.test(s))return null;
+ s=s.replace(/^(oye |hey )?lumi\s+/,'').replace(/^(por favor|please)\s+/,'').trim();
+ if(/^(que|cuales|cuantas|what|which|how many)\s+(pantallas|monitores|screens|displays)/.test(s)||/^(muestra|muestrame|ensename|lista|list|show me|show)\s+(las |los |the |my |mis )?(pantallas|monitores|screens|displays)( de (la |mi )?(mac|computadora))?( conectad[oa]s)?\s*(por favor|please)?$/.test(s))return {target:'list'};
+ if(!/^(?:me puedes |puedes |podrias |can you |could you )?(?:mostrar|mostrarme|muestra|muestrame|ensename|ver|dejame ver|mandame|enviame|toma|saca|haz|captura|show|show me|let me see|send me|take|capture)\b/.test(s))return null;
+ if(!/\b(pantalla|monitor|screen|display|screenshot|captura)\b/.test(s))return null;
+ if(/\b(companycam|company cam|matterport|whatsapp|ventana|window)\b/.test(s))return {error:'Por ahora puedo mostrar pantallas completas. Dime “muéstrame las pantallas” para elegir una.'};
+ const m=/\b(?:pantalla|monitor|screen|display)\s*(?:numero |number )?(\d+|uno|una|dos|tres|cuatro|one|two|three|four)\b/.exec(s);
+ const numbers={uno:'1',una:'1',dos:'2',tres:'3',cuatro:'4',one:'1',two:'2',three:'3',four:'4'};
+ const target=m?(numbers[m[1]]||m[1]):'main';if(target!=='main'&&(+target<1||+target>16))return {error:'Ese número de pantalla no es válido. Pídeme la lista de pantallas.'};
+ if(/\b(izquierda|derecha|left|right|otra|other)\b/.test(s)&&!m)return {error:'Para elegir la correcta, pídeme “muéstrame las pantallas” y selecciona su número.'};
+ return {target};
+}
+function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms))}){
+ return {async capture(target){
+  if(!['list','main',...Array.from({length:16},(_,i)=>String(i+1))].includes(target))throw Error('Pantalla no válida.');
+  const s={...session()},same=()=>s.user_id===session().user_id&&s.company_id===session().company_id&&session().role==='manager';
+  if(s.role!=='manager'||!s.user_id||!s.company_id)throw Error('Las capturas requieren tu cuenta de Manager vinculada.');
+  const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(s.company_id)+'&clave=eq.lumi_local_model_device');
+  const d=rows?.[0]?.valor;
+  if(!same())throw Error('La sesión cambió.');
+  if(d?.userId!==s.user_id||!d.remoteScreen||!d.available||!d.workerId||!Number.isFinite(Date.parse(d.updatedAt))||now()-Date.parse(d.updatedAt)>180000)throw Error('Tu Mac vinculada no está disponible para capturas.');
+  const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
+  try{
+   await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_screen',target}})});
+   const deadline=now()+175000;
+   while(now()<deadline){
+    if(!same())throw Error('La sesión cambió.');
+    const jobs=await call(route+'&select=state,result');const job=jobs?.[0];
+    if(!same())throw Error('La sesión cambió.');
+    if(job?.state==='failed')throw Error('No pude obtener la captura. Revisa la conexión y el permiso en la Mac.');
+    if(job?.state==='done'){
+     const r=job.result?.data;
+     if(!r||!['captured','screens','needs_screen_permission','screen_not_found'].includes(r.status))throw Error('Respuesta de captura no válida.');
+     if(r.status==='captured'&&(r.mime!=='image/jpeg'||typeof r.image!=='string'||!r.image.startsWith('/9j/')||r.image.length>4000000||!Number.isFinite(Date.parse(r.capturedAt))))throw Error('Imagen de captura no válida.');
+     return r;
+    }
+    await wait(700);
+   }
+   throw Error('La Mac no respondió a tiempo. No repetí la captura.');
+  }finally{if(same())await call(route,{method:'DELETE'}).catch(()=>{});}
+ }};
+}
+
+  let AS_SCREEN_BUSY=false;
+  async function asMostrarPantallaMac(order){
+    if(AS_SCREEN_BUSY){asMostrarRespuesta('Ya estoy buscando la captura que pediste.');return;}
+    if(order.error){asMostrarRespuesta(order.error);return;}
+    const owner=SES.user_id+'|'+SES.company_id;const active=()=>AS.abierto&&owner===SES.user_id+'|'+SES.company_id;
+    AS_SCREEN_BUSY=true;asPararOido();asCallar();asAccionVisible('Consultando la pantalla de tu Mac…','working');
+    const client=createLumiScreenClient({session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),call:async(route,init={})=>{
+      const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
+      try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('No pude consultar la Mac ('+r.status+').');const t=await r.text();return t?JSON.parse(t):null;}finally{clearTimeout(timer);}
+    }});
+    try{
+      const r=await client.capture(order.target);if(!active())return;
+      if(r.status==='needs_screen_permission')throw Error('Falta autorizar las capturas para LumiControl en la Mac: Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla. Todavía no tomé ninguna captura.');
+      const log=document.getElementById('asConversacion');if(!log)throw Error('La conversación está cerrada.');
+      const card=document.createElement('section');card.className='as-chat-docs';card.style.cssText='padding:12px;border:1px solid #345;border-radius:12px;margin:10px 0;';
+      if(r.status==='captured'){
+        const label=document.createElement('p');label.textContent='Pantalla '+r.screen+' · '+new Date(r.capturedAt).toLocaleString();card.appendChild(label);
+        const img=document.createElement('img');img.alt='Captura de la pantalla '+r.screen;img.src='data:image/jpeg;base64,'+r.image;img.style.cssText='width:100%;height:auto;border-radius:8px;cursor:zoom-in';
+        img.addEventListener('click',()=>{
+          if(!active())return;const dialog=document.createElement('dialog');dialog.className='lumi-screen-preview';dialog.style.cssText='width:95vw;max-width:none;max-height:95vh;background:#101820;color:white;padding:12px;border:1px solid #527;';
+          const close=document.createElement('button');close.textContent='Cerrar captura';close.addEventListener('click',()=>{dialog.close();dialog.remove();});
+          const large=document.createElement('img');large.src=img.src;large.alt=img.alt;large.style.cssText='display:block;max-width:100%;height:auto;';dialog.append(close,large);document.body.appendChild(dialog);dialog.showModal();dialog.addEventListener('close',()=>dialog.remove(),{once:true});
+        });card.appendChild(img);
+        asMostrarRespuesta('Aquí tienes la pantalla '+r.screen+' de tu Mac. Toca la imagen para ampliarla.');
+      }else asMostrarRespuesta(r.status==='screen_not_found'?'Esa pantalla no está conectada. Estas son las disponibles:':'Estas son las pantallas conectadas a tu Mac:');
+      for(const screen of (r.screens||[]).slice(0,16)){
+        if(!Number.isInteger(screen.index)||screen.index<1||screen.index>16)continue;
+        const button=document.createElement('button');button.textContent='Ver pantalla '+screen.index+(screen.main?' (principal)':'')+' · '+screen.width+'×'+screen.height;
+        button.style.cssText='display:block;margin:8px 0;padding:10px;';button.addEventListener('click',()=>{if(active())asMostrarPantallaMac({target:String(screen.index)});});card.appendChild(button);
+      }
+      log.appendChild(card);log.scrollTop=log.scrollHeight;asAccionVisible('Consulta de pantalla completada','done');asEstado('esperando','');asHablar(r.status==='captured'?'Aquí tienes la captura.':'Elige la pantalla que quieres ver.',asSeguirOyendo);
+    }catch(e){if(active()){asMostrarRespuesta(String(e.message||e));asAccionVisible('No se obtuvo la captura','error');asEstado('esperando','');}}
+    finally{AS_SCREEN_BUSY=false;}
+  }
+
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando){const screen=lumiScreenOrder(texto);if(screen){asTranscribir(texto);await asMostrarPantallaMac(screen);return;}}
     if(!dictando){const page=asPedidoPagina(texto);if(page){asTranscribir(texto);await asAbrirPaginaMac(page);return;}}
     asAccionVisible('', '');
     if(!dictando && AS_GAL.p?.tipo==='labor_logs'){const control=asOrdenControlMac(texto,AS_GAL.p.items);if(control){asTranscribir(texto);if(control.error){asMostrarRespuesta(control.error);asHablar(control.error,asSeguirOyendo);}else{await asControlHojaMac(AS_GAL.p.items[control.index],control.action);}return;}}
