@@ -17896,7 +17896,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-06-R182';
+  const APP_BUILD = '2026-11-06-R183';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67173,10 +67173,95 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     el.hidden = !basica;
   }
   // UNA frase a la cola de la voz. encolar=true no corta lo que se esta diciendo (streaming frase por frase).
+
+  // Local Qwen warm voice, selected by the account owner. No paid TTS fallback.
+/* Warm local voice. Uses the existing owner-only queue; audio is deleted after retrieval. */
+function createLumiVoice({call,session,play,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
+ let epoch=0,chain=Promise.resolve(),current=null,cache=null;
+ const owner=s=>s.user_id+'|'+s.company_id;
+ const active=(s,e)=>e===epoch&&owner(s)===owner(session())&&session().role==='manager';
+ async function device(s){
+  if(cache&&cache.owner===owner(s)&&now()-cache.at<30000)return cache.device;
+  const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(s.company_id)+'&clave=eq.lumi_local_model_device');
+  const d=rows?.[0]?.valor;
+  const valid=d?.userId===s.user_id&&d.voice==='calida-tranquila-v1'&&d.available&&now()-Date.parse(d.updatedAt)<180000;
+  const value=valid?d:null;cache={owner:owner(s),at:now(),device:value};return value;
+ }
+ async function speech(text,language,s,e){
+  if(!active(s,e))return 'cancelled';
+  const d=await device(s);if(!active(s,e))return 'cancelled';if(!d)return 'unavailable';
+  // Sentence boundaries first, hard cap for unusually long uninterrupted text.
+  const pieces=text.match(/[^.!?]+[.!?]*\s*/g)||[text],chunks=[];
+  for(const part of pieces){let rest=part.trim();while(rest.length>450){let cut=rest.lastIndexOf(' ',450);if(cut<100)cut=450;chunks.push(rest.slice(0,cut));rest=rest.slice(cut).trim();}if(rest){if(chunks.length&&chunks.at(-1).length+rest.length<450)chunks[chunks.length-1]+=' '+rest;else chunks.push(rest);}}
+  for(const chunk of chunks){
+   if(!active(s,e))return 'cancelled';
+   const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
+   try{
+    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:chunk,language}})});
+    const deadline=now()+160000;let data=null;
+    while(now()<deadline){
+     if(!active(s,e))return 'cancelled';
+     const rows=await call(route+'&select=state,result');const job=rows?.[0];
+     if(job?.state==='failed')throw Error('Voice generation failed');
+     if(job?.state==='done'){data=job.result?.data;break;}
+     await wait(650);
+    }
+    if(!active(s,e))return 'cancelled';
+    if(!data||data.voice!=='calida-tranquila-v1'||data.mime!=='audio/mpeg'||typeof data.audio!=='string'||data.audio.length>2200000||!Number.isFinite(data.seconds)||data.seconds<=0||data.seconds>120)throw Error('Invalid voice audio');
+    current=play(data);await current.done;current=null;
+   }finally{
+    // Never use a newly switched account to clean up another account's private job.
+    if(owner(s)===owner(session()))await call(route,{method:'DELETE'}).catch(()=>{});
+   }
+  }
+  return 'played';
+ }
+ return {cancel(){epoch++;current?.stop();current=null;},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const r=chain.then(()=>speech(text,language,s,e)).catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
+}
+
+  let AS_VOZ_LOCAL=null;
+  function asVozLocal(){
+    if(AS_VOZ_LOCAL)return AS_VOZ_LOCAL;
+    AS_VOZ_LOCAL=createLumiVoice({
+      session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),
+      call:async(route,init={})=>{
+        const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
+        try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('Local voice HTTP '+r.status);const t=await r.text();return t?JSON.parse(t):null;}finally{clearTimeout(timer);}
+      },
+      play:data=>{
+        const bytes=Uint8Array.from(atob(data.audio),c=>c.charCodeAt(0));
+        const url=URL.createObjectURL(new Blob([bytes],{type:data.mime})),audio=new Audio(url);
+        let finish,settled=false,timer;
+        const done=new Promise((resolve,reject)=>{
+          finish=error=>{if(settled)return;settled=true;clearTimeout(timer);audio.pause();audio.removeAttribute('src');URL.revokeObjectURL(url);error?reject(error):resolve();};
+          audio.onended=()=>finish();audio.onerror=()=>finish(Error('Audio playback failed'));
+          timer=setTimeout(()=>finish(Error('Audio playback timed out')),data.seconds*1000+20000);
+          Promise.resolve(audio.play()).catch(finish);
+        });
+        return {done,stop:()=>finish()};
+      }
+    });
+    return AS_VOZ_LOCAL;
+  }
+
   async function asDecir(t, encolar){
     t = asParaVoz(asTrVoz(t), asEn() ? 'en' : (AS.idiomaResp || 'es')); if(!t) return 0;
     asEstado('hablando', ''); if(window.Cara){ try{ Cara.hablando(true, t); }catch(err){} }
     setTimeout(asVigilarInterrupcion, 250);   // barge-in (si está prendido): también con frases encoladas del stream
+    // Keep listening paused while the local model generates and plays the actual audio.
+    if(SES.role==='manager' && cloudOn()){
+      const voice=asVozLocal();if(!encolar)voice.cancel();
+      AS.vozEnVuelo=(AS.vozEnVuelo||0)+1;
+      try{
+        const result=await voice.speak(t,asVozEn()?'English':'Spanish');
+        if(result!=='unavailable'){
+          AS.esperaFin=false;AS.finPendiente=false;AS.hablaHasta=Date.now();
+          if(result==='played'){asBit('voz cálida local');const notice=$('#asVozAviso');if(notice)notice.hidden=true;}
+          return 0;
+        }
+      }catch(error){asBit('voz cálida no disponible; respaldo del dispositivo');}
+      finally{AS.vozEnVuelo=Math.max(0,(AS.vozEnVuelo||1)-1);}
+    }
     const S = asPlugin();
     let ms = Math.max(900, t.length * 62);
     if(isNative() && S && S.hablar){
@@ -67251,6 +67336,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   function asRellenoTermino(){ AS.rellenoActivo = false; clearTimeout(AS.tmrRellenoTope); const f = AS.rellenoFin; AS.rellenoFin = null; AS.rellenoEspera = null; if(f) f(); }
   // Habla sin cambiar el estado (el relleno de "déjame ver" mientras piensa).
   function asDecirSuave(t){
+    if(SES.role==='manager')return; // Avoid switching voice for filler while the local answer is prepared.
     const S = asPlugin();
     if(isNative() && S && S.hablar){ AS.vozEnVuelo = (AS.vozEnVuelo || 0) + 1; let listo = false; const fin = function(r){ if(listo) return; listo = true; AS.vozEnVuelo = Math.max(0, (AS.vozEnVuelo || 1) - 1); asBit('relleno hablar -> ' + (r && r.ok === false ? 'ok=false' : (r && r.segundos ? 'ok ' + (+r.segundos).toFixed(1) + ' s' : 'sin respuesta'))); if(r && r.ok === false) asRellenoTermino(); };
       // (R2) La respuesta espera a que el relleno termine (su hablaFin, o 4 s como tope): nunca se encola detrás.
@@ -67260,6 +67346,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     if(window.speechSynthesis){ try{ const u = new SpeechSynthesisUtterance(t); u.lang = asIdiomaVozWeb(); const v = asVozWeb(); if(v) u.voice = v; u.rate = 1.0; u.pitch = 1.1; /* voz "Scanova": mismo tono que el telefono */ speechSynthesis.speak(u); }catch(e){} }
   }
   function asCallar(){
+    if(AS_VOZ_LOCAL)AS_VOZ_LOCAL.cancel();
     clearTimeout(AS.tmrHabla); clearTimeout(AS.tmrRelleno); AS.hablaHasta = 0; AS.esperaFin = false; AS.finPendiente = false; AS.textoTanda = '';
     if(AS.rellenoActivo) asRellenoTermino();
     if(window.speechSynthesis){ try{ speechSynthesis.cancel(); }catch(e){} }
