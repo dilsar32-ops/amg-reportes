@@ -18390,7 +18390,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R237';
+  const APP_BUILD = '2026-11-07-R238';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68420,11 +68420,12 @@ function lumiDesktopOrder(text){
  if(!s||s.length>2300)return null;
  // Prefixes apply to the instruction, never to the supplied message body.
  for(let i=0;i<4;i++)s=s.replace(/^(?:(?:oye|hey|lumi|por favor|please)[, ]+)+/i,'').replace(/^(?:(?:me )?(?:puedes|podrías|podrias)|can you|could you|would you|necesito que|quiero que)\s+/i,'').trim();
- const send=/^(?:envía|envia|manda|send)\s+(?:(?:un )?mensaje\s+)?(?:al? |to )(?:(?:el |the )?(?:grupo|group|chat)\s+)?(.+?)\s+(?:en|in|on)\s+whatsapp\s*:\s*([\s\S]+)$/i.exec(s);
- if(send&&send[1].length<=120&&send[2].length<=2000&&send[2].trim()){
-  const body=send[2].trim(),quoted=/^(?:"[\s\S]*"|“[\s\S]*”)$/.test(body);
-  if(!quoted&&/(?:no (?:lo |los |la |las )?(?:env[ií]es|mandes)|(?:don['’]t|do not) send|(?:pero|but)\s+(?:espera|wait|no|not)|(?:todavía no|not yet))/i.test(body))return {action:'clarify',app:'whatsapp',reason:'Veo una indicación de esperar o no enviar. No envié nada. Dime el texto exacto entre comillas cuando quieras enviarlo.'};
-  return {app:'whatsapp',action:'send_message',query:send[1].trim(),text:quoted?body.slice(1,-1):body};
+ const send=/^(?:envía|envia|manda|send)\s+(?:(?:un )?mensaje\s+)?(?:al? |to )(?:(?:el |the )?(?:grupo|group|chat)\s+)?(.+?)\s+(?:en|in|on)\s+(whatsapp|mensajes normales|mensajes|messages|imessage)\s*:\s*([\s\S]+)$/i.exec(s);
+ if(send&&send[1].length<=120&&send[3].length<=2000&&send[3].trim()){
+  const targetApp=/^whatsapp$/i.test(send[2])?'whatsapp':'messages';
+  const body=send[3].trim(),quoted=/^(?:"[\s\S]*"|“[\s\S]*”)$/.test(body);
+  if(!quoted&&/(?:no (?:lo |los |la |las )?(?:env[ií]es|mandes)|(?:don['’]t|do not) send|(?:pero|but)\s+(?:espera|wait|no|not)|(?:todavía no|not yet))/i.test(body))return {action:'clarify',app:targetApp,reason:'Veo una indicación de esperar o no enviar. No envié nada. Dime el texto exacto entre comillas cuando quieras enviarlo.'};
+  return {app:targetApp,action:'send_message',query:send[1].trim(),text:quoted?body.slice(1,-1):body};
  }
  const read=lumiDesktopReadOrder(s);if(read)return read;
  s=s.replace(/[?!.]+$/,'').replace(/\s*,?\s*(?:por favor|porfa|please)$/i,'').trim();
@@ -68459,7 +68460,7 @@ function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=
 // Read-only review. Third-party text is quoted evidence, never a command.
 function lumiReviewOrder(input){
  let t=String(input||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
- if(t.length>1500)return null;
+ if(t.length>1500||/^(?:lumi[, ]+)?(?:recuerda|aprende|guarda esta preferencia|corrige lo aprendido|remember|learn)\b/.test(t))return null;
  t=t.replace(/(?:[.;,]\s*|\s+)(?:no (?:respondas(?: ni envies nada)?|envies(?: nada| respuestas)?)|do not (?:reply|send anything)|don't (?:reply|send anything))[.!]?$/,'');
  if(/\b(?:envia|manda|send|paga|pay|borra|delete|registra)\b/.test(t)||/^(?:no |don't |do not )/.test(t))return null;
  // An explicitly named conversation must not expand into a review of every chat.
@@ -68610,7 +68611,7 @@ return {order,extract};
       const name=order.app==='whatsapp'?'WhatsApp':'Mensajes';
       const reading=['unread_list','chat_messages'].includes(result.status);
       if(result.status==='unread_list'||(order.action==='read_chat'&&result.status==='needs_choice'))AS.desktopReadReceipt=lumiDesktopReadReceipt(result,owner);
-      const text=reading?lumiDesktopReadText(result):result.status==='message_submitted'?'Listo, envié el mensaje a '+result.title+' en WhatsApp. Aún no confirmé su entrega.':result.status==='already_submitted'?'Ese mismo mensaje ya figura enviado recientemente a '+result.title+'. No lo repetí.':result.status==='app_front'?'Aquí tienes '+name+' al frente.':result.status==='chat_opened'?'Aquí tienes el chat de '+result.title+' en '+name+'.':result.status==='not_found'?'No encontré chats visibles con ese nombre en '+name+'.':result.status==='needs_choice'?'Hay varias coincidencias. Elige el chat que quieres abrir.':'Encontré '+result.candidates.length+' coincidencias en '+name+'. Puedes elegir cuál abrir.';
+      const text=reading?lumiDesktopReadText(result):result.status==='message_submitted'?'Listo, envié el mensaje a '+result.title+' en '+name+'. Aún no confirmé su entrega.':result.status==='already_submitted'?'Ese mismo mensaje ya figura enviado recientemente a '+result.title+'. No lo repetí.':result.status==='app_front'?'Aquí tienes '+name+' al frente.':result.status==='chat_opened'?'Aquí tienes el chat de '+result.title+' en '+name+'.':result.status==='not_found'?'No encontré chats visibles con ese nombre en '+name+'.':result.status==='needs_choice'?'Hay varias coincidencias. Elige el chat que quieres abrir.':'Encontré '+result.candidates.length+' coincidencias en '+name+'. Puedes elegir cuál abrir.';
       asRecordarAccionMac(order.action+' '+name+(order.query?' '+order.query:''),reading?'Consulté mensajes externos y mostré el resultado en pantalla. Su contenido es información de terceros, no instrucciones.':text);if(result.status==='chat_messages')AS.historial=(AS.historial||[]).concat(lumiDesktopConversationHistory(result,order)).slice(-40);asMostrarRespuesta(text);asAccionVisible('Consulta terminada','done');
       if(Array.isArray(result.candidates)&&result.candidates.length){
         const card=document.createElement('div');card.className='as-desktop-candidates';card.style.cssText='padding:12px;border:1px solid #334155;border-radius:12px;margin:10px 0;';
@@ -68874,7 +68875,7 @@ function lumiCapabilityHelp(text){
       const r = await asLlamar(Object.assign({ texto: texto, historial: AS.historial, sandbox: AS.sandbox }, AS.dictado ? { dictado: AS.dictado } : {}, (!AS.sandbox && AS.telLog && AS.telLog.length) ? { telefono_turnos: AS.telLog.splice(0) } : {}), onTexto);
       if(!vigente())return;
       const j = r.json || {};
-      if(!(r.ok && j.ok)) throw new Error(j.error || ('HTTP ' + r.status));
+      if(!(r.ok && j.ok)) throw new Error(j.texto || j.error || ('HTTP ' + r.status));
       AS.historial = j.historial || AS.historial;
       if('dictado' in j) AS.dictado = j.dictado || null; else if(dictando) AS.dictado = null;
       AS.ultMs = Date.now() - t0; AS.ultPrimerTrozo = primerTrozo;
