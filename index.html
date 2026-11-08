@@ -18545,7 +18545,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R257';
+  const APP_BUILD = '2026-11-07-R258';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68800,13 +68800,19 @@ function lumiReviewBrief(results,en=false){
  return text;
 }
 function lumiReviewFollowup(text,receipt,owner,now=Date.now()){
- if(!receipt||receipt.owner!==owner||now-receipt.at>900000)return null;
- const n=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿?!.]/g,'');
- if(/^(?:lumi[, ]+)?(?:leemelos|lee los mensajes|muestrame los detalles|ver detalles|read them|show details)$/.test(n))return {action:'details'};
+ if(!receipt||receipt.owner!==owner||!Number.isFinite(receipt.at)||now<receipt.at||now-receipt.at>900000)return null;
+ const norm=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,' ');
+ const n=norm(text).replace(/[¿?!.]/g,'').replace(/^lumi[, ]+/,'').replace(/^(?:please|por favor)[, ]+/,'').replace(/[, ]+(?:please|por favor)$/,'').trim();
+ if(/^(?:leemelos|lee los mensajes|muestrame (?:los detalles|el detalle)|ver detalles|read them|show details)$/.test(n))return {action:'details'};
  const m=n.match(/^(?:abre|lee|muestrame|open|read) (?:el de |la de |el chat de |the one from )?(.+)$/);if(!m)return null;
- const norm=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
- const matches=receipt.chats.filter(c=>norm(c.chat)===m[1]||norm(c.chat).includes(m[1]));
- return matches.length===1?{action:'chat',app:matches[0].app,query:matches[0].chat}:matches.length>1?{action:'clarify',text:'Hay varios chats parecidos. Dime el nombre completo.'}:null;
+ let query=m[1],app=null;
+ const channel=query.match(/\s+(?:en|in|on)\s+(whatsapp|mensajes(?: de apple)?|messages|imessage)$/);
+ if(channel){app=channel[1]==='whatsapp'?'whatsapp':'messages';query=query.slice(0,channel.index).trim();}
+ if(!query)return null;
+ const available=receipt.chats.filter(c=>!app||c.app===app);
+ const exact=available.filter(c=>norm(c.chat)===query);
+ const matches=exact.length?exact:available.filter(c=>norm(c.chat).includes(query));
+ return matches.length===1?{action:'chat',app:matches[0].app,query:matches[0].chat}:matches.length>1?{action:'clarify',text:'Hay varios chats parecidos. Dime el nombre completo y si es WhatsApp o Mensajes.'}:null;
 }
 
 function lumiReviewText(results,en=false){
