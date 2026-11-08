@@ -9592,6 +9592,22 @@ html body.cala-thome::after{content:""; position:fixed; left:0; right:0; bottom:
 #caltHome .calt-grid .calt-tile:last-child:nth-child(odd) b{grid-column:2; margin:0; font-size:18px;}
 #caltHome .calt-grid .calt-tile:last-child:nth-child(odd) small{grid-column:2; -webkit-line-clamp:1;}
 
+/* ===== VIDEOS EN MENSAJES (7-nov-2026): su boton morado en el +, la burbuja con su portada, ▶ y la duracion ===== */
+.msg-adjuntar .ico.mo{background:#8e44ff;}
+.msg-video{position:relative; display:block; width:min(260px, 62vw); max-height:340px; margin:0 0 4px; border-radius:12px; overflow:hidden; background:#111; cursor:pointer; -webkit-tap-highlight-color:transparent;}
+.msg-video:not([style*="aspect-ratio"]){aspect-ratio:9/16;}
+.msg-video img, .msg-video video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; background:#111;}
+.msg-video video{object-fit:contain; z-index:2;}
+.msg-video-play{position:absolute; left:50%; top:50%; width:54px; height:54px; margin:-27px 0 0 -27px; border-radius:50%; background:rgba(0,0,0,.55); display:grid; place-items:center; box-shadow:0 0 0 2px rgba(255,255,255,.85);}
+.msg-video-play svg{width:24px; height:24px; margin-left:3px; fill:#fff;}
+.msg-video-dur{position:absolute; left:8px; bottom:7px; padding:2px 7px; border-radius:999px; background:rgba(0,0,0,.6); color:#fff; font:600 12px/1.3 -apple-system, var(--sf), sans-serif;}
+.msg-video.reproduciendo .msg-video-play, .msg-video.reproduciendo .msg-video-dur{display:none;}
+.msg-b.solo-foto .msg-video{margin:0;}
+/* la vista previa antes de mandar: con su ▶ encima */
+.msg-adj-prev.es-video{position:relative;}
+.msg-adj-prev.es-video::after{content:""; position:absolute; left:calc(12px + 37px); top:calc(8px + 37px); width:34px; height:34px; margin:-17px 0 0 -17px; border-radius:50%; pointer-events:none;
+  background:rgba(0,0,0,.55) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 6v12l9-6z' fill='white'/%3E%3C/svg%3E") center/18px no-repeat; box-shadow:0 0 0 2px rgba(255,255,255,.85);}
+
 .rdg-sin{margin-top:calc(2.75*var(--rdu)); font:400 calc(10.52*var(--rdu))/1.3 "Avenir Next", var(--sf); color:#8e92a2;}
 
 /* ---- la barra de abajo de cada pantalla (#rdAcc): Horas · Confirmar | Agregar turno; Gastos · Cámara | Galería | Enviar gasto ---- */
@@ -18390,7 +18406,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R241';
+  const APP_BUILD = '2026-11-07-R242';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -76404,6 +76420,100 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   setInterval(() => { try{ caltSync(); }catch(e){} }, 250);
   window.__calt = { sync: caltSync, modo: caltModo };
+  // ===== VIDEOS EN MENSAJES (7-nov-2026). Su pedido: "en mensajes agrega la opción de enviar videos en el chat" y "desde el icono de
+  // la cámara tomar foto o grabar video de un solo, como WhatsApp": la cámara y la galería dan foto o video, sin botón aparte. Sale como la foto: la burbuja con su primer cuadro y ▶; tocarla lo reproduce ahí mismo.
+  // Se sube al mismo balde 'mensajes' (fr-22 le deja videos de hasta 50 MB). Si pesa más, el teléfono lo achica a 720p antes de
+  // mandarlo (tarda lo que dura el video); si aun así no cabe, lo dice claro. Sin fr-22 la nube no lo acepta: dice que no se pudo.
+  const MSGV_MAX = 50 * 1024 * 1024;
+  const msgEsVideo = f => !!f && (/^video\//i.test(f.type || '') || /\.(mov|mp4|m4v|webm|3gp)$/i.test(f.name || ''));
+  const msgVideoDe = a => (a && a.local && /^blob:/.test(String(a.local))) ? a.local : (a && a.path ? msgFotoUrl(a.path) : '');
+  const msgVideoPosterDe = a => (a && a.poster_local && /^blob:/.test(String(a.poster_local))) ? a.poster_local : (a && a.poster ? msgFotoUrl(a.poster) : '');
+  const msgVDur = s => { s = Math.max(0, Math.round(+s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  function msgVideosHtml(adj){
+    return (Array.isArray(adj) ? adj : []).filter(a => a && a.tipo === 'video' && msgVideoDe(a)).map(a => {
+      const w = +a.ancho || 0, h = +a.alto || 0, p = msgVideoPosterDe(a);
+      return '<div class="msg-video" data-msg-video="' + esc(msgVideoDe(a)) + '"' + (w > 0 && h > 0 ? ' style="aspect-ratio:' + w + '/' + h + '"' : '') + '>'
+        + (p ? '<img alt="" loading="lazy" src="' + esc(p) + '" onerror="this.remove()">' : '')
+        + '<span class="msg-video-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>'
+        + (a.duracion ? '<span class="msg-video-dur">' + msgVDur(a.duracion) + '</span>' : '') + '</div>';
+    }).join('');
+  }
+  // el primer cuadro (la portada de la burbuja) y las medidas
+  function msgVideoLeer(file){
+    return new Promise((res, rej) => {
+      const v = document.createElement('video'), u = URL.createObjectURL(file);
+      let listo = false; const fin = (x, err) => { if(listo) return; listo = true; err ? rej(err) : res(x); };
+      v.muted = true; v.playsInline = true; v.preload = 'auto'; v.setAttribute('playsinline', '');
+      v.onloadedmetadata = () => { try{ v.currentTime = Math.min(0.1, (v.duration || 1) / 2); }catch(e){} };
+      v.onseeked = () => {
+        try{
+          const W = v.videoWidth || 640, H = v.videoHeight || 360, k = Math.min(1, 640 / Math.max(W, H));
+          const c = document.createElement('canvas'); c.width = Math.round(W * k); c.height = Math.round(H * k);
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          c.toBlob(b => fin({ url: u, poster: b, ancho: W, alto: H, duracion: v.duration || 0 }), 'image/jpeg', 0.72);
+        }catch(e){ fin({ url: u, poster: null, ancho: v.videoWidth, alto: v.videoHeight, duracion: v.duration || 0 }); }
+      };
+      v.onerror = () => fin(null, new Error('no se pudo leer'));
+      setTimeout(() => fin({ url: u, poster: null, ancho: v.videoWidth || 0, alto: v.videoHeight || 0, duracion: v.duration || 0 }), 8000);
+      v.src = u;
+    });
+  }
+  // achicarlo en el teléfono (720p, ~1.6 Mbps): se reproduce sin sonido al canvas y se graba otra vez; tarda lo que dura el video
+  async function msgVideoAchicar(file, info, avance){
+    if(typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream) throw new Error('sin achicar');
+    const tipo = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find(t => { try{ return MediaRecorder.isTypeSupported(t); }catch(e){ return false; } });
+    if(!tipo) throw new Error('sin achicar');
+    const v = document.createElement('video'); v.src = info.url; v.playsInline = true; v.setAttribute('playsinline', ''); v.muted = false;
+    await new Promise(r => { if(v.readyState >= 1) r(); else v.onloadedmetadata = r; });
+    const W = v.videoWidth, H = v.videoHeight, k = Math.min(1, 720 / Math.min(W, H));
+    const c = document.createElement('canvas'); c.width = Math.round(W * k / 2) * 2; c.height = Math.round(H * k / 2) * 2; const g = c.getContext('2d');
+    const stream = c.captureStream(30);
+    try{ const AC = window.AudioContext || window.webkitAudioContext; if(AC){ const ac = new AC(), src = ac.createMediaElementSource(v), dst = ac.createMediaStreamDestination(); src.connect(dst); dst.stream.getAudioTracks().forEach(t => stream.addTrack(t)); } }catch(e){}
+    const rec = new MediaRecorder(stream, { mimeType: tipo, videoBitsPerSecond: 1600000, audioBitsPerSecond: 96000 }), trozos = [];
+    rec.ondataavailable = e => { if(e.data && e.data.size) trozos.push(e.data); };
+    const hecho = new Promise(r => { rec.onstop = r; });
+    rec.start(1000);
+    let vivo = true; const pintar = () => { if(!vivo) return; try{ g.drawImage(v, 0, 0, c.width, c.height); }catch(e){} if(avance && v.duration) avance(v.currentTime / v.duration); requestAnimationFrame(pintar); };
+    await v.play(); pintar();
+    await new Promise(r => { v.onended = r; });
+    vivo = false; rec.stop(); await hecho;
+    return { blob: new Blob(trozos, { type: tipo.split(';')[0] }), mime: tipo.split(';')[0] };
+  }
+  async function msgVideoPoner(file){
+    const root = MSG.root; if(!root || !file) return;
+    const aviso = root.querySelector('.msg-aviso'); if(aviso) aviso.textContent = '';
+    let info = null;
+    try{ info = await msgVideoLeer(file); }catch(e){ if(aviso) aviso.textContent = 'No se pudo leer el video.'; return; }
+    let blob = file, mime = file.type || 'video/mp4';
+    if(file.size > MSGV_MAX){
+      try{
+        if(aviso) aviso.textContent = 'Preparando el video… 0%';
+        const r = await msgVideoAchicar(file, info, f => { if(aviso) aviso.textContent = 'Preparando el video… ' + Math.min(99, Math.round(f * 100)) + '%'; });
+        blob = r.blob; mime = r.mime;
+      }catch(e){ blob = null; }
+      if(aviso) aviso.textContent = '';
+      if(!blob || blob.size > MSGV_MAX){ try{ URL.revokeObjectURL(info.url); }catch(e){} if(aviso) aviso.textContent = 'El video es muy largo para mandarlo (máximo 50 MB, como 4 minutos). Grábalo más corto.'; return; }
+    }
+    const ext = /quicktime/.test(mime) ? 'mov' : (/webm/.test(mime) ? 'webm' : 'mp4');
+    if(MSG.adjunto && MSG.adjunto.url){ try{ URL.revokeObjectURL(MSG.adjunto.url); }catch(e){} }
+    MSG.adjunto = { video: true, blob, mime, ext, url: info.url, poster: info.poster, posterUrl: info.poster ? URL.createObjectURL(info.poster) : '', ancho: info.ancho, alto: info.alto, duracion: info.duracion };
+    msgPintarAdjunto();
+  }
+  async function msgSubirVideo(adj){
+    const out = { tipo: 'video', ancho: adj.ancho || 0, alto: adj.alto || 0, duracion: Math.round((adj.duracion || 0) * 10) / 10, peso: adj.blob.size };
+    if(adj.poster){ try{ out.poster = (await msgSubirArchivo(adj.poster, 'jpg', 'image/jpeg')).path; }catch(e){} }
+    out.path = (await msgSubirArchivo(adj.blob, adj.ext, adj.mime)).path;
+    return out;
+  }
+  // tocar la burbuja: se reproduce ahí mismo (el iPhone lo deja ver en grande con su botón)
+  document.addEventListener('click', e => {
+    const t = e.target && e.target.closest && e.target.closest('.msg-video[data-msg-video]'); if(!t || t.querySelector('video')) return;
+    e.preventDefault(); e.stopPropagation();
+    const v = document.createElement('video'); v.src = t.dataset.msgVideo; v.controls = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
+    const img = t.querySelector('img'); if(img) v.poster = img.src;
+    t.classList.add('reproduciendo'); t.appendChild(v); v.play().catch(() => {});
+  }, true);
+  window.__msgv = { poner: msgVideoPoner, html: msgVideosHtml };
   window.__rdx = { soltarYa: rdxSoltarYa, todo: rdxTodo, filas: rdxFilas, sumar: rdxSumar, activar: rdxActivar, otro: rdxOtro, hoja: () => rdxHojaHtml(rdxHojaDatos()), estado: RDX, son: RDX_SON };   // para las pruebas
   window.__rds = { todo: rdsTodo, estado: RDS };
   // ===================== (3-nov-2026, R129) MAPA DE HUMEDAD DE RD: sus 6 maquetas =====================
@@ -76769,7 +76879,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     + '<div class="msg-adj-prev" hidden><img alt=""><button type="button" class="msg-adj-quitar" aria-label="Quitar foto">✕</button></div>'
     // (R80) la barra de escribir de WhatsApp: + (Fotos, Cámara, Cliente) · la caja · cámara · micrófono (mantener apretado) / enviar
     + '<div class="msg-barra">'
-    +   '<div class="msg-adjuntar" hidden><button type="button" data-msg-adj="fotos"><span class="ico az" aria-hidden="true">' + MSG_ICO.fotos + '</span>Fotos</button><button type="button" data-msg-adj="camara"><span class="ico gr" aria-hidden="true">' + MSG_ICO.cam + '</span>Cámara</button><button type="button" data-msg-adj="casa"><span class="ico ve" aria-hidden="true">' + MSG_ICO.casa + '</span>Cliente</button><button type="button" data-msg-adj="trabajo" class="rdtj-mas"><span class="ico" aria-hidden="true" style="background:#e3242b"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18v13H3zM8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7M3 12.5h18"/></svg></span>Nuevo trabajo</button></div>'
+    +   '<div class="msg-adjuntar" hidden><button type="button" data-msg-adj="fotos"><span class="ico az" aria-hidden="true">' + MSG_ICO.fotos + '</span>Fotos y videos</button><button type="button" data-msg-adj="casa"><span class="ico ve" aria-hidden="true">' + MSG_ICO.casa + '</span>Cliente</button><button type="button" data-msg-adj="trabajo" class="rdtj-mas"><span class="ico" aria-hidden="true" style="background:#e3242b"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18v13H3zM8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7M3 12.5h18"/></svg></span>Nuevo trabajo</button></div>'
     +   '<button type="button" class="msg-mas" aria-label="Adjuntar">' + MSG_ICO.mas + '</button>'
     +   '<div class="msg-campo"><textarea class="msg-texto" rows="1" aria-label="Mensaje"></textarea></div>'
     +   '<button type="button" class="msg-cam" aria-label="Cámara" hidden>' + MSG_ICO.cam + '</button>'
@@ -76777,7 +76887,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     +   '<button type="button" class="msg-enviar" aria-label="Enviar">' + MSG_ICO.enviar + '</button>'
     +   '<div class="msg-rec" hidden><button type="button" class="msg-rec-borrar" aria-label="Borrar audio">' + MSG_ICO.basura + '</button><span class="msg-rec-punto" aria-hidden="true"></span><span class="msg-rec-t">0:00</span><span class="msg-rec-cancelar">' + MSG_ICO.atrasChico + '<span>Desliza para cancelar</span></span><button type="button" class="msg-rec-enviar" aria-label="Enviar audio">' + MSG_ICO.enviar + '</button></div>'
     +   '<div class="msg-rec-candado" hidden aria-hidden="true">' + MSG_ICO.candado + MSG_ICO.arriba + '</div>'
-    +   '<input type="file" class="msg-foto-in" accept="image/*" hidden><input type="file" class="msg-cam-in" accept="image/*" capture="environment" hidden>'
+    +   '<input type="file" class="msg-foto-in" accept="image/*,video/*" hidden><input type="file" class="msg-cam-in" accept="image/*,video/*" capture="environment" hidden>'
     + '</div>'
     + '<p class="clockhint msg-aviso"></p>'
     + '<div class="msg-foto-grande" hidden><img alt=""><button type="button" class="msg-foto-cerrar" aria-label="Cerrar">✕</button></div></section>';
@@ -77012,7 +77122,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     MSG.acc = null; h.hidden = false;
   }
   function msgInfoCerrar(){ const root = MSG.root; const h = root && root.querySelector('.msg-info'); if(h) h.hidden = true; }
-  const msgResumenTexto = m => { const a = Array.isArray(m.adjuntos) ? m.adjuntos : []; if(a.some(x => x && x.tipo === 'audio')) return 'Nota de voz'; return String(m.texto || (a.some(x => x && x.tipo === 'imagen') ? 'Foto' : '')); };
+  const msgResumenTexto = m => { const a = Array.isArray(m.adjuntos) ? m.adjuntos : []; if(a.some(x => x && x.tipo === 'audio')) return 'Nota de voz'; return String(m.texto || (a.some(x => x && x.tipo === 'video') ? 'Video' : (a.some(x => x && x.tipo === 'imagen') ? 'Foto' : ''))); };
   async function msgPonerFoto(file, para){
     if(!para) return; msgHojaCerrar();
     let blob = null; try{ blob = await fotoRecortar(file); }catch(e){ msgAvisoLista('No se pudo leer la foto.'); return; }
@@ -77131,6 +77241,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const a = Array.isArray(m.adjuntos) ? m.adjuntos : [], voz = a.find(x => x && x.tipo === 'audio'), foto = a.find(x => x && x.tipo === 'imagen');
     if(voz) return '<span class="msg-ico-voz">' + MSG_ICO.micChico + '</span>' + esc(msgDur(voz.duracion));
     if(foto) return MSG_ICO.fotoChica + esc(m.texto || 'Foto');
+    if(a.some(x => x && x.tipo === 'video')) return '🎬 ' + esc(m.texto || 'Video');
     return esc(m.texto || '');
   }
   // las palomitas como WhatsApp: relojito (saliendo), una gris (mandado), dos grises (ya le llegó), dos azules (leído; solo en pláticas de dos)
@@ -77207,7 +77318,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     return String(s).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
       .replace(/(^|[\s(>])((?:\+?1[ -]?)?\(?\d{3}\)?[ -]?\d{3}[ -]?\d{4})(?=$|[\s).,;<])/g, (a, b, c) => b + '<a href="tel:' + c.replace(/[^\d+]/g, '') + '">' + c + '</a>');
   }
-  const msgResumen = m => { if(m.borrado_at) return 'Se eliminó este mensaje'; const a = Array.isArray(m.adjuntos) ? m.adjuntos : [], v = a.find(x => x && x.tipo === 'audio'); if(v) return `🎤 Mensaje de voz (${msgDur(v.duracion)})`; return m.texto || (a.length ? '📷 Foto' : ''); };
+  const msgResumen = m => { if(m.borrado_at) return 'Se eliminó este mensaje'; const a = Array.isArray(m.adjuntos) ? m.adjuntos : [], v = a.find(x => x && x.tipo === 'audio'); if(v) return `🎤 Mensaje de voz (${msgDur(v.duracion)})`; return m.texto || (a.some(x => x && x.tipo === 'video') ? '🎬 Video' : (a.length ? '📷 Foto' : '')); };
   function msgCitaHtml(id){
     const o = MSG.lista.find(x => x.id === id); const n = o ? (msgMio(o) ? 'Tú' : o.de_nombre) : '';
     const f = o && !o.borrado_at && Array.isArray(o.adjuntos) ? o.adjuntos.find(a => a && a.tipo === 'imagen' && msgFotoDe(a)) : null;
@@ -77226,7 +77337,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const fotosA = adj.filter(a => a && a.tipo === 'imagen' && msgFotoDe(a)), voz = adj.find(a => a && a.tipo === 'audio' && msgAudioDe(a));
     const reac = (MSG.reacciones.get(m.id) || []).length > 0;
     const clases = 'msg-b ' + (mio ? 'out' : 'in') + (inicio ? ' inicio' : '') + (fij ? ' fijado' : '') + (m.borrado_at ? ' borrado' : '')
-      + (fotosA.length ? ' foto' : '') + (fotosA.length && !m.texto && !m.casa ? ' solo-foto' : '') + (voz ? ' voz' : '') + (reac ? ' con-reac' : '') + (MSG.acc === m.id ? ' elegida' : '') + (m.tipo === 'peticion' ? ' pet' : '');
+      + ((fotosA.length || adj.some(a => a && a.tipo === 'video')) ? ' foto' : '') + ((fotosA.length || adj.some(a => a && a.tipo === 'video')) && !m.texto && !m.casa ? ' solo-foto' : '') + (voz ? ' voz' : '') + (reac ? ' con-reac' : '') + (MSG.acc === m.id ? ' elegida' : '') + (m.tipo === 'peticion' ? ' pet' : '');
     const cab = '<div class="' + clases + '" data-msg-id="' + esc(m.id) + '">';
     const meta = '<span class="msg-meta">' + (m.editado_at ? '<span class="msg-editado">editado</span>' : '') + (fij ? '<span class="msg-meta-pin" aria-label="Fijado">' + MSG_ICO.pin + '</span>' : '') + '<span class="msg-hora">' + esc(hora) + '</span>' + (mio ? msgTicks(m) : '') + '</span>';
     if(m.borrado_at) return cab + '<span class="msg-txt msg-borrado-t">' + MSG_ICO.prohibido + '<i>Se eliminó este mensaje</i></span>' + meta + '</div>';
@@ -77235,7 +77346,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       + (!mio && grupo && inicio ? '<span class="msg-de" style="color:' + msgColorDe(m.de_nombre) + '">' + esc(m.de_nombre) + '</span>' : '')
       + msgPetCabHtml(m)
       + (m.responde_a ? msgCitaHtml(m.responde_a) : '')
-      + fotos
+      + fotos + msgVideosHtml(adj)
       + (voz ? msgVozHtml(m, voz, mio) : '')
       + (m.casa ? (cp => '<span class="msg-casa">' + MSG_ICO.casaChica + '<span>' + esc(cp.n) + '</span></span>' + (cp.d ? '<span class="msg-casa-dir">' + esc(cp.d) + '</span>' : ''))(msgCasaPartes(m.casa)) : '')
       + (m.texto ? '<span class="msg-txt">' + (m.tipo === 'peticion' ? esc(msgPetSinTipo(m)) : msgLinkify(esc(m.texto))) + '</span>' : '')
@@ -77287,7 +77398,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   function msgPintarAdjunto(){
     const root = MSG.root; if(!root) return; const p = root.querySelector('.msg-adj-prev'); if(!p) return;
-    p.hidden = !MSG.adjunto; if(MSG.adjunto) p.querySelector('img').src = MSG.adjunto.url;
+    p.hidden = !MSG.adjunto; if(MSG.adjunto) p.querySelector('img').src = MSG.adjunto.video ? (MSG.adjunto.posterUrl || '') : MSG.adjunto.url; p.classList.toggle('es-video', !!(MSG.adjunto && MSG.adjunto.video));
     msgPintarBotones();
   }
   async function msgReaccionar(id, emoji){
@@ -78736,7 +78847,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const tmp = { id: 'tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), _pendiente: true,
       de_user_id: yo.startsWith('c:') ? yo.slice(2) : null, de_casual_id: yo.startsWith('t:') ? yo.slice(2) : null, de_nombre: 'Yo',
       para_user_id: key.startsWith('c:') ? key.slice(2) : null, para_casual_id: key.startsWith('t:') ? key.slice(2) : null, para_grupo_id: key.startsWith('g:') ? key.slice(2) : null, para_todos: key === 'todos',
-      casa, texto, responde_a: responde, adjuntos: adj ? [{ tipo: 'imagen', local: adj.url, ancho: adj.ancho, alto: adj.alto }] : [], created_at: new Date().toISOString(), leido_at: null };
+      casa, texto, responde_a: responde, adjuntos: adj ? [adj.video ? { tipo: 'video', local: adj.url, poster_local: adj.posterUrl, ancho: adj.ancho, alto: adj.alto, duracion: adj.duracion } : { tipo: 'imagen', local: adj.url, ancho: adj.ancho, alto: adj.alto }] : [], created_at: new Date().toISOString(), leido_at: null };
     MSG.pend.push(tmp); MSG.respondiendo = null; MSG.adjunto = null; MSG.cajaDe = null;
     ta.value = ''; ta.style.height = ''; aviso.textContent = ''; msgPintarCitaBarra(); msgPintarAdjunto(); msgPintarBotones(); msgPintarChat();
     if(notaCaja) aviso.textContent = notaCaja;   // (Cajero rev. 2, E) lo que ya se anotó de esa petición
@@ -78744,7 +78855,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const box = root.querySelector('.msg-burbujas'); if(box) box.scrollTop = box.scrollHeight;
     let noG = false;   // (R160) "no estás en este grupo"
     try{
-      const adjuntos = adj ? [await msgSubirFoto(adj.blob)] : [];
+      const adjuntos = adj ? [adj.video ? await msgSubirVideo(adj) : await msgSubirFoto(adj.blob)] : [];
       const fila = await msgEnviar(texto, { casa, responde_a: responde, adjuntos });
       if(fila && !MSG.lista.some(x => x.id === fila.id)) MSG.lista.unshift(fila);
       if(adj){ try{ URL.revokeObjectURL(adj.url); }catch(e){} }
@@ -79676,7 +79787,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       box1.addEventListener('contextmenu', (e) => { const b = e.target.closest('.msg-b'); if(!b || String(b.dataset.msgId).startsWith('tmp-')) return; e.preventDefault(); MSG.toqueLargoAt = Date.now(); MSG.acc = b.dataset.msgId; msgPintarChat(); });
       // (fr-11) la foto: se achica en el teléfono (1600 px) antes de subirla; la flecha ⌄ aparece al deslizar hacia arriba
       const fotoPoner = async (f) => { try{ const blob = await ctAchicar(f, 1600, 0.82); MSG.adjunto = Object.assign({ blob, url: URL.createObjectURL(blob) }, await msgMedidas(blob)); msgPintarAdjunto(); }catch(err){ root.querySelector('.msg-aviso').textContent = 'No se pudo leer la foto.'; } };
-      const fotoElegida = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if(f) fotoPoner(f); };
+      const fotoElegida = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if(f){ if(msgEsVideo(f)) msgVideoPoner(f); else fotoPoner(f); } };   // (7-nov) foto o video
       // (2-nov-2026, R111, su pedido: "estoy tratando de pegar una foto y no lo pega") Con una foto copiada, el iPhone sí ofrece
       // "Pegar" en la caja y el evento trae la foto completa (probado en el simulador: files=1 image/png), pero nadie la recogía.
       // Ahora una foto pegada (o soltada) se vuelve la foto del mensaje, igual que escogerla en Fotos. El texto se pega como siempre.
