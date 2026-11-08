@@ -18618,7 +18618,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R268';
+  const APP_BUILD = '2026-11-08-R269';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69095,6 +69095,40 @@ return {order,extract};
   }
 
 
+function lumiMessageDigest(results,workspace=null,en=false){
+ const sections=[];
+ for(const r of results){
+  const label=r.app==='whatsapp'?'WhatsApp':en?'Apple Messages':'Mensajes';
+  const certain=[...new Set(r.candidates.filter(c=>!c.uncertain).map(c=>c.chat))];
+  const uncertain=[...new Set(r.candidates.filter(c=>c.uncertain).map(c=>c.chat))];
+  const unavailable=r.checked===0&&r.errors.length>0;
+  let summary=unavailable?(en?'Could not check. Pending replies are unknown.':'No pude revisar. No sé si hay respuestas pendientes.'):certain.length?(en?'Possible replies: ':'Posibles respuestas: ')+certain.slice(0,2).join(', ')+(certain.length>2?(en?' and '+(certain.length-2)+' more.':' y '+(certain.length-2)+' más.') :'.'):(en?'No clear request found in the chats checked.':'Sin solicitudes claras en los chats revisados.');
+  if(!unavailable&&uncertain.length)summary+=en?' Some attachments or later replies need checking.':' Hay adjuntos o respuestas posteriores por comprobar.';
+  if(!unavailable)summary+=en?' Partial review.':' Revisión parcial.';
+  sections.push({app:r.app,label,summary,detail:lumiReviewText([r],en)});
+ }
+ if(workspace!==null){
+  const count=/mensajes.*?(?:respuesta|responder)[^\n]*?:\s*(\d+)/i.exec(workspace);
+  const unavailable=/^No pude revisar Workspace/.test(workspace);
+  const summary=unavailable?(en?'Could not check.':'No pude revisar.'):count?(en?count[1]+' items to check; not all require a reply.':count[1]+' elementos por revisar; no todos requieren respuesta.'):(en?'Review available; check the details before replying.':'Revisión disponible; comprueba el detalle antes de responder.');
+  sections.push({app:'workspace',label:'Workspace',summary,detail:workspace});
+ }
+ return sections;
+}
+function lumiRenderMessageDigest(sections,owner){
+ const log=document.getElementById('asConversacion');if(!log)return;
+ const root=document.createElement('div');root.className='as-message-digest';root.style.cssText='display:grid;gap:8px;margin:12px 0;max-width:100%;';
+ for(const section of sections){
+  const card=document.createElement('section');card.style.cssText='border:1px solid #475569;border-radius:14px;padding:12px;background:rgba(100,116,139,.12);';
+  const title=document.createElement('strong');title.textContent=section.label;
+  const summary=document.createElement('p');summary.textContent=section.summary;summary.style.cssText='margin:6px 0;line-height:1.4';
+  const button=document.createElement('button');button.textContent='Detalle de '+section.label;button.style.cssText='padding:8px 12px;border-radius:8px;';
+  button.onclick=()=>{if(owner!==SES.user_id+'|'+SES.company_id||!AS.abierto)return;asMostrarRespuesta(section.label+'\n'+section.detail);};
+  card.appendChild(button);root.appendChild(card);
+ }
+ log.appendChild(root);asChatFollow(log,true);
+}
+
   async function asRevisionCompleta(order,texto){
     if(AS_DESKTOP_BUSY)return;
     const owner=SES.user_id+'|'+SES.company_id,epoch=AS.requestEpoch=(AS.requestEpoch||0)+1;
@@ -69125,7 +69159,8 @@ return {order,extract};
       }
       if(!active())return;
       LUMI_REVIEW_DETAIL={owner,at:Date.now(),text:parts.join('\n\n'),chats:reviewResults.flatMap(r=>[...new Set(r.candidates.map(c=>c.chat))].map(chat=>({app:r.app,chat})))};
-      const answer=brief.join(' ')+(order.english?' Say “read them” or name a chat to see the details.':' Dime «léemelos» o el nombre del chat para ver el detalle.');asMostrarRespuesta(answer);asAccionVisible('Revisión terminada; consulta la cobertura de cada fuente','done');
+      const sections=lumiMessageDigest(reviewResults,order.workspace?parts[0]||'No pude revisar Workspace.':null,order.english);
+      const answer=(sections.length?sections.map(x=>x.label+': '+x.summary).join('\n\n'):brief.join(' '))+(order.english?' Say “read them” or name a chat to see the details.':' Dime «léemelos» o el nombre del chat para ver el detalle.');asMostrarRespuesta(answer);lumiRenderMessageDigest(sections,owner);asAccionVisible('Revisión terminada; consulta la cobertura de cada fuente','done');
       asRecordarAccionMac(texto,'Revisión de solo lectura mostrada en pantalla. Las sugerencias son borradores; no se envió ninguna respuesta.');
       asHablar(answer,asSeguirOyendo);
     }catch(e){if(active()){asMostrarRespuesta('No pude terminar la revisión. Lo revisado hasta aquí no confirma todos los pendientes.');asAccionVisible('Revisión incompleta','error');}}
