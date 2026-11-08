@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R286';
+  const APP_BUILD = '2026-11-08-R287';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69008,7 +69008,7 @@ async function lumiRunPageSequence(pages,text){
     finally{AS_BROWSER_BUSY=false;}
   }
 
-let LUMI_SCREEN_CONTEXT=null;
+let LUMI_SCREEN_CONTEXT=null,LUMI_SCREEN_PENDING=null;
 function lumiRelativeScreen(screens,direction,current){
  const valid=screens.filter(s=>Number.isInteger(s.index)&&Number.isFinite(s.x)&&Number.isFinite(s.y));
  const origin=valid.find(s=>s.index===current)||valid.find(s=>s.main);
@@ -69023,6 +69023,11 @@ function lumiRelativeScreen(screens,direction,current){
 
 function lumiScreenOrder(text){
  let s=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.,]/g,' ').replace(/\s+/g,' ');
+ const owner=typeof SES!=='undefined'?SES.user_id+'|'+SES.company_id:null;
+ if(LUMI_SCREEN_PENDING?.owner===owner&&Date.now()-LUMI_SCREEN_PENDING.at<120000){
+  const choice=/^(?:(?:la|screen|pantalla) )?(\d+)$/.exec(s);if(choice)return {target:choice[1]};
+ }
+ s=s.replace(/^la (?:de )?(abajo|arriba|izquierda|derecha)$/, 'muestrame la pantalla $1');
  if(/^(?:no en esa no en la otra|en esa no en la otra|no esa la otra|not that one the other one)$/.test(s))return {direction:'other'};
  if(!s||s.length>500||/\b(no|not|don't|dont|nunca|never|cancel|cancelar)\b/.test(s))return null;
  s=s.replace(/^(oye |hey )?lumi\s+/,'').replace(/^(por favor|please)\s+/,'').trim();
@@ -69082,10 +69087,10 @@ function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=D
         const list=await client.capture('list');if(!active())return;
         const previous=LUMI_SCREEN_CONTEXT?.owner===owner?LUMI_SCREEN_CONTEXT.screen:null;
         const resolved=lumiRelativeScreen(list.screens||[],order.direction,previous);
-        if(resolved.error)throw Error(resolved.error);order={target:resolved.target};
+        if(resolved.error){LUMI_SCREEN_PENDING={owner,at:Date.now()};throw Error(resolved.error);}order={target:resolved.target};
       }
       const r=await client.capture(order.target);if(!active())return;
-      if(r.status==='captured')LUMI_SCREEN_CONTEXT={owner,screen:r.screen};
+      if(r.status==='captured'){LUMI_SCREEN_CONTEXT={owner,screen:r.screen};LUMI_SCREEN_PENDING=null;}
       if(r.status==='needs_screen_permission')throw Error('Falta autorizar las capturas para LumiControl en la Mac: Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla. Todavía no tomé ninguna captura.');
       const log=document.getElementById('asConversacion');if(!log)throw Error('La conversación está cerrada.');
       const card=document.createElement('section');card.className='as-chat-docs';card.style.cssText='padding:12px;border:1px solid #345;border-radius:12px;margin:10px 0;';
