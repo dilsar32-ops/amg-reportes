@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R283';
+  const APP_BUILD = '2026-11-08-R284';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68456,8 +68456,8 @@ function createLumiVoice({call,session,play,observe=()=>{},stream=true,now=Date.
   if(cache&&cache.owner===owner(s)&&now()-cache.at<30000)return cache.device;
   const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(s.company_id)+'&clave=eq.lumi_local_model_device');
   const d=rows?.[0]?.valor;
-  const valid=d?.userId===s.user_id&&d.voice==='calida-tranquila-v1'&&d.available&&now()-Date.parse(d.updatedAt)<180000;
-  const value=valid?d:null;cache={owner:owner(s),at:now(),device:value};return value;
+  const valid=d?.userId===s.user_id&&d.voice==='calida-tranquila-v1'&&!!d.workerId&&Number.isFinite(Date.parse(d.updatedAt))&&now()-Date.parse(d.updatedAt)>=0&&now()-Date.parse(d.updatedAt)<180000;
+  const value=valid?d:null;cache=value?{owner:owner(s),at:now(),device:value}:null;return value;
  }
  async function speech(text,language,s,e,prepareGate=Promise.resolve(),playGate=Promise.resolve(),releaseNext=()=>{}){
   const began=now(),attempt=++trace;const mark=(stage,extra={})=>{try{observe({trace:attempt,stage,ms:Math.max(0,now()-began),...extra});}catch{}};mark('start');
@@ -68688,7 +68688,7 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
       asPrepararAudio();
       const voice=asVozLocal();if(!encolar)voice.cancel();
       AS.vozEnVuelo=(AS.vozEnVuelo||0)+1;
-      let audioFailure='La voz 1 no está disponible ahora. Comprueba que la Mac esté conectada.';
+      let audioFailure='No pude confirmar una conexión reciente con la voz 1 de tu Mac.';
       try{
         const result=await voice.speak(t,asVozEn()?'English':'Spanish');
         if(result!=='unavailable'){
@@ -68700,6 +68700,8 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
       finally{AS.vozEnVuelo=Math.max(0,(AS.vozEnVuelo||1)-1);}
       AS.esperaFin=false; AS.finPendiente=false; AS.hablaHasta=Date.now();
       const notice=$('#asVozAviso');if(notice){notice.textContent=audioFailure+' La respuesta sigue en la conversación.';notice.hidden=false;}asAudioRepetirBoton().hidden=false;
+      if(window.Cara){try{Cara.hablando(false);}catch{}}
+      asEstado('esperando',AS.micMuted?'Micrófono silenciado. Puedes escribir.':'');
       return 0; // Never substitute another speaker for the owner's selected voice.
     }
     const S = asPlugin();
