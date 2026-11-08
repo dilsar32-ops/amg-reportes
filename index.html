@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R299';
+  const APP_BUILD = '2026-11-08-R300';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70076,6 +70076,96 @@ function lumiBasicWorkspaceReply({question,balance,verifiedAt,now=Date.now(),sam
  return {action:'propose',text};
 }
 
+function lumiBasicNorm(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¿?.,!]/g,' ').replace(/\s+/g,' ').trim();}
+function lumiBasicQuestion(question,people){
+ let t=lumiBasicNorm(question).replace(/^(?:hola )?(?:jefe |lumi )?/,'').replace(/^(?:una pregunta |una duda )/,'');
+ const m=t.match(/^(?:(?:usted |ustedes |nosotros )?(?:le |les )?(?:debe|deben|debemos)|(?:do we|do you) owe)(?: (?:a|to))? (.+)$/);
+ if(!m)return {action:'review',reason:'unsupported_question'};
+ const q=m[1],exact=people.filter(p=>lumiBasicNorm(p.full_name)===q),matches=exact.length?exact:people.filter(p=>lumiBasicNorm(p.full_name).split(' ')[0]===q);
+ if(matches.length!==1)return {action:'review',reason:'ambiguous_person'};
+ if(!/^[\p{L} .'-]{1,80}$/u.test(matches[0].full_name))return {action:'review',reason:'invalid_name'};
+ return {action:'balance',person:matches[0]};
+}
+function lumiBasicCandidate(m,{owner,company,since,now},all){
+ if(!m||m.company_id!==company||m.para_user_id!==owner||!m.de_user_id||m.de_user_id===owner||m.para_grupo_id||m.para_todos||m.borrado_at||m.peticion||(m.adjuntos||[]).length)return false;
+ const time=Date.parse(m.created_at);if(!Number.isFinite(time)||time<=since||time>now||now-time>20*60000)return false;
+ // Any later intervention makes this request stale: do not answer old context.
+ return !all.some(x=>!x.borrado_at&&x.id!==m.id&&Date.parse(x.created_at)>=time&&((x.de_user_id===owner&&x.para_user_id===m.de_user_id)||(x.de_user_id===m.de_user_id&&x.para_user_id===owner)));
+}
+async function lumiBasicMessageId(owner,id){const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('lumi-basic-v1|'+owner+'|'+id)));bytes[6]=(bytes[6]&15)|80;bytes[8]=(bytes[8]&63)|128;const h=Array.from(bytes.slice(0,16),x=>x.toString(16).padStart(2,'0')).join('');return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);}
+
+let LUMI_BASIC_BUSY=false;
+function lumiBasicOwner(){return SES?.role==='manager'?SES.user_id+'|'+SES.company_id:null;}
+async function lumiBasicGet(route,owner){const r=await authFetch(route,{headers:cloudHeaders(),signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('No se pudo comprobar la información.');const rows=await r.json();if(lumiBasicOwner()!==owner||!Array.isArray(rows))throw Error('La sesión cambió o los datos no son válidos.');return rows;}
+async function lumiBasicAll(route,owner){let all=[];for(let off=0;off<20000;off+=500){const p=await lumiBasicGet(route+'&order=id.asc&limit=500&offset='+off,owner);all.push(...p);if(p.length<500)return all;}throw Error('La revisión quedó incompleta.');}
+async function lumiBasicBalance(person,owner){
+ const company=encodeURIComponent(SES.company_id),uid=encodeURIComponent(person.id),scope='&company_id=eq.'+company+'&user_id=eq.'+uid;
+ const [rows,rates,kind,gastos,payments]=await Promise.all([
+ lumiBasicAll('/rest/v1/time_entries?select=id,user_id,clock_in,clock_out,confirmed,paid_at,paid_amount,work_kind'+scope+'&paid_at=is.null',owner),
+ lumiBasicGet('/rest/v1/crew_rates?select=rate'+scope,owner),
+ lumiBasicGet('/rest/v1/crew_kind_rates?select=rate&user_id=eq.'+uid+'&work_kind=eq.mudanza',owner),
+ lumiBasicAll('/rest/v1/expenses?select=id,amount&company_id=eq.'+company+'&created_by=eq.'+uid+'&work_kind=eq.restauracion&approved_at=not.is.null&reimbursed_at=is.null',owner),
+ crewPaymentsFor(scope)]);
+ if(lumiBasicOwner()!==owner||!payments||rates.length>1||kind.length>1||rows.some(r=>!r.confirmed||!r.clock_out))throw Error('Faltan datos confirmados para responder.');
+ const rate=rates[0]?.rate==null?null:Number(rates[0].rate),mg=kind[0]?.rate==null?null:Number(kind[0].rate);
+ if((rate!==null&&!Number.isFinite(rate))||(mg!==null&&!Number.isFinite(mg))||gastos.some(g=>!Number.isFinite(Number(g.amount))))throw Error('Importes incompletos.');
+ const pay=payFor(rows,rate,mg);if(pay.sinPrecio||!Number.isFinite(pay.amount))throw Error('Falta una tarifa.');
+ const given=teamGivenFrom(payments)[person.id]||0;
+ return Math.round((pay.amount+gastos.reduce((a,g)=>a+Number(g.amount),0)-given)*100)/100;
+}
+async function lumiBasicReview({automatic=false}={}){
+ const owner=lumiBasicOwner();if(!owner)throw Error('Esta revisión requiere Manager.');
+ const company=SES.company_id,uid=SES.user_id,now=Date.now(),base='/rest/v1/mensajes?select=*&company_id=eq.'+encodeURIComponent(company)+'&order=created_at.desc&limit=400';
+ const settings=await lumiBasicGet('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(company)+'&clave=eq.'+encodeURIComponent('lumi_basic_replies_'+uid),owner);
+ const policy=settings[0]?.valor;
+ if(automatic&&(!policy?.enabled||policy.owner!==owner||!Number.isFinite(policy.since)))return [];
+ const [all,people]=await Promise.all([lumiBasicGet(base,owner),lumiBasicAll('/rest/v1/profiles?select=id,full_name,status&company_id=eq.'+encodeURIComponent(company),owner)]);
+ const result=[];
+ for(const m of all.slice(0,50)){
+  if(!lumiBasicCandidate(m,{owner:uid,company,since:automatic?policy.since:0,now},all))continue;
+  if(!people.some(p=>p.id===m.de_user_id&&p.status!=='removed'))continue;
+  const parsed=lumiBasicQuestion(m.texto,people.filter(p=>p.status!=='removed'));
+  if(parsed.action!=='balance'){if(!automatic)result.push({sender:m.de_nombre||'Un compañero',status:'review'});continue;}
+  let reserved=false;
+  try{
+   const balance=await lumiBasicBalance(parsed.person,owner);
+   const reply=lumiBasicWorkspaceReply({question:m.texto,balance,verifiedAt:Date.now(),person:parsed.person.full_name,sameCompany:true,uniquePerson:true});
+   if(reply.action!=='propose'||lumiPrivatePayrollReply(reply.text))throw Error('La consulta necesita revisión.');
+   if(!automatic){result.push({sender:m.de_nombre||'Un compañero',status:'proposal',text:reply.text});continue;}
+   // Read current context again, immediately before sending. Stable ID prevents cross-device duplicates.
+   const fresh=await lumiBasicGet(base,owner);if(!lumiBasicCandidate(m,{owner:uid,company,since:policy.since,now:Date.now()},fresh))continue;
+   const current=fresh.find(x=>x.id===m.id);if(!current||current.texto!==m.texto||current.editado_at!==m.editado_at)continue;
+   const id=await lumiBasicMessageId(owner,m.id);
+   const row={id,company_id:company,de_user_id:uid,de_nombre:String(SES.full_name||SES.name||'Manager'),para_user_id:m.de_user_id,para_nombre:m.de_nombre||'',texto:reply.text,responde_a:m.id,para_todos:false};
+   if(lumiBasicOwner()!==owner)throw Error('La sesión cambió.');
+   const claim=await authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:Object.assign(cloudHeaders(),{Prefer:'resolution=ignore-duplicates,return=representation'}),body:JSON.stringify({company_id:company,clave:'lumi_basic_claim_'+uid+'_'+m.id,valor:{owner,message:m.id,reply:id,state:'reserved',at:Date.now()}}),signal:AbortSignal.timeout(15000)});
+   if(!claim.ok)throw Error('No se pudo reservar el envío.');const claimed=await claim.json();if(!Array.isArray(claimed)||claimed.length!==1)continue;reserved=true;
+   if(lumiBasicOwner()!==owner)throw Error('La sesión cambió.');
+   const sent=await authFetch('/rest/v1/mensajes?on_conflict=id',{method:'POST',headers:Object.assign(cloudHeaders(),{Prefer:'resolution=ignore-duplicates,return=representation'}),body:JSON.stringify(row),signal:AbortSignal.timeout(15000)});
+   if(!sent.ok)throw Error('No se confirmó el envío.');
+   const confirm=await lumiBasicGet('/rest/v1/mensajes?select=id,texto,de_user_id,para_user_id&company_id=eq.'+encodeURIComponent(company)+'&id=eq.'+id,owner);
+   if(confirm.length!==1||confirm[0].texto!==reply.text||confirm[0].para_user_id!==m.de_user_id||confirm[0].de_user_id!==uid)throw Error('El envío necesita revisión.');
+   result.push({sender:m.de_nombre||'Un compañero',status:'sent',text:reply.text});
+  }catch(e){if(!automatic||reserved)result.push({sender:m.de_nombre||'Un compañero',status:'review',reason:e.message});}
+ }
+ return result;
+}
+async function lumiBasicTick(){if(LUMI_BASIC_BUSY||document.hidden||!lumiBasicOwner())return;LUMI_BASIC_BUSY=true;try{const rows=await lumiBasicReview({automatic:true});for(const r of rows)lumiNoticeSay(r.status==='sent'?'Respondí a '+r.sender+' en Workspace: '+r.text:'No pude confirmar la respuesta a '+r.sender+' en Workspace. Necesita revisión; no la reenviaré automáticamente.');}catch{}finally{LUMI_BASIC_BUSY=false;}}
+setInterval(lumiBasicTick,30000);
+async function asBasicWorkspace(texto){
+ const t=lumiBasicNorm(texto),activate=/^(?:activa|activar|enable) (?:las )?respuestas basicas(?: de| en)? workspace$/.test(t);
+ const check=t.match(/^(?:comprueba|verifica) si le debemos a (.+) sin (?:mostrar|compartir) (?:el monto|montos)$/);
+ const review=/(?:workspace)/.test(t)&&/(?:preguntas|consultas|mensajes)/.test(t)&&/(?:revisa|revisar|podemos responder|puedes responder)/.test(t);
+ if(!activate&&!review&&!check)return false;
+ const owner=lumiBasicOwner();asPararOido();asCallar();asTranscribir(texto);if(!owner){asMostrarRespuesta('Esta acción requiere Manager.');return true;}
+ AS.enviando=true;try{let text;
+ if(check){const people=await lumiBasicAll('/rest/v1/profiles?select=id,full_name,status&company_id=eq.'+encodeURIComponent(SES.company_id),owner);const parsed=lumiBasicQuestion('le debemos a '+check[1],people.filter(p=>p.status!=='removed'));if(parsed.action!=='balance')throw Error('No pude identificar a una sola persona.');const balance=await lumiBasicBalance(parsed.person,owner);const answer=lumiBasicWorkspaceReply({question:'le debemos a '+parsed.person.full_name,balance,verifiedAt:Date.now(),sameCompany:true,uniquePerson:true,person:parsed.person.full_name});if(answer.action!=='propose')throw Error('No pude verificar el saldo.');text=answer.text+' No envié ningún mensaje.';}
+ else if(activate){const row={company_id:SES.company_id,clave:'lumi_basic_replies_'+SES.user_id,valor:{owner,enabled:true,since:Date.now(),version:1}};const r=await authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:Object.assign(cloudHeaders(),{Prefer:'resolution=merge-duplicates'}),body:JSON.stringify(row)});if(!r.ok)throw Error('No se pudo activar.');text='Activé respuestas básicas para preguntas nuevas y directas de Workspace sobre si existe saldo pendiente. Consultaré los datos sin compartir cantidades. Los grupos, solicitudes de pago y preguntas ambiguas quedan para revisión. Funciona mientras Workspace está abierto y visible.';}
+ else{const rows=await lumiBasicReview();text=rows.length?rows.slice(0,5).map(r=>r.sender+': '+(r.status==='proposal'?r.text:'Necesita revisión; no envié nada.')).join('\n'):'No encontré consultas básicas recientes sin respuesta en los mensajes revisados. No envié nada.';}
+ if(owner===lumiBasicOwner()){asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);}
+ }catch(e){if(owner===lumiBasicOwner()){asMostrarRespuesta(e.message);asSeguirOyendo();}}finally{AS.enviando=false;}return true;
+}
+
 let LUMI_MESSAGE_DRAFT=null,LUMI_MESSAGE_CONTEXT=null;
 async function asComposeMessage(command,texto){
  const owner=SES.user_id+'|'+SES.company_id;
@@ -70158,6 +70248,7 @@ async function asCommercialQuote(order,texto){
       const explicit=/^(?:lee|leeme|léeme|revisa|read) (?:el chat |el grupo |the chat )?(?:de |con |with )?(.+?) (?:en|in|on) (whatsapp|mensajes normales|mensajes|messages)(?: y dime qu[eé] (?:contestaron|respondieron|dijeron)| and tell me what they said)?[.!?]*$/i.exec(texto);
       if(explicit&&!/\b(envia|manda|send|borra|delete)\b/i.test(explicit[1])){asTranscribir(texto);await asEscritorioMac({app:/^whatsapp$/i.test(explicit[2])?'whatsapp':'messages',action:'read_chat',query:explicit[1].trim()});return;}
     }
+    if(!dictando&&!AS.conf&&!AS.pregunta&&(await asBasicWorkspace(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asInboxPending(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLearnReply(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asReplyAdvice(texto)))return;
