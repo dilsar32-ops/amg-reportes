@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R296';
+  const APP_BUILD = '2026-11-08-R297';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69916,11 +69916,44 @@ function lumiReplyAdvice(text,receipt,owner,now=Date.now()){
  return pending.slice(-3).map(c=>'En '+c.chat+': '+(c.draft?'Podrías responder: «'+c.draft+'»':'Necesito revisar más contexto antes de redactar.')).join('\n')+'\nSon propuestas; no envié nada.';
 }
 let LUMI_REPLY_EVIDENCE=null;
-function asReplyAdvice(texto){
+let LUMI_BRAIN_PROPOSAL=null;
+async function lumiBrainRequest(payload){
+ const user=SES.user_id,company=SES.company_id,owner=user+'|'+company;
+ if(SES.role!=='manager')throw Error('Se requiere Manager.');
+ const same=()=>SES.role==='manager'&&owner===SES.user_id+'|'+SES.company_id&&AS.abierto;
+ const headers=cloudHeaders();
+ const call=async(url,init={})=>{const r=await authFetch(url,{...init,headers:{...headers,...init.headers},signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('No pude conectar con la Mac.');const t=await r.text();return t?JSON.parse(t):null;};
+ const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(company)+'&clave=eq.lumi_local_model_device');const d=rows?.[0]?.valor;
+ if(!same()||!d?.available||d.userId!==user||Date.now()-Date.parse(d.updatedAt)>180000)throw Error('La Mac no está disponible.');
+ const id=crypto.randomUUID(),route='/rest/v1/lumi_model_jobs?id=eq.'+id;
+ await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:user,company_id:company,worker_id:d.workerId,state:'queued',payload:{...payload,local_profile:'lumi_reply_brain'}})});
+ try{const until=Date.now()+65000;while(Date.now()<until){if(!same())throw Error('La sesión cambió.');const j=(await call(route+'&select=state,result'))?.[0];if(j?.state==='failed')throw Error('No pude preparar una sugerencia con el modelo local.');if(j?.state==='done'){const r=j.result?.data;if(!r||r.sent!==false)throw Error('Respuesta no válida.');return r;}await new Promise(r=>setTimeout(r,500));}throw Error('La sugerencia tardó demasiado.');}
+ finally{if(same())await call(route,{method:'DELETE'}).catch(()=>{});}
+}
+async function asReplyAdvice(texto){
+ if(!lumiReplyAdviceOrder(texto))return false;
  const owner=SES.user_id+'|'+SES.company_id;
- const reply=lumiReplyAdvice(texto,LUMI_REPLY_EVIDENCE,owner);
- if(reply===null)return false;
- asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(reply);asRecordarAccionMac(texto,reply);asHablar(reply,asSeguirOyendo);return true;
+ // A named conversation must never reuse another person's evidence.
+ const named=String(texto).match(/(?:respond\w*|contest\w*)\s+a\s+([^?¿.!]+)[?!.]*$/i);
+ const evidence=LUMI_REPLY_EVIDENCE;
+ if(named&&evidence?.result?.title&&!lumiRouteNorm(evidence.result.title).includes(lumiRouteNorm(named[1]))){asMostrarRespuesta('Primero necesito leer la conversación de '+named[1]+'. No usaré los mensajes de otra persona.');return true;}
+ const fresh=evidence?.owner===owner&&Date.now()-evidence.at<300000&&evidence.result?.status==='chat_messages'&&!evidence.result.syncPaused;
+ if(!fresh){const reply=lumiReplyAdvice(texto,evidence,owner);asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(reply);asHablar(reply,asSeguirOyendo);return true;}
+ asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;asAccionVisible('Revisando la conversación…','working');
+ const r=evidence.result,thread=r.app+'|'+r.title;
+ try{const answer=await lumiBrainRequest({thread,request:texto,messages:r.messages.map(m=>({text:lumiDesktopMessageText(m.text||m.description,r.app,r.title),outgoing:m.outgoing,attachment:m.attachment,truncated:m.truncated}))});if(owner!==SES.user_id+'|'+SES.company_id||!AS.abierto)return true;
+ const reply=answer.explanation+(answer.draft?'\nPodríamos responder: «'+answer.draft+'»':'')+'\nNo envié nada.';
+ LUMI_BRAIN_PROPOSAL={owner,thread,at:Date.now(),draft:answer.draft,request:texto};asMostrarRespuesta(reply);asRecordarAccionMac(texto,reply);asAccionVisible('Sugerencia lista','done');asHablar(reply,asSeguirOyendo);
+ }catch(e){if(owner===SES.user_id+'|'+SES.company_id){asMostrarRespuesta(e.message);asAccionVisible('No se completó la sugerencia','error');asSeguirOyendo();}}
+ finally{AS.enviando=false;}return true;
+}
+async function asLearnReply(texto){
+ if(!/^(?:lumi[, ]+)?(?:aprende esta respuesta|recuerda esta respuesta|guarda esta respuesta como ejemplo|learn this reply|remember this reply)[.!]*$/i.test(texto.trim()))return false;
+ const p=LUMI_BRAIN_PROPOSAL,owner=SES.user_id+'|'+SES.company_id;
+ asPararOido();asCallar();asTranscribir(texto);
+ if(!p||p.owner!==owner||Date.now()-p.at>300000||!p.draft){asMostrarRespuesta('Primero necesito una propuesta reciente que quieras guardar como ejemplo.');asSeguirOyendo();return true;}
+ AS.enviando=true;
+ try{const r=await lumiBrainRequest({operation:'learn',thread:p.thread,approved:true,example:p.draft});if(owner===SES.user_id+'|'+SES.company_id){const text=r.saved?'Guardé esa respuesta como ejemplo para esta conversación. No la envié.':'No pude confirmar que se guardó el ejemplo.';asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);}}catch(e){asMostrarRespuesta(e.message);asSeguirOyendo();}finally{AS.enviando=false;}return true;
 }
 
 // Store verified routes, never infer a channel from a person's name alone.
@@ -70024,6 +70057,7 @@ async function asComposeMessage(command,texto){
   }else{
    const result=await asEscritorioMac({app:d.app,action:'send_message',query:d.query,text:d.text});
    LUMI_MESSAGE_DRAFT={...d,status:result&&['message_submitted','already_submitted'].includes(result.status)?'sent':'uncertain'};
+   const taught=LUMI_BRAIN_PROPOSAL;if(LUMI_MESSAGE_DRAFT.status==='sent'&&taught?.owner===owner&&taught.thread===d.app+'|'+d.query&&Date.now()-taught.at<300000&&d.text!==taught.draft){void lumiBrainRequest({operation:'learn',thread:taught.thread,approved:true,example:d.text}).catch(()=>{});}
   }
  }catch(e){LUMI_MESSAGE_DRAFT={...d,status:'uncertain'};if(owner===SES.user_id+'|'+SES.company_id)asMostrarRespuesta(e.message);}
  finally{AS.enviando=false;}
@@ -70085,7 +70119,8 @@ async function asCommercialQuote(order,texto){
       const explicit=/^(?:lee|leeme|léeme|revisa|read) (?:el chat |el grupo |the chat )?(?:de |con |with )?(.+?) (?:en|in|on) (whatsapp|mensajes normales|mensajes|messages)(?: y dime qu[eé] (?:contestaron|respondieron|dijeron)| and tell me what they said)?[.!?]*$/i.exec(texto);
       if(explicit&&!/\b(envia|manda|send|borra|delete)\b/i.test(explicit[1])){asTranscribir(texto);await asEscritorioMac({app:/^whatsapp$/i.test(explicit[2])?'whatsapp':'messages',action:'read_chat',query:explicit[1].trim()});return;}
     }
-    if(!dictando&&!AS.conf&&!AS.pregunta&&asReplyAdvice(texto))return;
+    if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLearnReply(texto)))return;
+    if(!dictando&&!AS.conf&&!AS.pregunta&&(await asReplyAdvice(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&window.LumiCommunications){const unavailable=LumiCommunications.unavailable(texto);if(unavailable){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(unavailable);asHablar(unavailable,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const owner=SES.user_id+'|'+SES.company_id;const context=LUMI_MESSAGE_CONTEXT?.owner===owner&&Date.now()-LUMI_MESSAGE_CONTEXT.at<300000?LUMI_MESSAGE_CONTEXT:null;let compose=lumiComposeParse(texto,LUMI_MESSAGE_DRAFT?.owner===owner?LUMI_MESSAGE_DRAFT:null,context);if(compose?.query){await lumiLoadRoutes(owner);if(owner!==SES.user_id+'|'+SES.company_id)return;compose=lumiResolveCompose(compose,lumiRouteRows(owner),owner);}if(compose){await asComposeMessage(compose,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const quote=lumiQuoteOrder(texto);if(quote){await asCommercialQuote(quote,texto);return;}}
