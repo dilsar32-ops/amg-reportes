@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R288';
+  const APP_BUILD = '2026-11-08-R289';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69152,6 +69152,9 @@ function lumiDesktopReadValid(r,order){
 function lumiDesktopMessageText(raw,app,title=''){
  const s=String(raw||'').trim();if(app!=='whatsapp')return s;
  const cleaned=s.replace(/(?:,\s*(?:Disappearing message|Edited|Read|Delivered))+$/gi,'');
+ const today=/^Message from ([^,\n]+),\s*([\s\S]*),\s*(\d{1,2}:\d{2}\s*(?:AM|PM)),\s*Received in ([^,\n]+)$/i.exec(cleaned);
+ if(today&&(!title||today[4].trim().toLowerCase()===title.trim().toLowerCase()))return today[1]+' dice: '+today[2]+' ('+today[3]+')';
+
  const direct=/,\s*((?:(?:January|February|March|April|May|June|July|August|September|October|November|December)\s*\d{1,2}(?:,?\s*20\d{2})?,\s*at\s*)?\d{1,2}:\d{2}\s*(?:AM|PM)),\s*(Received from|Sent to)\s+([^,\n]+)$/i.exec(cleaned);
  if(direct){
   let body=cleaned.slice(0,direct.index),forwarded=/^Forwarded\.\s*/i.test(body);body=body.replace(/^Forwarded\.\s*/i,'');
@@ -69202,7 +69205,8 @@ function lumiDesktopReadText(r){
   return 'En '+app+' encontré '+r.chats.length+' chats sin leer'+(r.partial?' en la lista visible':'')+'. Te leo la vista previa del último mensaje de cada uno:\n'+r.chats.map((c,i)=>(i+1)+'. '+c.title+(c.unreadCount?' ('+c.unreadCount+' sin leer)':'')+': '+(lumiDesktopMessageText(c.preview,r.app,c.title)||'No veo una vista previa de este mensaje.')+(c.truncated?' [Texto recortado]':'')).join('\n')+'\nPuedes decirme «lee el primero» o pedirme un chat por su nombre. Aquí no he leído el contenido de las fotos ni escuchado los audios.';
  }
  if(!r.messages.length)return 'Abrí '+r.title+' en '+app+', pero no pude leer contenido de mensajes. No significa que esté vacío.';
- return 'En '+r.title+' de '+app+', estos son los mensajes recientes que puedo ver; puede haber anteriores fuera de esta vista:\n'+r.messages.map(m=>(m.dateLabel?m.dateLabel+' · ':'')+(r.app==='messages'&&m.text?(m.outgoing?'Tú escribiste: ':'Mensaje: ')+m.text:lumiDesktopMessageText(m.description,r.app,r.title))+(m.truncated?' [Texto recortado]':'')).join('\n')+'\nNo envié ninguna respuesta.';
+ const incoming=r.messages.filter(m=>!m.outgoing&&!/^Your (?:message|photo|video)/i.test(String(m.description||'').trim()));const visible=(incoming.length?incoming:r.messages).slice(-8);
+ return 'En '+r.title+' de '+app+', estos son los últimos mensajes '+(incoming.length?'recibidos':'visibles')+' que pude leer (máximo 8):\n'+visible.map(m=>(m.dateLabel?m.dateLabel+' · ':'')+(r.app==='messages'&&m.text?(m.outgoing?'Tú escribiste: ':'Mensaje: ')+m.text:lumiDesktopMessageText(m.description,r.app,r.title))+(m.truncated?' [Texto recortado]':'')).join('\n')+'\nNo envié ninguna respuesta.';
 }
 let LUMI_LAYOUT_CONTEXT=null;
 function lumiWindowPairOrder(text){
