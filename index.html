@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R285';
+  const APP_BUILD = '2026-11-08-R286';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69357,7 +69357,7 @@ async function lumiRunExternalReview({run,apps,active=()=>true,english=false,pro
   try{
    const list=await run({app,action:'list_recent'});if(!active())throw Error('La sesión cambió.');
    if(!lumiDesktopReadValid(list,{app,action:'list_recent'}))throw Error('Lista no válida');
-   report.available=list.chats.length;
+   report.available=list.chats.length;report.latest=list.chats.filter(c=>c.preview&&!/your message|tu mensaje|sent to/i.test(c.preview)).slice(0,3).map(c=>({chat:c.title,preview:String(c.preview).slice(0,220)}));
    if(list.syncPaused===true)report.errors.push('WhatsApp tiene la sincronización pausada; abre la app en tu teléfono.');
    const normalized=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
    // Scan unique names so accessibility duplicates do not consume the review quota.
@@ -69571,6 +69571,7 @@ function lumiMessageDigest(results,workspace=null,en=false){
   const uncertain=[...new Set(r.candidates.filter(c=>c.uncertain).map(c=>c.chat))];
   const unavailable=r.checked===0&&r.errors.length>0;
   let summary=unavailable?(en?'Could not check. Pending replies are unknown.':'No pude revisar. No sé si hay respuestas pendientes.'):certain.length?(en?'Possible replies: ':'Posibles respuestas: ')+certain.slice(0,2).join(', ')+(certain.length>2?(en?' and '+(certain.length-2)+' more.':' y '+(certain.length-2)+' más.') :'.'):(en?'No confirmed recent reply requests in the chats checked.':'No confirmé respuestas pendientes recientes en los chats revisados.');
+  if(!unavailable&&r.latest?.length)summary=(en?'Latest visible: ':'Últimos visibles: ')+r.latest.map(c=>c.chat+': '+c.preview).join(' · ')+'. '+summary;
   if(!unavailable&&uncertain.length)summary+=en?' Some attachments or later replies need checking.':' Hay adjuntos o respuestas posteriores por comprobar.';
   if(!unavailable)summary+=r.errors.some(e=>/sincronización pausada|sync.*paused/i.test(e))?(en?' Sync is paused; this may be outdated.':' Sincronización pausada; puede faltar información.'):r.errors.length?(en?' Some chats could not be checked.':' Algunos chats no se pudieron revisar.'):(en?' Partial review.':' Revisión parcial.');
   sections.push({app:r.app,label,summary,detail:lumiReviewText([r],en)});
