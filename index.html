@@ -10898,6 +10898,7 @@ html body #asPanel #asSharedNotice{display:none!important;}
 <script src="lumi-communications.js?v=R246"></script>
 <script src="lumi-attachments.js?v=R250"></script>
 <script src="lumi-attachment-cloud.js?v=R251"></script>
+<script src="lumi-voice-diagnostics.js?v=R252"></script>
 </head>
 <body>
 
@@ -18543,7 +18544,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R251';
+  const APP_BUILD = '2026-11-07-R252';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67991,8 +67992,8 @@ function packLumiSpeech(text){
  }
  return packed;
 }
-function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
- let epoch=0,chain=Promise.resolve(),prepareChain=Promise.resolve(),current=null,cache=null,playing=new Set(),jobs=new Set();
+function createLumiVoice({call,session,play,observe=()=>{},stream=true,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
+ let epoch=0,trace=0,chain=Promise.resolve(),prepareChain=Promise.resolve(),current=null,cache=null,playing=new Set(),jobs=new Set();
  const owner=s=>s.user_id+'|'+s.company_id;
  const active=(s,e)=>e===epoch&&owner(s)===owner(session())&&session().role==='manager';
  async function device(s){
@@ -68003,18 +68004,20 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
   const value=valid?d:null;cache={owner:owner(s),at:now(),device:value};return value;
  }
  async function speech(text,language,s,e,prepareGate=Promise.resolve(),playGate=Promise.resolve(),releaseNext=()=>{}){
+  const began=now(),attempt=++trace;const mark=(stage,extra={})=>{try{observe({trace:attempt,stage,ms:Math.max(0,now()-began),...extra});}catch{}};mark('start');
   let failed=false;const live=()=>!failed&&active(s,e);
   await prepareGate;
   if(!live())return 'cancelled';
-  const d=await device(s);if(!live())return 'cancelled';if(!d)return 'unavailable';
-  const useStream=typeof stream==='function'?await stream():stream;
+  const d=await device(s);mark('device',{ready:!!d});if(!live())return 'cancelled';if(!d)return 'unavailable';
+  const useStream=typeof stream==='function'?await stream():stream;mark('capability',{stream:!!useStream});
   if(!live())return 'cancelled';
   const chunks=useStream?packLumiSpeech(text):splitLumiSpeech(text);
+  let downloaded=false;const downloadedAudio=data=>{if(downloaded)return;downloaded=true;mark('audio_downloaded',{engineMs:Number.isFinite(data.engineMs)?data.engineMs:null});};
   async function prepare(chunk,onPartial){
    if(!live())return null;
    const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id),job={route,owner:owner(s)};jobs.add(job);
    try{
-    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:chunk,language,stream:!!onPartial}})});
+    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:chunk,language,stream:!!onPartial}})});mark('queued');
     const deadline=now()+160000;let data=null,seen=0;
     while(now()<deadline){
      if(!live())return null;
@@ -68025,7 +68028,7 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
       for(;seen<pieces.length;seen++){
        const part=pieces[seen];
        if(part.index!==seen||part.voice!=='calida-tranquila-v1'||part.mime!=='audio/wav'||typeof part.audio!=='string'||part.audio.length>160000||!Number.isFinite(part.seconds)||part.seconds<=0||part.seconds>2)throw Error('Invalid stream audio');
-       if(!live())return null;await onPartial(part);
+       if(!live())return null;downloadedAudio(part);await onPartial(part);
       }
      }
      if(job?.state==='failed')throw Error('Voice generation failed');
@@ -68034,11 +68037,11 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
     }
     if(!live())return null;
     if(!data||data.voice!=='calida-tranquila-v1'||data.mime!=='audio/mpeg'||typeof data.audio!=='string'||data.audio.length>2200000||!Number.isFinite(data.seconds)||data.seconds<=0||data.seconds>120)throw Error('Invalid voice audio');
-    return {...data,streamed:seen>0};
+    downloadedAudio(data);return {...data,streamed:seen>0};
    }finally{jobs.delete(job);if(owner(s)===owner(session()))await call(route,{method:'DELETE'}).catch(()=>{});}
   }
   let startedAudio=false;
-  function enqueue(data){const handle=play(data);playing.add(handle);handle.done.then(()=>{startedAudio=true;playing.delete(handle);},()=>playing.delete(handle));return handle;}
+  let firstAudio=true;function enqueue(data){if(firstAudio){firstAudio=false;mark('playback_requested',{engineMs:Number.isFinite(data.engineMs)?data.engineMs:null});}const handle=play(data);playing.add(handle);handle.done.then(()=>{startedAudio=true;playing.delete(handle);},()=>playing.delete(handle));return handle;}
   function preparePhrase(index,deliveryGate=playGate){
    const played=[];let delivery=Promise.resolve(),nextPrepared=null,ready;
    const next=()=>nextPrepared||(nextPrepared=index+1<chunks.length?preparePhrase(index+1,ready):null);
@@ -68065,8 +68068,8 @@ function createLumiVoice({call,session,play,stream=true,now=Date.now,wait=ms=>ne
     const next=prepared.next();
     await finished;current=null;prepared=next;
    }
-   return live()?'played':'cancelled';
-  }catch(error){failed=true;if(active(s,e)){for(const handle of playing)handle.stop();playing.clear();}if(startedAudio)error.spoken=true;throw error;}
+   mark(live()?'completed':'cancelled');return live()?'played':'cancelled';
+  }catch(error){mark('failed');failed=true;if(active(s,e)){for(const handle of playing)handle.stop();playing.clear();}if(startedAudio)error.spoken=true;throw error;}
  }
  return {cancel(){epoch++;chain=Promise.resolve();prepareChain=Promise.resolve();for(const job of jobs){if(job.owner===owner(session()))Promise.resolve().then(()=>call(job.route,{method:'DELETE'})).catch(()=>{});}current?.stop();current=null;for(const handle of playing)handle.stop();playing.clear();},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const prepareGate=prepareChain,playGate=chain;let release;prepareChain=new Promise(r=>release=r);const run=speech(text,language,s,e,prepareGate,playGate,release).finally(release);const r=run.catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
 }
@@ -68165,6 +68168,7 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
     if(useMedia&&nativeVoice){audioPlayer=createLumiNativePlayer({plugin:nativeVoice,fallback:audioPlayer});audioPlayer=createLumiNativeStreamPlayer({plugin:nativeVoice,fallback:audioPlayer});}
     AS_AUDIO_PLAYER=audioPlayer;
     AS_VOZ_LOCAL=createLumiVoice({
+      observe:createLumiVoiceDiagnostics({session:()=>SES,device:useMedia?'mobile':'desktop',native:isNative(),version:APP_BUILD,send:record=>authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:{...cloudHeaders(),Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(record)})}),
       stream:async()=>useMedia?(audioPlayer.supportsStreaming?await audioPlayer.supportsStreaming():false):true,
       session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),
       call:async(route,init={})=>{
