@@ -18545,7 +18545,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R255';
+  const APP_BUILD = '2026-11-07-R256';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68789,6 +68789,26 @@ async function lumiRunExternalReview({run,apps,active=()=>true,english=false,pro
  }
  return results;
 }
+let LUMI_REVIEW_DETAIL=null;
+function lumiReviewBrief(results,en=false){
+ const names=[...new Set(results.flatMap(r=>r.candidates.filter(c=>!c.uncertain).map(c=>c.chat)))];
+ const unsure=results.some(r=>r.candidates.some(c=>c.uncertain));
+ const errors=results.some(r=>r.errors.length);
+ let text=names.length?(en?'There are possible replies to check in ':'Hay posibles respuestas pendientes en ')+names.slice(0,3).join(', ')+(names.length>3?(en?' and '+(names.length-3)+' more chats':' y '+(names.length-3)+' chats más'):'')+'.':(en?'I found no clear unanswered requests in the chats reviewed.':'No encontré solicitudes claras sin responder en los chats revisados.');
+ if(unsure)text+=en?' Some attachments and conversations need checking.':' Hay adjuntos y conversaciones por comprobar.';
+ text+=errors?(en?' Some sources could not be checked.':' Algunas fuentes no se pudieron revisar.'):(en?' The review is partial.':' La revisión es parcial.');
+ return text;
+}
+function lumiReviewFollowup(text,receipt,owner,now=Date.now()){
+ if(!receipt||receipt.owner!==owner||now-receipt.at>900000)return null;
+ const n=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿?!.]/g,'');
+ if(/^(?:lumi[, ]+)?(?:leemelos|lee los mensajes|muestrame los detalles|ver detalles|read them|show details)$/.test(n))return {action:'details'};
+ const m=n.match(/^(?:abre|lee|muestrame|open|read) (?:el de |la de |el chat de |the one from )?(.+)$/);if(!m)return null;
+ const norm=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ const matches=receipt.chats.filter(c=>norm(c.chat)===m[1]||norm(c.chat).includes(m[1]));
+ return matches.length===1?{action:'chat',app:matches[0].app,query:matches[0].chat}:matches.length>1?{action:'clarify',text:'Hay varios chats parecidos. Dime el nombre completo.'}:null;
+}
+
 function lumiReviewText(results,en=false){
  const lines=[];
  for(const r of results){
@@ -68905,7 +68925,7 @@ return {order,extract};
     const active=()=>AS.abierto&&AS.requestEpoch===epoch&&SES.role==='manager'&&owner===SES.user_id+'|'+SES.company_id;
     if(SES.role!=='manager'){asMostrarRespuesta('Esta revisión es solo para Manager.');return;}
     AS_DESKTOP_BUSY=true;AS.enviando=true;asPararOido();asCallar();asTranscribir(texto);asAccionVisible('Revisando pendientes…','working');
-    const parts=[];
+    const parts=[],brief=[];let reviewResults=[];
     try{
       if(order.workspace){
        try{
@@ -68913,7 +68933,7 @@ return {order,extract};
         if(!active())return;
         if(!response.ok||!response.json?.texto)parts.push('No pude revisar Workspace; no significa que no haya pendientes.');
         else parts.push(response.json.texto);
-        asMostrarRespuesta(parts.join('\n\n'));
+        brief.push(order.accounts?'La revisión de cuentas y Workspace está lista para consultar.':'Workspace tiene una revisión aparte; algunos mensajes necesitan comprobarse.');
        }catch(e){if(!active())return;parts.push('No pude revisar Workspace; no significa que no haya pendientes.');}
       }
       if(order.apps.length){
@@ -68925,13 +68945,14 @@ return {order,extract};
             try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('No pude conectar con la Mac.');const t=await r.text();return t?JSON.parse(t):null;}finally{clearTimeout(timer);}
           }});
           const results=await lumiRunExternalReview({run:o=>client.run(o),apps:order.apps,active,english:order.english,progress:(app,title)=>{if(active())asAccionVisible('Revisando '+(app==='whatsapp'?'WhatsApp':'Mensajes')+': '+title,'working');}});
-          if(!active())return;parts.push(lumiReviewText(results,order.english));
+          if(!active())return;reviewResults=results;parts.push(lumiReviewText(results,order.english));brief.push(lumiReviewBrief(results,order.english));
         }
       }
       if(!active())return;
-      const answer=parts.join('\n\n');asMostrarRespuesta(answer);asAccionVisible('Revisión terminada; consulta la cobertura de cada fuente','done');
+      LUMI_REVIEW_DETAIL={owner,at:Date.now(),text:parts.join('\n\n'),chats:reviewResults.flatMap(r=>[...new Set(r.candidates.map(c=>c.chat))].map(chat=>({app:r.app,chat})))};
+      const answer=brief.join(' ')+(order.english?' Say “read them” or name a chat to see the details.':' Dime «léemelos» o el nombre del chat para ver el detalle.');asMostrarRespuesta(answer);asAccionVisible('Revisión terminada; consulta la cobertura de cada fuente','done');
       asRecordarAccionMac(texto,'Revisión de solo lectura mostrada en pantalla. Las sugerencias son borradores; no se envió ninguna respuesta.');
-      asHablar(order.english?'The review is on screen, with suggested replies and the coverage of each source. I did not send anything.':'Ya tienes la revisión en pantalla, con sugerencias de respuesta y el alcance de cada fuente. No envié nada.',asSeguirOyendo);
+      asHablar(answer,asSeguirOyendo);
     }catch(e){if(active()){asMostrarRespuesta(parts.concat('No pude terminar la revisión: '+String(e.message||e)).join('\n\n'));asAccionVisible('Revisión incompleta','error');}}
     finally{AS_DESKTOP_BUSY=false;AS.enviando=false;}
   }
@@ -69176,6 +69197,7 @@ async function asCommercialQuote(order,texto){
     if(!dictando&&!AS.conf&&!AS.pregunta){const quote=lumiQuoteOrder(texto);if(quote){await asCommercialQuote(quote,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const pdf=lumiPdfOrder(texto);if(pdf){await asCrearPdf(pdf,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
+    if(!dictando&&!AS.conf&&!AS.pregunta){const follow=lumiReviewFollowup(texto,LUMI_REVIEW_DETAIL,SES.user_id+'|'+SES.company_id);if(follow){asTranscribir(texto);if(follow.action==='chat'){await asEscritorioMac({app:follow.app,action:'read_chat',query:follow.query});return;}asPararOido();asCallar();const answer=follow.action==='details'?LUMI_REVIEW_DETAIL.text:follow.text;asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const review=lumiReviewOrder(texto);if(review){await asRevisionCompleta(review,texto);return;}}
     if(!dictando&&!AS.conf){const calendar=LUMI_CAL_CHAT.order(texto);if(calendar){asTranscribir(texto);await asEscritorioMac({...calendar,originalText:texto});return;}}
     if(!dictando){const desktop=lumiDesktopOrder(texto)||lumiDesktopReadFollowup(texto,AS.desktopReadReceipt,SES.user_id+'|'+SES.company_id);if(desktop){if(!['read_chat','read_unread','clarify'].includes(desktop.action))AS.desktopReadReceipt=null;asTranscribir(texto);await asEscritorioMac(desktop);return;}AS.desktopReadReceipt=null;}
