@@ -10899,6 +10899,7 @@ html body #asPanel #asSharedNotice{display:none!important;}
 <script src="lumi-attachments.js?v=R250"></script>
 <script src="lumi-attachment-cloud.js?v=R251"></script>
 <script src="lumi-voice-diagnostics.js?v=R252"></script>
+<script src="lumi-ear-health.js?v=R253"></script>
 </head>
 <body>
 
@@ -18544,7 +18545,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R252';
+  const APP_BUILD = '2026-11-07-R253';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67684,7 +67685,7 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
   async function asOidoNativo(S, mantenerVoz){
     if(AS.micMuted || !AS.abierto)return;
     asOyeTomaLumi();   // (R88) su empezar reemplaza al vigía
-    asEnganchar(S);
+    await asEnganchar(S);
     AS.ru = asRuNuevo(AS.pisoPrev); AS.dudosos = [];
     AS.oidoDesde = Date.now(); AS.oidoMantiene = !!mantenerVoz; AS.altoDesde = 0;
     asBit('empezar (oído)' + (mantenerVoz ? ' sin cortar la voz' : '') + ' enVuelo=' + (AS.vozEnVuelo || 0));
@@ -67715,14 +67716,19 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
   }
   // Los avisos del plugin. Se enganchan también al ABRIR (antes del saludo): sin `hablaFin` el saludo se cortaba
   // 50 ms antes del estimado y el oído arrancaba encima de la última sílaba.
-  function asEnganchar(S){
-    if(S.removeAllListeners) S.removeAllListeners();
-    S.addListener('nivel', function(d){
+  function asEnganchar(plugin){
+    const setup=(AS.earListenerSetup||Promise.resolve()).catch(()=>{}).then(async()=>{
+      if(plugin.removeAllListeners)await plugin.removeAllListeners();
+      const registrations=[];
+      const S={addListener:(...args)=>{const p=plugin.addListener(...args);registrations.push(Promise.resolve(p));return p;}};
+
+
+    S.addListener('nivel', function(d){ AS.earHealth?.frame();
       AS.nivel = Math.max(0, Math.min(1, (d && d.nivel) || 0)); if(window.Cara){ try{ Cara.nivel(AS.nivel); }catch(err){} }
       if(AS.estado === 'escuchando' && AS.ru) asRuMuestra(AS.ru, AS.nivel, Date.now());
       if(AS.estado === 'hablando' && AS.oidoMantiene){ const ahora = Date.now(); if(AS.nivel > 0.6){ if(!AS.altoDesde) AS.altoDesde = ahora; else if(ahora - AS.altoDesde > 400){ AS.altoDesde = 0; asInterrumpir(); } } else AS.altoDesde = 0; }
     });
-    S.addListener('texto', function(d){ const t = (d && d.texto) || ''; AS.dudosos = (d && d.dudosos) || []; if(t !== AS.texto){ AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); } });
+    S.addListener('texto', function(d){ const raw = (d && d.texto) || ''; const t = [AS.earPrefix || '',raw].filter(Boolean).join(' ').trim(); AS.dudosos = (d && d.dudosos) || []; if(t !== AS.texto){ AS.earHealth?.text(); AS.texto = t; AS.ultTexto = Date.now(); asTranscribir(t); } });
     S.addListener('aviso', function(d){ asBit('aviso ' + ((d && d.aviso) || '') + ' ' + ((d && d.idioma) || '')); });
     S.addListener('error', function(d){
       asBit('error del oído: ' + asTapar(d && d.mensaje));
@@ -67755,7 +67761,10 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
       AS.textoTanda = '';
       AS.esperaFin = false; if(AS.enviando){ AS.finPendiente = true; return; } AS.hablaHasta = Math.min(AS.hablaHasta || 0, Date.now());
     });
-    AS.oyeHablaFin = true;
+    await Promise.all(registrations); AS.oyeHablaFin = true;
+  
+    });
+    AS.earListenerSetup=setup;setup.catch(()=>{});return setup;
   }
 /* Browser recognizers may end sessions themselves. Preserve the turn and reopen. */
 function createLumiWebEar({Recognition,language,active,onText,onError,schedule=setTimeout,unschedule=clearTimeout}){
@@ -67772,17 +67781,19 @@ function createLumiWebEar({Recognition,language,active,onText,onError,schedule=s
  return {start,stop};
 }
 
-  async function asEscuchar(){
+  async function asEscuchar(recovering=false){
     if(AS.micMuted)return;
     if(!AS.abierto || AS.estado === 'escuchando' || AS.estado === 'pensando') return;
     asCallar();
-    AS.texto = ''; asTranscribir('');
+    AS.earPrefix=recovering===true?AS.texto:''; AS.texto=AS.earPrefix;asTranscribir(AS.texto);
+    if(recovering!==true&&typeof createLumiEarHealth==='function')AS.earHealth=createLumiEarHealth();
     const S = asPlugin();
     if(isNative() && S){
       try{
-        asEstado('escuchando', 'Te escucho…');
+        asEstado('esperando', 'Activando micrófono…');
         await asOidoNativo(S, false);
         if(AS.micMuted || !AS.abierto)return;
+        AS.earHealth?.begin();asEstado('escuchando','Te escucho…');
         AS.ultTexto = Date.now(); asVigilarSilencio();
       }catch(err){
         const code = (err && (err.code || err.message)) || '';
@@ -67813,6 +67824,11 @@ function createLumiWebEar({Recognition,language,active,onText,onError,schedule=s
       // Never finish a turn just because transcription stalled while voice continues.
       const silencio = asRuSinVoz(AS.ru, ahora);
       if(AS.micMuted || !AS.abierto){ clearInterval(AS.tmrSil); asPararOido(); return; }
+      if(AS.modo==='nativo'&&AS.earHealth){
+        const health=AS.earHealth.check({active:AS.abierto&&!AS.micMuted&&AS.estado==='escuchando',voice:silencio<1000});
+        if(health){clearInterval(AS.tmrSil);asEstado('esperando',health.action==='recover'?'Recuperando el micrófono…':'No estoy recibiendo tu voz. Toca el micrófono para volver a intentar o escribe abajo.');
+          asPararOido().then(()=>{if(health.action==='recover'&&AS.abierto&&!AS.micMuted&&AS.estado==='esperando')asEscuchar(true);});return;}
+      }
       if(AS.texto.trim() && ahora - AS.ultTexto > (dicta ? 2300 : 1400) && silencio >= (dicta ? 1400 : 1000)){
         clearInterval(AS.tmrSil); const texto = AS.texto;
         asPararOido().then(function(){ if(AS.abierto && !AS.micMuted) asEnviarVoz(texto); });
@@ -69145,6 +69161,15 @@ async function asCommercialQuote(order,texto){
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando&&!AS.conf&&!AS.pregunta&&typeof lumiResolveLaborSpeech==='function'){
+      if(AS.laborTermPending){const intended=AS.laborTermPending;AS.laborTermPending=null;
+        if(/^(?:si|sí|yes|correcto|exacto)[.! ]*$/i.test(texto.trim()))texto=intended;
+        else if(/^(?:no|nope)[.! ]*$/i.test(texto.trim())){const reply='Dime qué necesitas revisar.';asPararOido();asMostrarRespuesta(reply);asHablar(reply,asSeguirOyendo);return;}}
+      const resolved=lumiResolveLaborSpeech(texto);
+      if(resolved.clarify){AS.laborTermPending=texto.replace(/\b(?:label|leibor|leiber)\b/gi,'labor log');const reply='¿Te refieres a un labor log, el reporte de trabajo?';asPararOido();asMostrarRespuesta(reply);asHablar(reply,asSeguirOyendo);return;}
+      texto=resolved.text;
+    }
+
     if(!dictando&&!AS.conf&&!AS.pregunta&&window.LumiCommunications){const unavailable=LumiCommunications.unavailable(texto);if(unavailable){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(unavailable);asHablar(unavailable,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const owner=SES.user_id+'|'+SES.company_id;const context=LUMI_MESSAGE_CONTEXT?.owner===owner&&Date.now()-LUMI_MESSAGE_CONTEXT.at<300000?LUMI_MESSAGE_CONTEXT:null;const compose=lumiComposeParse(texto,LUMI_MESSAGE_DRAFT?.owner===owner?LUMI_MESSAGE_DRAFT:null,context);if(compose){await asComposeMessage(compose,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const quote=lumiQuoteOrder(texto);if(quote){await asCommercialQuote(quote,texto);return;}}
