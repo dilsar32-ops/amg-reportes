@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R297';
+  const APP_BUILD = '2026-11-08-R298';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69443,6 +69443,26 @@ async function lumiCheckWorkspaceArrivals(){
  }catch(e){/* A failed refresh is unknown, never an empty inbox. */}
  finally{LUMI_MESSAGE_CHECK=false;}
 }
+function lumiInboxSummary(data,now=Date.now()){
+ if(!data||now-data.at>120000)return 'No tengo una revisión reciente. No puedo confirmar qué mensajes siguen sin leer.';
+ const names={whatsapp:'WhatsApp',messages:'Mensajes normales',workspace:'Workspace'},lines=[];
+ for(const [source,name] of Object.entries(names)){
+  const rows=(data.inbox||[]).filter(x=>x.source===source),health=data.health?.[source];
+  if(rows.length){lines.push(name+': '+rows.length+' conversaciones detectadas con mensajes sin leer.');for(const r of rows.slice(0,3))lines.push('• '+r.title+': '+r.preview+(r.suggestion?' '+r.suggestion:''));}
+  else lines.push(name+': '+(health==='unavailable'?'no pude consultar esta aplicación.':'no detecté pendientes en la parte revisada.'));
+  if(health==='unavailable'&&rows.length)lines.push('Estos pendientes son de la última revisión; no he podido actualizar esta aplicación.');
+  else if(health==='visible_only')lines.push('Solo pude revisar la lista visible.');
+ }
+ return lines.join('\n');
+}
+async function asInboxPending(texto){
+ const t=String(texto).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ if(!/\b(?:mensajes|messages)\b/.test(t)||!/(?:sin leer|no he leido|siguen pendientes|unread)/.test(t))return false;
+ if(/\b(envia|manda|send|responde|reply)\b/.test(t))return false;
+ const owner=SES.user_id+'|'+SES.company_id;asPararOido();asCallar();asTranscribir(texto);
+ try{const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('No pude actualizar los pendientes.');const d=(await r.json())[0]?.valor;if(owner!==SES.user_id+'|'+SES.company_id||d?.owner!==owner)return true;const text=lumiInboxSummary(d);asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);}catch(e){asMostrarRespuesta(e.message);asSeguirOyendo();}return true;
+}
+
 // Proactive notices: no reply, send, payment, or read-marking occurs here.
 let LUMI_NOTICE_BUSY=false,LUMI_NOTICE_SPOKEN=[],LUMI_NOTICE_OWNER=null;
 function lumiNoticeSay(text){
@@ -69460,7 +69480,7 @@ async function lumiProactiveTick(){
  const key='lumi_notices_seen_'+owner;let seen;try{seen=JSON.parse(localStorage.getItem(key)||'[]');if(!Array.isArray(seen))seen=[];}catch{seen=[];}
  const notices=[];
  const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders()});
- if(r.ok){const data=(await r.json())[0]?.valor;if(data?.owner===owner){for(const e of data.events||[]){if(!seen.includes(e.id)&&Date.now()-e.at<86400000){notices.push({id:e.id,text:({whatsapp:'WhatsApp',messages:'Mensajes normales',workspace:'Workspace',labor:'Labor log'}[e.source]||'Workspace')+': '+e.title});}}}}
+ if(r.ok){const data=(await r.json())[0]?.valor;if(data?.owner===owner){for(const e of data.events||[]){if(!seen.includes(e.id)&&Date.now()-e.at<86400000){notices.push({id:e.id,text:({whatsapp:'WhatsApp',messages:'Mensajes normales',workspace:'Workspace',labor:'Labor log'}[e.source]||'Workspace')+': '+e.title+(e.preview?' — '+e.preview:'')+(e.suggestion?' '+e.suggestion:'')});}}}}
  if(owner!==SES.user_id+'|'+SES.company_id)return;
  if(owner!==SES.user_id+'|'+SES.company_id)return;
  if(notices.length){const unique=[...new Map(notices.map(n=>[n.id,n])).values()];lumiNoticeSay('Amílcar, hay novedades. '+[...new Set(unique.map(n=>n.text))].slice(0,4).join('. ')+(unique.length>4?'. Hay más por revisar.':'.')+' Puedes pedirme que las lea.');seen.push(...unique.map(n=>n.id));localStorage.setItem(key,JSON.stringify(seen.slice(-500)));}
@@ -70119,6 +70139,7 @@ async function asCommercialQuote(order,texto){
       const explicit=/^(?:lee|leeme|léeme|revisa|read) (?:el chat |el grupo |the chat )?(?:de |con |with )?(.+?) (?:en|in|on) (whatsapp|mensajes normales|mensajes|messages)(?: y dime qu[eé] (?:contestaron|respondieron|dijeron)| and tell me what they said)?[.!?]*$/i.exec(texto);
       if(explicit&&!/\b(envia|manda|send|borra|delete)\b/i.test(explicit[1])){asTranscribir(texto);await asEscritorioMac({app:/^whatsapp$/i.test(explicit[2])?'whatsapp':'messages',action:'read_chat',query:explicit[1].trim()});return;}
     }
+    if(!dictando&&!AS.conf&&!AS.pregunta&&(await asInboxPending(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLearnReply(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asReplyAdvice(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&window.LumiCommunications){const unavailable=LumiCommunications.unavailable(texto);if(unavailable){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(unavailable);asHablar(unavailable,asSeguirOyendo);return;}}
