@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R284';
+  const APP_BUILD = '2026-11-08-R285';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69008,18 +69008,32 @@ async function lumiRunPageSequence(pages,text){
     finally{AS_BROWSER_BUSY=false;}
   }
 
+let LUMI_SCREEN_CONTEXT=null;
+function lumiRelativeScreen(screens,direction,current){
+ const valid=screens.filter(s=>Number.isInteger(s.index)&&Number.isFinite(s.x)&&Number.isFinite(s.y));
+ const origin=valid.find(s=>s.index===current)||valid.find(s=>s.main);
+ if(!origin)return {error:'Necesito actualizar la lista de pantallas para ubicarla.'};
+ if(direction==='other'){const options=valid.filter(s=>s.index!==origin.index);return options.length===1?{target:String(options[0].index)}:{error:'Hay varias otras pantallas: '+options.map(s=>s.index).join(', ')+'. ¿Cuál quieres ver?'};}
+ const axis=['left','right'].includes(direction)?'x':'y',sign=['left','up'].includes(direction)?-1:1;
+ const candidates=valid.filter(s=>s.index!==origin.index&&(s[axis]-origin[axis])*sign>20).sort((a,b)=>Math.abs(a[axis]-origin[axis])-Math.abs(b[axis]-origin[axis]));
+ if(!candidates.length)return {error:'No veo una pantalla conectada en esa dirección.'};
+ if(candidates.length>1&&Math.abs(candidates[0][axis]-candidates[1][axis])<20)return {error:'Hay más de una pantalla en esa dirección. Dime su número.'};
+ return {target:String(candidates[0].index)};
+}
+
 function lumiScreenOrder(text){
  let s=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.,]/g,' ').replace(/\s+/g,' ');
+ if(/^(?:no en esa no en la otra|en esa no en la otra|no esa la otra|not that one the other one)$/.test(s))return {direction:'other'};
  if(!s||s.length>500||/\b(no|not|don't|dont|nunca|never|cancel|cancelar)\b/.test(s))return null;
  s=s.replace(/^(oye |hey )?lumi\s+/,'').replace(/^(por favor|please)\s+/,'').trim();
  if(/^(que|cuales|cuantas|what|which|how many)\s+(pantallas|monitores|screens|displays)/.test(s)||/^(muestra|muestrame|ensename|lista|list|show me|show)\s+(las |los |the |my |mis )?(pantallas|monitores|screens|displays)( de (la |mi )?(mac|computadora))?( conectad[oa]s)?\s*(por favor|please)?$/.test(s))return {target:'list'};
- if(!/^(?:me puedes |puedes |podrias |can you |could you )?(?:mostrar|mostrarme|muestra|muestrame|ensename|ver|dejame ver|mandame|enviame|toma|saca|haz|captura|show|show me|let me see|send me|take|capture)\b/.test(s))return null;
+ if(!/^(?:me puedes |puedes |podrias |can you |could you )?(?:abre|abreme|quiero ver|open|mostrar|mostrarme|muestra|muestrame|ensename|ver|dejame ver|mandame|enviame|toma|saca|haz|captura|show|show me|let me see|send me|take|capture)\b/.test(s))return null;
  if(!/\b(pantalla|monitor|screen|display|screenshot|captura)\b/.test(s))return null;
  if(/\b(companycam|company cam|matterport|whatsapp|ventana|window)\b/.test(s))return {error:'Por ahora puedo mostrar pantallas completas. Dime “muéstrame las pantallas” para elegir una.'};
  const m=/\b(?:pantalla|monitor|screen|display)\s*(?:numero |number )?(\d+|uno|una|dos|tres|cuatro|one|two|three|four)\b/.exec(s);
  const numbers={uno:'1',una:'1',dos:'2',tres:'3',cuatro:'4',one:'1',two:'2',three:'3',four:'4'};
  const target=m?(numbers[m[1]]||m[1]):'main';if(target!=='main'&&(+target<1||+target>16))return {error:'Ese número de pantalla no es válido. Pídeme la lista de pantallas.'};
- if(/\b(izquierda|derecha|left|right|otra|other)\b/.test(s)&&!m)return {error:'Para elegir la correcta, pídeme “muéstrame las pantallas” y selecciona su número.'};
+ const directions={izquierda:'left',derecha:'right',abajo:'down',arriba:'up',left:'left',right:'right',below:'down',above:'up',otra:'other',other:'other'};const dir=/\b(izquierda|derecha|abajo|arriba|left|right|below|above|otra|other)\b/.exec(s);if(dir&&!m)return {direction:directions[dir[1]]};
  return {target};
 }
 function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms))}){
@@ -69030,7 +69044,7 @@ function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=D
   const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(s.company_id)+'&clave=eq.lumi_local_model_device');
   const d=rows?.[0]?.valor;
   if(!same())throw Error('La sesión cambió.');
-  if(d?.userId!==s.user_id||!d.remoteScreen||!d.available||!d.workerId||!Number.isFinite(Date.parse(d.updatedAt))||now()-Date.parse(d.updatedAt)>180000)throw Error('Tu Mac vinculada no está disponible para capturas.');
+  if(d?.userId!==s.user_id||!d.remoteScreen||!d.workerId||!Number.isFinite(Date.parse(d.updatedAt))||now()-Date.parse(d.updatedAt)>180000)throw Error('Tu Mac vinculada no está disponible para capturas.');
   const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
   try{
    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_screen',target}})});
@@ -69064,7 +69078,14 @@ function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=D
       try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('No pude consultar la Mac ('+r.status+').');const t=await r.text();return t?JSON.parse(t):null;}finally{clearTimeout(timer);}
     }});
     try{
+      if(order.direction){
+        const list=await client.capture('list');if(!active())return;
+        const previous=LUMI_SCREEN_CONTEXT?.owner===owner?LUMI_SCREEN_CONTEXT.screen:null;
+        const resolved=lumiRelativeScreen(list.screens||[],order.direction,previous);
+        if(resolved.error)throw Error(resolved.error);order={target:resolved.target};
+      }
       const r=await client.capture(order.target);if(!active())return;
+      if(r.status==='captured')LUMI_SCREEN_CONTEXT={owner,screen:r.screen};
       if(r.status==='needs_screen_permission')throw Error('Falta autorizar las capturas para LumiControl en la Mac: Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla. Todavía no tomé ninguna captura.');
       const log=document.getElementById('asConversacion');if(!log)throw Error('La conversación está cerrada.');
       const card=document.createElement('section');card.className='as-chat-docs';card.style.cssText='padding:12px;border:1px solid #345;border-radius:12px;margin:10px 0;';
@@ -69801,6 +69822,15 @@ function lumiComposeParse(input,draft,context){
  if(draft&&(m=/^(?:cambia(?: el texto)?|corrige(?: el texto)?|replace(?: the text)?|change(?: the text)?)\s*(?::|por\s+|to\s+)([\s\S]+)$/i.exec(raw)))return {kind:'replace',text:unquote(m[1])};
  if(draft&&(m=/^(?:agrega|añade|anade|append|add)\s*:\s*([\s\S]+)$/i.exec(raw)))return {kind:'replace',text:draft.text+' '+unquote(m[1])};
  if(draft&&(m=/^(?:mejor para|cambia el destinatario a|change recipient to)\s+(.+?)\s+(?:en|in|on)\s+(whatsapp|mensajes normales|mensajes|messages|imessage|workspace)[.!]*$/i.exec(raw)))return {kind:'recipient',query:m[1].trim(),app:channel(m[2])};
+ if(draft?.status==='incomplete'){
+  const ch=/^(?:en |por |in |on )?(whatsapp|workspace|mensajes normales|mensajes|messages|imessage)[.!]*$/i.exec(raw);
+  if(ch)return {kind:'partial',...draft,app:channel(ch[1])};
+  const recipient=/^(?:a|para|to) (.+)$/i.exec(raw);if(!draft.query&&recipient)return {kind:'partial',...draft,query:recipient[1].trim()};
+  const body=/^(?:dile que |que |el mensaje es |texto:|text:|tell him |tell her )\s*([\s\S]+)$/i.exec(raw);if(body)return {kind:'partial',...draft,text:unquote(body[1])};
+ }
+ if(/^(?:responde|respondele|contestale|reply|respond)[.!]*$/.test(n))return {kind:'partial',query:context?.query||'',app:context?.app||'',text:''};
+ const vague=/^(?:(?:lumi|oye|hey|por favor|please)[, ]+)*(?:m[aá]ndale(?: un mensaje)?|manda un mensaje|env[ií]ale(?: un mensaje)?|env[ií]a un mensaje|escr[ií]bele|escribile|dile|resp[oó]ndele|cont[eé]stale|send a message|message|text|write to)\s+(?:a |al |to )?(.+?)(?:\s+(?:en|por|in|on)\s+(whatsapp|workspace|mensajes normales|mensajes|messages|imessage))?(?:\s*(?::|,?\s+que\s+)([\s\S]+))?$/i.exec(raw);
+ if(vague&&vague[1].length<=120&&!/\b(y|and|dijo|said)\b/i.test(vague[1]))return {kind:'partial',query:vague[1].trim(),app:vague[2]?channel(vague[2]):'',text:vague[3]||''};
  const prefix='(?:(?:lumi|oye|hey|por favor|please)[, ]+)*';
  const verbs='(?:dile|diles|escr[ií]bele|escribe|responde(?:le)?|resp[oó]ndele|cont[eé]stale|prepara(?: un mensaje)?|redacta(?: un mensaje)?|write(?: a message)?|tell|reply|draft(?: a message)?)';
  const re=new RegExp('^'+prefix+verbs+'\\s+(?:(?:a|al|para|to)\\s+)?(.+?)\\s+(?:en|in|on|por)\\s+(whatsapp|mensajes normales|mensajes|messages|imessage|workspace)\\s*(?::|,?\\s+(?:que|that|diciendo|saying)\\s+)([\\s\\S]+)$','i');
@@ -69814,12 +69844,20 @@ function lumiComposeReduce(state,command,owner){
  const same=state&&state.owner===owner,old=same?state:null;
  if(command.kind==='clarify')return {state:old,message:command.text};
  if(command.kind==='cancel')return {state:null,message:'Borrador descartado. No envié nada.'};
+ if(command.kind==='partial'){
+  const d={owner,query:command.query||'',app:command.app||'',text:command.text||'',status:'incomplete'};
+  if(!d.query)return {state:d,message:'¿A quién quieres responder?'};
+  if(!d.app)return {state:d,message:'¿Por dónde le escribo a '+d.query+': WhatsApp, Mensajes normales o Workspace?'};
+  if(!d.text)return {state:d,message:'¿Qué quieres decirle a '+d.query+'?'};
+  return lumiComposeReduce(null,{...d,kind:'draft'},owner);
+ }
  if(command.kind==='draft'){
   if(!command.query||command.query.length>120||/[\n\r\0]/.test(command.query)||!command.text||command.text.length>2000||command.text.includes('\0'))return {state:old,message:'Necesito un destinatario claro y un mensaje de hasta 2000 caracteres.'};
   return {state:{owner,app:command.app,query:command.query,text:command.text,status:'draft'}};
  }
  if(!old)return {state:null,message:'No hay un borrador de esta cuenta para enviar.'};
  if(command.kind==='hold')return {state:old,message:'Lo dejo como borrador. No lo envío.'};
+ if(command.kind==='send'&&old.status==='incomplete')return {state:old,message:'Falta completar el destinatario, el canal o el texto. No envié nada.'};
  if(command.kind==='send')return old.status==='draft'?{state:{...old,status:'sending'},send:true}:{state:old,message:'Este envío ya se intentó. Revisa el chat antes de repetirlo.'};
  if(old.status!=='draft')return {state:old,message:'Ese envío ya se intentó; prepara un borrador nuevo para otro mensaje.'};
  if(command.kind==='replace')return lumiComposeReduce(null,{...old,...command,kind:'draft'},owner);
