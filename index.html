@@ -18618,7 +18618,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R271';
+  const APP_BUILD = '2026-11-08-R272';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68862,11 +68862,39 @@ function lumiReviewOrder(input){
  const explicit=wa||appleListed||ws;
  return {accounts,workspace:!explicit||ws||accounts,apps:explicit?[...(wa?['whatsapp']:[]),...(appleListed?['messages']:[])]:['whatsapp','messages'],english:/\b(?:which|what|review|reply|messages need)\b/.test(t)&&!/[¿]|\b(?:que|revisa|mensajes)\b/.test(t)};
 }
+// Only parse date labels or the accessibility timestamp suffix, never dates in message prose.
+function lumiMessageAge(row,result){
+ const captured=new Date(result.capturedAt);if(!Number.isFinite(+captured))return 'unknown';
+ let label=String(row.dateLabel||'').trim();
+ if(!label&&result.app==='whatsapp'){
+  const suffix=String(row.description||'').match(/,\s*((?:January|February|March|April|May|June|July|August|September|October|November|December)\s*\d{1,2}(?:,?\s*20\d{2})?),\s*at\s*\d{1,2}:\d{2}.*?,\s*(?:Received|Sent)\b/i);
+  if(suffix)label=suffix[1];
+ }
+ const normalized=label.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ if(/^(?:today|hoy)(?:\b|,)/.test(normalized))return 'recent';
+ if(/^(?:yesterday|ayer)(?:\b|,)/.test(normalized))return 'recent';
+ const months=['jan(?:uary)?|enero','feb(?:ruary)?|febrero','mar(?:ch)?|marzo','apr(?:il)?|abril','may|mayo','jun(?:e)?|junio','jul(?:y)?|julio','aug(?:ust)?|agosto','sep(?:tember)?|septiembre','oct(?:ober)?|octubre','nov(?:ember)?|noviembre','dec(?:ember)?|diciembre'];
+ let date=null;
+ for(let month=0;month<months.length;month++){
+  const m=new RegExp('\\b(?:'+months[month]+')\\s*(\\d{1,2})(?:,?\\s+(20\\d{2}))?(?:\\b|,)','i').exec(normalized);
+  const reverse=!m?new RegExp('\\b(\\d{1,2}) de (?:'+months[month]+')(?: de (20\\d{2}))?\\b','i').exec(normalized):null;
+  const matched=m||reverse;if(!matched)continue;
+  let year=matched[2]?Number(matched[2]):captured.getFullYear();date=new Date(year,month,Number(matched[1]));
+  if(date.getMonth()!==month||date.getDate()!==Number(matched[1]))return 'unknown';
+  if(!matched[2]&&+date>+captured+86400000)date.setFullYear(year-1);
+  break;
+ }
+ if(!date)return 'unknown';
+ const days=(+captured-+date)/86400000;
+ return days< -1?'unknown':days<=7?'recent':'old';
+}
+
 function lumiReviewCandidates(result,english=false){
  if(!lumiDesktopReadValid(result,{app:result.app,action:'read_chat'}))throw Error('Invalid conversation evidence');
  const rows=result.messages,candidates=[];
  for(let i=0;i<rows.length;i++){
   const m=rows[i];if(m.outgoing)continue;
+  const age=lumiMessageAge(m,result);if(age==='old')continue;
   const text=m.text||lumiDesktopMessageText(m.description,result.app,result.title),t=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
   const urgencyText=t.replace(/emergency\??\s*:\s*no(?:,?\s*not an emergency)?/g,'').replace(/\b(?:not (?:an? )?(?:emergency|urgent)|no (?:es )?(?:una )?(?:emergencia|urgente))\b/g,'');
   const replyEnglish=english||(/\b(?:please|can you|could you|what time|has this|would you|i need|thank you|call her|call him|when will|first name|call summary|hello|your invoice)\b/.test(t)&&!/\b(?:puedes|necesito|gracias|por favor|cuando|hora)\b/.test(t));
@@ -68875,12 +68903,12 @@ function lumiReviewCandidates(result,english=false){
   if(!question&&!urgent&&!m.attachment)continue;
   const later=rows.slice(i+1).some(x=>x.outgoing);
   // A later outgoing message can concern another topic: do not silently dismiss the request.
-  const review=m.attachment||m.truncated;
+  const review=m.attachment||m.truncated||age==='unknown';
   let draft=null;
   if(!review&&!later){
    draft=urgent?(replyEnglish?'I saw your message. Can you confirm the location and current situation?':'Vi tu mensaje. ¿Me confirmas la ubicación y la situación actual?'):/\b(?:pago|pagaste|pagar|payment|paid|pay)\b/.test(t)?(replyEnglish?'Let me check the payment record and get back to you.':'Déjame revisar el registro del pago y te confirmo.'):/\b(?:hora|horario|schedule|what time|arrival time|start time)\b/.test(t)?(replyEnglish?'Let me confirm the schedule and get back to you.':'Déjame confirmar el horario y te aviso.'):(replyEnglish?'Thank you for letting me know. I’ll review it and get back to you.':'Gracias por avisarme. Lo reviso y te confirmo.');
   }
-  candidates.push({source:result.app,chat:result.title,date:m.dateLabel||null,excerpt:text,urgent,draft,uncertain:later||review,reason:later?(english?'You wrote afterward; check whether that answered this request.':'Escribiste después; hay que comprobar si contestaste esta solicitud.'):review?(english?'Attachment or truncated text: review the original before replying.':'Adjunto o texto recortado: revisa el original antes de contestar.'):(english?'Possible unanswered request in the visible history.':'Posible solicitud pendiente en el historial visible.')});
+  candidates.push({source:result.app,chat:result.title,date:m.dateLabel||null,excerpt:text,urgent,draft,uncertain:later||review,reason:age==='unknown'?(english?'The date is not confirmed; this is not a confirmed current pending reply.':'Fecha sin confirmar; no es un pendiente actual confirmado.'):later?(english?'You wrote afterward; check whether that answered this request.':'Escribiste después; hay que comprobar si contestaste esta solicitud.'):review?(english?'Attachment or truncated text: review the original before replying.':'Adjunto o texto recortado: revisa el original antes de contestar.'):(english?'Possible unanswered request in the visible history.':'Posible solicitud pendiente en el historial visible.')});
  }
  return candidates.sort((a,b)=>Number(b.urgent)-Number(a.urgent));
 }
@@ -68987,7 +69015,7 @@ function lumiReviewText(results,en=false){
   for(const c of r.candidates.slice(0,15)){lines.push((c.urgent?'⚠ ':'')+c.chat+(c.date?' · '+c.date:'')+': “'+c.excerpt+'”',c.reason);if(c.draft)lines.push((en?'Suggested reply: “':'Respuesta sugerida: “')+c.draft+'”');}
   if(r.candidates.length>15)lines.push(en?'Showing the first 15 candidates.':'Muestro los primeros 15 candidatos.');
   if(!r.candidates.length&&r.checked)lines.push(en?'No candidate requests detected in that visible text; this does not certify that everything is answered.':'No detecté solicitudes candidatas en ese texto visible; no confirma que todo esté contestado.');
-  lines.push(...r.errors,en?'Coverage is partial: up to 10 available chats and 20 visible recent messages per chat. Photos and audio were not interpreted.':'Cobertura parcial: hasta 10 chats disponibles y 20 mensajes recientes visibles por chat. No interpreté fotos ni audios.');
+  lines.push(...r.errors,en?'Coverage is partial: up to 10 available chats and 20 visible recent messages per chat. Photos and audio were not interpreted.':'Cobertura parcial: hasta 10 chats y 20 mensajes visibles por chat; se excluyen fechas comprobadas de más de una semana. No interpreté fotos ni audios.');
  }
  lines.push(en?'No replies were sent. Opening chats may mark them as read.':'No envié respuestas. Abrir los chats puede marcarlos como leídos.');
  return lines.join('\n');
@@ -69102,7 +69130,7 @@ function lumiMessageDigest(results,workspace=null,en=false){
   const certain=[...new Set(r.candidates.filter(c=>!c.uncertain).map(c=>c.chat))];
   const uncertain=[...new Set(r.candidates.filter(c=>c.uncertain).map(c=>c.chat))];
   const unavailable=r.checked===0&&r.errors.length>0;
-  let summary=unavailable?(en?'Could not check. Pending replies are unknown.':'No pude revisar. No sé si hay respuestas pendientes.'):certain.length?(en?'Possible replies: ':'Posibles respuestas: ')+certain.slice(0,2).join(', ')+(certain.length>2?(en?' and '+(certain.length-2)+' more.':' y '+(certain.length-2)+' más.') :'.'):(en?'No clear request found in the chats checked.':'Sin solicitudes claras en los chats revisados.');
+  let summary=unavailable?(en?'Could not check. Pending replies are unknown.':'No pude revisar. No sé si hay respuestas pendientes.'):certain.length?(en?'Possible replies: ':'Posibles respuestas: ')+certain.slice(0,2).join(', ')+(certain.length>2?(en?' and '+(certain.length-2)+' more.':' y '+(certain.length-2)+' más.') :'.'):(en?'No confirmed recent reply requests in the chats checked.':'No confirmé respuestas pendientes recientes en los chats revisados.');
   if(!unavailable&&uncertain.length)summary+=en?' Some attachments or later replies need checking.':' Hay adjuntos o respuestas posteriores por comprobar.';
   if(!unavailable)summary+=r.errors.some(e=>/sincronización pausada|sync.*paused/i.test(e))?(en?' Sync is paused; this may be outdated.':' Sincronización pausada; puede faltar información.'):r.errors.length?(en?' Some chats could not be checked.':' Algunos chats no se pudieron revisar.'):(en?' Partial review.':' Revisión parcial.');
   sections.push({app:r.app,label,summary,detail:lumiReviewText([r],en)});
