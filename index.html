@@ -18618,7 +18618,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R274';
+  const APP_BUILD = '2026-11-08-R275';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69325,6 +69325,26 @@ function lumiCapabilityHelp(text){
 
 // Dictated message content stays literal and temporary; it never changes stored rates.
 // Read-only tool: reply advice cannot dispatch a payment or send a message.
+function lumiConversationFollowup(r){
+ if(!r||r.status!=='chat_messages'||r.syncPaused)return null;
+ const rows=r.messages.filter(m=>!m.attachment&&(m.text||m.description));
+ const text=m=>String(m.text||m.description).trim();
+ const last=rows.at(-1);if(!last)return null;
+ const lastText=text(last),previous=rows.slice(0,-1),incoming=previous.filter(m=>!m.outgoing).at(-1);
+ if(last.outgoing&&/\b(?:i will do|i'll (?:check|find|review)|voy a (?:revisar|buscar)|lo reviso|lo busco)\b/i.test(lastText)){
+  return {kind:'commitment',text:'En '+r.title+' ya prometiste hacer seguimiento: «'+lastText.slice(0,220)+'». Eso no confirma que la tarea esté hecha.'+(incoming?' Te pidieron: «'+text(incoming).slice(0,350)+'».':''),draft:null};
+ }
+ const scheduleQuestion=rows.findIndex(m=>!m.outgoing&&/confirm.*time|what time|a que hora|a qué hora/i.test(text(m)));
+ if(scheduleQuestion>=0){
+  const answer=rows.slice(scheduleQuestion+1).find(m=>/\b\d{1,2}(?::\d{2})?\s*(?:o.clock|am|pm|a\.m\.|p\.m\.)\b/i.test(text(m)));
+  if(answer&&/understood|we.ll be there|entendido|ahi estaremos|ahí estaremos/i.test(lastText))return {kind:'schedule_confirmed',text:'En '+r.title+' ya respondieron el horario: «'+text(answer).slice(0,240)+'». Después lo confirmaron: «'+lastText.slice(0,240)+'». No hace falta volver a preguntar la hora.',draft:null};
+ }
+ if(!last.outgoing&&lastText.length<180&&!/[?¿]/.test(lastText)&&/\b(?:ok(?:ay)? cool|i(?:’|')?ll let (?:them|him|her) know|ima let them know|thanks|thank you|gracias|entendido|les aviso)\b/i.test(lastText)&&previous.some(m=>m.outgoing)){
+  return {kind:'acknowledged',text:'El último mensaje de '+r.title+' dice: «'+lastText+'». Recibió la respuesta; no veo una pregunta nueva en ese mensaje. Podemos esperar su siguiente confirmación.',draft:null};
+ }
+ return null;
+}
+
 function lumiReplyAdviceOrder(text){
  const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
  return /(?:que (?:le |les |podemos |puedo )*(?:responder|contestar)|(?:hace falta|debo|debemos|conviene) (?:responder|contestar)|(?:sugiere|sugerencia|recomienda).*(?:respuesta|contestar)|what (?:should|can) (?:we|i) (?:reply|respond)|should (?:we|i) reply)/.test(t);
@@ -69340,6 +69360,7 @@ function lumiReplyAdvice(text,receipt,owner,now=Date.now()){
   if(/reply stop|stop to (?:end|opt out)|automated|automatic notification/i.test(p))return 'Parece un aviso automático. No hace falta contestarle por chat. Si pide revisar una cuenta o un cobro, compruébalo directamente en la aplicación o sitio oficial que ya utilizas. No envié nada ni hice pagos.';
   return 'La vista previa no basta para saber si ya respondiste. Pídeme leer el chat de '+r.chats[0].title+' y revisaré el contexto antes de sugerir una respuesta.';
  }
+ const followup=lumiConversationFollowup(r);if(followup)return followup.text+' No envié nada.';
  const pending=lumiReviewCandidates(r).filter(c=>!c.uncertain);
  if(!pending.length)return 'En lo que pude leer no hay una solicitud clara pendiente. Si hay fotos, audios o una respuesta posterior, necesito comprobarlos antes de recomendar que contestes.';
  return pending.slice(-3).map(c=>'En '+c.chat+': '+(c.draft?'Podrías responder: «'+c.draft+'»':'Necesito revisar más contexto antes de redactar.')).join('\n')+'\nSon propuestas; no envié nada.';
