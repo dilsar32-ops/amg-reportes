@@ -18406,7 +18406,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R243';
+  const APP_BUILD = '2026-11-07-R244';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67156,7 +67156,7 @@ function createLumiSharedHistory({storage,session,call,uuid=()=>crypto.randomUUI
  let busy=false;
  return {
  owner,rows(){const o=owner();return o?load(o):[];},
- import(legacy){const o=owner();if(!o)return[];let rows=load(o);if(!rows.length&&legacy.length){rows=legacy.filter(r=>['user','assistant'].includes(r.role)).slice(-120).map((r,i,a)=>({id:uuid(),role:r.role,content:r.content.slice(0,16000),created_at:new Date(now()-(a.length-i)*1000).toISOString(),dirty:true}));save(o,rows);}return rows;},
+ import(legacy){const o=owner();if(!o)return[];let rows=load(o);if(!rows.length&&legacy.length){rows=legacy.filter(r=>['user','assistant'].includes(r.role)).slice(-120).map((r,i,a)=>({id:uuid(),role:r.role,content:r.content.slice(0,16000),created_at:new Date(Date.UTC(2000,0,1)+i*1000).toISOString(),dirty:true}));save(o,rows);}return rows;},
  put(id,role,content){const o=owner();if(!o)return null;const rows=load(o),i=rows.findIndex(r=>r.id===id);const row={id:id||uuid(),role,content:String(content).slice(0,16000),created_at:i>=0?rows[i].created_at:new Date(now()).toISOString(),dirty:true};if(!valid(row))throw Error('Invalid conversation row');if(i>=0)rows[i]=row;else rows.push(row);save(o,rows);return row.id;},
  async sync(){const o=owner();if(!o||busy)return null;busy=true;const s={...session()},same=()=>owner()===o;try{
   const pending=load(o).filter(r=>r.dirty);
@@ -67177,7 +67177,8 @@ function asSharedRender(rows){const log=document.getElementById('asConversacion'
  log.replaceChildren();for(const r of rows){const p=document.createElement('p');p.dataset.role=r.role;p.dataset.sharedId=r.id;p.dataset.sharedRemote='1';const label=document.createElement('strong');label.textContent=r.role==='user'?'Tú: ':'Lumi: ';const span=document.createElement('span');span.textContent=r.content;p.append(label,span);log.append(p);}
  AS.historial=rows.slice(-40).map(({role,content})=>({role,content}));asChatStore().save(rows);if(follow||rows.at(-1)?.role==='assistant')asChatFollow(log,true);else box.scrollTop=oldTop;
 }
-function asSharedNotice(text){const log=document.getElementById('asConversacion');if(!log)return;let el=document.getElementById('asSharedNotice');if(!el){el=document.createElement('div');el.id='asSharedNotice';el.style.cssText='font-size:11px;opacity:.7;text-align:center;padding:4px;';log.parentNode.insertBefore(el,log);}el.textContent=text;}
+function asSharedNotice(text){const log=document.getElementById('asConversacion'),panel=document.getElementById('asPanel');if(!log||!panel)return;let el=document.getElementById('asSharedNotice');if(!el){el=document.createElement('button');el.type='button';el.id='asSharedNotice';el.style.cssText='order:1;flex:0 0 auto;font-size:11px;color:#a8caff;background:transparent;border:0;text-align:center;padding:6px;';const cab=panel.querySelector('.as-cab');cab.after(el);el.onclick=()=>{void asSharedTick();asChatFollow(log,true);};}el.textContent=text.includes('Sin sincronizar')?'Sincronización pendiente · tocar para reintentar':'Chat compartido · ver últimos mensajes';el.title=text;}
+
 async function asSharedTick(){if(!AS.abierto||SES.role!=='manager'||AS_SHARED_RENDERING)return;const owner=asChatOwner();try{const rows=await asShared().sync();if(rows&&AS.abierto&&owner===asChatOwner()&&!AS.enviando&&!AS_DESKTOP_BUSY){asSharedRender(rows);asSharedNotice('Conversación sincronizada entre tus dispositivos');}}catch(e){asSharedNotice('Sin sincronizar todavía. La conversación sigue guardada en este dispositivo.');asBit('Historial compartido pendiente: '+e.message);}}
 function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')return;const rows=asShared().import(asChatStore().load());asSharedRender(rows);void asSharedTick();AS_SHARED_TIMER=setInterval(()=>void asSharedTick(),3000);}
 
