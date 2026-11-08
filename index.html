@@ -10897,6 +10897,7 @@ html body #asPanel #asSharedNotice{display:none!important;}
 </style>
 <script src="lumi-communications.js?v=R246"></script>
 <script src="lumi-attachments.js?v=R250"></script>
+<script src="lumi-attachment-cloud.js?v=R251"></script>
 </head>
 <body>
 
@@ -18542,7 +18543,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R250';
+  const APP_BUILD = '2026-11-07-R251';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67306,6 +67307,24 @@ function createLumiSharedHistory({storage,session,call,uuid=()=>crypto.randomUUI
  }finally{busy=false;}}
  };
 }
+let AS_CARD_CLOUD=null;
+async function asCardCloudCall(route,opts={}){
+ const {kind,allowDuplicate,mime,...init}=opts;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+ try{
+  if(kind==='upload')init.body=await(await fetch(init.body)).blob();
+  const response=await authFetch(route,{...init,signal:controller.signal,headers:{...cloudHeaders(),...init.headers}});
+  if(!response.ok){const problem=await response.json().catch(()=>({}));if(allowDuplicate&&(response.status===409||problem.error==='Duplicate'||problem.code==='23505'))return null;throw Error('Adjuntos privados: '+response.status);}
+  if(kind==='image'){const blob=await response.blob();if(blob.size>6000000||blob.type!==mime)throw Error('Imagen privada no válida');return await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(blob);});}
+  const text=await response.text();return text?JSON.parse(text):null;
+ }finally{clearTimeout(timer);}
+}
+async function asSyncCards(){
+ if(!AS.abierto||SES.role!=='manager')return;
+ if(!AS_CARD_CLOUD)AS_CARD_CLOUD=LumiAttachmentCloud.createSync({backend:LumiAttachments.indexedBackend(indexedDB),session:()=>({...SES,sandbox:AS.sandbox}),owner:()=>SES.role==='manager'?asChatOwner():null,call:asCardCloudCall});
+ const log=document.getElementById('asConversacion');if(!log)return;
+ try{if(await AS_CARD_CLOUD(Array.from(log.children).map(r=>r.dataset.sharedId).filter(Boolean)))await asRestoreCards();}catch(e){asBit('Sincronización de adjuntos pendiente: '+e.message);}
+}
+
 let AS_ATTACHMENTS=null;
 function asAttachments(){return AS_ATTACHMENTS||(AS_ATTACHMENTS=LumiAttachments.createStore({backend:LumiAttachments.indexedBackend(indexedDB),owner:()=>SES.role==='manager'?asChatOwner():null}));}
 async function asRememberCard(card){
@@ -67353,7 +67372,7 @@ function asSharedNotice(text){
  const panel=document.getElementById('asPanel');if(panel)panel.dataset.historySync=text.includes('Sin sincronizar')?'pending':'ready';
 }
 
-async function asSharedTick(){if(!AS.abierto||SES.role!=='manager'||AS_SHARED_RENDERING)return;const owner=asChatOwner();try{const rows=await asShared().sync();if(rows&&AS.abierto&&owner===asChatOwner()&&!AS.enviando&&!AS_DESKTOP_BUSY){asSharedRender(rows);asSharedNotice('Conversación sincronizada entre tus dispositivos');}}catch(e){asSharedNotice('Sin sincronizar todavía. La conversación sigue guardada en este dispositivo.');asBit('Historial compartido pendiente: '+e.message);}}
+async function asSharedTick(){if(!AS.abierto||SES.role!=='manager'||AS_SHARED_RENDERING)return;const owner=asChatOwner();try{const rows=await asShared().sync();if(rows&&AS.abierto&&owner===asChatOwner()&&!AS.enviando&&!AS_DESKTOP_BUSY){asSharedRender(rows);void asSyncCards();asSharedNotice('Conversación sincronizada entre tus dispositivos');}}catch(e){asSharedNotice('Sin sincronizar todavía. La conversación sigue guardada en este dispositivo.');asBit('Historial compartido pendiente: '+e.message);}}
 window.addEventListener('online',()=>{if(AS.abierto)void asSharedTick();});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&AS.abierto)void asSharedTick();});
 function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')return;const rows=asShared().import(asChatStore().load());asSharedRender(rows);void asSharedTick();AS_SHARED_TIMER=setInterval(()=>void asSharedTick(),3000);}
