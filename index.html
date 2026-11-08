@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R298';
+  const APP_BUILD = '2026-11-08-R299';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70058,6 +70058,24 @@ function lumiComposeReduce(state,command,owner){
  if(command.kind==='recipient')return lumiComposeReduce(null,{...old,...command,kind:'draft'},owner);
  return {state:old};
 }
+// Company replies may use private evidence internally, never disclose payroll details.
+function lumiPrivatePayrollReply(text){
+ const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ const payroll=/\b(?:debemos|debo|debe|saldo|sueldo|salario|nomina|adelanto|pago|pagamos|gana|cobra|tarifa|horas|owe|balance|salary|payroll|wage|paid|earned|hourly)\b/.test(t);
+ const quantity=/\d|[$€£]|\b(?:dolares|dollars|[a-z]*cientos?|mil|hundred|thousand|one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieci[a-z]+|veinti[a-z]+|veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)\b/.test(t);
+ return payroll&&quantity;
+}
+function lumiBasicWorkspaceReply({question,balance,verifiedAt,now=Date.now(),sameCompany=false,uniquePerson=false,person='',alreadyReplied=false}){
+ if(alreadyReplied)return {action:'skip',reason:'already_replied'};
+ const t=String(question||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ if(/\b(?:cuanto|cantidad|monto|how much|amount|salario|salary|tarifa|rate)\b/.test(t))return {action:'review',reason:'private_financial_details'};
+ if(!sameCompany||!uniquePerson||!person||!Number.isFinite(balance)||!Number.isFinite(verifiedAt)||now-verifiedAt>60000||verifiedAt>now)return {action:'review',reason:'unverified_evidence'};
+ if(!/\b(?:debe|debemos|owe)\b/.test(t))return {action:'review',reason:'unsupported_question'};
+ if(/\b(?:pague|paga|manda|envia|pay|send|transfer|deposit|hoy|today|manana|tomorrow)\b/.test(t))return {action:'review',reason:'additional_request'};
+ const text=balance>0?'Sí, le debemos a '+person+'. ¿Hay alguna razón en particular por la que usted pregunta?':'Según el registro actual, no hay saldo pendiente para '+person+'. ¿Hay alguna razón en particular por la que usted pregunta?';
+ return {action:'propose',text};
+}
+
 let LUMI_MESSAGE_DRAFT=null,LUMI_MESSAGE_CONTEXT=null;
 async function asComposeMessage(command,texto){
  const owner=SES.user_id+'|'+SES.company_id;
@@ -70068,6 +70086,7 @@ async function asComposeMessage(command,texto){
  const d=r.state;AS.enviando=true;
  try{
   if(d.app==='workspace'){
+   if(lumiPrivatePayrollReply(d.text))throw Error('No comparto cantidades ni detalles de pagos de trabajadores en Workspace. Puedo confirmar si hay saldo pendiente, sin indicar el monto.');
    await asMsgDatos();if(owner!==SES.user_id+'|'+SES.company_id||!AS.abierto)throw Error('La sesión cambió.');
    const recipient=await asMsgResolver(asMsgNorm(d.query).split(' '),false);
    if(!recipient.key||recipient.varios||recipient.prohibido)throw Error('No pude identificar un único destinatario en Workspace. Escribe su nombre completo.');
