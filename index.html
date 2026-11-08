@@ -18141,7 +18141,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R234';
+  const APP_BUILD = '2026-11-07-R235';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68281,18 +68281,80 @@ function lumiReviewText(results,en=false){
  return lines.join('\n');
 }
 
+const LUMI_CAL_CHAT = (() => {
+// Conservative schedule extraction from quoted chat data, never executable instructions.
+const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+function order(text){
+ const s=String(text||'').trim();if(s.length>1200)return null;
+ if(!/\b(calendario|calendar|agenda)\b/i.test(s)||!/\b(lee|leer|revisa|revisar|read|check)\b/i.test(s)||!/\b(agrega|agregar|anade|programa|programar|agenda|add|schedule|pon|poner)\b/i.test(norm(s)))return null;
+ if(/\b(no agregues|no programes|don't add|do not add|no guardes)\b/i.test(s))return null;
+ const m=/(?:grupo|chat|group|conversation)\s+["“]?(.+?)["”]?(?=\s+(?:en|in|on)\s+(?:Mensajes|Messages|WhatsApp)|\s+(?:y|and)\s|[.;]|$)/i.exec(s);
+ if(!m||m[1].trim().length>120)return null;
+ return {app:/whatsapp/i.test(s)?'whatsapp':'messages',action:'read_chat',query:m[1].trim(),calendar:true};
+}
+function extract(source,today){
+ if(!source||source.status!=='chat_messages'||!['messages','whatsapp'].includes(source.app)||!Array.isArray(source.messages)||source.messages.length>20||!source.title)return {error:'No tengo una lectura válida del grupo.'};
+ if(!Number.isFinite(Date.parse(source.capturedAt))||Math.abs(Date.now()-Date.parse(source.capturedAt))>300000)return {error:'La lectura del grupo venció. Vuelve a pedirla.'};
+ if(source.messages.some(x=>!x||typeof x.outgoing!=='boolean'||typeof x.truncated!=='boolean'||String(x.text||x.description||'').length>4000))return {error:'La lectura de mensajes no es válida.'};
+ const rows=source.messages.filter(x=>!x.outgoing).map(x=>({text:String(x.text||x.description||''),truncated:x.truncated}));
+ if(rows.some(x=>x.truncated))return {error:'Hay mensajes recortados. Necesito leerlos completos antes de preparar el calendario.'};
+ const monthNames='january|february|march|april|may|june|july|august|september|october|november|december|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre';
+ const months=monthNames.split('|'); const year=Number(today.slice(0,4));let days=[];let time=null;
+ for(const row of rows){
+  const t=norm(row.text);
+  if(/\b(cancelled|canceled|cancelado|cancelamos|cancela|no longer need|ya no necesitamos|change the date|cambio de fecha)\b/.test(t))return {error:'Hay un cambio o cancelación en el grupo; necesito aclararlo antes de guardar.'};
+  const dates=[...t.matchAll(new RegExp('\\b('+monthNames+')\\s+(\\d{1,2})(?:,?\\s+(20\\d{2}))?\\b|\\b(\\d{1,2}) de ('+monthNames+')(?: de (20\\d{2}))?\\b','g'))];
+  if(dates.length){
+   if(/\b(cancel|cancelled|canceled|cancela|cancelado|instead|en vez|cambio de fecha)\b/.test(t))return {error:'El grupo contiene un cambio o cancelación de fechas. Hay que aclararlo antes de guardar.'};
+   for(let i=0;i<dates.length;i++){
+    const d=dates[i];let end=i+1;let segment=t.slice(d.index,dates[end]?.index??t.length);
+    // Adjacent dates may share one resource clause: Thursday Nov12 and Friday Nov13 both trucks/four guys.
+    while(end<dates.length&&!/\b(people|persons|guys|men|personas|hombres|trabajadores|camiones?|trucks?)\b/.test(segment)){end++;segment=t.slice(d.index,dates[end]?.index??t.length);}
+    const num={'two':2,'dos':2,'four':4,'cuatro':4,'three':3,'tres':3,'one':1,'uno':1,'una':1,'five':5,'cinco':5,'six':6,'seis':6};
+    const people=/\b(\d{1,2}|two|dos|four|cuatro|three|tres|one|uno|una|five|cinco|six|seis)\s+(?:people|persons|guys|men|personas|hombres|trabajadores)\b/.exec(segment);
+    const trucks=/\b(no trucks?|without (?:a )?truck|sin camion|ningun camion)\b/.test(segment)?'Sin camión':/\b(both trucks|two trucks|2 trucks|ambos camiones|dos camiones|2 camiones)\b/.test(segment)?'Ambos camiones':null;
+    if(!people||!trucks)continue;
+    const month=months.indexOf(d[1]||d[5])%12+1,day=Number(d[2]||d[4]),y=Number(d[3]||d[6]||year);
+    const date=y+'-'+String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+    if(!Number.isFinite(Date.parse(date+'T12:00:00Z'))||new Date(date+'T12:00:00Z').toISOString().slice(0,10)!==date||date<today)return {error:'Una fecha no es válida o ya pasó. Necesito aclararla.'};
+    const value={fecha:date,personas:num[people[1]]||Number(people[1]),camiones:trucks};
+    const prev=days.find(x=>x.fecha===date);if(prev&&JSON.stringify(prev)!==JSON.stringify(value))return {error:'Hay instrucciones distintas para la misma fecha. Necesito aclararlas.'};if(!prev)days.push(value);
+   }
+  }
+  const tm=/\b(\d{1,2})(?::(\d{2})|\s*o[’']?clock)?\s*(am|pm)?\s+(?:each day|every day|todos los dias|cada dia)\b/.exec(t);
+  if(tm){let h=Number(tm[1]);if(tm[3]==='pm'&&h<12)h+=12;if(tm[3]==='am'&&h===12)h=0;if(h>23||Number(tm[2]||0)>59)return {error:'La hora no es válida.'};const n=String(h).padStart(2,'0')+':'+(tm[2]||'00');if(time&&time!==n)return {error:'Hay dos horas de inicio distintas. Necesito aclararlas.'};time=n;}
+ }
+ if(!days.length||days.length>7)return {error:'No pude identificar de forma segura los días, personas y camiones del grupo.'};
+ if(!time)return {error:'No encontré la confirmación de hora para todos los días.'};
+ return {days:days.sort((a,b)=>a.fecha.localeCompare(b.fecha)),time,title:source.title};
+}
+
+return {order,extract};
+})();
   let AS_DESKTOP_BUSY=false;
   async function asEscritorioMac(order){
     if(order.action==='clarify'){asPararOido();asCallar();asMostrarRespuesta(order.reason);asHablar(order.reason,asSeguirOyendo);return;}
     if(AS_DESKTOP_BUSY){asMostrarRespuesta('Estoy terminando la consulta anterior.');return;}
-    const owner=SES.user_id+'|'+SES.company_id,active=()=>AS.abierto&&owner===SES.user_id+'|'+SES.company_id;
+    const started=Date.now(),owner=SES.user_id+'|'+SES.company_id,active=()=>AS.abierto&&SES.role==='manager'&&owner===SES.user_id+'|'+SES.company_id;
     AS_DESKTOP_BUSY=true;asPararOido();asCallar();asAccionVisible('Buscando en tu Mac…','working');
     try{
       const client=createLumiDesktopClient({session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),call:async(route,init={})=>{
         const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
         try{const response=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!response.ok)throw Error('No pude conectar con la Mac.');const body=await response.text();return body?JSON.parse(body):null;}finally{clearTimeout(timer);}
       }});
-      const result=await client.run(order);if(!active())return;
+      const {calendar,originalText,...desktopOrder}=order;
+      const result=await client.run(desktopOrder);if(!active())return;
+      if(order.calendar && result.status==='chat_messages'){
+        asAccionVisible('Comparando los días con el calendario…','working');
+        const response=await asLlamar({texto:order.originalText,calendar_source:result,sandbox:AS.sandbox});
+        if(!active())return;
+        const j=response.json||{};if(!response.ok||!j.ok)throw Error(j.error||'No pude comprobar el calendario. No guardé nada.');
+        AS.ultMs=Date.now()-started;
+        asRecordarAccionMac(order.originalText,j.texto);asMostrarRespuesta(j.texto);
+        if(j.confirmacion)asMostrarTarjeta(j.confirmacion);else asQuitarTarjeta();
+        asAccionVisible(j.confirmacion?'Propuesta lista para revisar':'Calendario comprobado','done');
+        asHablar(j.texto,asSeguirOyendo);return;
+      }
       const name=order.app==='whatsapp'?'WhatsApp':'Mensajes';
       const reading=['unread_list','chat_messages'].includes(result.status);
       if(result.status==='unread_list'||(order.action==='read_chat'&&result.status==='needs_choice'))AS.desktopReadReceipt=lumiDesktopReadReceipt(result,owner);
@@ -68482,6 +68544,7 @@ function lumiCapabilityHelp(text){
     if(!dictando&&!AS.conf&&!AS.pregunta){const pdf=lumiPdfOrder(texto);if(pdf){await asCrearPdf(pdf,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const review=lumiReviewOrder(texto);if(review){await asRevisionCompleta(review,texto);return;}}
+    if(!dictando&&!AS.conf){const calendar=LUMI_CAL_CHAT.order(texto);if(calendar){asTranscribir(texto);await asEscritorioMac({...calendar,originalText:texto});return;}}
     if(!dictando){const desktop=lumiDesktopOrder(texto)||lumiDesktopReadFollowup(texto,AS.desktopReadReceipt,SES.user_id+'|'+SES.company_id);if(desktop){if(!['read_chat','read_unread','clarify'].includes(desktop.action))AS.desktopReadReceipt=null;asTranscribir(texto);await asEscritorioMac(desktop);return;}AS.desktopReadReceipt=null;}
     if(!dictando){const followup=lumiBrowserFollowup(texto,AS.browserReceipt,SES.user_id+'|'+SES.company_id);if(followup){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,followup);asMostrarRespuesta(followup);asHablar(followup,asSeguirOyendo);return;}}
     if(!dictando){const screen=lumiScreenOrder(texto);if(screen){asTranscribir(texto);await asMostrarPantallaMac(screen);return;}}
@@ -69199,7 +69262,7 @@ function lumiCapabilityHelp(text){
     AS.conf = c;
     const t = $('#asTarjeta'); if(!t) return;
     asVistaPintar($('#asTarjetaVista'), c.vista || null);   // (1-nov) el recibo y su línea
-    const tipos = { grupo_lote_mac:'Enviar reportes al grupo', marcar_pagado:'Marcar como pagado', aprobar_gastos:'Aprobar gastos', grupo_gastos:'Mandar al grupo', mensaje:'Mensaje', grupo:'Mandar al grupo', pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa', visita_lecturas:'Lecturas de la casa', visita_materiales:'Materiales de la casa', visita_comunicacion:'Comunicación de la casa', cal_dia:'Calendario de AMG' };
+    const tipos = { grupo_lote_mac:'Enviar reportes al grupo', marcar_pagado:'Marcar como pagado', aprobar_gastos:'Aprobar gastos', grupo_gastos:'Mandar al grupo', mensaje:'Mensaje', grupo:'Mandar al grupo', pago:'Pago', adelanto:'Adelanto', descuento:'Descuento', extra:'Extra / bono', devolucion:'Devolución', ajuste:'Ajuste', tarifa:'Tarifa por hora', devolver_log:'Devolver labor log', archivar_log:'Labor log', crear_cliente:'Cliente nuevo', visita:'Equipo de la casa', visita_lecturas:'Lecturas de la casa', visita_materiales:'Materiales de la casa', visita_comunicacion:'Comunicación de la casa', cal_lote:'Calendario de AMG · varios días', cal_dia:'Calendario de AMG' };
     const metodos = { zelle:'Zelle', cheque:'Cheque', efectivo:'Efectivo', otro:'Otro' };
     const esDinero = ['pago','adelanto','descuento','extra','devolucion','ajuste'].includes(c.tipo);
     $('#asTarjetaTipo').textContent = (tipos[c.tipo] || c.tipo || 'Acción') + (c.cola ? ' · de la lista' : '') + (c.sandbox ? ' · PRUEBA' : '');
