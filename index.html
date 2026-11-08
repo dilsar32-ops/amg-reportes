@@ -10896,6 +10896,7 @@ html body #asPanel .as-esfera-wrap{height:68px!important;min-height:68px!importa
 html body #asPanel #asSharedNotice{display:none!important;}
 </style>
 <script src="lumi-communications.js?v=R246"></script>
+<script src="lumi-attachments.js?v=R249"></script>
 </head>
 <body>
 
@@ -67305,11 +67306,38 @@ function createLumiSharedHistory({storage,session,call,uuid=()=>crypto.randomUUI
  }finally{busy=false;}}
  };
 }
+let AS_ATTACHMENTS=null;
+function asAttachments(){return AS_ATTACHMENTS||(AS_ATTACHMENTS=LumiAttachments.createStore({backend:LumiAttachments.indexedBackend(indexedDB),owner:()=>SES.role==='manager'?asChatOwner():null}));}
+async function asRememberCard(card){
+ const owner=asChatOwner();let anchor=card.previousElementSibling;while(anchor&&!anchor.dataset.sharedId)anchor=anchor.previousElementSibling;
+ if(!anchor)return;card.dataset.attachmentAnchor=anchor.dataset.sharedId;
+ try{const images=[];for(const img of card.querySelectorAll('img')){
+  let src=img.src;if(src.startsWith('blob:')){const blob=await (await fetch(src)).blob();src=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(blob);});}
+  if(!src.startsWith('data:image/'))continue;images.push({src,alt:(img.alt||'Hoja').slice(0,200)});
+ }
+ if(owner!==asChatOwner()||!images.length)return;
+ await asAttachments().put(anchor.dataset.sharedId,images,(card.querySelector('p')?.textContent||'Documento').slice(0,300));
+ }catch(e){asBit('No se pudo conservar el adjunto: '+e.message);const note=document.createElement('small');note.textContent='Esta imagen no se pudo guardar para reabrirla después.';card.append(note);}
+}
+async function asRestoreCards(){
+ const owner=asChatOwner(),log=document.getElementById('asConversacion');if(!log||SES.role!=='manager')return;
+ try{const ids=Array.from(log.children).map(r=>r.dataset.sharedId).filter(Boolean),rows=await asAttachments().list(ids);
+ if(owner!==asChatOwner()||!AS.abierto)return;
+ for(const row of rows){const anchor=Array.from(log.children).find(r=>r.dataset.sharedId===row.anchor);if(!anchor)continue;
+ if(anchor.nextElementSibling?.classList.contains('as-chat-docs')||Array.from(log.children).some(r=>r.dataset.attachmentAnchor===row.anchor))continue;
+ const card=document.createElement('section');card.className='as-chat-docs';card.dataset.attachmentAnchor=row.anchor;
+ const label=document.createElement('p');label.textContent=row.label;card.append(label);
+ for(const data of row.images){const img=document.createElement('img');img.src=data.src;img.alt=data.alt;img.style.cssText='max-width:100%;max-height:220px;object-fit:contain;cursor:zoom-in';img.onclick=()=>{const modal=document.createElement('dialog'),close=document.createElement('button'),large=document.createElement('img');close.textContent='Cerrar imagen';close.onclick=()=>modal.close();large.src=data.src;large.alt=data.alt;large.style.cssText='max-width:100%;max-height:85vh';modal.append(close,large);document.body.append(modal);modal.addEventListener('close',()=>modal.remove());modal.showModal();};card.append(img);}
+ anchor.after(card);
+ }
+ }catch(e){asBit('Adjuntos guardados no disponibles: '+e.message);}
+}
+
 let AS_SHARED=null,AS_SHARED_TIMER=null,AS_SHARED_RENDERING=false;
 function asShared(){if(!AS_SHARED)AS_SHARED=createLumiSharedHistory({storage:localStorage,session:()=>({...SES,sandbox:AS.sandbox}),call:async(route,init={})=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),12000);try{const r=await authFetch(route,{...init,signal:c.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('Historial sin sincronizar ('+r.status+')');const body=await r.text();return body?JSON.parse(body):null;}finally{clearTimeout(t);}}});return AS_SHARED;}
 function asSharedRender(rows){const log=document.getElementById('asConversacion');if(!log)return;const box=asChatScrollBox(log),follow=box.scrollHeight-box.scrollTop-box.clientHeight<70,oldTop=box.scrollTop;
  const isMessage=r=>r.dataset.role==='user'||r.dataset.role==='assistant';
- const current=Array.from(log.children).filter(isMessage).map(r=>[r.dataset.sharedId,r.dataset.role,r.lastElementChild?.textContent]);const next=rows.map(r=>[r.id,r.role,r.content]);if(AS_CHAT_OWNER===asChatOwner()&&JSON.stringify(current)===JSON.stringify(next))return;
+ const current=Array.from(log.children).filter(isMessage).map(r=>[r.dataset.sharedId,r.dataset.role,r.lastElementChild?.textContent]);const next=rows.map(r=>[r.id,r.role,r.content]);if(AS_CHAT_OWNER===asChatOwner()&&JSON.stringify(current)===JSON.stringify(next)){void asRestoreCards();return;}
  // Keep live document nodes (including event handlers) anchored to their message.
  const attachments=new Map();let anchor=null;
  if(AS_CHAT_OWNER===asChatOwner())for(const child of Array.from(log.children)){
@@ -67317,7 +67345,7 @@ function asSharedRender(rows){const log=document.getElementById('asConversacion'
   if(anchor&&child.classList.contains('as-chat-docs')){if(!attachments.has(anchor))attachments.set(anchor,[]);attachments.get(anchor).push(child);}
  }
  log.replaceChildren();for(const r of rows){const p=document.createElement('p');p.dataset.role=r.role;p.dataset.sharedId=r.id;p.dataset.sharedRemote='1';const label=document.createElement('strong');label.textContent=r.role==='user'?'Tú: ':'Lumi: ';const span=document.createElement('span');span.textContent=r.content;p.append(label,span);log.append(p);for(const card of attachments.get(r.id)||[])log.append(card);}
- AS.historial=rows.slice(-40).map(({role,content})=>({role,content}));asChatStore().save(rows);if(follow||rows.at(-1)?.role==='assistant')asChatFollow(log,true);else box.scrollTop=oldTop;
+ AS.historial=rows.slice(-40).map(({role,content})=>({role,content}));asChatStore().save(rows);if(follow||rows.at(-1)?.role==='assistant')asChatFollow(log,true);else box.scrollTop=oldTop;void asRestoreCards();
 }
 function asSharedNotice(text){
  // Synchronization is automatic; keep diagnostics out of the conversation controls.
@@ -68520,7 +68548,7 @@ function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=D
         const button=document.createElement('button');button.textContent='Ver pantalla '+screen.index+(screen.main?' (principal)':'')+' · '+screen.width+'×'+screen.height;
         button.style.cssText='display:block;margin:8px 0;padding:10px;';button.addEventListener('click',()=>{if(active())asMostrarPantallaMac({target:String(screen.index)});});card.appendChild(button);
       }
-      log.appendChild(card);asChatFollow(log,true);asAccionVisible('Consulta de pantalla completada','done');asEstado('esperando','');asHablar(r.status==='captured'?'Aquí tienes la captura.':'Elige la pantalla que quieres ver.',asSeguirOyendo);
+      log.appendChild(card);void asRememberCard(card);asChatFollow(log,true);asAccionVisible('Consulta de pantalla completada','done');asEstado('esperando','');asHablar(r.status==='captured'?'Aquí tienes la captura.':'Elige la pantalla que quieres ver.',asSeguirOyendo);
     }catch(e){if(active()){asMostrarRespuesta(String(e.message||e));asAccionVisible('No se obtuvo la captura','error');asEstado('esperando','');}}
     finally{AS_SCREEN_BUSY=false;}
   }
@@ -69488,7 +69516,7 @@ async function asCommercialQuote(order,texto){
       const copy=document.createElement('button');copy.type='button';copy.textContent='Copiar hoja';
       copy.onclick=function(){return asCopiarHoja(it,copy);};
       card.appendChild(copy);block.appendChild(card);
-    });log.appendChild(block);asChatFollow(log,true);asActualizarEstadoHojas(block,p.items);
+    });log.appendChild(block);void asRememberCard(block);asChatFollow(log,true);asActualizarEstadoHojas(block,p.items);
   }
   async function asSeguirEnvioMac(results,ids){
     if(!Array.isArray(results)||!results.length)return;
