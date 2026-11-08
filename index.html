@@ -15124,7 +15124,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // Se editan en tools/idioma/trad/*.json y se regeneran con tools/idioma/aplicar_diccionario.py.
   const idiEspacios = s => String(s).replace(/\s+/g, ' ').trim();
   // de cada patrón se saca un pedazo de texto que SIEMPRE tiene que aparecer: sin él ni se prueba la expresión (rápido en el teléfono)
-  function idiPieza(src){ let t = String(src); for(let k = 0; k < 5; k++) t = t.replace(/\((?:[^()\\]|\\.)*\)[?*+]?/g, '\u0000'); t = t.replace(/\\./g, '\u0000').replace(/[^\u0000][?*]/g, '\u0000'); const r = t.split(/[\u0000^$.|?*+()\[\]{}]/).filter(x => x.length >= 4).sort((a, b) => b.length - a.length); return r[0] || ''; }
+  function idiPieza(src){ let t = String(src); for(let k = 0; k < 5; k++) t = t.replace(/\((?:[^()\\]|\\.)*\)[?*+]?/g, '^@'); t = t.replace(/\\./g, '^@').replace(/[^^@][?*]/g, '^@'); const r = t.split(/[^@^$.|?*+()\[\]{}]/).filter(x => x.length >= 4).sort((a, b) => b.length - a.length); return r[0] || ''; }
   function idiMapas(dicc, pat){ return { ex: new Map(Object.entries(dicc)), ps: pat.map(p => [new RegExp(p[0]), p[1], idiPieza(p[0])]) }; }
   const IDI_M = { en: idiMapas(IDI_DICC, IDI_PAT), es: idiMapas(IDI_DICC_ES, IDI_PAT_ES) };
   function idiSuelto(texto, lang){
@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R278';
+  const APP_BUILD = '2026-11-08-R279';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -32023,7 +32023,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       // (18-oct) cámara materiales: un material del trabajo de un nivel SIN cuarto (entrada, escalera, otro piso) es "Whole level":
       // su propio renglón por nivel, aparte de los cuartos. Lo demás sin cuarto sigue siendo "Room not specified".
       const todoNivel = !c.cuarto && !!claveNivel && c.seccion === 'materiales' && !!c.todoNivel;   // (19 oct) solo lo que la cámara marcó "Todo el nivel"; lo escrito a mano sin cuarto sigue "Room not specified"
-      const claveCuarto = todoNivel ? '\u0000todo-el-nivel' : (c.cuarto || '');
+      const claveCuarto = todoNivel ? '^@todo-el-nivel' : (c.cuarto || '');
       let ct = nv.cuartos.get(claveCuarto);
       if(!ct){
         ct = { cuarto: todoNivel ? '' : claveCuarto, titulo: todoNivel ? 'Whole level' : (claveCuarto || 'Room not specified'), todoNivel,
@@ -32038,7 +32038,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       // (18-oct) cámara materiales: el nombre viejo suma en el renglón del nuevo (y sale con el nuevo).
       const claveMat = c.material
         ? (medNombre(c.material) + '|' + c.seccion)
-        : ('\u0000sin-material|' + c.seccion + '|' + (ct.materiales.size + 1));
+        : ('^@sin-material|' + c.seccion + '|' + (ct.materiales.size + 1));
       let mt = ct.materiales.get(claveMat);
       if(!mt){
         mt = { material: c.material ? medNombre(c.material) : c.material, superficie: c.superficie, seccion: c.seccion,
@@ -69155,11 +69155,16 @@ function lumiDesktopReadText(r){
  if(!r.messages.length)return 'Abrí '+r.title+' en '+app+', pero no pude leer contenido de mensajes. No significa que esté vacío.';
  return 'En '+r.title+' de '+app+', estos son los mensajes recientes que puedo ver; puede haber anteriores fuera de esta vista:\n'+r.messages.map(m=>(m.dateLabel?m.dateLabel+' · ':'')+(r.app==='messages'&&m.text?(m.outgoing?'Tú escribiste: ':'Mensaje: ')+m.text:lumiDesktopMessageText(m.description,r.app,r.title))+(m.truncated?' [Texto recortado]':'')).join('\n')+'\nNo envié ninguna respuesta.';
 }
+let LUMI_LAYOUT_CONTEXT=null;
 function lumiWindowPairOrder(text){
  const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
  if(t.length>900||/\b(no quiero|no pongas|no acomodes|no muevas|don't|do not|envia|manda|send|borra|delete|cierra|close)\b/.test(t))return null;
+ const owner=typeof SES!=='undefined'?SES.user_id+'|'+SES.company_id:null;
+ const ctx=LUMI_LAYOUT_CONTEXT&&LUMI_LAYOUT_CONTEXT.owner===owner&&Date.now()-LUMI_LAYOUT_CONTEXT.at<600000?LUMI_LAYOUT_CONTEXT:null;
+ const follow=/^(?:lumi[, ]+)?(?:hazlas del mismo tamano|que ambas queden del mismo tamano|reajustalas|rectifica el tamano|orden(?:a|ame) esta pantalla|tidy this screen|make them the same size|mensajes queda mas pequen[oa]|expande mensajes para abajo mas)[.!?]*$/.test(t.trim());
+ if(follow){if(!ctx)return {app:'desktop',action:'clarify',reason:'¿Qué ventanas quieres acomodar y en cuál pantalla?'};return {app:'desktop',action:'window_pair',queries:[...ctx.queries],...(ctx.screen?{screen:ctx.screen}:{})};}
  const wa=/\b(?:whats\s?app|guasap|wasap)\b/.exec(t),im=/\b(?:mensajes normales|mensajes de apple|apple messages|imessage|messages|mensajes)\b/.exec(t);
- if(!wa||!im||!(/\b(?:juntos|juntas|lado del otro|lado a lado|misma pantalla|compartan|side by side|same screen|split screen|mitad|izquierda|derecha|left|right)\b/.test(t))||!(/\b(?:pon|ponme|ponlos|ponlas|acomoda|acomodame|acomodalos|acomodamelos|acomdamelos|coloca|quiero ver|quiero tener|necesito ver|muestra|muestrame|put|arrange|show|see|move|split)\b/.test(t)))return null;
+ if(!wa||!im||!(/\b(?:al frente|front|mismo tamano|same size|prioridad|juntos|juntas|lado del otro|lado a lado|misma pantalla|compartan|side by side|same screen|split screen|mitad|izquierda|derecha|left|right)\b/.test(t))||!(/\b(?:ordena|ordename|reajusta|rectifica|deja|bring|quiero como prioridad|pon|ponme|ponlos|ponlas|acomoda|acomodame|acomodalos|acomodamelos|acomdamelos|coloca|quiero ver|quiero tener|necesito ver|muestra|muestrame|put|arrange|show|see|move|split)\b/.test(t)))return null;
  const n=/(?:pantalla|monitor|screen|display)\s+(\d+)/.exec(t);
  const mentioned=[...t.matchAll(/(?:pantalla|monitor|screen|display)\s+(\d+)/g)];if(new Set(mentioned.map(m=>m[1])).size>1)return {app:'desktop',action:'clarify',question:'¿En cuál pantalla quieres poner las dos ventanas juntas?'};
  let queries=wa.index<im.index?['WhatsApp','Messages']:['Messages','WhatsApp'];
@@ -69471,8 +69476,9 @@ return {order,extract};
       const {calendar,originalText,...desktopOrder}=order;
       const result=await client.run(desktopOrder);if(!active())return;
       if(order.app==='desktop'){
+       if(order.action==='window_pair'&&result.status==='layout_done')LUMI_LAYOUT_CONTEXT={owner,at:Date.now(),queries:[...order.queries],screen:order.screen};
        const labels=result.windows.map(w=>w.application+' — '+(w.title||'Sin título')+(w.minimized?' (minimizada)':''));
-       const answer=result.status==='layout_done'?'Listo, dejé '+labels[0]+' a la izquierda y '+labels[1]+' a la derecha, juntas en la misma pantalla.':result.status==='layout_review'?'No pude dejar las dos ventanas bien acomodadas. Una ventana limita su tamaño o está a pantalla completa; el acomodo puede haber quedado parcial.':result.status==='files_denied'?'No pude acceder a algunas carpetas de la Mac. No puedo confirmar si el archivo está ahí; falta revisar el acceso del conector.':result.status==='files'?'Encontré estos archivos por nombre (búsqueda parcial por nombre, máximo 25):\n'+(labels.join('\n')||'Sin coincidencias en las ubicaciones revisadas; la búsqueda no cubre todo el disco.'):result.status==='close_review'?'Dejé la ventana abierta o pendiente de revisar. No descarté cambios ni pulsé No guardar.':result.status==='window_closed'?'Cerré la ventana sin descartar cambios.':result.status==='screen_missing'?'Esa pantalla no está conectada. Pídeme la lista de pantallas.':result.status==='windows'?'Estas son las ventanas abiertas:\n'+labels.join('\n'):result.status==='window_choice'?'Hay varias ventanas. Dime el título exacto:\n'+labels.join('\n'):result.status==='window_not_found'?'No encontré esa ventana. Pídeme la lista de ventanas.':'Listo: '+labels.join(', ')+'.';
+       const answer=result.status==='layout_done'?'Listo, dejé '+labels[0]+' a la izquierda y '+labels[1]+' a la derecha, del mismo tamaño y con espacio abajo para el Dock.':result.status==='layout_review'?'No pude dejar las dos ventanas bien acomodadas. Una ventana limita su tamaño o está a pantalla completa; el acomodo puede haber quedado parcial.':result.status==='files_denied'?'No pude acceder a algunas carpetas de la Mac. No puedo confirmar si el archivo está ahí; falta revisar el acceso del conector.':result.status==='files'?'Encontré estos archivos por nombre (búsqueda parcial por nombre, máximo 25):\n'+(labels.join('\n')||'Sin coincidencias en las ubicaciones revisadas; la búsqueda no cubre todo el disco.'):result.status==='close_review'?'Dejé la ventana abierta o pendiente de revisar. No descarté cambios ni pulsé No guardar.':result.status==='window_closed'?'Cerré la ventana sin descartar cambios.':result.status==='screen_missing'?'Esa pantalla no está conectada. Pídeme la lista de pantallas.':result.status==='windows'?'Estas son las ventanas abiertas:\n'+labels.join('\n'):result.status==='window_choice'?'Hay varias ventanas. Dime el título exacto:\n'+labels.join('\n'):result.status==='window_not_found'?'No encontré esa ventana. Pídeme la lista de ventanas.':'Listo: '+labels.join(', ')+'.';
        asMostrarRespuesta(answer);asAccionVisible('Ventanas comprobadas','done');asHablar(answer,asSeguirOyendo);return;
       }
       if(order.calendar && result.status==='chat_messages'){
@@ -69595,7 +69601,7 @@ function lumiPdfOrder(input){
 }
 function lumiPdfText(raw){
  const s=String(raw||'').normalize('NFC').replace(/\r\n?/g,'\n').replace(/\t/g,'    ').replace(/[\u2010-\u2015]/g,'-').replace(/[“”]/g,'"').replace(/[‘’]/g,"'").replace(/…/g,'...').replace(/[•●]/g,'-').replace(/€/g,'EUR');
- if(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(s))throw Error('El texto contiene caracteres de control. Revisa el contenido.');
+ if(/[^@-^H\u000b^L^N-^_\u007f]/.test(s))throw Error('El texto contiene caracteres de control. Revisa el contenido.');
  if(/[^\x20-\x7e\xa0-\xff\n]/.test(s))throw Error('Este PDF admite español e inglés. Quita emojis o caracteres no compatibles antes de crearlo.');
  if(!s.trim())throw Error('No hay texto para convertir a PDF.');if(s.length>60000)throw Error('El texto supera 60.000 caracteres. Divídelo en documentos más cortos.');return s;
 }
@@ -70405,7 +70411,7 @@ async function asCommercialQuote(order,texto){
   const AS_SUPERFICIES = { Floor: 'Piso', Wall: 'Pared', Ceiling: 'Techo' };
   function asLlNum(v, min, max){ const n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return (isFinite(n) && n >= min && n <= max) ? n : null; }
   function asLlFecha(v){ return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : ''; }
-  function asLlTexto(v, max){ return String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max || 200); }
+  function asLlTexto(v, max){ return String(v == null ? '' : v).replace(/[^@-^_]/g, ' ').trim().slice(0, max || 200); }
   function asLlSet(el, v){ if(el && v != null && String(v) !== '') el.value = String(v); }
   // Secado: pone lo dictado en el formulario de Secado. true = algo se llenó.
   function asSecadoAplicar(p){
