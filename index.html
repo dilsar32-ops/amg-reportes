@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R293';
+  const APP_BUILD = '2026-11-08-R294';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69443,7 +69443,36 @@ async function lumiCheckWorkspaceArrivals(){
  }catch(e){/* A failed refresh is unknown, never an empty inbox. */}
  finally{LUMI_MESSAGE_CHECK=false;}
 }
-setInterval(lumiCheckWorkspaceArrivals,30000);
+// Proactive notices: no reply, send, payment, or read-marking occurs here.
+let LUMI_NOTICE_BUSY=false,LUMI_NOTICE_SPOKEN=[],LUMI_NOTICE_OWNER=null;
+function lumiNoticeSay(text){
+ if(AS.abierto){asMostrarRespuesta(text);if(!AS.enviando&&AS.estado==='esperando')asHablar(text,asSeguirOyendo);else LUMI_NOTICE_SPOKEN.push(text);}
+ let box=document.getElementById('lumiArrivalBanner');if(!box){box=document.createElement('div');box.id='lumiArrivalBanner';box.setAttribute('role','status');box.style.cssText='position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);left:12px;right:12px;z-index:999999;background:#16334a;color:white;border:1px solid #4da9cd;border-radius:16px;padding:14px;box-shadow:0 4px 18px #0008;font-size:16px';document.body.appendChild(box);}
+ box.replaceChildren();const message=document.createElement('span');message.textContent=text;box.appendChild(message);const close=document.createElement('button');close.textContent='Entendido';close.style.cssText='margin-left:12px;padding:8px';close.onclick=()=>box.remove();box.appendChild(close);
+}
+async function lumiProactiveTick(){
+ if(typeof SES==='undefined'||SES.role!=='manager'||!SES.user_id){LUMI_NOTICE_SPOKEN=[];LUMI_NOTICE_OWNER=null;document.getElementById('lumiArrivalBanner')?.remove();return;}
+ if(LUMI_NOTICE_BUSY||document.hidden)return;
+ const owner=SES.user_id+'|'+SES.company_id;if(LUMI_NOTICE_OWNER!==owner){LUMI_NOTICE_OWNER=owner;LUMI_NOTICE_SPOKEN=[];document.getElementById('lumiArrivalBanner')?.remove();}
+ if(LUMI_NOTICE_SPOKEN.length&&AS.abierto&&!AS.enviando&&AS.estado==='esperando'){asHablar(LUMI_NOTICE_SPOKEN.splice(0).join(' '),asSeguirOyendo);}
+ LUMI_NOTICE_BUSY=true;
+ try{
+ const key='lumi_notices_seen_'+owner;let seen;try{seen=JSON.parse(localStorage.getItem(key)||'[]');if(!Array.isArray(seen))seen=[];}catch{seen=[];}
+ const notices=[];
+ const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders()});
+ if(r.ok){const data=(await r.json())[0]?.valor;if(data?.owner===owner){for(const e of data.events||[]){if(!seen.includes(e.id)&&Date.now()-e.at<86400000){notices.push({id:e.id,text:(e.source==='whatsapp'?'WhatsApp':'Mensajes normales')+': '+e.title});}}}}
+ if(owner!==SES.user_id+'|'+SES.company_id)return;
+ if(typeof window.__lumiWorkspaceSnapshot==='function')try{
+ const rows=await window.__lumiWorkspaceSnapshot();const result=await lumiComparePersisted('workspace_watch',rows,owner,Date.now());
+ for(const name of result.newMessages||[])notices.push({id:'ws:'+Date.now()+':'+name,text:'Workspace (mensaje o petición): '+name});
+ }catch{}
+ try{const lr=await authFetch('/rest/v1/labor_logs?select=id,created_at,crew_leader&order=created_at.desc&limit=100',{headers:cloudHeaders()});if(lr.ok){const logs=await lr.json();if(owner!==SES.user_id+'|'+SES.company_id)return;const c=await lumiComparePersisted('labor_watch',logs.map(x=>({id:x.id,at:Date.parse(x.created_at),chat:x.crew_leader||'la cuadrilla',preview:x.id})),owner,Date.now());for(const name of c.newMessages||[])notices.push({id:'labor:'+Date.now()+':'+name,text:'Labor log: '+name});}}catch{}
+ if(owner!==SES.user_id+'|'+SES.company_id)return;
+ if(notices.length){const unique=[...new Map(notices.map(n=>[n.id,n])).values()];lumiNoticeSay('Amílcar, hay novedades. '+[...new Set(unique.map(n=>n.text))].slice(0,4).join('. ')+(unique.length>4?'. Hay más por revisar.':'.')+' Puedes pedirme que las lea.');seen.push(...unique.map(n=>n.id));localStorage.setItem(key,JSON.stringify(seen.slice(-500)));}
+ }catch{}finally{LUMI_NOTICE_BUSY=false;}
+}
+setInterval(lumiProactiveTick,15000);
+
 
 function lumiReviewBrief(results,en=false){
  const names=[...new Set(results.flatMap(r=>r.candidates.filter(c=>!c.uncertain).map(c=>c.chat)))];
