@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R300';
+  const APP_BUILD = '2026-11-08-R301';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70154,13 +70154,14 @@ async function lumiBasicTick(){if(LUMI_BASIC_BUSY||document.hidden||!lumiBasicOw
 setInterval(lumiBasicTick,30000);
 async function asBasicWorkspace(texto){
  const t=lumiBasicNorm(texto),activate=/^(?:activa|activar|enable) (?:las )?respuestas basicas(?: de| en)? workspace$/.test(t);
+ const disable=/^(?:desactiva|desactivar|deten|pausa|disable) (?:las )?respuestas basicas(?: de| en)? workspace$/.test(t);
  const check=t.match(/^(?:comprueba|verifica) si le debemos a (.+) sin (?:mostrar|compartir) (?:el monto|montos)$/);
  const review=/(?:workspace)/.test(t)&&/(?:preguntas|consultas|mensajes)/.test(t)&&/(?:revisa|revisar|podemos responder|puedes responder)/.test(t);
- if(!activate&&!review&&!check)return false;
+ if(!activate&&!disable&&!review&&!check)return false;
  const owner=lumiBasicOwner();asPararOido();asCallar();asTranscribir(texto);if(!owner){asMostrarRespuesta('Esta acción requiere Manager.');return true;}
  AS.enviando=true;try{let text;
  if(check){const people=await lumiBasicAll('/rest/v1/profiles?select=id,full_name,status&company_id=eq.'+encodeURIComponent(SES.company_id),owner);const parsed=lumiBasicQuestion('le debemos a '+check[1],people.filter(p=>p.status!=='removed'));if(parsed.action!=='balance')throw Error('No pude identificar a una sola persona.');const balance=await lumiBasicBalance(parsed.person,owner);const answer=lumiBasicWorkspaceReply({question:'le debemos a '+parsed.person.full_name,balance,verifiedAt:Date.now(),sameCompany:true,uniquePerson:true,person:parsed.person.full_name});if(answer.action!=='propose')throw Error('No pude verificar el saldo.');text=answer.text+' No envié ningún mensaje.';}
- else if(activate){const row={company_id:SES.company_id,clave:'lumi_basic_replies_'+SES.user_id,valor:{owner,enabled:true,since:Date.now(),version:1}};const r=await authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:Object.assign(cloudHeaders(),{Prefer:'resolution=merge-duplicates'}),body:JSON.stringify(row)});if(!r.ok)throw Error('No se pudo activar.');text='Activé respuestas básicas para preguntas nuevas y directas de Workspace sobre si existe saldo pendiente. Consultaré los datos sin compartir cantidades. Los grupos, solicitudes de pago y preguntas ambiguas quedan para revisión. Funciona mientras Workspace está abierto y visible.';}
+ else if(activate||disable){const row={company_id:SES.company_id,clave:'lumi_basic_replies_'+SES.user_id,valor:{owner,enabled:!disable,since:Date.now(),version:1}};const r=await authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:Object.assign(cloudHeaders(),{Prefer:'resolution=merge-duplicates'}),body:JSON.stringify(row)});if(!r.ok)throw Error('No se pudo activar.');text=disable?'Desactivé las respuestas automáticas básicas de Workspace. Seguiré mostrando avisos de mensajes.':'Activé respuestas básicas para preguntas nuevas y directas de Workspace sobre si existe saldo pendiente. Consultaré los datos sin compartir cantidades. Los grupos, solicitudes de pago y preguntas ambiguas quedan para revisión. Funciona mientras Workspace está abierto y visible.';}
  else{const rows=await lumiBasicReview();text=rows.length?rows.slice(0,5).map(r=>r.sender+': '+(r.status==='proposal'?r.text:'Necesita revisión; no envié nada.')).join('\n'):'No encontré consultas básicas recientes sin respuesta en los mensajes revisados. No envié nada.';}
  if(owner===lumiBasicOwner()){asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);}
  }catch(e){if(owner===lumiBasicOwner()){asMostrarRespuesta(e.message);asSeguirOyendo();}}finally{AS.enviando=false;}return true;
