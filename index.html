@@ -18390,7 +18390,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R238';
+  const APP_BUILD = '2026-11-07-R239';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68789,11 +68789,47 @@ function lumiCapabilityHelp(text){
  return en?"I can help you review reports, find project documents, and work with messages. With your Mac connected, I can open pages and show you screenshots. Tell me what you need, and I’ll show you the result or explain what’s missing.":'Puedo ayudarte a revisar reportes, buscar documentos de proyectos y trabajar con mensajes. Con tu Mac conectada puedo abrir páginas y mostrarte capturas. Dime qué necesitas y te muestro el resultado o te explico qué falta.';
 }
 
+function lumiQuoteOrder(input){
+ const t=String(input||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+ if(t.length>700||/^(?:recuerda|aprende|remember|learn)\b/.test(t))return null;
+ if(!/\b(?:cotizacion|cotiza|presupuesto|quote|quotation|estimate)\b/.test(t)||!/\b(?:mudanza|moving|movers|tarifas|rates|comerciales)\b/.test(t))return null;
+ const withoutSend=t.replace(/\b(?:sin enviar(?: nada)?|no (?:lo )?envies|do not send|don't send)\b/g,'');
+ if(/\b(?:envia|enviala|mandala|manda|send|text|email)\b/.test(withoutSend))return null;
+ return {english:/\b(?:ingles|english|quote|quotation|estimate)\b/.test(t)};
+}
+function lumiQuoteFromMemory(memory,english){
+ const raw=String(memory||'');
+ const line=key=>raw.split('\n').filter(x=>x.toLowerCase().startsWith(key+':'));
+ const labor=line('tarifa mudanza'),truck=line('tarifa camion');
+ if(labor.length!==1||truck.length!==1)throw Error('Faltan tarifas comerciales guardadas sin ambigüedad. No voy a inventar precios.');
+ const clean=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ const l=clean(labor[0]),t=clean(truck[0]);
+ const amounts=s=>[...s.matchAll(/\$\s*(\d+(?:\.\d{1,2})?)/g)].map(m=>m[1]);
+ const money=amounts(l),vehicle=amounts(t);
+ if(money.length!==2||vehicle.length!==1||!/dos muchachos.*\$.*por hora.*cuatro muchachos.*\$.*por hora/.test(l)||!/\$.*por dia/.test(t)||!money.concat(vehicle).every(x=>Number(x)>0))throw Error('No pude verificar las unidades de las tarifas. Revisa los precios antes de cotizar.');
+ if(!/gasolina y millas incluidas/.test(t)||!/mantas son gratis/.test(t)||!/materiales adicionales se cobran aparte/.test(t))throw Error('Falta confirmar qué incluyen el camión, las mantas y los materiales.');
+ return english?`We charge $${money[0]} per hour for two movers or $${money[1]} per hour for four movers. The truck is $${vehicle[0]} per day, including gas and mileage. Moving blankets are included at no extra charge. Any additional materials used are charged separately.`:`Cobramos $${money[0]} por hora por dos muchachos o $${money[1]} por hora por cuatro. El camión cuesta $${vehicle[0]} por día e incluye gasolina y millas. Las mantas son gratis. Los materiales adicionales se cobran aparte.`;
+}
+async function asCommercialQuote(order,texto){
+ const owner=SES.user_id+'|'+SES.company_id;
+ if(SES.role!=='manager'){asMostrarRespuesta('Esta cotización requiere Manager.');return;}
+ AS.enviando=true;asPararOido();asCallar();asTranscribir(texto);asAccionVisible('Consultando tus tarifas guardadas…','working');
+ try{
+  const r=await asLlamar({texto:'Qué recuerdas',historial:[],sandbox:AS.sandbox});
+  if(!AS.abierto||owner!==SES.user_id+'|'+SES.company_id||SES.role!=='manager')return;
+  if(!r.ok||!r.json?.ok)throw Error(r.json?.texto||r.json?.error||'No pude consultar tus tarifas.');
+  const quote=lumiQuoteFromMemory(r.json.texto,order.english);
+  asRecordarAccionMac(texto,quote);asMostrarRespuesta(quote);asAccionVisible('Borrador listo · no enviado','done');asHablar(quote,asSeguirOyendo);
+ }catch(e){if(AS.abierto&&owner===SES.user_id+'|'+SES.company_id){asMostrarRespuesta(e.message);asAccionVisible('No se preparó la cotización','error');}}
+ finally{AS.enviando=false;}
+}
+
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando&&!AS.conf&&!AS.pregunta){const quote=lumiQuoteOrder(texto);if(quote){await asCommercialQuote(quote,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const pdf=lumiPdfOrder(texto);if(pdf){await asCrearPdf(pdf,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const review=lumiReviewOrder(texto);if(review){await asRevisionCompleta(review,texto);return;}}
