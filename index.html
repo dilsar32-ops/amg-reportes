@@ -10761,6 +10761,14 @@ html body #asPanel .as-charla::-webkit-scrollbar{display:none;}
 html body #asPanel #asConversacion{padding-top:54px!important;padding-bottom:12px!important;}
 html body #asPanel #asEsfera{width:68px!important;height:68px!important;}
 </style>
+<style id="lumi-continuity-r245">
+/* Separate scroll region and controls: no message underneath the sphere/header. */
+html body #asPanel .as-cab{position:relative!important;top:auto!important;left:auto!important;right:auto!important;order:1!important;flex:0 0 48px!important;background:#000!important;pointer-events:auto;}
+html body #asPanel .as-charla{min-height:0!important;overflow-y:auto!important;overflow-x:hidden!important;flex:1 1 0!important;mask-image:none!important;-webkit-mask-image:none!important;scroll-padding-bottom:20px;}
+html body #asPanel #asConversacion{padding-top:8px!important;padding-bottom:24px!important;}
+html body #asPanel .as-esfera-wrap{height:68px!important;min-height:68px!important;flex:0 0 68px!important;overflow:hidden!important;animation:none!important;}
+html body #asPanel #asSharedNotice{display:none!important;}
+</style>
 </head>
 <body>
 
@@ -18406,7 +18414,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R244';
+  const APP_BUILD = '2026-11-07-R245';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67177,9 +67185,15 @@ function asSharedRender(rows){const log=document.getElementById('asConversacion'
  log.replaceChildren();for(const r of rows){const p=document.createElement('p');p.dataset.role=r.role;p.dataset.sharedId=r.id;p.dataset.sharedRemote='1';const label=document.createElement('strong');label.textContent=r.role==='user'?'Tú: ':'Lumi: ';const span=document.createElement('span');span.textContent=r.content;p.append(label,span);log.append(p);}
  AS.historial=rows.slice(-40).map(({role,content})=>({role,content}));asChatStore().save(rows);if(follow||rows.at(-1)?.role==='assistant')asChatFollow(log,true);else box.scrollTop=oldTop;
 }
-function asSharedNotice(text){const log=document.getElementById('asConversacion'),panel=document.getElementById('asPanel');if(!log||!panel)return;let el=document.getElementById('asSharedNotice');if(!el){el=document.createElement('button');el.type='button';el.id='asSharedNotice';el.style.cssText='order:6!important;position:relative;z-index:30;flex:0 0 auto;align-self:center;min-height:28px;font-size:12px;color:#c9dfff;background:#182333;border:1px solid #395270;border-radius:12px;text-align:center;padding:5px 12px;margin:4px;opacity:1;';const cab=panel.querySelector('.as-cab');cab.after(el);el.onclick=()=>{void asSharedTick();asChatFollow(log,true);};}el.textContent=text.includes('Sin sincronizar')?'Sincronización pendiente · tocar para reintentar':'Chat compartido · ver últimos mensajes';el.title=text;}
+function asSharedNotice(text){
+ // Synchronization is automatic; keep diagnostics out of the conversation controls.
+ document.getElementById('asSharedNotice')?.remove();
+ const panel=document.getElementById('asPanel');if(panel)panel.dataset.historySync=text.includes('Sin sincronizar')?'pending':'ready';
+}
 
 async function asSharedTick(){if(!AS.abierto||SES.role!=='manager'||AS_SHARED_RENDERING)return;const owner=asChatOwner();try{const rows=await asShared().sync();if(rows&&AS.abierto&&owner===asChatOwner()&&!AS.enviando&&!AS_DESKTOP_BUSY){asSharedRender(rows);asSharedNotice('Conversación sincronizada entre tus dispositivos');}}catch(e){asSharedNotice('Sin sincronizar todavía. La conversación sigue guardada en este dispositivo.');asBit('Historial compartido pendiente: '+e.message);}}
+window.addEventListener('online',()=>{if(AS.abierto)void asSharedTick();});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&AS.abierto)void asSharedTick();});
 function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')return;const rows=asShared().import(asChatStore().load());asSharedRender(rows);void asSharedTick();AS_SHARED_TIMER=setInterval(()=>void asSharedTick(),3000);}
 
   let AS_CHAT_OWNER='',AS_CHAT_RESTORING=false;
@@ -67205,7 +67219,7 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
     if(AS_CHAT_OWNER!==asChatOwner()){asChatRestore();}
     const box=asChatScrollBox(log);
     const newReply=role==='assistant' && log.lastElementChild?.dataset.role!=='assistant';
-    const nearEnd = AS_CHAT_RESTORING || role==='user' || newReply || box.scrollHeight-box.scrollTop-box.clientHeight<60;
+    const nearEnd = AS_CHAT_RESTORING || role==='user' || role==='assistant' || newReply || box.scrollHeight-box.scrollTop-box.clientHeight<60;
     let row = log.lastElementChild;
     if(!row || row.dataset.role !== role || row.dataset.sharedRemote==='1'){
       row = document.createElement('p'); row.dataset.role = role;
@@ -67280,19 +67294,10 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
     const Sp = asPlugin(); if(isNative() && Sp){ try{ asEnganchar(Sp); }catch(err){} }
     asPantalla(true);   // (30 oct) la pantalla no se apaga mientras Lumi está abierta
     if(opts && opts.sinSaludo) return;   // (31 oct) los buenos días traen su propio saludo
-    // Saluda por el nombre de pila (una vez, al abrir) y se queda oyendo.
-    // (pendiente 1, 21 oct) Y dice el resumen del día (logs sin ver, pagos por confirmar, casas con equipo), que la nube
-    // arma sin modelo; se pide mientras saluda y se dice después, a lo más una vez cada 30 minutos.
-    const nombre = asNombreDePila();
-    const resumen = asPedirResumen();
-    asHablar(nombre ? '¿Qué necesitas, ' + nombre + '?' : '¿Qué necesitas?', function(){
-      resumen.then(function(t){
-        if(!AS.abierto || AS.estado !== 'esperando' && AS.estado !== 'hablando') return;   // ya está oyendo/pensando: no se interrumpe
-        if(!t){ asSeguirOyendo(); return; }
-        asMostrarRespuesta(t); asHablar(t, asSeguirOyendo);
-      });
-    });
+    // Opening is resuming the same conversation, never a new greeting or summary.
+    asSeguirOyendo();
   }
+
   const AS_RESUMEN_CADA_MS = 30 * 60 * 1000;
   // (31 oct 2026, el dueño: "si entro por la mañana a Field Reports, Lumi me habla: la hora, buenos días, recordatorios y lo de los labor
   // logs") LOS BUENOS DÍAS: la primera vez del día que el manager abre la app entre las 4 y las 12, Lumi se abre sola y habla
