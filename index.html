@@ -68561,7 +68561,9 @@ async function lumiRunExternalReview({run,apps,active=()=>true,english=false,pro
    if(!lumiDesktopReadValid(list,{app,action:'list_recent'}))throw Error('Lista no válida');
    report.available=list.chats.length;
    const normalized=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
-   for(const chat of list.chats.slice(0,maxChats)){
+   // Scan unique names so accessibility duplicates do not consume the review quota.
+   const seenNames=new Set();const reviewChats=list.chats.filter(c=>{const n=normalized(c.title);if(seenNames.has(n))return false;seenNames.add(n);return true;});
+   for(const chat of reviewChats.slice(0,maxChats)){
     if(!active())throw Error('La sesión cambió.');
     if(list.chats.filter(c=>normalized(c.title)===normalized(chat.title)).length!==1){report.errors.push(chat.title+': nombre repetido; no elegí uno al azar.');continue;}
     progress(app,chat.title);
@@ -68572,7 +68574,7 @@ async function lumiRunExternalReview({run,apps,active=()=>true,english=false,pro
      report.candidates.push(...lumiReviewCandidates(r,english));report.checked++;
      // Native accessibility may omit the newest bubble although the chat-list preview includes it.
      const preview=String(chat.preview||'');
-     if(preview&&!/your message|tu mensaje|tú:|you:|sent to/i.test(preview)&&!r.messages.some(m=>(m.text||m.description).includes(preview))&&/ne[cs]e[cs]ito|nesesito|muving|restauration|\?|please|can you|necesita|need|fuga|leak/i.test(preview))report.candidates.push({chat:chat.title,excerpt:preview,uncertain:true,reason:english?'The chat-list preview shows a possible request missing from the readable transcript. Check the original.':'La vista previa muestra un posible pendiente que no aparece completo en la lectura del chat. Hay que revisar el original.',draft:null,urgent:false});
+     if(preview&&!/your message|tu mensaje|tú:|you:|sent to/i.test(preview)&&!r.messages.some(m=>(m.text||m.description).includes(preview))&&/ne[cs]e[cs]ito|nesesito|muving|restauration|\?|please|can you|necesita|need|fuga|leak|adelanto|queria pedir|quería pedir|falta.*parte/i.test(preview))report.candidates.push({chat:chat.title,excerpt:preview,uncertain:true,reason:english?'The chat-list preview shows a possible request missing from the readable transcript. Check the original.':'La vista previa muestra un posible pendiente que no aparece completo en la lectura del chat. Hay que revisar el original.',draft:null,urgent:false});
     }catch(e){if(!active())throw e;report.errors.push(chat.title+': no pude verificar la conversación.');}
    }
   }catch(e){if(!active())throw e;report.errors.push(english?'Could not review this app; this does not mean there are no pending messages.':'No pude revisar esta aplicación; no significa que no haya pendientes.');}
