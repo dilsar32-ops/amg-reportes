@@ -18618,7 +18618,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R267';
+  const APP_BUILD = '2026-11-08-R268';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67538,6 +67538,7 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
   function asAbrir(opts){
     if(!signedIn()) return;
     asPrepararAudio();
+    if(SES.role==='manager')void asVozLocal().warm().catch(()=>{});
     asOyeLiberar();
     { asChatRestore(); asAccionVisible('', ''); }
     AS.abierto = true; AS.dictado = null; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asMapa(null); asTranscribir('');
@@ -68170,7 +68171,30 @@ function createLumiVoice({call,session,play,observe=()=>{},stream=true,now=Date.
    mark(live()?'completed':'cancelled');return live()?'played':'cancelled';
   }catch(error){mark('failed');failed=true;if(active(s,e)){for(const handle of playing)handle.stop();playing.clear();}if(startedAudio)error.spoken=true;throw error;}
  }
- return {cancel(){epoch++;chain=Promise.resolve();prepareChain=Promise.resolve();for(const job of jobs){if(job.owner===owner(session()))Promise.resolve().then(()=>call(job.route,{method:'DELETE'})).catch(()=>{});}current?.stop();current=null;for(const handle of playing)handle.stop();playing.clear();},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const prepareGate=prepareChain,playGate=chain;let release;prepareChain=new Promise(r=>release=r);const run=speech(text,language,s,e,prepareGate,playGate,release).finally(release);const r=run.catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
+ let warmed=null,warming=null;
+ async function warm(){
+  const s={...session()},key=owner(s);
+  if(s.role!=='manager'||!s.user_id||!s.company_id)return false;
+  if(warmed?.owner===key&&now()-warmed.at<300000)return true;
+  if(warming?.owner===key)return warming.promise;
+  const run=(async()=>{
+   const d=await device(s);if(!d||owner(session())!==key)return false;
+   const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
+   try{
+    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:'Hola.',language:'Spanish',stream:false}})});
+    const deadline=now()+60000;
+    while(now()<deadline&&owner(session())===key){
+     const rows=await call(route+'&select=state,result');const job=rows?.[0];
+     if(job?.state==='failed')return false;
+     if(job?.state==='done'){if(job.result?.data?.voice!=='calida-tranquila-v1')return false;warmed={owner:key,at:now()};return true;}
+     await wait(500);
+    }
+    return false;
+   }finally{if(owner(session())===key)await call(route,{method:'DELETE'}).catch(()=>{});}
+  })();
+  warming={owner:key,promise:run};try{return await run;}finally{if(warming?.promise===run)warming=null;}
+ }
+ return {warm,cancel(){epoch++;chain=Promise.resolve();prepareChain=Promise.resolve();for(const job of jobs){if(job.owner===owner(session()))Promise.resolve().then(()=>call(job.route,{method:'DELETE'})).catch(()=>{});}current?.stop();current=null;for(const handle of playing)handle.stop();playing.clear();},speak(text,language){const s={...session()},e=epoch;if(s.role!=='manager'||!s.user_id||!s.company_id)return Promise.resolve('unavailable');const prepareGate=prepareChain,playGate=chain;let release;prepareChain=new Promise(r=>release=r);const run=speech(text,language,s,e,prepareGate,playGate,release).finally(release);const r=run.catch(error=>{if(!active(s,e))return 'cancelled';throw error;});chain=r.catch(()=>{});return r;}};
 }
 /* One audio clock; unlock synchronously from a user gesture on mobile. */
 function createLumiAudioPlayer({context,decodeBase64=x=>Uint8Array.from(atob(x),c=>c.charCodeAt(0)),timer=setTimeout,clear=clearTimeout,beforeResume=()=>{}}){
