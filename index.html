@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R302';
+  const APP_BUILD = '2026-11-08-R303';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -78704,11 +78704,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     window.addEventListener('scroll', () => { if(MSGK_CAPA.el && window.scrollY) msgkCapaAjustar(); }, { passive: true });
   }
   // ===================== (8-nov-2026) LA RADIO DEL EQUIPO =====================
-  // Su pedido: "solo lo presiono y automáticamente la otra persona me escucha", como el walkie-talkie del reloj (que
-  // Apple quitó en watchOS 27). Es el Push to Talk de Apple (plugin nativo "Radio"): cada quien se une UNA vez al canal
-  // de su grupo y desde ahí su iPhone suena solo aunque esté bloqueado. Se habla con el botón grande de aquí, con el
-  // botón de la pantalla bloqueada / la isla, o con el Botón de Acción. Cada mensaje de radio queda también como nota
-  // de voz en el chat del grupo. Solo iPhone con la app nueva: en la web y en el simulador el botón no aparece.
+  // Radio v2: transmisión cifrada en vivo, sin archivos ni notas en el chat.
   const RADIO = { abierta: null, est: null, hablando: false, t0: 0, reloj: null, escucha: false };
   const RADIO_ICO = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="7" width="12" height="15" rx="2.5"/><path d="M10 7 8 2"/><circle cx="12" cy="13" r="2.4"/><path d="M9.5 18.5h5"/></svg>';
   const RADIO_MIC = '<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg>';
@@ -78745,7 +78741,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(!v){ v = document.createElement('div'); v.id = 'radioVelo'; v.className = 'radio-velo'; document.body.appendChild(v);
       v.addEventListener('click', radioClic); ['pointerdown'].forEach(ev => v.addEventListener(ev, radioApretar));
       ['pointerup', 'pointercancel'].forEach(ev => v.addEventListener(ev, radioSoltar)); }
-    radioPintar(); v.hidden = false; requestAnimationFrame(() => v.classList.add('ver'));
+    if(est.protocolo!==2){ alert('Actualice Workspace para usar la radio en vivo sin notas de audio.'); RADIO.abierta=null; v.hidden=true; return; } radioPintar(); v.hidden = false; requestAnimationFrame(() => v.classList.add('ver'));
   }
   function radioCerrar(){ const v = document.getElementById('radioVelo'); if(!v) return; if(RADIO.hablando) radioSoltar(); v.classList.remove('ver'); setTimeout(() => { v.hidden = true; }, 220); RADIO.abierta = null; }
 
@@ -78760,12 +78756,12 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       + '<button type="button" class="radio-x" data-radio="cerrar" aria-label="Cerrar">✕</button></div>'
       + (aqui
         ? '<div class="radio-estado">' + (RADIO.hablando ? 'Hablando… <b class="radio-t">0:00</b>' : (RADIO.escucha ? 'Escuchando…' : 'Mantén apretado para hablar')) + '</div>'
-          + '<button type="button" class="radio-boton' + (RADIO.hablando ? ' on' : '') + '" data-radio="hablar">' + RADIO_MIC + '<span>' + (RADIO.hablando ? 'SUELTA PARA MANDAR' : 'HABLAR') + '</span></button>'
-          + '<div class="radio-pie">Suena solo aunque el teléfono esté bloqueado.</div>'
+          + '<button type="button" class="radio-boton' + (RADIO.hablando ? ' on' : '') + '" data-radio="hablar">' + RADIO_MIC + '<span>' + (RADIO.hablando ? 'SUELTA PARA TERMINAR' : 'HABLAR') + '</span></button>'
+          + '<div class="radio-pie">Voz en vivo. No se guarda como nota de audio.</div>'
           + '<button type="button" class="radio-salir" data-radio="salir">Salir de la radio</button>'
-        : '<div class="radio-txt">' + (otro ? 'Estás en la radio de <b>' + esc(g.nombre || '') + '</b>. Solo se puede estar en una.' : 'Únete una vez y tu iPhone suena solo, aunque esté bloqueado o con la app cerrada.') + '</div>'
+        : '<div class="radio-txt">' + (otro ? 'Estás en la radio de <b>' + esc(g.nombre || '') + '</b>. Solo se puede estar en una.' : 'Únase con ambos iPhone actualizados. La voz se escucha en vivo y no queda guardada en el chat.') + '</div>'
           + lista
-          + '<button type="button" class="radio-unir" data-radio="unir">' + (otro ? 'Cambiar a esta radio' : 'Unirme a la radio') + '</button>'
+          + '<button type="button" class="radio-unir" data-radio="unir">' + (otro ? 'Salga de la otra radio primero' : 'Unirme a la radio') + '</button>'
           + '<div class="radio-pie">También: dejar apretado el ícono de Workspace → Radio, o el Botón de Acción del iPhone.</div>')
       + '<div class="radio-msj" aria-live="polite"></div></div>';
   }
@@ -78777,33 +78773,33 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const b = e.target.closest('[data-radio]'); if(!b) return; const P = radioPlugin(); if(!P) return;
     const que = b.dataset.radio, key = RADIO.abierta;
     if(que === 'cerrar'){ radioCerrar(); return; }
-    if(que === 'unir'){
+    if(que === 'unir'){ RADIO.error=null;
       b.disabled = true; radioAviso('Uniéndote…');
       try{
         const r = await P.unir({ canal: key, uuid: await radioUUID(key), nombre: 'Radio · ' + radioNombreCanal(key), servidor: CLOUD.url, llave: CLOUD.key, registro: radioRegistro() });
         if(r && r.ok){ radioGuardar({ canal: key, nombre: radioNombreCanal(key) }); RADIO.est = await P.estado(); radioPintar(); radioPintarCab(key); }
-        else { radioAviso(r && r.motivo === 'no-disponible' ? 'La radio funciona en el iPhone (no en el simulador ni en la web).' : 'No se pudo unir. Revisa tu internet.'); b.disabled = false; }
+        else { radioAviso(r && r.motivo === 'no-disponible' ? 'La radio funciona en el iPhone (no en el simulador ni en la web).' : r && r.motivo === 'salir-primero' ? 'Salga de la radio anterior antes de unirse a esta.' : 'No se pudo unir. Revise su conexión y permiso de micrófono.'); b.disabled = false; }
       }catch(err){ radioAviso('No se pudo unir.'); b.disabled = false; }
       return;
     }
     if(que === 'salir'){ try{ await P.salir(); }catch(err){} radioGuardar(null); RADIO.est = Object.assign({}, RADIO.est, { unido: false }); radioPintar(); radioPintarCab(key); return; }
   }
-  // dejar apretado = hablar; soltar = mandar (como un radio). El dedo se sigue aunque salga del botón.
+  // dejar apretado = hablar; soltar = terminar la transmisión. El dedo se sigue aunque salga del botón.
   async function radioApretar(e){
     const b = e.target.closest('[data-radio="hablar"]'); if(!b) return; e.preventDefault();
     try{ b.setPointerCapture(e.pointerId); }catch(err){}
     const P = radioPlugin(); if(!P || RADIO.hablando) return;
-    RADIO.hablando = true; RADIO.t0 = Date.now();
+    RADIO.error=null; RADIO.hablando = true; RADIO.t0 = Date.now();
     // sin redibujar: el botón sigue siendo el mismo bajo el dedo (si se cambiara, el iPhone podría soltar la transmisión)
-    b.classList.add('on'); const lb = b.querySelector('span'); if(lb) lb.textContent = 'SUELTA PARA MANDAR';
-    const es = document.querySelector('#radioVelo .radio-estado'); if(es) es.innerHTML = 'Hablando… <b class="radio-t">0:00</b>';
+    b.classList.add('on'); const lb = b.querySelector('span'); if(lb) lb.textContent = 'CONECTANDO…';
+    const es = document.querySelector('#radioVelo .radio-estado'); if(es) es.innerHTML = 'Conectando… <b class="radio-t">0:00</b>';
     clearInterval(RADIO.reloj); RADIO.reloj = setInterval(() => { const t = document.querySelector('#radioVelo .radio-t'); if(t){ const s = Math.floor((Date.now() - RADIO.t0) / 1000); t.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); } }, 250);
-    try{ const r = await P.hablar(); if(r && !r.ok){ RADIO.hablando = false; clearInterval(RADIO.reloj); radioPintar(); radioAviso('Primero únete a la radio.'); } }catch(err){ RADIO.hablando = false; clearInterval(RADIO.reloj); radioPintar(); }
+    try{ const r = await P.hablar(); if(r && !r.ok){ RADIO.hablando = false; clearInterval(RADIO.reloj); radioPintar(); radioAviso(r.motivo==='ocupado' ? 'La radio está ocupada. Espere a que termine la otra persona.' : 'Primero únase a la radio.'); } }catch(err){ RADIO.hablando = false; clearInterval(RADIO.reloj); radioPintar(); }
   }
   async function radioSoltar(){
     if(!RADIO.hablando) return; RADIO.hablando = false; clearInterval(RADIO.reloj);
     const P = radioPlugin(); try{ if(P) await P.soltar(); }catch(e){}
-    radioPintar(); radioAviso('Mandando…');
+    radioPintar(); radioAviso('Transmisión terminada. No se guardó audio.');
   }
 
   // lo que avisa el iPhone (unido, se salió desde la pantalla bloqueada, mandado, recibido, error)
@@ -78811,10 +78807,12 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const P = radioPlugin(); if(!P || !P.addListener) return;
     P.addListener('radio', (d) => {
       const ev = d && d.evento;
-      if(ev === 'salio'){ radioGuardar(null); if(RADIO.est) RADIO.est.unido = false; if(RADIO.abierta) radioPintar(); if(MSG && MSG.con) radioPintarCab(MSG.con); }
-      else if(ev === 'mandado'){ radioAviso('Mandado ✓'); setTimeout(() => radioAviso(''), 1800); try{ if(typeof msgRecargarAhora === 'function') msgRecargarAhora(); }catch(e){} }
-      else if(ev === 'recibido'){ RADIO.escucha = true; if(RADIO.abierta) radioPintar(); setTimeout(() => { RADIO.escucha = false; if(RADIO.abierta) radioPintar(); }, 6000); }
-      else if(ev === 'error'){ radioAviso(d.que === 'mandar' ? 'No se pudo mandar. Revisa tu internet.' : (d.que === 'registro' ? 'No se pudo registrar este iPhone en la radio.' : 'La radio tuvo un problema.')); }
+      if(ev === 'unido' || ev === 'registrado'){ P.estado().then(est=>{RADIO.est=est;if(RADIO.abierta&&!RADIO.hablando)radioPintar();}).catch(()=>{}); }
+      else if(ev === 'hablando' && d.si === true){const es=document.querySelector('#radioVelo .radio-estado');if(es)es.textContent='Hablando en vivo';const lb=document.querySelector('#radioVelo [data-radio=hablar] span');if(lb)lb.textContent='SUELTA PARA TERMINAR';}
+      else if(ev === 'terminado'){RADIO.hablando=false;RADIO.escucha=false;clearInterval(RADIO.reloj);if(RADIO.abierta){radioPintar();if(RADIO.error)radioAviso(RADIO.error);}}
+      else if(ev === 'salio'){ radioGuardar(null); if(RADIO.est) RADIO.est.unido = false; if(RADIO.abierta) radioPintar(); if(MSG && MSG.con) radioPintarCab(MSG.con); }
+      else if(ev === 'recibido'){ RADIO.escucha = true; if(RADIO.abierta) radioPintar();  }
+      else if(ev === 'error'){ RADIO.hablando=false;clearInterval(RADIO.reloj);if(RADIO.abierta)radioPintar();const reasons={'sin-oyentes':'Ningún teléfono está listo para escuchar. Comprueben que ambos estén unidos.','ocupado':'Otra persona está hablando o hay una llamada activa.','aviso-rechazado':'Apple no aceptó el aviso. No se transmitió la voz.','microfono':'No se pudo activar el micrófono.','conexion':'Se interrumpió la conexión.','conexion-lenta':'La conexión está demasiado lenta.','actualizar-radio':'Actualice Workspace en ambos teléfonos.'}; RADIO.error=reasons[d.que] || 'No se pudo conectar la radio.'; radioAviso(RADIO.error); }
       else if(ev === 'hablando' && d.si === false && RADIO.hablando){ RADIO.hablando = false; clearInterval(RADIO.reloj); if(RADIO.abierta) radioPintar(); }   // Apple cortó (llamada, otro canal)
     });
   })();
