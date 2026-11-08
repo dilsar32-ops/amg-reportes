@@ -18618,7 +18618,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R273';
+  const APP_BUILD = '2026-11-08-R274';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68939,7 +68939,7 @@ async function lumiRunExternalReview({run,apps,active=()=>true,english=false,pro
      report.candidates.push(...lumiReviewCandidates(r,english));report.checked++;
      // Native accessibility may omit the newest bubble although the chat-list preview includes it.
      const preview=String(chat.preview||'');
-     if(preview&&!/your message|tu mensaje|tú:|you:|sent to/i.test(preview)&&!r.messages.some(m=>(m.text||m.description).includes(preview))&&/ne[cs]e[cs]ito|nesesito|muving|restauration|\?|please|can you|necesita|need|fuga|leak|adelanto|queria pedir|quería pedir|falta.*parte/i.test(preview))report.candidates.push({chat:chat.title,excerpt:preview,uncertain:true,reason:english?'The chat-list preview shows a possible request missing from the readable transcript. Check the original.':'La vista previa muestra un posible pendiente que no aparece completo en la lectura del chat. Hay que revisar el original.',draft:null,urgent:false});
+     if(preview&&!/reply stop|stop to (?:end|opt out)/i.test(preview)&&!/your message|tu mensaje|tú:|you:|sent to/i.test(preview)&&!r.messages.some(m=>(m.text||m.description).includes(preview))&&/ne[cs]e[cs]ito|nesesito|muving|restauration|\?|please|can you|necesita|need|fuga|leak|adelanto|queria pedir|quería pedir|falta.*parte/i.test(preview))report.candidates.push({chat:chat.title,excerpt:preview,uncertain:true,reason:english?'The chat-list preview shows a possible request missing from the readable transcript. Check the original.':'La vista previa muestra un posible pendiente que no aparece completo en la lectura del chat. Hay que revisar el original.',draft:null,urgent:false});
     }catch(e){if(!active())throw e;report.errors.push(chat.title+': no pude verificar la conversación.');}
    }
   }catch(e){if(!active())throw e;report.errors.push(english?'Could not review this app; this does not mean there are no pending messages.':'No pude revisar esta aplicación; no significa que no haya pendientes.');}
@@ -69015,8 +69015,10 @@ function lumiReviewText(results,en=false){
  for(const r of results){
   const name=r.app==='whatsapp'?'WhatsApp':'Mensajes de Apple';
   lines.push(name+': '+r.checked+(en?' conversations reviewed from the available list.':' conversaciones revisadas de la lista disponible.'));
-  for(const c of r.candidates.slice(0,15)){lines.push((c.urgent?'⚠ ':'')+c.chat+(c.date?' · '+c.date:'')+': “'+c.excerpt+'”',c.reason);if(c.draft)lines.push((en?'Suggested reply: “':'Respuesta sugerida: “')+c.draft+'”');}
-  if(r.candidates.length>15)lines.push(en?'Showing the first 15 candidates.':'Muestro los primeros 15 candidatos.');
+  const confirmed=r.candidates.filter(c=>!c.uncertain),uncertain=[...new Set(r.candidates.filter(c=>c.uncertain).map(c=>c.chat))];
+  for(const c of confirmed.slice(0,3)){lines.push((c.urgent?'⚠ ':'')+c.chat+(c.date?' · '+c.date:'')+': “'+c.excerpt+'”');if(c.draft)lines.push((en?'Suggested reply: “':'Respuesta sugerida: “')+c.draft+'”');}
+  if(confirmed.length>3)lines.push(en?'There are more possible replies; ask for a specific chat.':'Hay más posibles respuestas; pide un chat concreto.');
+  if(uncertain.length)lines.push((en?'Needs context: ':'Por comprobar: ')+uncertain.slice(0,4).join(', ')+(uncertain.length>4?(en?' and '+(uncertain.length-4)+' more.':' y '+(uncertain.length-4)+' más.'):'.'),en?'Dates, attachments or later replies are unconfirmed. Name a chat to inspect it.':'Hay fechas, adjuntos o respuestas posteriores sin confirmar. Dime el chat que quieres revisar.');
   if(!r.candidates.length&&r.checked)lines.push(en?'No candidate requests detected in that visible text; this does not certify that everything is answered.':'No detecté solicitudes candidatas en ese texto visible; no confirma que todo esté contestado.');
   lines.push(...r.errors,en?'Coverage is partial: up to 10 available chats and 20 visible recent messages per chat. Photos and audio were not interpreted.':'Cobertura parcial: hasta 10 chats y 20 mensajes visibles por chat; se excluyen fechas comprobadas de más de una semana. No interpreté fotos ni audios.');
  }
