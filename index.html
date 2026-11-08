@@ -18618,7 +18618,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R266';
+  const APP_BUILD = '2026-11-08-R267';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68102,7 +68102,7 @@ function createLumiVoice({call,session,play,observe=()=>{},stream=true,now=Date.
   if(!live())return 'cancelled';
   const chunks=useStream?packLumiSpeech(text):splitLumiSpeech(text);
   let downloaded=false;const downloadedAudio=data=>{if(downloaded)return;downloaded=true;mark('audio_downloaded',{engineMs:Number.isFinite(data.engineMs)?data.engineMs:null});};
-  async function prepare(chunk,onPartial){
+  async function prepareOnce(chunk,onPartial){
    if(!live())return null;
    const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id),job={route,owner:owner(s)};jobs.add(job);
    try{
@@ -68128,6 +68128,16 @@ function createLumiVoice({call,session,play,observe=()=>{},stream=true,now=Date.
     if(!data||data.voice!=='calida-tranquila-v1'||data.mime!=='audio/mpeg'||typeof data.audio!=='string'||data.audio.length>2200000||!Number.isFinite(data.seconds)||data.seconds<=0||data.seconds>120)throw Error('Invalid voice audio');
     downloadedAudio(data);return {...data,streamed:seen>0};
    }finally{jobs.delete(job);if(owner(s)===owner(session()))await call(route,{method:'DELETE'}).catch(()=>{});}
+  }
+  async function prepare(chunk,onPartial){
+   let emitted=false;
+   const deliver=onPartial?async part=>{emitted=true;return onPartial(part);}:undefined;
+   try{return await prepareOnce(chunk,deliver);}
+   catch(error){
+    // Retry synthesis once only before any fragment was exposed; never replay spoken audio.
+    if(!live()||emitted||error.message!=='Voice generation failed')throw error;
+    return prepareOnce(chunk,deliver);
+   }
   }
   let startedAudio=false;
   let firstAudio=true;function enqueue(data){if(firstAudio){firstAudio=false;mark('playback_requested',{engineMs:Number.isFinite(data.engineMs)?data.engineMs:null});}const handle=play(data);playing.add(handle);handle.done.then(()=>{startedAudio=true;playing.delete(handle);},()=>playing.delete(handle));return handle;}
