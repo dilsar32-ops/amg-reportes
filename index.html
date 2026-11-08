@@ -18545,7 +18545,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R253';
+  const APP_BUILD = '2026-11-07-R254';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68724,17 +68724,18 @@ function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=
 function lumiReviewOrder(input){
  let t=String(input||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
  if(t.length>1500||/^(?:lumi[, ]+)?(?:recuerda|aprende|guarda esta preferencia|corrige lo aprendido|remember|learn)\b/.test(t))return null;
- t=t.replace(/(?:[.;,]\s*|\s+)(?:no (?:respondas(?: ni envies nada)?|envies(?: nada| respuestas)?)|do not (?:reply|send anything)|don't (?:reply|send anything))[.!]?$/,'');
+ t=t.replace(/(?:[.;,]\s*|\s+)(?:no (?:respondas(?: ni envies nada)?(?: todavia)?|envies(?: nada| respuestas)?)|do not (?:reply|send anything)|don't (?:reply|send anything))[.!]?$/,'');
  if(/\b(?:envia|manda|send|paga|pay|borra|delete|registra)\b/.test(t)||/^(?:no |don't |do not )/.test(t))return null;
  // An explicitly named conversation must not expand into a review of every chat.
  if(/\b(?:chat|grupo|conversacion|group|conversation)\s+(?!(?:de\s+)?(?:whatsapp|mensajes|messages)\b)[a-z0-9]/.test(t))return null;
- const messages=/(?:mensajes|messages|texts).*(?:responder|contestar|respuestas?|reply|respond|answer)\b|(?:que|what|which).*(?:contesto|respondo|should i reply)|(?:sugiere|suggest).*(?:respuesta|reply)/.test(t);
- if(!messages&&!/\b(?:a quien (?:(?:debo|tengo que|tenemos que|nos falta|me falta|debemos) (?:responder|contestar))|(?:hay|tengo) algo (?:pendiente de |que )contestar|who should i reply to|anything i need to answer)\b/.test(t))return null;
+ const messages=/(?:mensajes|messages|texts).*(?:responder|contestar(?:le|les)?|respuestas?|reply|respond|answer)\b|(?:que|what|which).*(?:contesto|respondo|should i reply)|(?:sugiere|suggest).*(?:respuesta|reply)/.test(t);
+ if(!messages&&!/\b(?:a quien (?:(?:debo|tengo que|tenemos que|tenemos pendiente|nos falta|me falta|debemos) (?:responder|contestar))|(?:hay|tengo) algo (?:pendiente de |que )contestar|who should i reply to|anything i need to answer)\b/.test(t))return null;
  if(/\b(?:el mensaje dice|me dijo|he said|she said)\b/.test(t))return null;
  const accounts=/\b(?:cuentas|pagos pendientes|pending payments|outstanding payments)\b/.test(t);
  const wa=/\b(?:whatsapp|guasap|wasap)\b/.test(t),apple=/\b(?:apple messages|mensajes (?:normales|de apple)|imessage)\b|(?:en|in|on) mensajes(?:[ .!?]|$)/.test(t),ws=/\bworkspace\b/.test(t);
- const explicit=wa||apple||ws;
- return {accounts,workspace:!explicit||ws||accounts,apps:explicit?[...(wa?['whatsapp']:[]),...(apple?['messages']:[])]:['whatsapp','messages'],english:/\b(?:which|what|review|reply|messages need)\b/.test(t)&&!/[¿]|\b(?:que|revisa|mensajes)\b/.test(t)};
+ const appleListed=apple||(/(?:whatsapp|guasap|wasap|workspace)[, ]+(?:y )?mensajes(?:[, ]|$)|mensajes[, ]+(?:y )?(?:whatsapp|workspace)/.test(t));
+ const explicit=wa||appleListed||ws;
+ return {accounts,workspace:!explicit||ws||accounts,apps:explicit?[...(wa?['whatsapp']:[]),...(appleListed?['messages']:[])]:['whatsapp','messages'],english:/\b(?:which|what|review|reply|messages need)\b/.test(t)&&!/[¿]|\b(?:que|revisa|mensajes)\b/.test(t)};
 }
 function lumiReviewCandidates(result,english=false){
  if(!lumiDesktopReadValid(result,{app:result.app,action:'read_chat'}))throw Error('Invalid conversation evidence');
