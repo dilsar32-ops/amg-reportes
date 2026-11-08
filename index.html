@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R290';
+  const APP_BUILD = '2026-11-08-R291';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69298,14 +69298,15 @@ function lumiReviewOrder(input){
  if(/\b(?:envia|manda|send|paga|pay|borra|delete|registra)\b/.test(t)||/^(?:no |don't |do not )/.test(t))return null;
  // An explicitly named conversation must not expand into a review of every chat.
  if(/\b(?:chat|grupo|conversacion|group|conversation)\s+(?!(?:de\s+)?(?:whatsapp|mensajes|messages)\b)[a-z0-9]/.test(t))return null;
+ const discovery=/\b(?:mensajes|messages|texts)\b/.test(t)&&/\b(?:nuevos?|new|llegaron|llego|han llegado|hay|tenemos|tengo|check|checa|chequea|revisa)\b/.test(t)&&!/(?:responder|contestar|reply|respond|answer)/.test(t);
  const messages=/(?:mensajes|messages|texts).*(?:responder|contestar(?:le|les)?|respuestas?|reply|respond|answer)\b|(?:que|what|which).*(?:contesto|respondo|should i reply)|(?:sugiere|suggest).*(?:respuesta|reply)/.test(t);
- if(!messages&&!/\b(?:a quien (?:(?:debo|tengo que|tenemos que|tenemos pendiente|nos falta|me falta|debemos) (?:responder|contestar)(?:le|les)?)|(?:hay|tengo) algo (?:pendiente de |que )contestar|who should i reply to|anything i need to answer)\b/.test(t))return null;
+ if(!discovery&&!messages&&!/\b(?:a quien (?:(?:debo|tengo que|tenemos que|tenemos pendiente|nos falta|me falta|debemos) (?:responder|contestar)(?:le|les)?)|(?:hay|tengo) algo (?:pendiente de |que )contestar|who should i reply to|anything i need to answer)\b/.test(t))return null;
  if(/\b(?:el mensaje dice|me dijo|he said|she said)\b/.test(t))return null;
  const accounts=/\b(?:cuentas|pagos pendientes|pending payments|outstanding payments)\b/.test(t);
- const wa=/\b(?:whatsapp|guasap|wasap)\b/.test(t),apple=/\b(?:apple messages|mensajes (?:normales|de apple)|imessage)\b|(?:en|in|on) mensajes(?:[ .!?]|$)/.test(t),ws=/\bworkspace\b/.test(t);
+ const wa=/\b(?:whatsapp|guasap|wasap)\b/.test(t),apple=/\b(?:apple messages|mensajes (?:normales|de apple)|imessage)\b|\b(?:en|in|on) mensajes(?:[ .!?]|$)/.test(t),ws=/\bworkspace\b/.test(t);
  const appleListed=apple||(/(?:whatsapp|guasap|wasap|workspace)[, ]+(?:y )?mensajes(?:[, ]|$)|mensajes[, ]+(?:y )?(?:whatsapp|workspace)/.test(t));
  const explicit=wa||appleListed||ws;
- return {accounts,workspace:!explicit||ws||accounts,apps:explicit?[...(wa?['whatsapp']:[]),...(appleListed?['messages']:[])]:['whatsapp','messages'],english:/\b(?:which|what|review|reply|messages need)\b/.test(t)&&!/[¿]|\b(?:que|revisa|mensajes)\b/.test(t)};
+ return {accounts,discovery,workspace:!explicit||ws||accounts,apps:explicit?[...(wa?['whatsapp']:[]),...(appleListed?['messages']:[])]:['whatsapp','messages'],english:/\b(?:which|what|review|reply|messages need)\b/.test(t)&&!/[¿]|\b(?:que|revisa|mensajes)\b/.test(t)};
 }
 // Only parse date labels or the accessibility timestamp suffix, never dates in message prose.
 function lumiMessageAge(row,result){
@@ -69595,6 +69596,14 @@ function lumiMessageDigest(results,workspace=null,en=false){
  }
  return sections;
 }
+function lumiDiscoveryDigest(results,workspace,en=false){
+ const sections=results.map(r=>{const label=r.app==='whatsapp'?'WhatsApp':en?'Apple Messages':'Mensajes normales';
+ const chats=[...new Set((r.latest||[]).map(c=>c.chat))];
+ const summary=r.errors?.length?(en?'Could not verify all recent messages.':'No pude verificar todas las novedades.'):(chats.length?(en?'Recent visible conversations: ':'Conversaciones recientes visibles: ')+chats.join(', ')+'.':(en?'No recent previews visible; this does not confirm there are no new messages.':'No hay vistas previas recientes visibles; eso no confirma que no haya mensajes nuevos.'));
+ return {app:r.app,label,summary,detail:(r.latest||[]).map(c=>c.chat+': '+c.preview).join('\n')+(r.errors?.length?'\n'+r.errors.join('\n'):'')};});
+ if(workspace!==null){const count=/mensajes.*?(?:respuesta|responder)[^\n]*?:\s*(\d+)/i.exec(workspace);sections.push({app:'workspace',label:'Workspace',summary:/^No pude/.test(workspace)?'No pude comprobar las novedades.':count?count[1]+' elementos por revisar; no todos son nuevos.':'Revisión disponible; aún no confirmé cuáles son nuevos.',detail:workspace});}
+ return sections;
+}
 function lumiRenderMessageDigest(sections,owner){
  const log=document.getElementById('asConversacion');if(!log)return;
  const root=document.createElement('div');root.className='as-message-digest as-chat-docs';root.style.cssText='display:grid;gap:8px;margin:12px 0;max-width:100%;';
@@ -69604,7 +69613,7 @@ function lumiRenderMessageDigest(sections,owner){
   const summary=document.createElement('p');summary.textContent=section.summary;summary.style.cssText='margin:6px 0;line-height:1.4';
   const button=document.createElement('button');button.textContent='Detalle de '+section.label;button.style.cssText='padding:8px 12px;border-radius:8px;';
   button.onclick=()=>{if(owner!==SES.user_id+'|'+SES.company_id||!AS.abierto)return;asMostrarRespuesta(section.label+'\n'+section.detail);};
-  card.appendChild(button);root.appendChild(card);
+  card.append(title,summary,button);root.appendChild(card);
  }
  log.appendChild(root);asChatFollow(log,true);
 }
@@ -69633,13 +69642,13 @@ function lumiRenderMessageDigest(sections,owner){
             const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
             try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('No pude conectar con la Mac.');const t=await r.text();return t?JSON.parse(t):null;}finally{clearTimeout(timer);}
           }});
-          const results=await lumiRunExternalReview({run:o=>client.run(o),apps:order.apps,active,english:order.english,progress:(app,title)=>{if(active())asAccionVisible('Revisando '+(app==='whatsapp'?'WhatsApp':'Mensajes')+': '+title,'working');}});
+          const results=await lumiRunExternalReview({run:o=>client.run(o),apps:order.apps,active,english:order.english,maxChats:order.discovery?0:10,progress:(app,title)=>{if(active())asAccionVisible('Revisando '+(app==='whatsapp'?'WhatsApp':'Mensajes')+': '+title,'working');}});
           if(!active())return;reviewResults=results;parts.push(lumiReviewText(results,order.english));brief.push(lumiReviewBrief(results,order.english));
         }
       }
       if(!active())return;
       LUMI_REVIEW_DETAIL={owner,at:Date.now(),text:parts.join('\n\n'),chats:reviewResults.flatMap(r=>[...new Set(r.candidates.map(c=>c.chat))].map(chat=>({app:r.app,chat})))};
-      const sections=lumiMessageDigest(reviewResults,order.workspace?parts[0]||'No pude revisar Workspace.':null,order.english);
+      const sections=order.discovery?lumiDiscoveryDigest(reviewResults,order.workspace?parts[0]||'No pude revisar Workspace.':null,order.english):lumiMessageDigest(reviewResults,order.workspace?parts[0]||'No pude revisar Workspace.':null,order.english);
       const answer=(sections.length?sections.map(x=>x.label+': '+x.summary).join('\n\n'):brief.join(' '))+(order.english?' Say “read them” or name a chat to see the details.':' Dime «léemelos» o el nombre del chat para ver el detalle.');asMostrarRespuesta(answer);lumiRenderMessageDigest(sections,owner);asAccionVisible('Revisión terminada; consulta la cobertura de cada fuente','done');
       asRecordarAccionMac(texto,'Revisión de solo lectura mostrada en pantalla. Las sugerencias son borradores; no se envió ninguna respuesta.');
       asHablar(answer,asSeguirOyendo);
