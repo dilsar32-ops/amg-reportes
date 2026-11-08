@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R280';
+  const APP_BUILD = '2026-11-08-R281';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68923,7 +68923,7 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
     if(!m)return null;
     const target=m[1].trim().replace(/\s+(?:al frente|enfrente|a primer plano|to the front|in front|up front)$/i,'').replace(/,?\s+(?:por favor|porfa|please|for me)\s*[?!.]*$/i,''),key=target.toLowerCase().replace(/\s+/g,' ');
     if(/^(esta pagina|esta página|esa pagina|esa página|la anterior|this page|that page|it)$/i.test(target))return {previous:true,browser};
-    const sites={'companycam':'https://app.companycam.com/','company cam':'https://app.companycam.com/','company camp':'https://app.companycam.com/','whatsapp':'https://web.whatsapp.com/','matterport':'https://my.matterport.com/','maroport':'https://my.matterport.com/','wikipedia':'https://www.wikipedia.org/','google':'https://www.google.com/','youtube':'https://www.youtube.com/','openai':'https://openai.com/'};
+    const sites={'companycam':'https://app.companycam.com/','company cam':'https://app.companycam.com/','company camp':'https://app.companycam.com/','whatsapp':'https://web.whatsapp.com/','matterport':'https://my.matterport.com/','maroport':'https://my.matterport.com/','maruport':'https://my.matterport.com/','companicam':'https://app.companycam.com/','wikipedia':'https://www.wikipedia.org/','google':'https://www.google.com/','youtube':'https://www.youtube.com/','openai':'https://openai.com/'};
     let raw=sites[key];
     if(!raw){
       if(/^[a-z][a-z0-9+.-]*:/i.test(target))raw=target;
@@ -68948,6 +68948,27 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
     if(!pedido||!resultado)return;
     AS.historial=(AS.historial||[]).concat([{role:'user',content:String(pedido)},{role:'assistant',content:String(resultado)}]).slice(-40);
   }
+function lumiPageSequence(text){
+ const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+ if(t.length>800||/\b(no|not|don't|dijo|said|envia|send|borra|delete)\b/.test(t))return null;
+ const parts=t.split(/\s+(?:y(?: luego)?|and(?: then)?|pero|but)\s+|\s*,\s*/).filter(Boolean);
+ if(parts.length<2||parts.length>5)return null;
+ let browser='default',pages=[];
+ for(let part of parts){
+  part=part.replace(/^lumi[, ]*/, '').replace(/^(?:pero|but|y|and)\s+/, '').trim();
+  const bm=/^(?:abre|abreme|open) (chrome|safari)$/.exec(part);if(bm){browser=bm[1];continue;}
+  const page=asPedidoPagina(part);if(!page||page.error||page.previous)return null;
+  pages.push({...page,browser:page.browser==='default'?browser:page.browser});
+ }
+ return pages.length?pages:null;
+}
+let LUMI_PAGE_SEQUENCE_BUSY=false;
+async function lumiRunPageSequence(pages,text){
+ const owner=SES.user_id+'|'+SES.company_id;LUMI_PAGE_SEQUENCE_BUSY=true;
+ try{for(const page of pages){if(owner!==SES.user_id+'|'+SES.company_id||!AS.abierto)return;const ok=await asAbrirPaginaMac(page,text);if(!ok)return;asCallar();asPararOido();}}
+ finally{LUMI_PAGE_SEQUENCE_BUSY=false;asSeguirOyendo();}
+}
+
   let AS_BROWSER_BUSY=false, AS_BROWSER_REPLY=0;
   async function asAbrirPaginaMac(page,pedido){
     if(AS_BROWSER_BUSY){asMostrarRespuesta('Ya estoy procesando una apertura.');return;}
@@ -68975,7 +68996,7 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
           const text=state==='browser_front_verified' ? (/\b(open|bring|show|could|can you)\b/i.test(pedido||'')?'Here is '+page.label+' in front.':'Aquí tienes '+page.label+' al frente.') : 'Envié la orden de abrir '+page.label+', pero todavía no pude comprobar que quedó al frente.';
           AS.browserReceipt={owner,url:page.url,label:page.label,browser:page.browser,at:Date.now(),state};
           asRecordarAccionMac(pedido,text+' La orden de abrir '+page.url+' se ejecutó en el navegador de la Mac vinculada. No se ha comprobado aún el contenido ni la carga de la página.');
-          asAccionVisible('Abriendo '+page.label,'done');asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);return;
+          asAccionVisible('Abriendo '+page.label,'done');asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);return state==='browser_front_verified';
         }
         if(state && state!=='queued')throw Error('No se confirmó la apertura. Revisa la Mac antes de repetirla.');
         await new Promise(r=>setTimeout(r,1000));
@@ -69049,9 +69070,9 @@ function createLumiScreenClient({call,session,uuid=()=>crypto.randomUUID(),now=D
         const label=document.createElement('p');label.textContent='Pantalla '+r.screen+' · '+new Date(r.capturedAt).toLocaleString();card.appendChild(label);
         const img=document.createElement('img');img.alt='Captura de la pantalla '+r.screen;img.src='data:image/jpeg;base64,'+r.image;img.style.cssText='width:100%;height:auto;border-radius:8px;cursor:zoom-in';
         img.addEventListener('click',()=>{
-          if(!active())return;const dialog=document.createElement('dialog');dialog.className='lumi-screen-preview';dialog.style.cssText='width:95vw;max-width:none;max-height:95vh;background:#101820;color:white;padding:12px;border:1px solid #527;';
+          if(!active())return;const dialog=document.createElement('dialog');dialog.className='lumi-screen-preview';dialog.style.cssText='position:fixed;inset:0;margin:0;width:100vw;height:100dvh;max-width:none;max-height:none;box-sizing:border-box;background:#101820;color:white;padding:16px;border:0;overflow:hidden;';
           const close=document.createElement('button');close.textContent='Cerrar captura';close.addEventListener('click',()=>{dialog.close();dialog.remove();});
-          const large=document.createElement('img');large.src=img.src;large.alt=img.alt;large.style.cssText='display:block;max-width:100%;height:auto;';dialog.append(close,large);document.body.appendChild(dialog);dialog.showModal();dialog.addEventListener('close',()=>dialog.remove(),{once:true});
+          const large=document.createElement('img');large.src=img.src;large.alt=img.alt;large.style.cssText='display:block;width:100%;height:calc(100% - 48px);object-fit:contain;margin-top:12px;';dialog.append(close,large);document.body.appendChild(dialog);dialog.showModal();dialog.addEventListener('close',()=>dialog.remove(),{once:true});
         });card.appendChild(img);
         asMostrarRespuesta('Aquí tienes la pantalla '+r.screen+' de tu Mac. Toca la imagen para ampliarla.');
       }else asMostrarRespuesta(r.status==='screen_not_found'?'Esa pantalla no está conectada. Estas son las disponibles:':'Estas son las pantallas conectadas a tu Mac:');
@@ -69178,6 +69199,10 @@ function lumiWindowOrder(text){
  const pair=lumiWindowPairOrder(text);if(pair)return pair;
  const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿?!.]+$/,'').replace(/^(?:oye )?lumi[, ]+/,'').replace(/[, ]+(?:por favor|please|porfa)$/,'');
  if(/^(?:que ventanas tengo abiertas|muestrame las ventanas|lista las ventanas|list windows|show my windows)$/.test(t))return {app:'desktop',action:'list_windows'};
+ const bulk=/^(?:cierra|cierrame|close) (?:todas las (?:pantallas|ventanas)|todo|all windows)(?: (?:en|de) (?:la )?(?:pantalla|screen) (\d+))?$/.exec(t);
+ if(bulk)return {app:'desktop',action:'window_close',query:'*',...(bulk[1]?{screen:Number(bulk[1])}:{})};
+ if(/^(?:cierra esas|cierralas|close those)$/.test(t)){const owner=SES.user_id+'|'+SES.company_id;if(!LUMI_LAYOUT_CONTEXT||LUMI_LAYOUT_CONTEXT.owner!==owner||Date.now()-LUMI_LAYOUT_CONTEXT.at>600000)return {app:'desktop',action:'clarify',reason:'¿Cuáles ventanas quieres cerrar?'};return {app:'desktop',action:'window_close',query:'@pair',queries:LUMI_LAYOUT_CONTEXT.queries,screen:LUMI_LAYOUT_CONTEXT.screen};}
+ if(/^(?:mueve|mueveme|move) .+ (?:a la otra pantalla|to the other screen)$/.test(t))return {app:'desktop',action:'clarify',reason:'Tienes varias pantallas. Dime el número de la pantalla de destino para no moverla a otra por error.'};
  const move=/^(?:mueve|pasa|move) (?:la ventana de |la ventana |the window )?(.+?) (?:a|a la|to|to the) (?:pantalla|monitor|screen|display) (\d+)$/.exec(t);
  if(move&&!/\b(y|and)\b/.test(move[1]))return {app:'desktop',action:'window_move',query:move[1],screen:Number(move[2])};
  const close=/^(?:cierra|close) (?:la ventana de |la ventana |the window )?(.+?)(?: sin perder trabajo| sin perder cambios| without losing work)?$/.exec(t);
@@ -69225,7 +69250,7 @@ function createLumiDesktopClient({call,session,uuid=()=>crypto.randomUUID(),now=
   const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
   try{await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{...order,local_profile:'lumi_desktop'}})});
    const until=now()+60000;
-   while(now()<until){if(!same())throw Error('La sesión cambió.');const jobs=await call(route+'&select=state,result');if(!same())throw Error('La sesión cambió.');const job=jobs?.[0];if(job?.state==='failed')throw Error(order.action==='send_message'?'No pude confirmar el envío. Revisa el chat antes de repetirlo.':['read_unread','read_chat','list_recent','read_listed'].includes(order.action)?'No pude leer los mensajes de esa aplicación. No envié ninguna respuesta.':'No pude completar la acción en esa aplicación.');if(job?.state==='done'){const r=job.result?.data;if(order.app==='desktop'){if(r?.app!=='desktop'||!['windows','window_done','window_choice','window_not_found','window_closed','close_review','screen_missing','files','files_denied','layout_done','layout_review'].includes(r.status)||!Array.isArray(r.windows))throw Error('Resultado de ventanas no válido.');return r;}if(!r||r.app!==order.app||!['app_front','matches','needs_choice','not_found','chat_opened','message_submitted','already_submitted','unread_list','chat_messages','recent_list'].includes(r.status))throw Error('Respuesta de la Mac no válida.');if(['unread_list','chat_messages','recent_list'].includes(r.status)){if(order.action==='read_listed'&&(r.listedKey!==order.key||r.listedQuery!==order.query))throw Error('Otra conversación.');if(!lumiDesktopReadValid(r,order))throw Error('Lectura de mensajes no válida.');return r;}const allowed={read_listed:['chat_messages'],list_recent:['recent_list'],read_unread:['unread_list'],read_chat:['chat_messages','needs_choice','not_found'],open_app:['app_front'],search_chats:['matches','not_found'],open_chat:['chat_opened','needs_choice','not_found'],send_message:['message_submitted','already_submitted','needs_choice','not_found']}[order.action];if(!allowed.includes(r.status))throw Error('La respuesta no corresponde a la orden.');if(['matches','needs_choice','not_found'].includes(r.status)&&(r.query!==order.query||!Array.isArray(r.candidates)||r.candidates.length>25))throw Error('Resultados de otra búsqueda.');if(['chat_opened','message_submitted','already_submitted'].includes(r.status)&&(typeof r.title!=='string'||!r.title.trim()))throw Error('Falta confirmar el destinatario.');return r;}await wait(500);}
+   while(now()<until){if(!same())throw Error('La sesión cambió.');const jobs=await call(route+'&select=state,result');if(!same())throw Error('La sesión cambió.');const job=jobs?.[0];if(job?.state==='failed')throw Error(order.action==='send_message'?'No pude confirmar el envío. Revisa el chat antes de repetirlo.':['read_unread','read_chat','list_recent','read_listed'].includes(order.action)?'No pude leer los mensajes de esa aplicación. No envié ninguna respuesta.':'No pude completar la acción en esa aplicación.');if(job?.state==='done'){const r=job.result?.data;if(order.app==='desktop'){if(r?.app!=='desktop'||!['bulk_closed','windows','window_done','window_choice','window_not_found','window_closed','close_review','screen_missing','files','files_denied','layout_done','layout_review'].includes(r.status)||!Array.isArray(r.windows))throw Error('Resultado de ventanas no válido.');return r;}if(!r||r.app!==order.app||!['app_front','matches','needs_choice','not_found','chat_opened','message_submitted','already_submitted','unread_list','chat_messages','recent_list'].includes(r.status))throw Error('Respuesta de la Mac no válida.');if(['unread_list','chat_messages','recent_list'].includes(r.status)){if(order.action==='read_listed'&&(r.listedKey!==order.key||r.listedQuery!==order.query))throw Error('Otra conversación.');if(!lumiDesktopReadValid(r,order))throw Error('Lectura de mensajes no válida.');return r;}const allowed={read_listed:['chat_messages'],list_recent:['recent_list'],read_unread:['unread_list'],read_chat:['chat_messages','needs_choice','not_found'],open_app:['app_front'],search_chats:['matches','not_found'],open_chat:['chat_opened','needs_choice','not_found'],send_message:['message_submitted','already_submitted','needs_choice','not_found']}[order.action];if(!allowed.includes(r.status))throw Error('La respuesta no corresponde a la orden.');if(['matches','needs_choice','not_found'].includes(r.status)&&(r.query!==order.query||!Array.isArray(r.candidates)||r.candidates.length>25))throw Error('Resultados de otra búsqueda.');if(['chat_opened','message_submitted','already_submitted'].includes(r.status)&&(typeof r.title!=='string'||!r.title.trim()))throw Error('Falta confirmar el destinatario.');return r;}await wait(500);}
    throw Error('La Mac no respondió a tiempo.');
   }finally{if(same())await call(route,{method:'DELETE'}).catch(()=>{});}
  }};
@@ -69478,7 +69503,7 @@ return {order,extract};
       if(order.app==='desktop'){
        if(order.action==='window_pair'&&['layout_done','layout_review'].includes(result.status))LUMI_LAYOUT_CONTEXT={owner,at:Date.now(),queries:[...order.queries],screen:order.screen};
        const labels=result.windows.map(w=>w.application+' — '+(w.title||'Sin título')+(w.minimized?' (minimizada)':''));
-       const answer=result.status==='layout_done'?'Listo, dejé '+labels[0]+' a la izquierda y '+labels[1]+' a la derecha, del mismo tamaño y con espacio abajo para el Dock.':result.status==='layout_review'?'No pude dejar las dos ventanas bien acomodadas. Una ventana limita su tamaño o está a pantalla completa; el acomodo puede haber quedado parcial.':result.status==='files_denied'?'No pude acceder a algunas carpetas de la Mac. No puedo confirmar si el archivo está ahí; falta revisar el acceso del conector.':result.status==='files'?'Encontré estos archivos por nombre (búsqueda parcial por nombre, máximo 25):\n'+(labels.join('\n')||'Sin coincidencias en las ubicaciones revisadas; la búsqueda no cubre todo el disco.'):result.status==='close_review'?'Dejé la ventana abierta o pendiente de revisar. No descarté cambios ni pulsé No guardar.':result.status==='window_closed'?'Cerré la ventana sin descartar cambios.':result.status==='screen_missing'?'Esa pantalla no está conectada. Pídeme la lista de pantallas.':result.status==='windows'?'Estas son las ventanas abiertas:\n'+labels.join('\n'):result.status==='window_choice'?'Hay varias ventanas. Dime el título exacto:\n'+labels.join('\n'):result.status==='window_not_found'?'No encontré esa ventana. Pídeme la lista de ventanas.':'Listo: '+labels.join(', ')+'.';
+       const answer=result.status==='bulk_closed'?'Revisé las ventanas.\n'+labels.join('\n'):result.status==='layout_done'?'Listo, dejé '+labels[0]+' a la izquierda y '+labels[1]+' a la derecha, del mismo tamaño y con espacio abajo para el Dock.':result.status==='layout_review'?'No pude dejar las dos ventanas bien acomodadas. Una ventana limita su tamaño o está a pantalla completa; el acomodo puede haber quedado parcial.':result.status==='files_denied'?'No pude acceder a algunas carpetas de la Mac. No puedo confirmar si el archivo está ahí; falta revisar el acceso del conector.':result.status==='files'?'Encontré estos archivos por nombre (búsqueda parcial por nombre, máximo 25):\n'+(labels.join('\n')||'Sin coincidencias en las ubicaciones revisadas; la búsqueda no cubre todo el disco.'):result.status==='close_review'?'Dejé la ventana abierta o pendiente de revisar. No descarté cambios ni pulsé No guardar.':result.status==='window_closed'?'Cerré la ventana sin descartar cambios.':result.status==='screen_missing'?'Esa pantalla no está conectada. Pídeme la lista de pantallas.':result.status==='windows'?'Estas son las ventanas abiertas:\n'+labels.join('\n'):result.status==='window_choice'?'Hay varias ventanas. Dime el título exacto:\n'+labels.join('\n'):result.status==='window_not_found'?'No encontré esa ventana. Pídeme la lista de ventanas.':'Listo: '+labels.join(', ')+'.';
        asMostrarRespuesta(answer);asAccionVisible('Ventanas comprobadas','done');asHablar(answer,asSeguirOyendo);return;
       }
       if(order.calendar && result.status==='chat_messages'){
@@ -69883,6 +69908,8 @@ async function asCommercialQuote(order,texto){
     if(!dictando&&!AS.conf&&!AS.pregunta){const follow=lumiReviewFollowup(texto,LUMI_REVIEW_DETAIL,SES.user_id+'|'+SES.company_id);if(follow){asTranscribir(texto);if(follow.action==='chat'){await asEscritorioMac({app:follow.app,action:'read_chat',query:follow.query});return;}asPararOido();asCallar();const answer=follow.action==='details'?LUMI_REVIEW_DETAIL.text:follow.text;asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const review=lumiReviewOrder(texto);if(review){await asRevisionCompleta(review,texto);return;}}
     if(!dictando&&!AS.conf){const calendar=LUMI_CAL_CHAT.order(texto);if(calendar){asTranscribir(texto);await asEscritorioMac({...calendar,originalText:texto});return;}}
+    if(!dictando&&LUMI_PAGE_SEQUENCE_BUSY){asMostrarRespuesta('Estoy terminando de abrir las páginas anteriores.');return;}
+    if(!dictando){const pages=lumiPageSequence(texto);if(pages){asTranscribir(texto);await lumiRunPageSequence(pages,texto);return;}}
     if(!dictando){const desktop=lumiWindowOrder(texto)||lumiDesktopOrder(texto)||lumiDesktopReadFollowup(texto,AS.desktopReadReceipt,SES.user_id+'|'+SES.company_id);if(desktop){if(!['read_chat','read_unread','clarify'].includes(desktop.action))AS.desktopReadReceipt=null;asTranscribir(texto);await asEscritorioMac(desktop);return;}AS.desktopReadReceipt=null;}
     if(!dictando){const followup=lumiBrowserFollowup(texto,AS.browserReceipt,SES.user_id+'|'+SES.company_id);if(followup){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,followup);asMostrarRespuesta(followup);asHablar(followup,asSeguirOyendo);return;}}
     if(!dictando){const screen=lumiScreenOrder(texto);if(screen){asTranscribir(texto);await asMostrarPantallaMac(screen);return;}}
