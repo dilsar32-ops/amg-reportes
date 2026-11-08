@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R306';
+  const APP_BUILD = '2026-11-08-R307';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -78764,6 +78764,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
           + '<button type="button" class="radio-unir" data-radio="unir">' + (otro ? 'Salga de la otra radio primero' : 'Unirme a la radio') + '</button>'
           + '<div class="radio-pie">También: dejar apretado el ícono de Workspace → Radio, o el Botón de Acción del iPhone.</div>')
       + '<div class="radio-msj" aria-live="polite"></div></div>';
+    if(RADIO.error && Date.now()-(RADIO.errorAt || 0)<=6000)radioAviso('Último intento: '+RADIO.error);
   }
   function radioAviso(t){ const m = document.querySelector('#radioVelo .radio-msj'); if(m) m.textContent = t || ''; }
 
@@ -78808,11 +78809,11 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     P.addListener('radio', (d) => {
       const ev = d && d.evento;
       if(ev === 'unido' || ev === 'registrado'){ P.estado().then(est=>{RADIO.est=est;if(RADIO.abierta&&!RADIO.hablando)radioPintar();}).catch(()=>{}); }
-      else if(ev === 'terminado'){RADIO.pulsando=false;RADIO.hablando=false;RADIO.emitiendo=false;RADIO.escucha=false;RADIO.hablante='';radioBanner();clearInterval(RADIO.reloj);if(RADIO.abierta){radioPintar();if(RADIO.error)radioAviso(RADIO.error);}}
+      else if(ev === 'terminado'){RADIO.pulsando=false;RADIO.hablando=false;RADIO.emitiendo=false;RADIO.escucha=false;RADIO.hablante='';radioBanner();clearInterval(RADIO.reloj);if(RADIO.abierta){radioPintar();if(RADIO.error)radioAviso('Último intento: '+RADIO.error);}}
       else if(ev === 'salio'){ radioGuardar(null); if(RADIO.est) RADIO.est.unido = false; if(RADIO.abierta) radioPintar(); if(MSG && MSG.con) radioPintarCab(MSG.con); }
       else if(ev === 'salida'){RADIO.altavoz=!!d.altavoz;if(RADIO.abierta&&!RADIO.hablando)radioPintar();}
       else if(ev === 'recibido'){ RADIO.escucha = true;RADIO.hablante=d.hablante || 'Equipo';RADIO.fase=d.fase || 'conectando';radioBanner(); if(RADIO.abierta) radioPintar();  }
-      else if(ev === 'error'){ RADIO.hablando=false;clearInterval(RADIO.reloj);if(RADIO.abierta)radioPintar();const reasons={'sin-oyentes':'Ningún teléfono está listo para escuchar. Comprueben que ambos estén unidos.','ocupado':'La radio está ocupada o hay una llamada activa. Espere un momento.','aviso-rechazado':'Apple no aceptó el aviso. No se transmitió la voz.','microfono':'No se pudo activar el micrófono.','altavoz':'No se pudo activar la salida de audio.','audio-interrumpido':'El teléfono interrumpió la salida de audio.','conexion':'Se interrumpió la conexión.','conexion-lenta':'La conexión está demasiado lenta.','actualizar-radio':'Actualice Workspace en ambos teléfonos.'}; RADIO.error=reasons[d.que] || 'No se pudo conectar la radio.'; radioAviso(RADIO.error); }
+      else if(ev === 'error'){ RADIO.hablando=false;clearInterval(RADIO.reloj);if(RADIO.abierta)radioPintar();const reasons={'sin-oyentes':'Ningún teléfono está listo para escuchar. Comprueben que ambos estén unidos.','ocupado':'La radio está ocupada o hay una llamada activa. Espere un momento.','aviso-rechazado':'Apple no aceptó el aviso. No se transmitió la voz.','activacion':'iOS no permitió iniciar la transmisión.','microfono':'No se pudo activar el micrófono.','altavoz':'No se pudo activar la salida de audio.','audio-interrumpido':'El teléfono interrumpió la salida de audio.','conexion':'Se interrumpió la conexión.','conexion-lenta':'La conexión está demasiado lenta.','actualizar-radio':'Actualice Workspace en ambos teléfonos.'}; RADIO.error=reasons[d.que] || 'No se pudo conectar la radio.';RADIO.errorAt=Date.now();radioAviso('Último intento: '+RADIO.error); }
       else if(ev === 'hablando' && d.si === true){RADIO.hablando=true;RADIO.emitiendo=true;radioActualizarVista();}
       else if(ev === 'hablando' && d.si === false && RADIO.hablando){ RADIO.hablando = false; clearInterval(RADIO.reloj); if(RADIO.abierta) radioPintar(); }   // Apple cortó (llamada, otro canal)
     });
@@ -78827,6 +78828,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     b.hidden=!RADIO.escucha || !!RADIO.abierta;b.textContent=RADIO.escucha ? (RADIO.hablante || 'Equipo') + (RADIO.fase==='hablando' ? ' está hablando · Radio' : ' está conectando · Radio') : '';
   }
   function radioAplicarEstado(est){
+    if(RADIO.error && Date.now()-(RADIO.errorAt || 0)>6000)RADIO.error=null;
     RADIO.est=est || {};RADIO.emitiendo=!!RADIO.est.hablando;RADIO.hablando=!!(RADIO.est.hablando || RADIO.est.solicitando);RADIO.hablante=RADIO.est.hablante || '';RADIO.fase=RADIO.est.recepcion || '';
     RADIO.escucha=!!RADIO.hablante;radioBanner();
   }
