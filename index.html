@@ -18390,7 +18390,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R239';
+  const APP_BUILD = '2026-11-07-R240';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68608,6 +68608,7 @@ return {order,extract};
         asAccionVisible(j.confirmacion?'Propuesta lista para revisar':'Calendario comprobado','done');
         asHablar(j.texto,asSeguirOyendo);return;
       }
+      if(result.status==='chat_messages')LUMI_MESSAGE_CONTEXT={owner,app:order.app,query:result.title,at:Date.now()};
       const name=order.app==='whatsapp'?'WhatsApp':'Mensajes';
       const reading=['unread_list','chat_messages'].includes(result.status);
       if(result.status==='unread_list'||(order.action==='read_chat'&&result.status==='needs_choice'))AS.desktopReadReceipt=lumiDesktopReadReceipt(result,owner);
@@ -68623,7 +68624,7 @@ return {order,extract};
         result.chats.forEach((chat,index)=>{const b=document.createElement('button');b.type='button';b.textContent=(index+1)+'. Leer conversación: '+chat.title;b.style.cssText='display:block;width:100%;text-align:left;margin:6px 0;padding:10px;';b.onclick=()=>{if(active())asEscritorioMac({app:order.app,action:'read_chat',query:chat.title});};card.appendChild(b);});
         const log=document.getElementById('asConversacion');if(log){log.appendChild(card);asChatFollow(log,true);}
       }
-      asHablar(text,asSeguirOyendo);
+      asHablar(text,asSeguirOyendo);return result;
     }catch(error){if(active()){asMostrarRespuesta(String(error.message||error));asAccionVisible('No se completó la acción','error');asEstado('esperando','');}}
     finally{AS_DESKTOP_BUSY=false;}
   }
@@ -68789,6 +68790,67 @@ function lumiCapabilityHelp(text){
  return en?"I can help you review reports, find project documents, and work with messages. With your Mac connected, I can open pages and show you screenshots. Tell me what you need, and I’ll show you the result or explain what’s missing.":'Puedo ayudarte a revisar reportes, buscar documentos de proyectos y trabajar con mensajes. Con tu Mac conectada puedo abrir páginas y mostrarte capturas. Dime qué necesitas y te muestro el resultado o te explico qué falta.';
 }
 
+// Dictated message content stays literal and temporary; it never changes stored rates.
+function lumiComposeParse(input,draft,context){
+ const raw=String(input||'').trim(),norm=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+ const n=norm(raw),unquote=x=>{x=x.trim();return /^(?:"[\s\S]*"|“[\s\S]*”)$/.test(x)?x.slice(1,-1):x;};
+ const channel=x=>/whatsapp/i.test(x)?'whatsapp':/workspace/i.test(x)?'workspace':'messages';
+ if(draft&&/^(?:cancela(?: el mensaje)?|cancel(?: the message)?|olvidalo|descarta el borrador)[.!]*$/.test(n))return {kind:'cancel'};
+ if(draft&&/^(?:no (?:lo )?envies|todavia no|espera|don't send|do not send|not yet)[.!]*$/.test(n))return {kind:'hold'};
+ if(draft&&/^(?:envialo|mandalo|envialo ahora|send it|send it now|si,? envialo)[.!]*$/.test(n))return {kind:'send'};
+ let m;
+ if(draft&&(m=/^(?:cambia(?: el texto)?|corrige(?: el texto)?|replace(?: the text)?|change(?: the text)?)\s*(?::|por\s+|to\s+)([\s\S]+)$/i.exec(raw)))return {kind:'replace',text:unquote(m[1])};
+ if(draft&&(m=/^(?:agrega|añade|anade|append|add)\s*:\s*([\s\S]+)$/i.exec(raw)))return {kind:'replace',text:draft.text+' '+unquote(m[1])};
+ if(draft&&(m=/^(?:mejor para|cambia el destinatario a|change recipient to)\s+(.+?)\s+(?:en|in|on)\s+(whatsapp|mensajes normales|mensajes|messages|imessage|workspace)[.!]*$/i.exec(raw)))return {kind:'recipient',query:m[1].trim(),app:channel(m[2])};
+ const prefix='(?:(?:lumi|oye|hey|por favor|please)[, ]+)*';
+ const verbs='(?:dile|diles|escr[ií]bele|escribe|responde(?:le)?|resp[oó]ndele|cont[eé]stale|prepara(?: un mensaje)?|redacta(?: un mensaje)?|write(?: a message)?|tell|reply|draft(?: a message)?)';
+ const re=new RegExp('^'+prefix+verbs+'\\s+(?:(?:a|al|para|to)\\s+)?(.+?)\\s+(?:en|in|on|por)\\s+(whatsapp|mensajes normales|mensajes|messages|imessage|workspace)\\s*(?::|,?\\s+(?:que|that|diciendo|saying)\\s+)([\\s\\S]+)$','i');
+ m=re.exec(raw);
+ if(m)return {kind:'draft',query:m[1].trim(),app:channel(m[2]),text:unquote(m[3])};
+ m=/^(?:resp[oó]ndele|cont[eé]stale|reply|respond)\s*(?::|que\s+|that\s+)([\s\S]+)$/i.exec(raw);
+ if(m)return context?{kind:'draft',query:context.query,app:context.app,text:unquote(m[1])}:{kind:'clarify',text:'Indica a quién y en qué aplicación quieres responder.'};
+ return null;
+}
+function lumiComposeReduce(state,command,owner){
+ const same=state&&state.owner===owner,old=same?state:null;
+ if(command.kind==='clarify')return {state:old,message:command.text};
+ if(command.kind==='cancel')return {state:null,message:'Borrador descartado. No envié nada.'};
+ if(command.kind==='draft'){
+  if(!command.query||command.query.length>120||/[\n\r\0]/.test(command.query)||!command.text||command.text.length>2000||command.text.includes('\0'))return {state:old,message:'Necesito un destinatario claro y un mensaje de hasta 2000 caracteres.'};
+  return {state:{owner,app:command.app,query:command.query,text:command.text,status:'draft'}};
+ }
+ if(!old)return {state:null,message:'No hay un borrador de esta cuenta para enviar.'};
+ if(command.kind==='hold')return {state:old,message:'Lo dejo como borrador. No lo envío.'};
+ if(command.kind==='send')return old.status==='draft'?{state:{...old,status:'sending'},send:true}:{state:old,message:'Este envío ya se intentó. Revisa el chat antes de repetirlo.'};
+ if(old.status!=='draft')return {state:old,message:'Ese envío ya se intentó; prepara un borrador nuevo para otro mensaje.'};
+ if(command.kind==='replace')return lumiComposeReduce(null,{...old,...command,kind:'draft'},owner);
+ if(command.kind==='recipient')return lumiComposeReduce(null,{...old,...command,kind:'draft'},owner);
+ return {state:old};
+}
+let LUMI_MESSAGE_DRAFT=null,LUMI_MESSAGE_CONTEXT=null;
+async function asComposeMessage(command,texto){
+ const owner=SES.user_id+'|'+SES.company_id;
+ if(SES.role!=='manager'){asMostrarRespuesta('Esta acción requiere Manager.');return;}
+ const r=lumiComposeReduce(LUMI_MESSAGE_DRAFT,command,owner);LUMI_MESSAGE_DRAFT=r.state;
+ asPararOido();asCallar();asTranscribir(texto);
+ if(!r.send){const d=r.state;const reply=r.message||(d?'Para '+d.query+' en '+(d.app==='messages'?'Mensajes':d.app==='whatsapp'?'WhatsApp':'Workspace')+':\n'+d.text+'\n\nBorrador listo. Puedes corregirlo o decir «envíalo».':'');asMostrarRespuesta(reply);asRecordarAccionMac(texto,reply);asHablar(reply,asSeguirOyendo);return;}
+ const d=r.state;AS.enviando=true;
+ try{
+  if(d.app==='workspace'){
+   await asMsgDatos();if(owner!==SES.user_id+'|'+SES.company_id||!AS.abierto)throw Error('La sesión cambió.');
+   const recipient=await asMsgResolver(asMsgNorm(d.query).split(' '),false);
+   if(!recipient.key||recipient.varios||recipient.prohibido)throw Error('No pude identificar un único destinatario en Workspace. Escribe su nombre completo.');
+   if(owner!==SES.user_id+'|'+SES.company_id)throw Error('La sesión cambió.');
+   const sent=await msgEnviar(d.text,{para:recipient.key});if(!sent?.id)throw Error('No pude confirmar el envío. Revisa el chat antes de repetirlo.');
+   LUMI_MESSAGE_DRAFT={...d,status:'sent'};asMostrarRespuesta('Listo, envié el mensaje a '+d.query+' en Workspace.');
+  }else{
+   const result=await asEscritorioMac({app:d.app,action:'send_message',query:d.query,text:d.text});
+   LUMI_MESSAGE_DRAFT={...d,status:result&&['message_submitted','already_submitted'].includes(result.status)?'sent':'uncertain'};
+  }
+ }catch(e){LUMI_MESSAGE_DRAFT={...d,status:'uncertain'};if(owner===SES.user_id+'|'+SES.company_id)asMostrarRespuesta(e.message);}
+ finally{AS.enviando=false;}
+}
+
 function lumiQuoteOrder(input){
  const t=String(input||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
  if(t.length>700||/^(?:recuerda|aprende|remember|learn)\b/.test(t))return null;
@@ -68829,6 +68891,7 @@ async function asCommercialQuote(order,texto){
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando&&!AS.conf&&!AS.pregunta){const owner=SES.user_id+'|'+SES.company_id;const context=LUMI_MESSAGE_CONTEXT?.owner===owner&&Date.now()-LUMI_MESSAGE_CONTEXT.at<300000?LUMI_MESSAGE_CONTEXT:null;const compose=lumiComposeParse(texto,LUMI_MESSAGE_DRAFT?.owner===owner?LUMI_MESSAGE_DRAFT:null,context);if(compose){await asComposeMessage(compose,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const quote=lumiQuoteOrder(texto);if(quote){await asCommercialQuote(quote,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const pdf=lumiPdfOrder(texto);if(pdf){await asCrearPdf(pdf,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
