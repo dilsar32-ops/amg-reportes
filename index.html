@@ -18415,7 +18415,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-07-R247';
+  const APP_BUILD = '2026-11-07-R248';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67182,8 +67182,15 @@ function createLumiSharedHistory({storage,session,call,uuid=()=>crypto.randomUUI
 let AS_SHARED=null,AS_SHARED_TIMER=null,AS_SHARED_RENDERING=false;
 function asShared(){if(!AS_SHARED)AS_SHARED=createLumiSharedHistory({storage:localStorage,session:()=>({...SES,sandbox:AS.sandbox}),call:async(route,init={})=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),12000);try{const r=await authFetch(route,{...init,signal:c.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('Historial sin sincronizar ('+r.status+')');const body=await r.text();return body?JSON.parse(body):null;}finally{clearTimeout(t);}}});return AS_SHARED;}
 function asSharedRender(rows){const log=document.getElementById('asConversacion');if(!log)return;const box=asChatScrollBox(log),follow=box.scrollHeight-box.scrollTop-box.clientHeight<70,oldTop=box.scrollTop;
- const current=Array.from(log.children).map(r=>[r.dataset.sharedId,r.dataset.role,r.lastElementChild?.textContent]);const next=rows.map(r=>[r.id,r.role,r.content]);if(JSON.stringify(current)===JSON.stringify(next))return;
- log.replaceChildren();for(const r of rows){const p=document.createElement('p');p.dataset.role=r.role;p.dataset.sharedId=r.id;p.dataset.sharedRemote='1';const label=document.createElement('strong');label.textContent=r.role==='user'?'Tú: ':'Lumi: ';const span=document.createElement('span');span.textContent=r.content;p.append(label,span);log.append(p);}
+ const isMessage=r=>r.dataset.role==='user'||r.dataset.role==='assistant';
+ const current=Array.from(log.children).filter(isMessage).map(r=>[r.dataset.sharedId,r.dataset.role,r.lastElementChild?.textContent]);const next=rows.map(r=>[r.id,r.role,r.content]);if(AS_CHAT_OWNER===asChatOwner()&&JSON.stringify(current)===JSON.stringify(next))return;
+ // Keep live document nodes (including event handlers) anchored to their message.
+ const attachments=new Map();let anchor=null;
+ if(AS_CHAT_OWNER===asChatOwner())for(const child of Array.from(log.children)){
+  if(isMessage(child)){anchor=child.dataset.sharedId||null;continue;}
+  if(anchor&&child.classList.contains('as-chat-docs')){if(!attachments.has(anchor))attachments.set(anchor,[]);attachments.get(anchor).push(child);}
+ }
+ log.replaceChildren();for(const r of rows){const p=document.createElement('p');p.dataset.role=r.role;p.dataset.sharedId=r.id;p.dataset.sharedRemote='1';const label=document.createElement('strong');label.textContent=r.role==='user'?'Tú: ':'Lumi: ';const span=document.createElement('span');span.textContent=r.content;p.append(label,span);log.append(p);for(const card of attachments.get(r.id)||[])log.append(card);}
  AS.historial=rows.slice(-40).map(({role,content})=>({role,content}));asChatStore().save(rows);if(follow||rows.at(-1)?.role==='assistant')asChatFollow(log,true);else box.scrollTop=oldTop;
 }
 function asSharedNotice(text){
