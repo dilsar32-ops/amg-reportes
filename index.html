@@ -18618,7 +18618,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R275';
+  const APP_BUILD = '2026-11-08-R276';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69330,9 +69330,12 @@ function lumiConversationFollowup(r){
  const rows=r.messages.filter(m=>!m.attachment&&(m.text||m.description));
  const text=m=>String(m.text||m.description).trim();
  const last=rows.at(-1);if(!last)return null;
- const lastText=text(last),previous=rows.slice(0,-1),incoming=previous.filter(m=>!m.outgoing).at(-1);
+ const lastText=text(last),previous=rows.slice(0,-1),incoming=previous.filter(m=>!m.outgoing&&!/^(?:thanks|thank you|gracias|ok(?:ay)?|perfect|perfecto)[.! ]*$/i.test(text(m))).at(-1);
  if(last.outgoing&&/\b(?:i will do|i'll (?:check|find|review)|voy a (?:revisar|buscar)|lo reviso|lo busco)\b/i.test(lastText)){
   return {kind:'commitment',text:'En '+r.title+' ya prometiste hacer seguimiento: «'+lastText.slice(0,220)+'». Eso no confirma que la tarea esté hecha.'+(incoming?' Te pidieron: «'+text(incoming).slice(0,350)+'».':''),draft:null};
+ }
+ if(!last.outgoing&&previous.some(m=>/water damage|inspection|water leak|daño de agua|inspecci[oó]n/i.test(text(m)))&&/^(?:calling|llamando|estoy llamando)[.! ]*$/i.test(lastText)){
+  return {kind:'in_progress',text:'En '+r.title+' el último aviso es «'+lastText+'». La llamada está en curso; todavía no confirma su resultado. Podemos responder: «Thanks. Please let us know the outcome of the call and whether an inspection needs to be scheduled.»',draft:'Thanks. Please let us know the outcome of the call and whether an inspection needs to be scheduled.'};
  }
  const scheduleQuestion=rows.findIndex(m=>!m.outgoing&&/confirm.*time|what time|a que hora|a qué hora/i.test(text(m)));
  if(scheduleQuestion>=0){
