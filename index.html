@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R305';
+  const APP_BUILD = '2026-11-08-R306';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -78705,7 +78705,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   // ===================== (8-nov-2026) LA RADIO DEL EQUIPO =====================
   // Radio v2: transmisión cifrada en vivo, sin archivos ni notas en el chat.
-  const RADIO = { abierta: null, est: null, hablando: false, t0: 0, reloj: null, escucha: false };
+  const RADIO = { abierta: null, est: null, hablando: false, emitiendo: false, pulsando: false, t0: 0, reloj: null, escucha: false };
   const RADIO_ICO = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="7" width="12" height="15" rx="2.5"/><path d="M10 7 8 2"/><circle cx="12" cy="13" r="2.4"/><path d="M9.5 18.5h5"/></svg>';
   const RADIO_MIC = '<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg>';
   function radioPlugin(){ try{ return (isNative() && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Radio) || null; }catch(e){ return null; } }
@@ -78755,7 +78755,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       + '<div class="radio-cab"><span class="radio-ico">' + RADIO_ICO + '</span><div class="radio-tit"><b>Radio</b><span>' + esc(radioNombreCanal(key)) + '</span></div>'
       + '<button type="button" class="radio-x" data-radio="cerrar" aria-label="Cerrar">✕</button></div>'
       + (aqui
-        ? '<div class="radio-estado">' + (RADIO.hablando ? 'Hablando… <b class="radio-t">0:00</b>' : (RADIO.escucha ? esc(RADIO.hablante || 'Equipo') + (RADIO.fase==='hablando' ? ' está hablando' : ' está conectando…') : 'Mantén apretado para hablar')) + '</div>'
+        ? '<div class="radio-estado">' + (RADIO.hablando ? (RADIO.emitiendo ? 'Hablando… <b class="radio-t">0:00</b>' : 'Conectando el micrófono…') : (RADIO.escucha ? esc(RADIO.hablante || 'Equipo') + (RADIO.fase==='hablando' ? ' está hablando' : ' está conectando…') : 'Mantén apretado para hablar')) + '</div>'
           + '<button type="button" class="radio-boton' + (RADIO.hablando ? ' on' : '') + '" data-radio="hablar"' + (RADIO.escucha ? ' disabled aria-disabled="true"' : '') + '>' + RADIO_MIC + '<span>' + (RADIO.hablando ? 'SUELTA PARA TERMINAR' : (RADIO.escucha ? 'ESCUCHANDO' : 'HABLAR')) + '</span></button>'
           + '<div class="radio-pie">Voz en vivo. No se guarda como nota de audio.</div>'
           + '<button type="button" class="radio-salir" data-radio="salir">Salir de la radio</button>'
@@ -78789,7 +78789,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const b = e.target.closest('[data-radio="hablar"]'); if(!b) return; e.preventDefault();
     try{ b.setPointerCapture(e.pointerId); }catch(err){}
     const P = radioPlugin(); if(!P || RADIO.hablando || RADIO.escucha) return;
-    RADIO.error=null; RADIO.hablando = true; RADIO.t0 = Date.now();
+    RADIO.error=null; RADIO.pulsando=true;RADIO.emitiendo=false; RADIO.hablando = true; RADIO.t0 = Date.now();
     // sin redibujar: el botón sigue siendo el mismo bajo el dedo (si se cambiara, el iPhone podría soltar la transmisión)
     b.classList.add('on'); const lb = b.querySelector('span'); if(lb) lb.textContent = 'CONECTANDO…';
     const es = document.querySelector('#radioVelo .radio-estado'); if(es) es.innerHTML = 'Conectando… <b class="radio-t">0:00</b>';
@@ -78797,7 +78797,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     try{ const r = await P.hablar(); if(r && !r.ok){ RADIO.hablando = false; clearInterval(RADIO.reloj); radioPintar(); radioAviso(r.motivo==='ocupado' ? 'La radio está ocupada. Espere a que termine la otra persona.' : 'Primero únase a la radio.'); } }catch(err){ RADIO.hablando = false; clearInterval(RADIO.reloj); radioPintar(); }
   }
   async function radioSoltar(){
-    if(!RADIO.hablando) return; RADIO.hablando = false; clearInterval(RADIO.reloj);
+    RADIO.pulsando=false;if(!RADIO.hablando) return; RADIO.hablando = false;RADIO.emitiendo=false; clearInterval(RADIO.reloj);
     const P = radioPlugin(); try{ if(P) await P.soltar(); }catch(e){}
     radioPintar(); radioAviso('Transmisión terminada. No se guardó audio.');
   }
@@ -78808,12 +78808,12 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     P.addListener('radio', (d) => {
       const ev = d && d.evento;
       if(ev === 'unido' || ev === 'registrado'){ P.estado().then(est=>{RADIO.est=est;if(RADIO.abierta&&!RADIO.hablando)radioPintar();}).catch(()=>{}); }
-      else if(ev === 'hablando' && d.si === true){const es=document.querySelector('#radioVelo .radio-estado');if(es)es.textContent='Hablando en vivo';const lb=document.querySelector('#radioVelo [data-radio=hablar] span');if(lb)lb.textContent='SUELTA PARA TERMINAR';}
-      else if(ev === 'terminado'){RADIO.hablando=false;RADIO.escucha=false;RADIO.hablante='';radioBanner();clearInterval(RADIO.reloj);if(RADIO.abierta){radioPintar();if(RADIO.error)radioAviso(RADIO.error);}}
+      else if(ev === 'terminado'){RADIO.pulsando=false;RADIO.hablando=false;RADIO.emitiendo=false;RADIO.escucha=false;RADIO.hablante='';radioBanner();clearInterval(RADIO.reloj);if(RADIO.abierta){radioPintar();if(RADIO.error)radioAviso(RADIO.error);}}
       else if(ev === 'salio'){ radioGuardar(null); if(RADIO.est) RADIO.est.unido = false; if(RADIO.abierta) radioPintar(); if(MSG && MSG.con) radioPintarCab(MSG.con); }
       else if(ev === 'salida'){RADIO.altavoz=!!d.altavoz;if(RADIO.abierta&&!RADIO.hablando)radioPintar();}
       else if(ev === 'recibido'){ RADIO.escucha = true;RADIO.hablante=d.hablante || 'Equipo';RADIO.fase=d.fase || 'conectando';radioBanner(); if(RADIO.abierta) radioPintar();  }
-      else if(ev === 'error'){ RADIO.hablando=false;clearInterval(RADIO.reloj);if(RADIO.abierta)radioPintar();const reasons={'sin-oyentes':'Ningún teléfono está listo para escuchar. Comprueben que ambos estén unidos.','ocupado':'Otra persona está hablando o hay una llamada activa.','aviso-rechazado':'Apple no aceptó el aviso. No se transmitió la voz.','microfono':'No se pudo activar el micrófono.','altavoz':'No se pudo activar la salida de audio.','audio-interrumpido':'El teléfono interrumpió la salida de audio.','conexion':'Se interrumpió la conexión.','conexion-lenta':'La conexión está demasiado lenta.','actualizar-radio':'Actualice Workspace en ambos teléfonos.'}; RADIO.error=reasons[d.que] || 'No se pudo conectar la radio.'; radioAviso(RADIO.error); }
+      else if(ev === 'error'){ RADIO.hablando=false;clearInterval(RADIO.reloj);if(RADIO.abierta)radioPintar();const reasons={'sin-oyentes':'Ningún teléfono está listo para escuchar. Comprueben que ambos estén unidos.','ocupado':'La radio está ocupada o hay una llamada activa. Espere un momento.','aviso-rechazado':'Apple no aceptó el aviso. No se transmitió la voz.','microfono':'No se pudo activar el micrófono.','altavoz':'No se pudo activar la salida de audio.','audio-interrumpido':'El teléfono interrumpió la salida de audio.','conexion':'Se interrumpió la conexión.','conexion-lenta':'La conexión está demasiado lenta.','actualizar-radio':'Actualice Workspace en ambos teléfonos.'}; RADIO.error=reasons[d.que] || 'No se pudo conectar la radio.'; radioAviso(RADIO.error); }
+      else if(ev === 'hablando' && d.si === true){RADIO.hablando=true;RADIO.emitiendo=true;radioActualizarVista();}
       else if(ev === 'hablando' && d.si === false && RADIO.hablando){ RADIO.hablando = false; clearInterval(RADIO.reloj); if(RADIO.abierta) radioPintar(); }   // Apple cortó (llamada, otro canal)
     });
   })();
@@ -78827,10 +78827,18 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     b.hidden=!RADIO.escucha || !!RADIO.abierta;b.textContent=RADIO.escucha ? (RADIO.hablante || 'Equipo') + (RADIO.fase==='hablando' ? ' está hablando · Radio' : ' está conectando · Radio') : '';
   }
   function radioAplicarEstado(est){
-    RADIO.est=est || {};RADIO.hablante=RADIO.est.hablante || '';RADIO.fase=RADIO.est.recepcion || '';
+    RADIO.est=est || {};RADIO.emitiendo=!!RADIO.est.hablando;RADIO.hablando=!!(RADIO.est.hablando || RADIO.est.solicitando);RADIO.hablante=RADIO.est.hablante || '';RADIO.fase=RADIO.est.recepcion || '';
     RADIO.escucha=!!RADIO.hablante;radioBanner();
   }
-  async function radioSincronizar(){const p=radioPlugin();if(!p)return;try{radioAplicarEstado(await p.estado());if(RADIO.abierta&&!RADIO.hablando)radioPintar();}catch(e){}}
+  function radioActualizarVista(){
+    if(!RADIO.abierta)return;
+    if(!RADIO.pulsando){radioPintar();return;}
+    // Keep the actual pointer-captured button mounted until the user releases it.
+    const e=document.querySelector('#radioVelo .radio-estado'),b=document.querySelector('#radioVelo [data-radio="hablar"] span');
+    if(e)e.textContent=RADIO.emitiendo ? 'Hablando…' : 'Conectando el micrófono…';
+    if(b)b.textContent=RADIO.emitiendo ? 'SUELTA PARA TERMINAR' : 'CONECTANDO…';
+  }
+  async function radioSincronizar(){const p=radioPlugin();if(!p)return;try{radioAplicarEstado(await p.estado());radioActualizarVista();}catch(e){}}
   // dejar apretado el ícono de Workspace → "Radio del equipo": abre la radio guardada
   async function radioRevisarAtajo(){
     const P = radioPlugin(); if(!P) return;
@@ -78838,6 +78846,8 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   document.addEventListener('visibilitychange', () => { if(!document.hidden){radioSincronizar();radioRevisarAtajo();} });
   setTimeout(()=>{radioSincronizar();radioRevisarAtajo();},1500);
+
+  setInterval(()=>{if(!document.hidden && (RADIO.abierta || RADIO.escucha))radioSincronizar();},1500);
   window.__rdx = { soltarYa: rdxSoltarYa, todo: rdxTodo, filas: rdxFilas, sumar: rdxSumar, activar: rdxActivar, otro: rdxOtro, hoja: () => rdxHojaHtml(rdxHojaDatos()), estado: RDX, son: RDX_SON };   // para las pruebas
   window.__rds = { todo: rdsTodo, estado: RDS };
   // ===================== (3-nov-2026, R129) MAPA DE HUMEDAD DE RD: sus 6 maquetas =====================
