@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R308';
+  const APP_BUILD = '2026-11-08-R309';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -78740,13 +78740,13 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     let v = document.getElementById('radioVelo');
     if(!v){ v = document.createElement('div'); v.id = 'radioVelo'; v.className = 'radio-velo'; document.body.appendChild(v);
       v.addEventListener('click', radioClic); ['pointerdown'].forEach(ev => v.addEventListener(ev, radioApretar));
-      ['pointerup', 'pointercancel'].forEach(ev => v.addEventListener(ev, radioSoltar)); }
+      ['pointerup', 'pointercancel'].forEach(ev => v.addEventListener(ev, radioTerminarPulsacion)); }
     if(est.protocolo!==2){ alert('Actualice Workspace para usar la radio en vivo sin notas de audio.'); RADIO.abierta=null; v.hidden=true; return; } radioPintar(); v.hidden = false; requestAnimationFrame(() => v.classList.add('ver'));
   }
   function radioCerrar(){ const v = document.getElementById('radioVelo'); if(!v) return; if(RADIO.hablando) radioSoltar(); v.classList.remove('ver'); setTimeout(() => { v.hidden = true; }, 220); RADIO.abierta = null; radioBanner(); }
 
   function radioPintar(){
-    const v = document.getElementById('radioVelo'); if(!v) return; const key = RADIO.abierta, est = RADIO.est || {}, g = radioGuardado();
+    const v = document.getElementById('radioVelo'); if(!v || !RADIO.abierta) return; const key = RADIO.abierta, est = RADIO.est || {}, g = radioGuardado();
     const aqui = !!(g && g.canal === key && est.unido), otro = !!(g && g.canal !== key && est.unido);
     const grupo = key.startsWith('g:') ? msgGrupoDe(key) : null;
     const gente = grupo ? (grupo.miembros || []).map(m => m.nombre).filter(Boolean) : [];
@@ -78790,15 +78790,22 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const b = e.target.closest('[data-radio="hablar"]'); if(!b) return; e.preventDefault();
     try{ b.setPointerCapture(e.pointerId); }catch(err){}
     const P = radioPlugin(); if(!P || RADIO.hablando || RADIO.escucha) return;
-    RADIO.error=null; RADIO.pulsando=true;RADIO.emitiendo=false; RADIO.hablando = true; RADIO.t0 = Date.now();
+    RADIO.error=null;RADIO.pointerId=e.pointerId; RADIO.pulsando=true;RADIO.emitiendo=false; RADIO.hablando = true; RADIO.t0 = Date.now();
     // sin redibujar: el botón sigue siendo el mismo bajo el dedo (si se cambiara, el iPhone podría soltar la transmisión)
     b.classList.add('on'); const lb = b.querySelector('span'); if(lb) lb.textContent = 'CONECTANDO…';
     const es = document.querySelector('#radioVelo .radio-estado'); if(es) es.innerHTML = 'Conectando… <b class="radio-t">0:00</b>';
     clearInterval(RADIO.reloj); RADIO.reloj = setInterval(() => { const t = document.querySelector('#radioVelo .radio-t'); if(t){ const s = Math.floor((Date.now() - RADIO.t0) / 1000); t.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); } }, 250);
     try{ const r = await P.hablar(); if(r && !r.ok){ RADIO.hablando = false; clearInterval(RADIO.reloj); radioPintar(); radioAviso(r.motivo==='ocupado' ? 'La radio está ocupada. Espere a que termine la otra persona.' : 'Primero únase a la radio.'); } }catch(err){ RADIO.hablando = false; clearInterval(RADIO.reloj); radioPintar(); }
   }
+  function radioTerminarPulsacion(e){
+    if(!RADIO.pulsando)return;
+    if(e && e.pointerId!=null && RADIO.pointerId!=null && e.pointerId!==RADIO.pointerId)return;
+    radioSoltar();
+  }
+  ['pointerup','pointercancel','lostpointercapture'].forEach(ev=>window.addEventListener(ev,radioTerminarPulsacion,true));
+  window.addEventListener('blur',()=>{if(RADIO.pulsando)radioSoltar();});
   async function radioSoltar(){
-    RADIO.pulsando=false;if(!RADIO.hablando) return; RADIO.hablando = false;RADIO.emitiendo=false; clearInterval(RADIO.reloj);
+    const ownPress=RADIO.pulsando;RADIO.pulsando=false;RADIO.pointerId=null;if(!RADIO.hablando && !ownPress) return; RADIO.hablando = false;RADIO.emitiendo=false; clearInterval(RADIO.reloj);
     const P = radioPlugin(); try{ if(P) await P.soltar(); }catch(e){}
     radioPintar(); radioAviso('Transmisión terminada. No se guardó audio.');
   }
@@ -78846,7 +78853,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const P = radioPlugin(); if(!P) return;
     try{ const r = await P.pendiente(); if(r && r.abrir){ const g = radioGuardado(); if(g && g.canal) radioAbrir(g.canal); } }catch(e){}
   }
-  document.addEventListener('visibilitychange', () => { if(!document.hidden){radioSincronizar();radioRevisarAtajo();} });
+  document.addEventListener('visibilitychange', () => { if(document.hidden){if(RADIO.pulsando)radioSoltar();}else{radioSincronizar();radioRevisarAtajo();} });
   setTimeout(()=>{radioSincronizar();radioRevisarAtajo();},1500);
 
   setInterval(()=>{if(!document.hidden && (RADIO.abierta || RADIO.escucha))radioSincronizar();},1500);
