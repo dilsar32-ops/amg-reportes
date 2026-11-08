@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R304';
+  const APP_BUILD = '2026-11-08-R305';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -78736,14 +78736,14 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   async function radioAbrir(key){
     const P = radioPlugin(); if(!P || !key) return;
     let est = {}; try{ est = await P.estado(); }catch(e){}
-    RADIO.abierta = key; RADIO.est = est;
+    RADIO.abierta = key; radioAplicarEstado(est);
     let v = document.getElementById('radioVelo');
     if(!v){ v = document.createElement('div'); v.id = 'radioVelo'; v.className = 'radio-velo'; document.body.appendChild(v);
       v.addEventListener('click', radioClic); ['pointerdown'].forEach(ev => v.addEventListener(ev, radioApretar));
       ['pointerup', 'pointercancel'].forEach(ev => v.addEventListener(ev, radioSoltar)); }
     if(est.protocolo!==2){ alert('Actualice Workspace para usar la radio en vivo sin notas de audio.'); RADIO.abierta=null; v.hidden=true; return; } radioPintar(); v.hidden = false; requestAnimationFrame(() => v.classList.add('ver'));
   }
-  function radioCerrar(){ const v = document.getElementById('radioVelo'); if(!v) return; if(RADIO.hablando) radioSoltar(); v.classList.remove('ver'); setTimeout(() => { v.hidden = true; }, 220); RADIO.abierta = null; }
+  function radioCerrar(){ const v = document.getElementById('radioVelo'); if(!v) return; if(RADIO.hablando) radioSoltar(); v.classList.remove('ver'); setTimeout(() => { v.hidden = true; }, 220); RADIO.abierta = null; radioBanner(); }
 
   function radioPintar(){
     const v = document.getElementById('radioVelo'); if(!v) return; const key = RADIO.abierta, est = RADIO.est || {}, g = radioGuardado();
@@ -78755,8 +78755,8 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       + '<div class="radio-cab"><span class="radio-ico">' + RADIO_ICO + '</span><div class="radio-tit"><b>Radio</b><span>' + esc(radioNombreCanal(key)) + '</span></div>'
       + '<button type="button" class="radio-x" data-radio="cerrar" aria-label="Cerrar">✕</button></div>'
       + (aqui
-        ? '<div class="radio-estado">' + (RADIO.hablando ? 'Hablando… <b class="radio-t">0:00</b>' : (RADIO.escucha ? (RADIO.altavoz ? 'Escuchando en altavoz…' : 'Recibiendo voz…') : 'Mantén apretado para hablar')) + '</div>'
-          + '<button type="button" class="radio-boton' + (RADIO.hablando ? ' on' : '') + '" data-radio="hablar">' + RADIO_MIC + '<span>' + (RADIO.hablando ? 'SUELTA PARA TERMINAR' : 'HABLAR') + '</span></button>'
+        ? '<div class="radio-estado">' + (RADIO.hablando ? 'Hablando… <b class="radio-t">0:00</b>' : (RADIO.escucha ? esc(RADIO.hablante || 'Equipo') + (RADIO.fase==='hablando' ? ' está hablando' : ' está conectando…') : 'Mantén apretado para hablar')) + '</div>'
+          + '<button type="button" class="radio-boton' + (RADIO.hablando ? ' on' : '') + '" data-radio="hablar"' + (RADIO.escucha ? ' disabled aria-disabled="true"' : '') + '>' + RADIO_MIC + '<span>' + (RADIO.hablando ? 'SUELTA PARA TERMINAR' : (RADIO.escucha ? 'ESCUCHANDO' : 'HABLAR')) + '</span></button>'
           + '<div class="radio-pie">Voz en vivo. No se guarda como nota de audio.</div>'
           + '<button type="button" class="radio-salir" data-radio="salir">Salir de la radio</button>'
         : '<div class="radio-txt">' + (otro ? 'Estás en la radio de <b>' + esc(g.nombre || '') + '</b>. Solo se puede estar en una.' : 'Únase con ambos iPhone actualizados. La voz se escucha en vivo y no queda guardada en el chat.') + '</div>'
@@ -78788,7 +78788,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   async function radioApretar(e){
     const b = e.target.closest('[data-radio="hablar"]'); if(!b) return; e.preventDefault();
     try{ b.setPointerCapture(e.pointerId); }catch(err){}
-    const P = radioPlugin(); if(!P || RADIO.hablando) return;
+    const P = radioPlugin(); if(!P || RADIO.hablando || RADIO.escucha) return;
     RADIO.error=null; RADIO.hablando = true; RADIO.t0 = Date.now();
     // sin redibujar: el botón sigue siendo el mismo bajo el dedo (si se cambiara, el iPhone podría soltar la transmisión)
     b.classList.add('on'); const lb = b.querySelector('span'); if(lb) lb.textContent = 'CONECTANDO…';
@@ -78809,22 +78809,35 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       const ev = d && d.evento;
       if(ev === 'unido' || ev === 'registrado'){ P.estado().then(est=>{RADIO.est=est;if(RADIO.abierta&&!RADIO.hablando)radioPintar();}).catch(()=>{}); }
       else if(ev === 'hablando' && d.si === true){const es=document.querySelector('#radioVelo .radio-estado');if(es)es.textContent='Hablando en vivo';const lb=document.querySelector('#radioVelo [data-radio=hablar] span');if(lb)lb.textContent='SUELTA PARA TERMINAR';}
-      else if(ev === 'terminado'){RADIO.hablando=false;RADIO.escucha=false;clearInterval(RADIO.reloj);if(RADIO.abierta){radioPintar();if(RADIO.error)radioAviso(RADIO.error);}}
+      else if(ev === 'terminado'){RADIO.hablando=false;RADIO.escucha=false;RADIO.hablante='';radioBanner();clearInterval(RADIO.reloj);if(RADIO.abierta){radioPintar();if(RADIO.error)radioAviso(RADIO.error);}}
       else if(ev === 'salio'){ radioGuardar(null); if(RADIO.est) RADIO.est.unido = false; if(RADIO.abierta) radioPintar(); if(MSG && MSG.con) radioPintarCab(MSG.con); }
       else if(ev === 'salida'){RADIO.altavoz=!!d.altavoz;if(RADIO.abierta&&!RADIO.hablando)radioPintar();}
-      else if(ev === 'recibido'){ RADIO.escucha = true; if(RADIO.abierta) radioPintar();  }
-      else if(ev === 'error'){ RADIO.hablando=false;clearInterval(RADIO.reloj);if(RADIO.abierta)radioPintar();const reasons={'sin-oyentes':'Ningún teléfono está listo para escuchar. Comprueben que ambos estén unidos.','ocupado':'Otra persona está hablando o hay una llamada activa.','aviso-rechazado':'Apple no aceptó el aviso. No se transmitió la voz.','microfono':'No se pudo activar el micrófono.','altavoz':'No se pudo activar la salida de audio.','conexion':'Se interrumpió la conexión.','conexion-lenta':'La conexión está demasiado lenta.','actualizar-radio':'Actualice Workspace en ambos teléfonos.'}; RADIO.error=reasons[d.que] || 'No se pudo conectar la radio.'; radioAviso(RADIO.error); }
+      else if(ev === 'recibido'){ RADIO.escucha = true;RADIO.hablante=d.hablante || 'Equipo';RADIO.fase=d.fase || 'conectando';radioBanner(); if(RADIO.abierta) radioPintar();  }
+      else if(ev === 'error'){ RADIO.hablando=false;clearInterval(RADIO.reloj);if(RADIO.abierta)radioPintar();const reasons={'sin-oyentes':'Ningún teléfono está listo para escuchar. Comprueben que ambos estén unidos.','ocupado':'Otra persona está hablando o hay una llamada activa.','aviso-rechazado':'Apple no aceptó el aviso. No se transmitió la voz.','microfono':'No se pudo activar el micrófono.','altavoz':'No se pudo activar la salida de audio.','audio-interrumpido':'El teléfono interrumpió la salida de audio.','conexion':'Se interrumpió la conexión.','conexion-lenta':'La conexión está demasiado lenta.','actualizar-radio':'Actualice Workspace en ambos teléfonos.'}; RADIO.error=reasons[d.que] || 'No se pudo conectar la radio.'; radioAviso(RADIO.error); }
       else if(ev === 'hablando' && d.si === false && RADIO.hablando){ RADIO.hablando = false; clearInterval(RADIO.reloj); if(RADIO.abierta) radioPintar(); }   // Apple cortó (llamada, otro canal)
     });
   })();
 
+  function radioBanner(){
+    let b=document.getElementById('radioEnVivo');
+    if(!b){b=document.createElement('button');b.id='radioEnVivo';b.type='button';b.setAttribute('aria-live','polite');
+      b.style.cssText='position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);left:12px;right:12px;z-index:2147483000;padding:14px 18px;border-radius:16px;background:#143a2c;color:#fff;border:2px solid #69e4ad;box-shadow:0 4px 20px #0007;font:600 17px system-ui;text-align:center';
+      b.addEventListener('click',()=>{const g=radioGuardado();if(g)radioAbrir(g.canal)});document.body.appendChild(b);
+    }
+    b.hidden=!RADIO.escucha || !!RADIO.abierta;b.textContent=RADIO.escucha ? (RADIO.hablante || 'Equipo') + (RADIO.fase==='hablando' ? ' está hablando · Radio' : ' está conectando · Radio') : '';
+  }
+  function radioAplicarEstado(est){
+    RADIO.est=est || {};RADIO.hablante=RADIO.est.hablante || '';RADIO.fase=RADIO.est.recepcion || '';
+    RADIO.escucha=!!RADIO.hablante;radioBanner();
+  }
+  async function radioSincronizar(){const p=radioPlugin();if(!p)return;try{radioAplicarEstado(await p.estado());if(RADIO.abierta&&!RADIO.hablando)radioPintar();}catch(e){}}
   // dejar apretado el ícono de Workspace → "Radio del equipo": abre la radio guardada
   async function radioRevisarAtajo(){
     const P = radioPlugin(); if(!P) return;
     try{ const r = await P.pendiente(); if(r && r.abrir){ const g = radioGuardado(); if(g && g.canal) radioAbrir(g.canal); } }catch(e){}
   }
-  document.addEventListener('visibilitychange', () => { if(!document.hidden) radioRevisarAtajo(); });
-  setTimeout(radioRevisarAtajo, 1500);
+  document.addEventListener('visibilitychange', () => { if(!document.hidden){radioSincronizar();radioRevisarAtajo();} });
+  setTimeout(()=>{radioSincronizar();radioRevisarAtajo();},1500);
   window.__rdx = { soltarYa: rdxSoltarYa, todo: rdxTodo, filas: rdxFilas, sumar: rdxSumar, activar: rdxActivar, otro: rdxOtro, hoja: () => rdxHojaHtml(rdxHojaDatos()), estado: RDX, son: RDX_SON };   // para las pruebas
   window.__rds = { todo: rdsTodo, estado: RDS };
   // ===================== (3-nov-2026, R129) MAPA DE HUMEDAD DE RD: sus 6 maquetas =====================
