@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R294';
+  const APP_BUILD = '2026-11-08-R295';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69460,13 +69460,8 @@ async function lumiProactiveTick(){
  const key='lumi_notices_seen_'+owner;let seen;try{seen=JSON.parse(localStorage.getItem(key)||'[]');if(!Array.isArray(seen))seen=[];}catch{seen=[];}
  const notices=[];
  const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders()});
- if(r.ok){const data=(await r.json())[0]?.valor;if(data?.owner===owner){for(const e of data.events||[]){if(!seen.includes(e.id)&&Date.now()-e.at<86400000){notices.push({id:e.id,text:(e.source==='whatsapp'?'WhatsApp':'Mensajes normales')+': '+e.title});}}}}
+ if(r.ok){const data=(await r.json())[0]?.valor;if(data?.owner===owner){for(const e of data.events||[]){if(!seen.includes(e.id)&&Date.now()-e.at<86400000){notices.push({id:e.id,text:({whatsapp:'WhatsApp',messages:'Mensajes normales',workspace:'Workspace',labor:'Labor log'}[e.source]||'Workspace')+': '+e.title});}}}}
  if(owner!==SES.user_id+'|'+SES.company_id)return;
- if(typeof window.__lumiWorkspaceSnapshot==='function')try{
- const rows=await window.__lumiWorkspaceSnapshot();const result=await lumiComparePersisted('workspace_watch',rows,owner,Date.now());
- for(const name of result.newMessages||[])notices.push({id:'ws:'+Date.now()+':'+name,text:'Workspace (mensaje o petición): '+name});
- }catch{}
- try{const lr=await authFetch('/rest/v1/labor_logs?select=id,created_at,crew_leader&order=created_at.desc&limit=100',{headers:cloudHeaders()});if(lr.ok){const logs=await lr.json();if(owner!==SES.user_id+'|'+SES.company_id)return;const c=await lumiComparePersisted('labor_watch',logs.map(x=>({id:x.id,at:Date.parse(x.created_at),chat:x.crew_leader||'la cuadrilla',preview:x.id})),owner,Date.now());for(const name of c.newMessages||[])notices.push({id:'labor:'+Date.now()+':'+name,text:'Labor log: '+name});}}catch{}
  if(owner!==SES.user_id+'|'+SES.company_id)return;
  if(notices.length){const unique=[...new Map(notices.map(n=>[n.id,n])).values()];lumiNoticeSay('Amílcar, hay novedades. '+[...new Set(unique.map(n=>n.text))].slice(0,4).join('. ')+(unique.length>4?'. Hay más por revisar.':'.')+' Puedes pedirme que las lea.');seen.push(...unique.map(n=>n.id));localStorage.setItem(key,JSON.stringify(seen.slice(-500)));}
  }catch{}finally{LUMI_NOTICE_BUSY=false;}
