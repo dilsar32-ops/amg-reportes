@@ -18618,7 +18618,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R264';
+  const APP_BUILD = '2026-11-08-R265';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68669,6 +68669,9 @@ function lumiDesktopReadOrder(text){
  let t=String(text||'').trim().replace(/[?!.]+$/,'').replace(/\s*,?\s*(?:por favor|please)$/i,'').trim();
  t=t.replace(/(?:[.;,]\s*|\s+)(?:no respondas(?: ni env[ií]es nada)?|no env[ií]es (?:respuestas|nada)|sin (?:enviar|mandar) nada|do not (?:reply|send anything)|don['’]t (?:reply|send anything))$/i,'').trim().replace(/[?!.]+$/,'');
  const apps='(WhatsApp|Mensajes de Apple|Mensajes normales|Mensajes|Apple Messages|Messages|iMessage)';
+ t=t.replace(/^Lumi[, ]+/i,'');
+ const openRead=new RegExp('^(?:abre|open) '+apps+' (?:y dime|y revisa|and (?:tell me|check)) (?:qu[eé] mensajes (?:nuevos )?tenemos|si (?:hay|tenemos) mensajes(?: nuevos)?|(?:our |the )?(?:new |unread )?messages)$','i').exec(t);
+ if(openRead)return {app:/^whatsapp$/i.test(openRead[1])?'whatsapp':'messages',action:'read_unread'};
  const replyCheck=new RegExp('^(?:(?:mira|revisa|checa|verifica) si |(?:ya )?)(.+?) (?:ya )?(?:contesto|contestó|respondio|respondió|ha respondido) (?:en|por) '+apps+'(?: y (?:dime|lee|leeme|léeme) (?:que|qué|lo que) (?:dijo|respondio|respondió|contesto|contestó))?$','i').exec(t)
   ||new RegExp('^(?:check (?:if|whether) |has )(.+?) (?:replied|answered)(?: yet)? (?:in|on) '+apps+'(?: and (?:tell me|read) (?:what (?:they|he|she) said|the reply))?$','i').exec(t);
  if(replyCheck&&!/^(?:no |don't |do not )/i.test(t)&&replyCheck[1].trim().length<=120&&!/\b(?:envia|envía|manda|send|delete|borra)\b/i.test(replyCheck[1]))return {app:/^whatsapp$/i.test(replyCheck[2])?'whatsapp':'messages',action:'read_chat',query:replyCheck[1].trim()};
@@ -68743,6 +68746,7 @@ function lumiDesktopReadFollowup(text,receipt,owner,now=Date.now()){
  return {app:receipt.app,action:'read_chat',query:selected.query||selected.title,...(selected.key?{key:selected.key}:{})};
 }
 function lumiDesktopReadText(r){
+ if(r.syncPaused===true)return 'WhatsApp tiene la sincronización pausada. Abre WhatsApp en tu teléfono para actualizarla; lo que veo puede estar incompleto. '+lumiDesktopReadText({...r,syncPaused:false});
  const app=r.app==='whatsapp'?'WhatsApp':'Mensajes de Apple';
  if(r.status==='unread_list'){
   if(!r.chats.length)return r.partial?'No veo chats sin leer en la parte disponible de '+app+'. No puedo confirmar el resto.':'No tienes chats sin leer en '+app+'.';
@@ -68855,6 +68859,7 @@ async function lumiRunExternalReview({run,apps,active=()=>true,english=false,pro
    const list=await run({app,action:'list_recent'});if(!active())throw Error('La sesión cambió.');
    if(!lumiDesktopReadValid(list,{app,action:'list_recent'}))throw Error('Lista no válida');
    report.available=list.chats.length;
+   if(list.syncPaused===true)report.errors.push('WhatsApp tiene la sincronización pausada; abre la app en tu teléfono.');
    const normalized=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
    // Scan unique names so accessibility duplicates do not consume the review quota.
    const seenNames=new Set();const reviewChats=list.chats.filter(c=>{const n=normalized(c.title);if(seenNames.has(n))return false;seenNames.add(n);return true;});
@@ -68877,11 +68882,49 @@ async function lumiRunExternalReview({run,apps,active=()=>true,english=false,pro
  return results;
 }
 let LUMI_REVIEW_DETAIL=null;
+// Session-scoped arrival detection. A first snapshot is a baseline, not a new arrival.
+function lumiArrivalTracker(){
+ let owner=null, channels=new Map();
+ return {observe(who,source,rows,ok=true,now=Date.now()){
+  if(who!==owner){owner=who;channels=new Map();}
+  if(!who||!ok)return {available:false,newMessages:[]};
+  const previous=channels.get(source),seen=previous?.seen||new Set();
+  const arrivals=[];
+  for(const row of rows){
+   if(!row||!row.id||row.outgoing)continue;
+   if(previous&&!seen.has(row.id)&&Number.isFinite(row.at)&&row.at>previous.start&&row.at<=now+60000)arrivals.push(row);
+   seen.add(row.id);
+  }
+  channels.set(source,{seen,start:previous?.start??now});
+  return {available:true,newMessages:arrivals};
+ },reset(){owner=null;channels=new Map();}};
+}
+const LUMI_ARRIVALS=lumiArrivalTracker();
+let LUMI_MESSAGE_CHECK=false;
+async function lumiCheckWorkspaceArrivals(){
+ if(LUMI_MESSAGE_CHECK||!AS.abierto||SES.role!=='manager'||document.hidden||AS.enviando||AS_DESKTOP_BUSY)return;
+ LUMI_MESSAGE_CHECK=true; const owner=asChatOwner();
+ try{
+  await msgRevisarSinLeer();
+  if(!AS.abierto||owner!==asChatOwner()||!MSG.lecturasOk)return;
+  const rows=(MSG.lista||[]).filter(m=>!m.borrado_at&&msgEsParaMi(m)&&!msgMio(m)&&(!msgVisible||msgVisible(m))).map(m=>({id:m.id,at:Date.parse(m.created_at),outgoing:false}));
+  const result=LUMI_ARRIVALS.observe(owner,'workspace',rows);
+  if(result.newMessages.length){
+   const text='Amílcar, llegaron '+result.newMessages.length+' mensajes a Workspace. Puedes pedirme que los revise.';
+   asMostrarRespuesta(text);
+   if(!AS.enviando&&AS.estado==='esperando')asHablar(text,asSeguirOyendo);
+  }
+ }catch(e){/* A failed refresh is unknown, never an empty inbox. */}
+ finally{LUMI_MESSAGE_CHECK=false;}
+}
+setInterval(lumiCheckWorkspaceArrivals,30000);
+
 function lumiReviewBrief(results,en=false){
  const names=[...new Set(results.flatMap(r=>r.candidates.filter(c=>!c.uncertain).map(c=>c.chat)))];
  const unsure=results.some(r=>r.candidates.some(c=>c.uncertain));
  const errors=results.some(r=>r.errors.length);
- let text=names.length?(en?'There are possible replies to check in ':'Hay posibles respuestas pendientes en ')+names.slice(0,3).join(', ')+(names.length>3?(en?' and '+(names.length-3)+' more chats':' y '+(names.length-3)+' chats más'):'')+'.':(en?'I found no clear unanswered requests in the chats reviewed.':'No encontré solicitudes claras sin responder en los chats revisados.');
+ const noCoverage=results.length>0&&results.every(r=>r.checked===0)&&errors;
+ let text=noCoverage?(en?'I could not check the conversations. I cannot tell whether replies are pending.':'No pude comprobar las conversaciones. Todavía no sé si hay respuestas pendientes.'):names.length?(en?'There are possible replies to check in ':'Hay posibles respuestas pendientes en ')+names.slice(0,3).join(', ')+(names.length>3?(en?' and '+(names.length-3)+' more chats':' y '+(names.length-3)+' chats más'):'')+'.':(en?'I found no clear unanswered requests in the chats reviewed.':'No encontré solicitudes claras sin responder en los chats revisados.');
  if(unsure)text+=en?' Some attachments and conversations need checking.':' Hay adjuntos y conversaciones por comprobar.';
  text+=errors?(en?' Some sources could not be checked.':' Algunas fuentes no se pudieron revisar.'):(en?' The review is partial.':' La revisión es parcial.');
  return text;
