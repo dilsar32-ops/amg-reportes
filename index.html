@@ -18984,7 +18984,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R291';
+  const APP_BUILD = '2026-11-08-R292';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69369,7 +69369,7 @@ async function lumiRunExternalReview({run,apps,active=()=>true,english=false,pro
   try{
    const list=await run({app,action:'list_recent'});if(!active())throw Error('La sesión cambió.');
    if(!lumiDesktopReadValid(list,{app,action:'list_recent'}))throw Error('Lista no válida');
-   report.available=list.chats.length;report.latest=list.chats.filter(c=>c.preview&&!/your message|tu mensaje|sent to/i.test(c.preview)).slice(0,3).map(c=>({chat:c.title,preview:String(c.preview).slice(0,220)}));
+   report.snapshotRows=list.chats.map(c=>({chat:c.title,preview:c.preview}));report.capturedAt=Date.parse(list.capturedAt)||Date.now();report.available=list.chats.length;report.latest=list.chats.filter(c=>c.preview&&!/your message|tu mensaje|sent to/i.test(c.preview)).slice(0,3).map(c=>({chat:c.title,preview:String(c.preview).slice(0,220)}));
    if(list.syncPaused===true)report.errors.push('WhatsApp tiene la sincronización pausada; abre la app en tu teléfono.');
    const normalized=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
    // Scan unique names so accessibility duplicates do not consume the review quota.
@@ -69596,10 +69596,55 @@ function lumiMessageDigest(results,workspace=null,en=false){
  }
  return sections;
 }
+async function lumiSnapshotRows(rows){
+ const hash=async text=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))).map(x=>x.toString(16).padStart(2,'0')).join('');
+ const counts=new Map();for(const r of rows)counts.set(r.id||r.chat,(counts.get(r.id||r.chat)||0)+1);
+ const out=[];for(const r of rows){if(!r.chat||!r.preview||counts.get(r.id||r.chat)!==1)continue;
+ const preview=String(r.preview).replace(/\b(?:Unread|Read|Pinned)\b,?\s*/gi,'').trim();
+ out.push({key:await hash(r.id||r.chat),fingerprint:await hash(preview),chat:r.chat,outgoing:/your message|tu mensaje|tú:|you:|sent to/i.test(preview),id:r.id||null,at:r.at||null});}return out;
+}
+function lumiCompareSnapshot(previous,rows,at){
+ const old=previous?.entries||{},baseline=!previous||previous.version!==1;
+ const changed=[],newMessages=[],unseen=[];const entries={...old};
+ for(const row of rows){const prior=old[row.key];
+ if(!baseline&&!row.outgoing&&prior!==row.fingerprint){
+ if(row.id&&Number.isFinite(row.at)&&row.at>previous.at)newMessages.push(row.chat);
+ else if(prior)changed.push(row.chat);else unseen.push(row.chat);
+ }entries[row.key]=row.fingerprint;}
+ const bounded=Object.fromEntries(Object.entries(entries).slice(-500));
+ return {baseline,changed,newMessages,unseen,snapshot:{version:1,at,entries:bounded}};
+}
+async function lumiComparePersisted(source,rows,owner,at=Date.now()){
+ const user=SES.user_id,company=SES.company_id;
+ const same=()=>owner===SES.user_id+'|'+SES.company_id&&SES.role==='manager';
+ if(!same())throw Error('La cuenta cambió');
+ const key='lumi_message_snapshot_v1_'+user+'_'+source+(AS.sandbox?'_sandbox':'');
+ const route='/rest/v1/asistente_ajustes?company_id=eq.'+encodeURIComponent(company)+'&clave=eq.'+encodeURIComponent(key);
+ const get=await authFetch(route+'&select=valor',{headers:cloudHeaders()});if(!get.ok)throw Error('No pude recuperar la comparación anterior');
+ const previous=(await get.json())?.[0]?.valor;
+ if(!same())throw Error('La cuenta cambió');
+ const result=lumiCompareSnapshot(previous?.owner===owner?previous:null,await lumiSnapshotRows(rows),at);
+ if(previous?.at>at)throw Error('Otra revisión más reciente ya terminó');
+ const value={...result.snapshot,owner};
+ let save;
+ if(previous){save=await authFetch(route+'&valor->>at=eq.'+encodeURIComponent(String(previous.at)),{method:'PATCH',headers:{...cloudHeaders(),Prefer:'return=representation'},body:JSON.stringify({valor:value,updated_at:new Date(at).toISOString()})});}
+ else{save=await authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:{...cloudHeaders(),Prefer:'resolution=ignore-duplicates,return=representation'},body:JSON.stringify({company_id:company,clave:key,valor:value,updated_by:user,updated_at:new Date(at).toISOString()})});}
+ if(!save.ok||!(await save.json())?.length)throw Error('No pude guardar esta comparación; inténtalo otra vez');
+ if(!same())throw Error('La cuenta cambió');return result;
+}
+function lumiComparisonSummary(c){
+ if(!c)return 'No pude comparar con la revisión anterior.';
+ if(c.baseline)return 'Guardé la primera referencia. No llamaré nuevos a los mensajes anteriores.';
+ const parts=[];
+ if(c.newMessages.length)parts.push('Mensajes nuevos: '+[...new Set(c.newMessages)].join(', ')+'.');
+ if(c.changed.length)parts.push('Cambios desde la revisión anterior en '+c.changed.join(', ')+'. Falta leerlos para confirmar qué llegó.');
+ if(c.unseen.length)parts.push('Conversaciones que no estaban en la vista anterior: '+c.unseen.join(', ')+'.');
+ return parts.join(' ')||'Sin cambios en los mensajes visibles desde la revisión anterior.';
+}
 function lumiDiscoveryDigest(results,workspace,en=false){
  const sections=results.map(r=>{const label=r.app==='whatsapp'?'WhatsApp':en?'Apple Messages':'Mensajes normales';
  const chats=[...new Set((r.latest||[]).map(c=>c.chat))];
- const summary=r.errors?.length?(en?'Could not verify all recent messages.':'No pude verificar todas las novedades.'):(chats.length?(en?'Recent visible conversations: ':'Conversaciones recientes visibles: ')+chats.join(', ')+'.':(en?'No recent previews visible; this does not confirm there are no new messages.':'No hay vistas previas recientes visibles; eso no confirma que no haya mensajes nuevos.'));
+ const summary=r.comparison?lumiComparisonSummary(r.comparison)+' La revisión cubre solo lo visible.':r.errors?.length?(en?'Could not verify all recent messages.':'No pude verificar todas las novedades.'):(chats.length?(en?'Recent visible conversations: ':'Conversaciones recientes visibles: ')+chats.join(', ')+'.':(en?'No recent previews visible; this does not confirm there are no new messages.':'No hay vistas previas recientes visibles; eso no confirma que no haya mensajes nuevos.'));
  return {app:r.app,label,summary,detail:(r.latest||[]).map(c=>c.chat+': '+c.preview).join('\n')+(r.errors?.length?'\n'+r.errors.join('\n'):'')};});
  if(workspace!==null){const count=/mensajes.*?(?:respuesta|responder)[^\n]*?:\s*(\d+)/i.exec(workspace);sections.push({app:'workspace',label:'Workspace',summary:/^No pude/.test(workspace)?'No pude comprobar las novedades.':count?count[1]+' elementos por revisar; no todos son nuevos.':'Revisión disponible; aún no confirmé cuáles son nuevos.',detail:workspace});}
  return sections;
@@ -69624,10 +69669,11 @@ function lumiRenderMessageDigest(sections,owner){
     const active=()=>AS.abierto&&AS.requestEpoch===epoch&&SES.role==='manager'&&owner===SES.user_id+'|'+SES.company_id;
     if(SES.role!=='manager'){asMostrarRespuesta('Esta revisión es solo para Manager.');return;}
     AS_DESKTOP_BUSY=true;AS.enviando=true;asPararOido();asCallar();asTranscribir(texto);asAccionVisible('Revisando pendientes…','working');
-    const parts=[],brief=[];let reviewResults=[];
+    const parts=[],brief=[];let reviewResults=[],workspaceComparison=null;
     try{
       if(order.workspace){
-       try{
+       if(order.discovery){try{const rows=await window.__lumiWorkspaceSnapshot();if(!active())return;workspaceComparison=await lumiComparePersisted('workspace',rows,owner);parts.push('Workspace: '+lumiComparisonSummary(workspaceComparison));}catch(e){parts.push('No pude revisar Workspace; no significa que no haya mensajes nuevos.');}}
+       else try{
         const response=await asLlamar({texto:order.accounts?'Revisa mis cuentas y mensajes pendientes por responder':'Qué mensajes requieren respuesta',sandbox:!!AS.sandbox,historial:[]});
         if(!active())return;
         if(!response.ok||!response.json?.texto){parts.push('No pude revisar Workspace; no significa que no haya pendientes.');brief.push('No pude revisar Workspace.');}
@@ -69643,12 +69689,15 @@ function lumiRenderMessageDigest(sections,owner){
             try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('No pude conectar con la Mac.');const t=await r.text();return t?JSON.parse(t):null;}finally{clearTimeout(timer);}
           }});
           const results=await lumiRunExternalReview({run:o=>client.run(o),apps:order.apps,active,english:order.english,maxChats:order.discovery?0:10,progress:(app,title)=>{if(active())asAccionVisible('Revisando '+(app==='whatsapp'?'WhatsApp':'Mensajes')+': '+title,'working');}});
-          if(!active())return;reviewResults=results;parts.push(lumiReviewText(results,order.english));brief.push(lumiReviewBrief(results,order.english));
+          if(!active())return;
+          if(order.discovery)for(const r of results){if(r.errors.length)continue;try{r.comparison=await lumiComparePersisted(r.app,r.snapshotRows||[],owner,r.capturedAt);if(!active())return;}catch(e){r.errors.push('No pude guardar o recuperar la comparación entre revisiones.');}}
+          reviewResults=results;parts.push(lumiReviewText(results,order.english));brief.push(lumiReviewBrief(results,order.english));
         }
       }
       if(!active())return;
       LUMI_REVIEW_DETAIL={owner,at:Date.now(),text:parts.join('\n\n'),chats:reviewResults.flatMap(r=>[...new Set(r.candidates.map(c=>c.chat))].map(chat=>({app:r.app,chat})))};
       const sections=order.discovery?lumiDiscoveryDigest(reviewResults,order.workspace?parts[0]||'No pude revisar Workspace.':null,order.english):lumiMessageDigest(reviewResults,order.workspace?parts[0]||'No pude revisar Workspace.':null,order.english);
+      if(order.discovery&&workspaceComparison){const ws=sections.find(x=>x.app==='workspace');if(ws)ws.summary=lumiComparisonSummary(workspaceComparison)+' Revisión limitada a los últimos 400 registros accesibles.';}
       const answer=(sections.length?sections.map(x=>x.label+': '+x.summary).join('\n\n'):brief.join(' '))+(order.english?' Say “read them” or name a chat to see the details.':' Dime «léemelos» o el nombre del chat para ver el detalle.');asMostrarRespuesta(answer);lumiRenderMessageDigest(sections,owner);asAccionVisible('Revisión terminada; consulta la cobertura de cada fuente','done');
       asRecordarAccionMac(texto,'Revisión de solo lectura mostrada en pantalla. Las sugerencias son borradores; no se envió ninguna respuesta.');
       asHablar(answer,asSeguirOyendo);
@@ -78687,6 +78736,14 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   const msgDesdeEnGrupo = g => { const yo = g && (g.miembros || []).find(x => x && x.user_id === SES.user_id); return yo && yo.agregado_at ? String(yo.agregado_at) : ''; };
   const msgMeToca = m => !!m && !!SES && (m.de_user_id === SES.user_id || m.para_user_id === SES.user_id || !!m.para_todos
     || (!!m.para_grupo_id && MSG.grupos.some(g => g.id === m.para_grupo_id && (!msgDesdeEnGrupo(g) || new Date(m.created_at) >= new Date(msgDesdeEnGrupo(g))))));
+  window.__lumiWorkspaceSnapshot=async()=>{
+   const owner=SES.user_id+'|'+SES.company_id;if(SES.role!=='manager')throw Error('Manager required');
+   await msgCargarGrupos();
+   const r=await authFetch('/rest/v1/mensajes?select=*&order=created_at.desc&limit=400',{headers:cloudHeaders()});
+   if(!r.ok)throw Error('Workspace no disponible');const rows=await r.json();
+   if(owner!==SES.user_id+'|'+SES.company_id)throw Error('Cuenta cambió');
+   return rows.filter(m=>msgMeToca(m)&&!m.borrado_at&&m.de_user_id!==SES.user_id).map(m=>({chat:m.de_nombre||m.nombre||'un contacto de Workspace',id:String(m.id),at:Date.parse(m.created_at),preview:JSON.stringify([m.texto,m.adjuntos,m.editado_at])}));
+  };
   async function msgCargarGrupos(){
     const s0 = MSG.gruposSeq || 0;   // (R160) lo que se quite de aquí mientras se espera, esta lectura no lo revive (msgSinGruposIdos)
     const d0 = MSG.dueno;   // (R161) si entró otra persona mientras se esperaba, lo que llegó no se escribe (ni la lista vacía de un error)
