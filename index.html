@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R334';
+  const APP_BUILD = '2026-11-09-R335';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69596,6 +69596,24 @@ const clean=x=>String(x||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(
 const normal=x=>norm(x).replace(/^(?:(?:hey|oye|lumi|bueno|pues|ok|por favor|please)\s+)+/,'').replace(/\s+(?:por favor|please)$/,'');
 function sources(text){const t=normal(text),out=[];if(/\b(?:whatsapp|wasap|guasap)\b/.test(t))out.push('whatsapp');if(/\b(?:workspace|field reports)\b/.test(t))out.push('workspace');if(/mensajes (?:normales|de apple)|apple messages|imessage|\bsms\b/.test(t))out.push('messages');return out.length?out:Object.keys(APPS);}
 function english(text){const t=normal(text);return /\b(?:any|have|read|messages|texts|who|what|reply|next|yes)\b/.test(t)&&! /\b(?:tenemos|hay|tengo|mensajes|leeme|leemelos|que|quien|dime|si)\b/.test(t);}
+function adviceRequest(text){
+ let t=normal(text),query='',last=false;
+ const deictic=/\s+(?:al (?:ultimo )?mensaje(?: que (?:revisamos|leimos))?|a (?:eso|ese mensaje)|to (?:that|the last message)(?: we (?:read|reviewed))?)$/;
+ if(deictic.test(t)){last=/ultimo|last|revisamos|reviewed|leimos/.test(t.match(deictic)[0]);t=t.replace(deictic,'');}
+ else{const named=t.match(/\s+(?:a|para|to)\s+(.+)$/);if(named){query=named[1];t=t.slice(0,named.index);}}
+ if(!/^(?:y (?:ahora )?)?(?:que (?:le |les |podemos |puedo |deberiamos |podriamos )*(?:respondo|respondemos|contestamos|contesto|decimos|digo|responder|contestar|decir)|que (?:sugieres|recomiendas)(?: (?:que )?(?:le |les )?(?:respondamos|contestemos))?|como le respondo|what (?:should|can|do) (?:i|we) (?:reply|say|answer|tell (?:him|her|them))|what do you suggest)$/.test(t))return null;
+ const selected=sources(query);query=query.replace(/\s+(?:en|in|on)\s+(?:whatsapp|workspace|mensajes normales|apple messages|imessage)$/,'');
+ return {query,last,selected,english:english(text)};
+}
+function resumeAdvice(request,remembered,active,owner,now=Date.now()){
+ const valid=r=>r?.owner===owner&&APPS[r.app]&&typeof r.query==='string'&&r.query.trim()&&Number.isFinite(r.at)&&r.at<=now&&now-r.at<90*86400000;
+ let rows=(remembered||[]).filter(valid);
+ if(request.query){const q=norm(request.query);rows=rows.filter(r=>request.selected.includes(r.app));const exact=rows.filter(r=>norm(r.query)===q);rows=exact.length?exact:rows.filter(r=>q.split(' ').every(w=>norm(r.query).split(' ').includes(w)));}
+ else if(!request.last&&(active||[]).some(valid)){rows=active.filter(r=>valid(r)&&now-r.at<900000);}
+ else {rows=rows.filter(r=>Number.isFinite(r.reviewedAt)&&r.reviewedAt<=now&&now-r.reviewedAt<86400000).sort((a,b)=>b.reviewedAt-a.reviewedAt);if(rows.length)rows=rows.filter(r=>r.reviewedAt===rows[0].reviewedAt);}
+ rows=[...new Map(rows.map(r=>[r.app+'|'+(r.key||norm(r.query)),r])).values()];
+ return rows.length===1?{route:rows[0]}:{choices:rows};
+}
 function intent(text){
  const t=normal(text);if(!t||t.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|he said|she said)/.test(t))return null;
  if(/\b(?:envia\w*|manda\w*|send|borra|delete|paga|pay|dile|escribe\w*|respond\w*|reply to)\b/.test(t))return null;
@@ -69638,7 +69656,7 @@ function follow(text,s,owner,now=Date.now()){
  if(/^(?:no|ahora no|despues|luego|not now|later|cancel|cancela)$/.test(t))return {action:'cancel'};
  if(/^(?:si|si leelos|si leemelos|claro|dale|adelante|ok|okay|yes|sure|go ahead|leelos|leemelos|lee los mensajes|read them|read the messages)$/.test(t))return {action:'read',index:s.phase==='offer'?0:s.index+1};
  if(/^(?:el |la |los |las |the )?(?:siguiente|siguientes|otro|otra|next)(?: mensaje| chat| message| one)?$/.test(t)||/^(?:sigue|continua|sigue con el siguiente|vamos con el siguiente|continue|keep going)$/.test(t))return {action:'read',index:s.index+1};
- if(/^(?:y (?:ahora )?)?(?:que (?:le |les |podemos |puedo |deberiamos |podriamos )*(?:respondo|respondemos|contestamos|contesto|decimos|digo|responder|contestar|decir)|que (?:sugieres|recomiendas)(?: (?:que )?(?:le |les )?(?:respondamos|contestemos))?|como le respondo|what (?:should|can|do) (?:i|we) (?:reply|say|answer|tell (?:him|her|them))|what do you suggest)$/.test(t))return {action:'advice',index:s.index};
+ const advice=adviceRequest(text);if(advice&&!advice.query)return {action:'advice',index:s.index};
  let q=t.replace(/^(?:lee|leeme|abre|muestrame|read|open|show)\s+/,'').replace(/^(?:el|la|los|las|the)\s+/,'').replace(/^(?:de|from|one from)\s+/,'');
  if(q==='primero'||q==='first')return {action:'read',index:0};
  const ord={segundo:1,tercero:2,cuarto:3,second:1,third:2,fourth:3};if(q in ord)return {action:'read',index:ord[q]};
@@ -69699,7 +69717,7 @@ function reading(item,rows,advice,index,total,en=false){
  else lines.push(en?'That is the last conversation on this list.':'Es la última conversación de esta lista.');
  return lines.join('\n');
 }
-const api={APPS,norm,clean,sources,english,intent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading};
+const api={APPS,norm,clean,sources,english,adviceRequest,resumeAdvice,intent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
@@ -69728,9 +69746,10 @@ async function asInboxDialogue(texto){
  if(SES.role!=='manager')return false;
  const D=LumiInboxDialogue,owner=SES.user_id+'|'+SES.company_id;
  const fresh=LUMI_INBOX_SESSION?.owner===owner&&Date.now()-LUMI_INBOX_SESSION.at<900000;
- const request=D.intent(texto),follow=fresh?D.follow(texto,LUMI_INBOX_SESSION,owner):null;
+ const request=D.intent(texto),adviceRequest=D.adviceRequest(texto);let follow=fresh?D.follow(texto,LUMI_INBOX_SESSION,owner):null;
+ const resume=!request&&adviceRequest&&(adviceRequest.query||!follow||follow.index<0);
  if(!request&&LUMI_MESSAGE_DRAFT&&!LUMI_MESSAGE_DRAFT.fromInbox&&['incomplete','draft','sending'].includes(LUMI_MESSAGE_DRAFT.status))return false;
- if(!request&&!follow){if(LUMI_INBOX_SESSION?.phase==='offer')LUMI_INBOX_SESSION.phase='idle';return false;}
+ if(!request&&!follow&&!resume){if(LUMI_INBOX_SESSION?.phase==='offer')LUMI_INBOX_SESSION.phase='idle';return false;}
  if(!request&&follow?.action==='read'&&/^(si|yes|claro|dale|ok|okay|sure)$/i.test(D.norm(texto))&&LUMI_INBOX_SESSION.phase!=='offer'){
   asPararOido();asCallar();asTranscribir(texto);lumiInboxPresent('¿Quieres que envíe la respuesta que ves o que lea el siguiente mensaje?');return true;
  }
@@ -69740,6 +69759,13 @@ async function asInboxDialogue(texto){
  asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;AS_DESKTOP_BUSY=true;asEstado('pensando','Revisando mensajes…');
  try{
   let action=follow;
+  if(resume){
+   await lumiLoadRoutes(owner);if(!active())return true;
+   const context=lumiCurrentMessageContext(owner),choices=context?.choices||[context].filter(Boolean);
+   const resumed=D.resumeAdvice(adviceRequest,lumiRouteRows(owner),choices,owner);
+   if(!resumed.route){lumiInboxPresent(resumed.choices.length?'Tengo varias conversaciones: '+resumed.choices.map(r=>r.query+' en '+D.APPS[r.app]).join(', ')+'. ¿Cuál quiere revisar?':'No tengo identificada esa conversación todavía. ¿Con quién quiere que la revise?');return true;}
+   LUMI_INBOX_SESSION={owner,at:Date.now(),items:[resumed.route],index:0,phase:'read',english:adviceRequest.english};action={action:'advice',index:0};
+  }
   if(request){
    const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});
    if(!r.ok)throw Error('No pude actualizar los mensajes.');const data=(await r.json())[0]?.valor;if(!active())return true;
@@ -69757,7 +69783,7 @@ async function asInboxDialogue(texto){
   const item=s.items[index];s.index=index;s.phase='reading';lumiInboxClearProposal();
   const result=await lumiInboxRead(item,active);if(!active())return true;
   const rows=D.evidence(result,item);if(result.key)item.key=result.key;
-  lumiSetMessageContext([{...item,at:Date.now()}]);LUMI_REPLY_EVIDENCE={owner,at:Date.now(),result:{...result,messages:rows}};
+  lumiSetMessageContext([{...item,at:Date.now(),reviewedAt:Date.now()}]);LUMI_REPLY_EVIDENCE={owner,at:Date.now(),result:{...result,messages:rows}};
   let advice=D.basicAdvice(rows,s.english);
   if(!advice){
    asAccionVisible('Preparando una respuesta para '+item.query+'…','working');
@@ -69776,6 +69802,8 @@ async function asInboxDialogue(texto){
  return true;
 }
 // LUMI_INBOX_DIALOGUE_APP_END
+
+
 
 
 
@@ -70001,7 +70029,7 @@ return {order,extract};
         asAccionVisible(j.confirmacion?'Propuesta lista para revisar':'Calendario comprobado','done');
         asHablar(j.texto,asSeguirOyendo);return;
       }
-      if(['chat_messages','chat_opened','message_submitted','already_submitted'].includes(result.status)&&result.title){lumiSetMessageContext([{owner,app:order.app,query:result.title,at:Date.now()}]);}
+      if(['chat_messages','chat_opened','message_submitted','already_submitted'].includes(result.status)&&result.title){lumiSetMessageContext([{owner,app:order.app,query:result.title,at:Date.now(),...(result.status==='chat_messages'?{reviewedAt:Date.now()}: {})}]);}
       const name=order.app==='whatsapp'?'WhatsApp':'Mensajes';
       const reading=['unread_list','chat_messages'].includes(result.status);
       if(reading)LUMI_REPLY_EVIDENCE={owner,at:Date.now(),result};
@@ -70380,16 +70408,16 @@ function lumiRouteResolve(rows,query,owner,app='',now=Date.now()){
 }
 function lumiRouteRows(owner){try{return JSON.parse(localStorage.getItem('lumi_routes_'+owner)||'[]');}catch{return [];}}
 async function lumiRememberRoute(route){
- const owner=SES.user_id+'|'+SES.company_id;if(route.owner!==owner)return;
- const rows=lumiRouteRows(owner).filter(r=>!(r.app===route.app&&r.query===route.query));rows.push(route);
+ const owner=SES.user_id+'|'+SES.company_id;if(route.owner!==owner)return;const justReviewed=Number.isFinite(route.reviewedAt);
+ const previous=lumiRouteRows(owner),old=previous.find(r=>r.app===route.app&&r.query===route.query);route={...route,reviewedAt:route.reviewedAt||old?.reviewedAt||null};const rows=previous.filter(r=>!(r.app===route.app&&r.query===route.query));rows.push(route);
  try{localStorage.setItem('lumi_routes_'+owner,JSON.stringify(rows.slice(-100)));}catch{}
  const key='lumi_route_'+SES.user_id+'_'+encodeURIComponent(route.app+'|'+route.query);
- try{await authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:{...cloudHeaders(),Prefer:'resolution=merge-duplicates'},body:JSON.stringify({company_id:SES.company_id,clave:key,valor:route})});}catch{}
+ try{await authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:{...cloudHeaders(),Prefer:'resolution=merge-duplicates'},body:JSON.stringify(justReviewed?[{company_id:SES.company_id,clave:key,valor:route},{company_id:SES.company_id,clave:'lumi_route_'+SES.user_id+'_last_reviewed',valor:route}]:{company_id:SES.company_id,clave:key,valor:route})});}catch{}
 }
 async function lumiLoadRoutes(owner){
  try{const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=like.'+encodeURIComponent('lumi_route_'+SES.user_id+'_*'),{headers:cloudHeaders()});if(!r.ok)return;
  const rows=(await r.json()).map(x=>x.valor).filter(x=>x?.owner===owner);if(owner!==SES.user_id+'|'+SES.company_id)return;
- const merged=new Map(lumiRouteRows(owner).concat(rows).sort((a,b)=>a.at-b.at).map(x=>[x.app+'|'+x.query,x]));localStorage.setItem('lumi_routes_'+owner,JSON.stringify([...merged.values()].slice(-100)));}catch{}
+ const merged=new Map();for(const x of lumiRouteRows(owner).concat(rows).sort((a,b)=>a.at-b.at)){const k=x.app+'|'+x.query,old=merged.get(k);merged.set(k,{...x,reviewedAt:Math.max(Number(x.reviewedAt)||0,Number(old?.reviewedAt)||0)||null});}localStorage.setItem('lumi_routes_'+owner,JSON.stringify([...merged.values()].slice(-100)));}catch{}
 }
 function lumiResolveCompose(command,rows,owner){
  if(!command||!['partial','draft'].includes(command.kind)||!command.query||command.key)return command;
@@ -72318,7 +72346,7 @@ function lumiIncompleteSpeechReply(text){
     const en = asEn(), c = AS_MSG.cola.shift(), pre = prefijo ? prefijo + ' ' : '';
     if(!c) return asCmdDecir(pre + (en ? "That's all." : 'Eso es todo.'), null, 'exito');
     AS_MSG.ultimoChat = c.key;
-    const replyTo=asMsgAQuien(c.key,c.ms);if(replyTo){lumiSetMessageContext([{owner:SES.user_id+'|'+SES.company_id,app:'workspace',query:replyTo.nombre,key:replyTo.key,at:Date.now()}]);LUMI_REPLY_EVIDENCE={owner:SES.user_id+'|'+SES.company_id,at:Date.now(),result:{status:'chat_messages',app:'workspace',title:replyTo.nombre,messages:c.ms.map(m=>({text:m.texto||'',outgoing:msgMio(m),attachment:!!m.adjuntos?.length,truncated:false}))}};}
+    const replyTo=asMsgAQuien(c.key,c.ms);if(replyTo){lumiSetMessageContext([{owner:SES.user_id+'|'+SES.company_id,app:'workspace',query:replyTo.nombre,key:replyTo.key,at:Date.now(),reviewedAt:Date.now()}]);LUMI_REPLY_EVIDENCE={owner:SES.user_id+'|'+SES.company_id,at:Date.now(),result:{status:'chat_messages',app:'workspace',title:replyTo.nombre,messages:c.ms.map(m=>({text:m.texto||'',outgoing:msgMio(m),attachment:!!m.adjuntos?.length,truncated:false}))}};}
     const texto = asMsgDecirChat(asMsgNombreChat(c.key), c.ms.map(asMsgDigerir), { grupo: c.key.startsWith('g:'), todos: c.key === 'todos', mezcla: !!c.viejos, en, hoy: asMsgDia(new Date()), ayer: asMsgAyer() });
     if(!c.viejos) msgMarcarLeidos(c.key).catch(function(){});
     if(AS_MSG.soloLeer){ const lectura = pre + texto; asMostrarRespuesta(lectura);if(replyTo)lumiReplyButtons(LUMI_MESSAGE_CHOICES); asHablar(lectura, function(){ if(AS.abierto && AS_MSG.soloLeer) asMsgLeerSiguiente(''); }); return; }
