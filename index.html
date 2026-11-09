@@ -69676,8 +69676,12 @@ function evidence(result,item){
  if(result.syncPaused)throw Error('La sincronización está pausada. No puedo confirmar los mensajes más recientes.');
  return result.messages.filter(m=>typeof m.text==='string'&&typeof m.outgoing==='boolean').slice(-20);
 }
-function messageBody(row,rendered){
+function messageBody(row,rendered,app){
  if(typeof row.text==='string'&&row.text.trim())return row.text;
+ if(app==='messages'){
+  const raw=String(row.description||rendered||''),wrapper=/^[^,\n]{1,160},\s*([\s\S]+),\s*\d{1,2}:\d{2}\s*[AP]M\s*$/i.exec(raw);
+  if(wrapper)return wrapper[1].replace(/,\s*\d+ mentions?,\s*[^,\n]+$/i,'').trim();
+ }
  return String(rendered||'').replace(/^(?:Tú escribiste|[^\n:]{1,120} dice):\s*/,'').replace(/\s*\((?:(?:[A-Za-z]+\s*\d{1,2}(?:,?\s*20\d{2})?),?\s*at\s*)?\d{1,2}:\d{2}\s*[AP]M\)\s*$/,'').trim();
 }
 function messageSender(row,app){
@@ -69740,7 +69744,7 @@ async function lumiInboxRead(item,active){
  }
  const client=createLumiDesktopClient({session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),call:async(route,init={})=>{if(!active())throw Error('La sesión cambió.');const r=await authFetch(route,{...init,signal:AbortSignal.timeout(15000),headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('No pude conectar con la Mac.');const t=await r.text();return t?JSON.parse(t):null;}});
  const result=await client.run({app:item.app,action:'read_chat',query:item.query});
- if(result.status==='chat_messages')result.messages=result.messages.map(m=>({...m,sender:LumiInboxDialogue.messageSender(m,item.app),text:LumiInboxDialogue.messageBody(m,lumiDesktopMessageText(m.description,item.app,result.title))}));
+ if(result.status==='chat_messages')result.messages=result.messages.map(m=>({...m,sender:LumiInboxDialogue.messageSender(m,item.app),text:LumiInboxDialogue.messageBody(m,lumiDesktopMessageText(m.description,item.app,result.title),item.app)}));
  return result;
 }
 async function asInboxDialogue(texto){
