@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R331';
+  const APP_BUILD = '2026-11-09-R332';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -72143,8 +72143,8 @@ function lumiIncompleteSpeechReply(text){
     }
   }
   // la nota de voz, si dice "ponla"
-  function asMsgOirNota(m, luego){
-    const a = (Array.isArray(m.adjuntos) ? m.adjuntos : []).find(function(x){ return x && x.tipo === 'audio'; }), url = a ? msgAudioDe(a) : '';
+  async function asMsgOirNota(m, luego){
+    const a = (Array.isArray(m.adjuntos) ? m.adjuntos : []).find(function(x){ return x && x.tipo === 'audio'; }); let url=a?msgAudioDe(a):''; try{if(url)url=await msgPrivateMedia.resolve(url);}catch(e){luego();return;}
     if(!url){ luego(); return; }
     asPararOido(); asEstado('hablando', asEn() ? 'Playing the voice message…' : 'Oyendo la nota de voz…');
     let listo = false; const seguir = function(){ if(listo) return; listo = true; luego(); };
@@ -78181,10 +78181,11 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     return out;
   }
   // tocar la burbuja: se reproduce ahí mismo (el iPhone lo deja ver en grande con su botón)
-  document.addEventListener('click', e => {
+  document.addEventListener('click', async e => {
     const t = e.target && e.target.closest && e.target.closest('.msg-video[data-msg-video]'); if(!t || t.querySelector('video')) return;
     e.preventDefault(); e.stopPropagation();
-    const v = document.createElement('video'); v.src = t.dataset.msgVideo; v.controls = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
+    let source;try{source=await msgPrivateMedia.resolve(t.dataset.msgVideo);}catch(e){msgAvisoBreve('No se pudo abrir el video. Intente otra vez.');return;}if(!t.isConnected)return;
+    const v = document.createElement('video'); v.src = source; v.controls = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
     const img = t.querySelector('img'); if(img) v.poster = img.src;
     t.classList.add('reproduciendo'); t.appendChild(v); v.play().catch(() => {});
   }, true);
@@ -79941,7 +79942,49 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     ['.msg-foto-grande', '.msg-adjuntar', '.msg-miembros'].forEach(s => { const x = root.querySelector(s); if(x) x.hidden = true; });
     msgPintarNuevo();
   }
-  const msgFotoUrl = path => CLOUD.url + '/storage/v1/object/public/mensajes/' + String(path).split('/').map(encodeURIComponent).join('/');
+// Short-lived URLs live in memory only and are isolated by account.
+function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=fn=>setTimeout(fn,20)}){
+ let owner='',generation=0,timer=false,running=false;
+ const cache=new Map(),pending=new Set(),failures=new Map(),reverse=new Map();
+ const placeholder=p=>'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=#private-message-'+encodeURIComponent(p);
+ const sync=()=>{const next=scope();if(next!==owner){owner=next;generation++;cache.clear();pending.clear();failures.clear();reverse.clear();}return owner;};
+ function save(path,value,expiresIn){const old=cache.get(path);cache.set(path,{url:value,until:now()+Math.min(90000,Math.max(0,(Number(expiresIn)||0)*1000-15000))});reverse.set(value,path);reverse.set(placeholder(path),path);if(old&&old.url!==value)update(old.url,value);update(placeholder(path),value);}
+ function enqueue(path){if((failures.get(path)||0)>now())return;pending.add(path);if(!timer&&!running){timer=true;schedule(flush);}}
+ function url(path){path=String(path||'');if(!sync()||!path)return '';const hit=cache.get(path);if(hit&&hit.until>now())return hit.url;enqueue(path);return placeholder(path);}
+ async function flush(){timer=false;if(running)return;sync();if(!owner||!pending.size)return;running=true;const gen=generation,paths=[...pending].slice(0,64);paths.forEach(p=>pending.delete(p));
+  try{const result=await request(paths);sync();if(gen!==generation)return;const valid=new Map();for(const f of result.files||[])if(paths.includes(f.path)&&typeof f.url==='string'&&/^https:\/\//.test(f.url))valid.set(f.path,f.url);
+   for(const path of paths){const value=valid.get(path);if(value){save(path,value,result.expiresIn);}else failures.set(path,now()+5000);}
+  }catch{sync();if(gen===generation)for(const path of paths)failures.set(path,now()+5000);}
+  finally{running=false;if(pending.size&&!timer){timer=true;schedule(flush);}}
+ }
+ async function resolve(value){sync();let path=reverse.get(value);const prefix=placeholder('');if(!path&&value.startsWith(prefix))path=decodeURIComponent(value.slice(prefix.length));if(!path){if(/^(blob:|data:(image|audio)\/)/.test(value))return value;throw Error('Adjunto no válido');}
+  const gen=generation,hit=cache.get(path);if(hit&&hit.until>now())return hit.url;
+  const r=await request([path]);sync();if(gen!==generation)throw Error('Cuenta cambió');const file=(r.files||[]).find(f=>f.path===path&&/^https:\/\//.test(f.url));if(!file)throw Error('Adjunto no disponible');save(path,file.url,r.expiresIn);return file.url;
+ }
+ return {url,flush,resolve,clear(){owner='';generation++;cache.clear();pending.clear();failures.clear();reverse.clear();},placeholder};
+}
+
+  const msgPrivateMedia = createPrivateMessageMedia({
+    scope: () => signedIn() ? 'u:'+SES.user_id+'|'+SES.company_id : (msgEsCasual() ? 't:'+JSON.stringify(msgSes()) : ''),
+    request: async paths => {
+      if(signedIn()) {
+        const r=await authFetch('/functions/v1/mensajes-media',{method:'POST',headers:cloudHeaders(),body:JSON.stringify({paths}),signal:AbortSignal.timeout(15000)});
+        if(!r.ok)throw Error('No se pudo abrir el adjunto');return r.json();
+      }
+      const s=msgSes();let error;
+      for(const code of msgCodigos(s))try{return await authPost('/functions/v1/mensajes-media',{paths,credentials:{p_join_code:code,p_name:s.name,p_pin:s.pin}});}catch(e){error=e;}
+      throw error||Error('Sesión requerida');
+    },
+    update: (from,to) => {
+      document.querySelectorAll('[src],[data-src],[data-msg-foto],[data-msg-video]').forEach(el=>{
+        for(const attr of ['src','data-src','data-msg-foto','data-msg-video']){
+          const value=el.getAttribute(attr);if(value===from||value===from+'#t=0.1')el.setAttribute(attr,to+(value.endsWith('#t=0.1')?'#t=0.1':''));
+        }
+      });
+    }
+  });
+  const msgFotoUrl = path => msgPrivateMedia.url(path);
+
   // la foto: la del teléfono mientras sube (blob:/data:), si no, la del balde; nunca una dirección de afuera que venga en el mensaje
   const msgFotoDe = a => (a && a.local && /^(blob:|data:image\/)/.test(String(a.local))) ? a.local : (a && a.path ? msgFotoUrl(a.path) : '');
   const msgAudioDe = a => (a && a.local && /^(blob:|data:audio\/)/.test(String(a.local))) ? a.local : (a && a.path ? msgFotoUrl(a.path) : '');
@@ -81540,11 +81583,16 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     a.addEventListener('ended', () => { const id = MSG.voz && MSG.voz.id; MSG.voz = null; msgVozPintarEstado(); msgVozSiguiente(id); });
     MSG.vozAudio = a; return a;
   }
-  function msgVozTocar(id, desde){
+  async function msgVozTocar(id, desde){
     const root = MSG.root; if(!root) return; const el = root.querySelector('.msg-voz[data-msg-voz="' + CSS.escape(id) + '"]'); if(!el || !el.dataset.src) return;
     const a = msgVozAudio();
     if(MSG.voz && MSG.voz.id === id && desde == null){ if(a.paused) a.play().catch(() => {}); else a.pause(); return; }
-    if(!(MSG.voz && MSG.voz.id === id)){ MSG.voz = { id, vel: (MSG.voz && MSG.voz.vel) || 1 }; a.src = el.dataset.src; }
+    if(!(MSG.voz && MSG.voz.id === id)){
+      const owner=MSG.dueno,chat=MSG.con,seq=MSG.mediaPlaySeq=(MSG.mediaPlaySeq||0)+1;let source;
+      try{source=await msgPrivateMedia.resolve(el.dataset.src);}catch(e){msgAvisoBreve('No se pudo abrir el audio. Intente otra vez.');return;}
+      if(MSG.dueno!==owner||MSG.con!==chat||MSG.mediaPlaySeq!==seq)return;
+      MSG.voz={id,vel:(MSG.voz&&MSG.voz.vel)||1};a.src=source;
+    }
     const dur = msgVozDuracion(el);
     if(desde != null){ if(a.readyState >= 1 && dur){ try{ a.currentTime = desde * dur; }catch(e){} } else MSG.voz.seek = desde; }
     a.playbackRate = MSG.voz.vel;
@@ -82328,7 +82376,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
         const ed = e.target.closest('[data-msg-editar]'); if(ed){ e.stopPropagation(); const m = MSG.lista.find(x => x.id === ed.dataset.msgEditar); if(m){ MSG.acc = null; MSG.respondiendo = null; MSG.editando = m.id; const ta = root.querySelector('.msg-texto'); ta.value = m.texto; ta.dispatchEvent(new Event('input')); msgPintarChat(); msgPintarCitaBarra(); ta.focus(); } return; }
         const el = e.target.closest('[data-msg-eliminar]'); if(el){ e.stopPropagation(); msgEliminar(el.dataset.msgEliminar); return; }
         if(e.target.closest('.msg-cita-barra-cerrar')){ MSG.respondiendo = null; if(MSG.editando){ MSG.editando = null; root.querySelector('.msg-texto').value = ''; root.querySelector('.msg-texto').style.height = ''; } msgPintarCitaBarra(); msgPintarBotones(); return; }
-        const fo = e.target.closest('[data-msg-foto]'); if(fo){ e.stopPropagation(); if(Date.now() - MSG.toqueLargoAt < 700) return; const lb = root.querySelector('.msg-foto-grande'); lb.classList.remove('perfil'); lb.querySelector('img').src = fo.dataset.msgFoto; lb.hidden = false; return; }
+        const fo = e.target.closest('[data-msg-foto]'); if(fo){ e.stopPropagation(); if(Date.now() - MSG.toqueLargoAt < 700) return; const lb = root.querySelector('.msg-foto-grande'); lb.classList.remove('perfil'); lb.querySelector('img').src = fo.dataset.msgFoto; lb.hidden = false; msgPrivateMedia.resolve(fo.dataset.msgFoto).then(url=>{if(!lb.hidden)lb.querySelector('img').src=url;}).catch(()=>msgAvisoBreve('No se pudo abrir la foto. Intente otra vez.')); return; }
         if(e.target.closest('.msg-foto-cerrar') || e.target.classList.contains('msg-foto-grande')){ root.querySelector('.msg-foto-grande').hidden = true; return; }
         // (R80) el + (Fotos, Cámara, Casa), la cámara directa, el reproductor de las notas de voz
         // (R99) la hoja del cliente: tocar uno lo pone; Cancelar o tocar afuera la cierra
