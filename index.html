@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R316';
+  const APP_BUILD = '2026-11-08-R317';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69474,7 +69474,7 @@ async function lumiCheckWorkspaceArrivals(){
  finally{LUMI_MESSAGE_CHECK=false;}
 }
 function lumiPaymentRequestIntent(text){
- const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.]/g,'').replace(/^(?:lumi[, ]+|dime |revisa |checa )+/, '').trim();
+ const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.]/g,'').replace(/\s+/g,' ').replace(/^(?:lumi[, ]+|dime |revisa |checa )+/, '').replace(/(?:,? por favor| please)$/,'').trim();
  const who=/^(?:quien|quienes|hay alguien que|hay alguien) (?:me |nos )?(?:(?:esta|estan|anda|andan) )?(?:pidiendo|solicitando|pide|piden|pidio|pidieron|ha pedido|han pedido) (?:un |el |su )?(?:pago|pagos|adelanto|adelantos|dinero)$/.test(t);
  const list=/^(?:que|hay|tenemos) solicitudes de (?:pago|adelanto|pago y adelanto|pagos|adelantos)(?: pendientes| nuevas)?$/.test(t);
  const english=/^who (?:is|are) (?:asking for|requesting) (?:payment|an advance|a payment|payments|money)$/.test(t);
@@ -69490,6 +69490,7 @@ function lumiPaymentRequestSummary(rows,kind,en=false){
 async function asPaymentRequestRead(text){
  const kind=lumiPaymentRequestIntent(text);if(!kind||SES.role!=='manager')return false;
  const owner=SES.user_id+'|'+SES.company_id;
+ AS.enviando=true;
  asPararOido();asCallar();asTranscribir(text);asEstado('pensando','Revisando solicitudes de pago…');
  try{
   await asMsgDatos();
@@ -69504,7 +69505,8 @@ async function asPaymentRequestRead(text){
   if(!AS.abierto||owner!==SES.user_id+'|'+SES.company_id)return true;
   const rows=fresh.filter(m=>!msgMio(m)&&msgEsParaMi(m)&&(typeof msgVisible!=='function'||msgVisible(m)));
   const answer=lumiPaymentRequestSummary(rows,kind,asEn());asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);
- }catch{const answer=asEn()?"I couldn't refresh payment requests. I can't confirm who is asking for payment.":'No pude actualizar las solicitudes. No puedo confirmar quién está pidiendo pago.';asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);}
+ }catch{if(!AS.abierto||owner!==SES.user_id+'|'+SES.company_id)return true;const answer=asEn()?"I couldn't refresh payment requests. I can't confirm who is asking for payment.":'No pude actualizar las solicitudes. No puedo confirmar quién está pidiendo pago.';asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);}
+ finally{AS.enviando=false;}
  return true;
 }
 
@@ -70323,7 +70325,7 @@ async function asCommercialQuote(order,texto){
       if(explicit&&!/\b(envia|manda|send|borra|delete)\b/i.test(explicit[1])){asTranscribir(texto);await asEscritorioMac({app:/^whatsapp$/i.test(explicit[2])?'whatsapp':'messages',action:'read_chat',query:explicit[1].trim()});return;}
     }
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asBasicWorkspace(texto)))return;
-    if(!dictando&&!AS.conf&&!AS.pregunta&&(await asPaymentRequestRead(texto)))return;
+    if(!dictando&&!AS.conf&&SES.role==='manager'&&lumiPaymentRequestIntent(texto)){AS.pregunta=null;if(await asPaymentRequestRead(texto))return;}
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asInboxPending(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLearnReply(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asReplyAdvice(texto)))return;
