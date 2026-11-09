@@ -69656,12 +69656,20 @@ function evidence(result,item){
  if(result.syncPaused)throw Error('La sincronización está pausada. No puedo confirmar los mensajes más recientes.');
  return result.messages.filter(m=>typeof m.text==='string'&&typeof m.outgoing==='boolean').slice(-20);
 }
+function messageBody(row,rendered){
+ if(typeof row.text==='string'&&row.text.trim())return row.text;
+ return String(rendered||'').replace(/^(?:Tú escribiste|[^\n:]{1,120} dice):\s*/,'').replace(/\s*\((?:(?:[A-Za-z]+\s*\d{1,2}(?:,?\s*20\d{2})?),?\s*at\s*)?\d{1,2}:\d{2}\s*[AP]M\)\s*$/,'').trim();
+}
 function basicAdvice(rows,en=false){
  const last=rows.at(-1);if(!last)return {draft:'',explanation:en?'I could not read the conversation.':'No pude leer el contenido de la conversación.'};
  if(last.outgoing)return {draft:'',explanation:en?'You already replied; I do not see a later message.':'Ya respondiste; no veo un mensaje posterior.'};
  if(last.attachment||last.truncated||!last.text.trim()||/no disponible|can.t be displayed|open whatsapp/i.test(last.text))return {draft:'',explanation:en?'I need to see that attachment or the complete message first.':'Necesito ver ese adjunto o el mensaje completo antes de recomendar una respuesta.'};
  if(/reply stop|verification code|codigo de verificacion|automated notification/i.test(last.text))return {draft:'',explanation:en?'This is an automatic notification; it does not need a chat reply.':'Es un aviso automático; no necesita respuesta por chat.'};
- if(/^(?:gracias|muchas gracias|ok|okay|perfecto|entendido|thanks|thank you)[.! ]*$/i.test(last.text.trim()))return {draft:'',explanation:en?'It is an acknowledgement. There is no new question to answer.':'Es una confirmación; no veo una pregunta nueva que responder.'};
+ if(/^(?:gracias|muchas gracias|ok|okay|perfecto|entendido|thanks|thank you)[.! ]*$/i.test(last.text.trim())){
+  const from=rows.map(r=>r.outgoing).lastIndexOf(true)+1;
+  const pending=rows.slice(from,-1).some(r=>!r.outgoing&&/[?¿]|necesito|puede|need|please|can you/i.test(r.text));
+  if(!pending)return {draft:'',explanation:en?'It is an acknowledgement. There is no new question to answer.':'Es una confirmación; no veo una pregunta nueva que responder.'};
+ }
  return null;
 }
 function safeAdvice(answer,rows){
@@ -69684,7 +69692,7 @@ function reading(item,rows,advice,index,total,en=false){
  else lines.push(en?'That is the last conversation on this list.':'Es la última conversación de esta lista.');
  return lines.join('\n');
 }
-const api={APPS,norm,clean,sources,english,intent,snapshot,overview,follow,evidence,basicAdvice,safeAdvice,reading};
+const api={APPS,norm,clean,sources,english,intent,snapshot,overview,follow,evidence,messageBody,basicAdvice,safeAdvice,reading};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
@@ -69706,7 +69714,7 @@ async function lumiInboxRead(item,active){
  }
  const client=createLumiDesktopClient({session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),call:async(route,init={})=>{if(!active())throw Error('La sesión cambió.');const r=await authFetch(route,{...init,signal:AbortSignal.timeout(15000),headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('No pude conectar con la Mac.');const t=await r.text();return t?JSON.parse(t):null;}});
  const result=await client.run({app:item.app,action:'read_chat',query:item.query});
- if(result.status==='chat_messages')result.messages=result.messages.map(m=>({...m,text:m.text||lumiDesktopMessageText(m.description,item.app,result.title)}));
+ if(result.status==='chat_messages')result.messages=result.messages.map(m=>({...m,text:LumiInboxDialogue.messageBody(m,lumiDesktopMessageText(m.description,item.app,result.title))}));
  return result;
 }
 async function asInboxDialogue(texto){
@@ -69761,6 +69769,7 @@ async function asInboxDialogue(texto){
  return true;
 }
 // LUMI_INBOX_DIALOGUE_APP_END
+
 
 
 function lumiInboxSources(text){
