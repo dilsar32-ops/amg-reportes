@@ -69660,6 +69660,13 @@ function messageBody(row,rendered){
  if(typeof row.text==='string'&&row.text.trim())return row.text;
  return String(rendered||'').replace(/^(?:Tú escribiste|[^\n:]{1,120} dice):\s*/,'').replace(/\s*\((?:(?:[A-Za-z]+\s*\d{1,2}(?:,?\s*20\d{2})?),?\s*at\s*)?\d{1,2}:\d{2}\s*[AP]M\)\s*$/,'').trim();
 }
+function messageSender(row,app){
+ if(row.outgoing)return '';
+ if(typeof row.sender==='string'&&row.sender.trim())return row.sender.trim().slice(0,160);
+ const raw=String(row.description||'');
+ if(app==='messages')return raw.split(',')[0].trim().slice(0,160);
+ return '';
+}
 function basicAdvice(rows,en=false){
  const last=rows.at(-1);if(!last)return {draft:'',explanation:en?'I could not read the conversation.':'No pude leer el contenido de la conversación.'};
  if(last.outgoing)return {draft:'',explanation:en?'You already replied; I do not see a later message.':'Ya respondiste; no veo un mensaje posterior.'};
@@ -69682,7 +69689,7 @@ function safeAdvice(answer,rows){
 }
 function reading(item,rows,advice,index,total,en=false){
  const last=rows.at(-1),tail=last&&!last.outgoing?rows.slice(Math.max(0,rows.map(m=>m.outgoing).lastIndexOf(true)+1)).slice(-2):[];
- const body=tail.map(m=>m.text?.trim()?m.text.trim():en?'[Attachment]':'[Adjunto]').join(' / ').slice(0,650);
+ const body=tail.map(m=>(m.sender&&norm(m.sender)!==norm(item.query)?m.sender+': ':'')+(m.text?.trim()?m.text.trim():en?'[Attachment]':'[Adjunto]')).join(' / ').slice(0,650);
  const lines=[(index+1)+'/'+total+' · '+item.query+' · '+APPS[item.app]];
  if(body)lines.push((en?'Says: “':'Dice: «')+body+(en?'”':'»'));
  if(advice.draft)lines.push((en?'You could reply: “':'Podríamos responder: «')+advice.draft+(en?'”':'»'));
@@ -69692,7 +69699,7 @@ function reading(item,rows,advice,index,total,en=false){
  else lines.push(en?'That is the last conversation on this list.':'Es la última conversación de esta lista.');
  return lines.join('\n');
 }
-const api={APPS,norm,clean,sources,english,intent,snapshot,overview,follow,evidence,messageBody,basicAdvice,safeAdvice,reading};
+const api={APPS,norm,clean,sources,english,intent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
@@ -69714,7 +69721,7 @@ async function lumiInboxRead(item,active){
  }
  const client=createLumiDesktopClient({session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),call:async(route,init={})=>{if(!active())throw Error('La sesión cambió.');const r=await authFetch(route,{...init,signal:AbortSignal.timeout(15000),headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('No pude conectar con la Mac.');const t=await r.text();return t?JSON.parse(t):null;}});
  const result=await client.run({app:item.app,action:'read_chat',query:item.query});
- if(result.status==='chat_messages')result.messages=result.messages.map(m=>({...m,text:LumiInboxDialogue.messageBody(m,lumiDesktopMessageText(m.description,item.app,result.title))}));
+ if(result.status==='chat_messages')result.messages=result.messages.map(m=>({...m,sender:LumiInboxDialogue.messageSender(m,item.app),text:LumiInboxDialogue.messageBody(m,lumiDesktopMessageText(m.description,item.app,result.title))}));
  return result;
 }
 async function asInboxDialogue(texto){
@@ -69769,6 +69776,7 @@ async function asInboxDialogue(texto){
  return true;
 }
 // LUMI_INBOX_DIALOGUE_APP_END
+
 
 
 
