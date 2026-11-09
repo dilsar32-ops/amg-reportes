@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R333';
+  const APP_BUILD = '2026-11-09-R334';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69585,6 +69585,181 @@ async function asPaymentRequestRead(text){
  return true;
 }
 
+// LUMI_INBOX_DIALOGUE_CORE_BEGIN
+// Guided inbox review. Message bodies are data, never executable instructions.
+(function(root){
+'use strict';
+const APPS={whatsapp:'WhatsApp',messages:'Mensajes',workspace:'Workspace'};
+const HEALTH=['visible_only','local_messages','latest_800_received','accessible_recent'];
+const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¿?¡!.,]/g,' ').replace(/\s+/g,' ').trim();
+const clean=x=>String(x||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/,\s*(?:Unread|Read|Pinned|Calling|Callin|Delivered)(?:,|$)[\s\S]*$/i,'').trim();
+const normal=x=>norm(x).replace(/^(?:(?:hey|oye|lumi|bueno|pues|ok|por favor|please)\s+)+/,'').replace(/\s+(?:por favor|please)$/,'');
+function sources(text){const t=normal(text),out=[];if(/\b(?:whatsapp|wasap|guasap)\b/.test(t))out.push('whatsapp');if(/\b(?:workspace|field reports)\b/.test(t))out.push('workspace');if(/mensajes (?:normales|de apple)|apple messages|imessage|\bsms\b/.test(t))out.push('messages');return out.length?out:Object.keys(APPS);}
+function english(text){const t=normal(text);return /\b(?:any|have|read|messages|texts|who|what|reply|next|yes)\b/.test(t)&&! /\b(?:tenemos|hay|tengo|mensajes|leeme|leemelos|que|quien|dime|si)\b/.test(t);}
+function intent(text){
+ const t=normal(text);if(!t||t.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|he said|she said)/.test(t))return null;
+ if(/\b(?:envia\w*|manda\w*|send|borra|delete|paga|pay|dile|escribe\w*|respond\w*|reply to)\b/.test(t))return null;
+ const noun=/\b(?:mensajes|messages|texts|inbox|novedades)\b/.test(t);
+ const ask=/\b(?:hay|tenemos|tengo|llego|llegaron|recibimos|recibido|nuevos|nuevas|revisa|checa|chequea|mira|dime|cuantos|cuales|que|lee|leeme|leemelos|read|check|look|any|have|unread|new)\b/.test(t);
+ const standalone=/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron)|any (?:news|updates)|anything new|what s new|do we have anything new)$/.test(t);
+ if(!standalone&&!(noun&&ask))return null;
+ // Named requests stay with the existing single-conversation reader.
+ if(/(?:chat|grupo|conversation|group) (?:de |con |with )?[a-z]/.test(t)||/(?:mensajes (?:de|con)|messages from) (?!whatsapp\b|workspace\b|apple\b)[a-z]/.test(t))return null;
+ if(/\b(?:cuentas|calendario|labor|reportes|payments|saldo)\b/.test(t))return null;
+ return {action:/\b(?:lee|leeme|leemelos|read)\b|que (?:dicen|dijeron)|what.*(?:say|said)/.test(t)?'read':'overview',sources:sources(t),english:english(t)};
+}
+function snapshot(data,owner,selected=Object.keys(APPS),now=Date.now()){
+ if(!data||data.owner!==owner||!Number.isFinite(data.at)||now-data.at>120000||data.at>now+60000)throw Error('No pude actualizar los mensajes. No puedo confirmar cuántos hay.');
+ const items=[],health={};
+ for(const app of selected){health[app]=data.health?.[app];if(!HEALTH.includes(health[app]))continue;
+  const byKey=new Map();
+  for(const r of data.inbox||[]){if(r.source!==app||r.unread===false||r.outgoing===true)continue;
+   const query=clean(r.route?.query||r.title),key=r.route?.key||r.thread||null;if(!query)continue;
+   const item={app,query,key,owner,preview:String(r.preview||''),at:now,unreadCount:Number.isInteger(r.unreadCount)&&r.unreadCount>0?r.unreadCount:null,observedAt:r.observedAt||data.at};
+   byKey.set(app+'|'+(key||norm(query)),item);
+  }items.push(...byKey.values());
+ }
+ return {owner,at:now,items,health,selected,index:-1,phase:'offer',english:false};
+}
+function overview(s){
+ const en=s.english,lines=[],total=s.items.length,exact=total>0&&s.items.every(r=>r.unreadCount!==null);
+ if(total)lines.push(exact?(en?'You have ':'Tienes ')+s.items.reduce((a,r)=>a+r.unreadCount,0)+(en?' unread messages.':' mensajes sin leer.'):(en?'You have unread messages in ':'Tienes mensajes sin leer en ')+total+(en?' conversations.':' conversaciones.'));
+ for(const app of s.selected){const rows=s.items.filter(r=>r.app===app);if(!HEALTH.includes(s.health[app])){lines.push(APPS[app]+(en?': I could not refresh it.':': no pude actualizar.'));continue;}
+  if(rows.length)lines.push(APPS[app]+': '+rows.length+(en?(rows.length===1?' conversation':' conversations'):(rows.length===1?' conversación':' conversaciones'))+' — '+rows.slice(0,3).map(r=>r.query).join(', ')+(rows.length>3?(en?' and ':' y ')+(rows.length-3)+(en?' more':' más'):'')+'.');
+  else lines.push(APPS[app]+(en?': no unread messages in what I checked.':': no vi mensajes sin leer en lo revisado.'));
+ }
+ if(s.selected.some(a=>s.health[a]==='visible_only'))lines.push(en?'Some lists are only partially visible.':'Parte de la revisión se limita a las listas visibles.');
+ if(total)lines.push(en?'Shall I read them?':'¿Te los leo?');return lines.join('\n');
+}
+function follow(text,s,owner,now=Date.now()){
+ if(!s||s.owner!==owner||now<s.at||now-s.at>900000)return null;
+ if(s.phase==='idle')return null;
+ const t=normal(text);
+ if(/^(?:no|ahora no|despues|luego|not now|later|cancel|cancela)$/.test(t))return {action:'cancel'};
+ if(/^(?:si|si leelos|si leemelos|claro|dale|adelante|ok|okay|yes|sure|go ahead|leelos|leemelos|lee los mensajes|read them|read the messages)$/.test(t))return {action:'read',index:s.phase==='offer'?0:s.index+1};
+ if(/^(?:el |la |los |las |the )?(?:siguiente|siguientes|otro|otra|next)(?: mensaje| chat| message| one)?$/.test(t)||/^(?:sigue|continua|sigue con el siguiente|vamos con el siguiente|continue|keep going)$/.test(t))return {action:'read',index:s.index+1};
+ if(/^(?:y )?(?:que (?:le |les |podemos |puedo )*(?:respondo|respondemos|contestamos|contesto|decimos)|que (?:sugieres|recomiendas)|como le respondo|what (?:should|can) (?:i|we) (?:reply|say)|what do you suggest)$/.test(t))return {action:'advice',index:s.index};
+ let q=t.replace(/^(?:lee|leeme|abre|muestrame|read|open|show)\s+/,'').replace(/^(?:el|la|los|las|the)\s+/,'').replace(/^(?:de|from|one from)\s+/,'');
+ if(q==='primero'||q==='first')return {action:'read',index:0};
+ const ord={segundo:1,tercero:2,cuarto:3,second:1,third:2,fourth:3};if(q in ord)return {action:'read',index:ord[q]};
+ if(/^\d+$/.test(q))return {action:'read',index:Number(q)-1};
+ const chosen=sources(q),filtered=chosen.length===1?s.items.filter(r=>r.app===chosen[0]):s.items;
+ if(/^(?:whatsapp|wasap|guasap|workspace|mensajes normales|mensajes de apple|apple messages|imessage)$/.test(q))return {action:'read',index:s.items.indexOf(filtered[0])};
+ q=q.replace(/\s+(?:en|in|on)\s+(?:whatsapp|workspace|mensajes normales|apple messages|imessage)$/,'');
+ const matches=filtered.filter(r=>norm(r.query)===q||q.split(' ').every(w=>norm(r.query).split(' ').includes(w)));
+ if(matches.length===1)return {action:'read',index:s.items.indexOf(matches[0])};
+ if(matches.length>1)return {action:'clarify',text:'Hay más de una conversación de '+q+': '+matches.map(r=>APPS[r.app]).join(', ')+'. ¿Cuál quieres leer?'};
+ return null;
+}
+function evidence(result,item){
+ if(!result||result.status!=='chat_messages'||result.app!==item.app||norm(result.title)!==norm(item.query)||!Array.isArray(result.messages))throw Error('No pude comprobar esa conversación. No usaré el contenido de otra persona.');
+ if(result.syncPaused)throw Error('La sincronización está pausada. No puedo confirmar los mensajes más recientes.');
+ return result.messages.filter(m=>typeof m.text==='string'&&typeof m.outgoing==='boolean').slice(-20);
+}
+function basicAdvice(rows,en=false){
+ const last=rows.at(-1);if(!last)return {draft:'',explanation:en?'I could not read the conversation.':'No pude leer el contenido de la conversación.'};
+ if(last.outgoing)return {draft:'',explanation:en?'You already replied; I do not see a later message.':'Ya respondiste; no veo un mensaje posterior.'};
+ if(last.attachment||last.truncated||!last.text.trim()||/no disponible|can.t be displayed|open whatsapp/i.test(last.text))return {draft:'',explanation:en?'I need to see that attachment or the complete message first.':'Necesito ver ese adjunto o el mensaje completo antes de recomendar una respuesta.'};
+ if(/reply stop|verification code|codigo de verificacion|automated notification/i.test(last.text))return {draft:'',explanation:en?'This is an automatic notification; it does not need a chat reply.':'Es un aviso automático; no necesita respuesta por chat.'};
+ if(/^(?:gracias|muchas gracias|ok|okay|perfecto|entendido|thanks|thank you)[.! ]*$/i.test(last.text.trim()))return {draft:'',explanation:en?'It is an acknowledgement. There is no new question to answer.':'Es una confirmación; no veo una pregunta nueva que responder.'};
+ return null;
+}
+function safeAdvice(answer,rows){
+ if(!answer||answer.sent!==false||typeof answer.draft!=='string')throw Error('No pude preparar una respuesta comprobable.');
+ const text=answer.draft.trim();
+ // Proposed replies cannot expose payroll or assert a payment/availability decision.
+ const financial=/\b(?:pago|pagos|saldo|debe|debemos|adelanto|nomina|sueldo|salary|payroll|owe|payment|advance)\b/i.test(rows.map(r=>r.text).join(' '));
+ if((financial&&/(?:\$|\d|dolares|dólares|dollars)/i.test(text))||/\b(?:ya (?:pague|pagué|transferi|transferí)|(?:te|le) (?:pago|pagaremos|pagaré) (?:hoy|mañana)|payment (?:is|was) confirmed|i (?:have paid|paid|will pay))\b/i.test(text))return {draft:'',explanation:'Hace falta comprobar y autorizar ese detalle de pago antes de responder.'};
+ return {draft:text.slice(0,1200),explanation:String(answer.explanation||'').slice(0,350)};
+}
+function reading(item,rows,advice,index,total,en=false){
+ const last=rows.at(-1),tail=last&&!last.outgoing?rows.slice(Math.max(0,rows.map(m=>m.outgoing).lastIndexOf(true)+1)).slice(-2):[];
+ const body=tail.map(m=>m.text?.trim()?m.text.trim():en?'[Attachment]':'[Adjunto]').join(' / ').slice(0,650);
+ const lines=[(index+1)+'/'+total+' · '+item.query+' · '+APPS[item.app]];
+ if(body)lines.push((en?'Says: “':'Dice: «')+body+(en?'”':'»'));
+ if(advice.draft)lines.push((en?'You could reply: “':'Podríamos responder: «')+advice.draft+(en?'”':'»'));
+ else lines.push(advice.explanation);
+ if(index+1<total)lines.push(en?'Reply here, or shall we go to the next one?':'¿Le respondemos o seguimos con el siguiente?');
+ else if(advice.draft)lines.push(en?'Shall I send that?':'¿Se lo envío?');
+ else lines.push(en?'That is the last conversation on this list.':'Es la última conversación de esta lista.');
+ return lines.join('\n');
+}
+const api={APPS,norm,clean,sources,english,intent,snapshot,overview,follow,evidence,basicAdvice,safeAdvice,reading};
+if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
+})(typeof globalThis!=='undefined'?globalThis:this);
+
+// LUMI_INBOX_DIALOGUE_CORE_END
+// LUMI_INBOX_DIALOGUE_APP_BEGIN
+let LUMI_INBOX_SESSION=null;
+function lumiInboxPresent(text){
+ const last=document.getElementById('asConversacion')?.lastElementChild;if(last?.dataset.role==='assistant')last.dataset.keepPreview='1';
+ asMostrarRespuesta(text);asRecordarAccionMac('Revisión de mensajes',text);asHablar(text,asSeguirOyendo);
+}
+function lumiInboxClearProposal(){if(LUMI_MESSAGE_DRAFT?.fromInbox===true&&LUMI_MESSAGE_DRAFT.status==='draft')LUMI_MESSAGE_DRAFT=null;}
+async function lumiInboxRead(item,active){
+ if(item.app==='workspace'){
+  await asMsgDatos();if(!active())throw Error('La sesión cambió.');
+  const known=asMsgCandidatos(),matches=item.key?known.filter(x=>x.key===item.key):known.filter(x=>LumiInboxDialogue.norm(x.nombre)===LumiInboxDialogue.norm(item.query));
+  if(matches.length!==1)throw Error('No pude identificar una sola conversación de '+item.query+' en Workspace.');
+  const c=matches[0],messages=(MSG.lista||[]).filter(m=>!m.borrado_at&&msgOtro(m)===c.key&&msgVisible(m)).sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at))).slice(-20);
+  return {app:'workspace',status:'chat_messages',title:item.query,key:c.key,capturedAt:new Date().toISOString(),messages:messages.map(m=>({text:m.texto||'',outgoing:msgMio(m),attachment:!!m.adjuntos?.length,truncated:false,dateLabel:m.created_at}))};
+ }
+ const client=createLumiDesktopClient({session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),call:async(route,init={})=>{if(!active())throw Error('La sesión cambió.');const r=await authFetch(route,{...init,signal:AbortSignal.timeout(15000),headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('No pude conectar con la Mac.');const t=await r.text();return t?JSON.parse(t):null;}});
+ const result=await client.run({app:item.app,action:'read_chat',query:item.query});
+ if(result.status==='chat_messages')result.messages=result.messages.map(m=>({...m,text:m.text||lumiDesktopMessageText(m.description,item.app,result.title)}));
+ return result;
+}
+async function asInboxDialogue(texto){
+ if(SES.role!=='manager')return false;
+ const D=LumiInboxDialogue,owner=SES.user_id+'|'+SES.company_id;
+ const fresh=LUMI_INBOX_SESSION?.owner===owner&&Date.now()-LUMI_INBOX_SESSION.at<900000;
+ const request=D.intent(texto),follow=fresh?D.follow(texto,LUMI_INBOX_SESSION,owner):null;
+ if(!request&&!follow){if(LUMI_INBOX_SESSION?.phase==='offer')LUMI_INBOX_SESSION.phase='idle';return false;}
+ if(!request&&follow?.action==='read'&&/^(si|yes|claro|dale|ok|okay|sure)$/i.test(D.norm(texto))&&LUMI_INBOX_SESSION.phase!=='offer'){
+  asPararOido();asCallar();asTranscribir(texto);lumiInboxPresent('¿Quieres que envíe la respuesta que ves o que lea el siguiente mensaje?');return true;
+ }
+ if(AS_DESKTOP_BUSY)return false;
+ const epoch=AS.requestEpoch=(AS.requestEpoch||0)+1,active=()=>AS.abierto&&SES.role==='manager'&&owner===SES.user_id+'|'+SES.company_id&&AS.requestEpoch===epoch;
+ asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;AS_DESKTOP_BUSY=true;asEstado('pensando','Revisando mensajes…');
+ try{
+  let action=follow;
+  if(request){
+   const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});
+   if(!r.ok)throw Error('No pude actualizar los mensajes.');const data=(await r.json())[0]?.valor;if(!active())return true;
+   LUMI_INBOX_SESSION=D.snapshot(data,owner,request.sources);LUMI_INBOX_SESSION.english=request.english;
+   lumiInboxClearProposal();
+   if(request.action==='overview'||!LUMI_INBOX_SESSION.items.length){lumiInboxPresent(D.overview(LUMI_INBOX_SESSION));return true;}
+   action={action:'read',index:0};
+  }
+  const s=LUMI_INBOX_SESSION;
+  if(action.action==='cancel'){s.phase='idle';lumiInboxClearProposal();lumiInboxPresent(s.english?'All right.':'Está bien.');return true;}
+  if(action.action==='clarify'){lumiInboxPresent(action.text);return true;}
+  const index=action.index;
+  if(index<0){lumiInboxPresent(s.english?'Which conversation shall I read?':'¿Cuál conversación quieres que lea?');return true;}
+  if(index>=s.items.length){s.phase='done';lumiInboxClearProposal();lumiInboxPresent(s.english?'That is the last conversation on this list.':'Ya revisamos la última conversación de esta lista.');return true;}
+  const item=s.items[index];s.index=index;s.phase='reading';lumiInboxClearProposal();
+  const result=await lumiInboxRead(item,active);if(!active())return true;
+  const rows=D.evidence(result,item);if(result.key)item.key=result.key;
+  lumiSetMessageContext([{...item,at:Date.now()}]);LUMI_REPLY_EVIDENCE={owner,at:Date.now(),result:{...result,messages:rows}};
+  let advice=D.basicAdvice(rows,s.english);
+  if(!advice){
+   asAccionVisible('Preparando una respuesta para '+item.query+'…','working');
+   try{const answer=await lumiBrainRequest({thread:item.app+'|'+item.query,request:(s.english?'Suggest one short reply to this conversation.':'Sugiere una respuesta breve y concreta para esta conversación.')+' Trate de usted. Use solo lo que aparece en la conversación. No comparta montos de trabajadores ni prometa pagos, disponibilidad o acciones no verificadas. No envíe nada.',messages:rows});if(!active())return true;advice=D.safeAdvice(answer,rows);}
+   catch{advice={draft:'',explanation:s.english?'I could read the message, but could not prepare a reliable reply.':'Pude leer el mensaje, pero no preparar una respuesta fiable todavía.'};}
+  }
+  if(!active())return true;
+  if(advice.draft&&item.app==='workspace'&&lumiPrivatePayrollReply(advice.draft))advice={draft:'',explanation:'No compartiré cantidades ni detalles de pagos. Esa respuesta requiere revisar la información autorizada.'};
+  if(advice.draft){
+   LUMI_MESSAGE_DRAFT={owner,app:item.app,query:item.query,key:item.key||null,text:advice.draft,intent:'preview',status:'draft',fromInbox:true};
+   LUMI_BRAIN_PROPOSAL={owner,thread:item.app+'|'+item.query,at:Date.now(),draft:advice.draft,request:texto};
+  }
+  s.phase='read';s.at=Date.now();lumiInboxPresent(D.reading(item,rows,advice,index,s.items.length,s.english));lumiReplyButtons([{...item,at:Date.now()}]);asAccionVisible('Conversación revisada','done');
+ }catch(e){if(active()){lumiInboxPresent(String(e.message||'No pude revisar los mensajes.'));asAccionVisible('Revisión pendiente','error');}}
+ finally{if(owner===SES.user_id+'|'+SES.company_id){AS.enviando=false;AS_DESKTOP_BUSY=false;}}
+ return true;
+}
+// LUMI_INBOX_DIALOGUE_APP_END
+
 function lumiInboxSources(text){
  const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
  const sources=[];
@@ -69652,13 +69827,14 @@ function lumiNoticeBatch(data,seen=[],pending=[],now=Date.now()){
  const excluded=new Set([...seen,...pending]),names={whatsapp:'WhatsApp',messages:'Mensajes normales',workspace:'Workspace',labor:'Labor logs'};
  const unique=[...new Map((data.events||[]).filter(e=>e.version===2&&names[e.source]&&e.id&&!excluded.has(e.id)&&Number.isFinite(e.at)&&e.at<=now+60000&&now-e.at<900000).map(e=>[e.id,e])).values()].sort((a,b)=>a.at-b.at).slice(0,6);
  if(!unique.length)return null;
- const lines=[];for(const [source,name] of Object.entries(names)){const people=[...new Set(unique.filter(e=>e.source===source).map(e=>e.title))];if(people.length)lines.push(name+': '+people.slice(0,3).join(', ')+(people.length>3?' y '+(people.length-3)+' más':'')+'.');}
- return {ids:unique.map(e=>e.id),events:unique,text:'Amílcar, tienes mensajes por revisar. '+lines.join(' '),at:now};
+ const lines=[];for(const [source,name] of Object.entries(names)){const people=[...new Set(unique.filter(e=>e.source===source).map(e=>lumiInboxTitle(e.route?.query||e.title)))];if(people.length)lines.push(name+': '+people.length+' '+(source==='labor'?'reportes':people.length===1?'conversación':'conversaciones')+' — '+people.slice(0,3).join(', ')+(people.length>3?' y '+(people.length-3)+' más':'')+'.');}
+ const total=new Set(unique.filter(e=>e.source!=='labor').map(e=>e.source+'|'+(e.route?.key||e.route?.query||e.title))).size;
+ return {ids:unique.map(e=>e.id),events:unique,text:'Amílcar, '+(total?'tienes mensajes nuevos en '+total+' '+(total===1?'conversación':'conversaciones')+'. ':'hay reportes nuevos. ')+lines.join(' ')+(total?' ¿Te los leo?':''),at:now};
 }
 function lumiNoticeSay(text,routes=[],meta={}){
  const blocked=!AS.abierto||AS.enviando||AS_DESKTOP_BUSY||lumiReplyInProgress()||AS.estado==='hablando'||AS.estado==='pensando'||AS.estado==='escuchando'&&AS.texto?.trim();
  if(blocked){if(!meta.ids||!LUMI_NOTICE_SPOKEN.some(n=>n.ids?.some(id=>meta.ids.includes(id))))LUMI_NOTICE_SPOKEN.push({text,routes,...meta});return false;}
- if(routes.length)lumiSetMessageContext(routes);
+ if(routes.length){lumiSetMessageContext(routes);LUMI_INBOX_SESSION={owner:SES.user_id+'|'+SES.company_id,at:Date.now(),items:routes.map(r=>({...r,unreadCount:null})),index:-1,phase:'offer',english:false,selected:[...new Set(routes.map(r=>r.app))],health:{}};}
  const last=document.getElementById('asConversacion')?.lastElementChild;if(last?.dataset.role==='assistant')last.dataset.keepPreview='1';
  asMostrarRespuesta(text);const current=document.getElementById('asConversacion')?.lastElementChild;if(current)current.dataset.keepPreview='1';
  lumiReplyButtons(routes);asHablar(text,asSeguirOyendo);
@@ -70555,6 +70731,7 @@ function lumiIncompleteSpeechReply(text){
     }
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asBasicWorkspace(texto)))return;
     if(!dictando&&!AS.conf&&SES.role==='manager'&&lumiPaymentRequestIntent(texto)){AS.pregunta=null;if(await asPaymentRequestRead(texto))return;}
+    if(!dictando&&!AS.conf&&!AS.pregunta&&(await asInboxDialogue(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asQuickReview(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asInboxPending(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLearnReply(texto)))return;
