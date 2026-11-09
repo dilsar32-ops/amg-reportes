@@ -11365,7 +11365,7 @@ html body #asPanel #asSharedNotice{display:none!important;}
 <script src="lumi-communications.js?v=R246"></script>
 <script src="lumi-attachments.js?v=R250"></script>
 <script src="lumi-attachment-cloud.js?v=R251"></script>
-<script src="lumi-voice-diagnostics.js?v=R252"></script>
+<script src="https://dilsar32-ops.github.io/amg-reportes/lumi-voice-diagnostics.js?v=R329"></script>
 <script src="lumi-ear-health.js?v=R253"></script>
 </head>
 <body>
@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R328';
+  const APP_BUILD = '2026-11-08-R329';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68502,7 +68502,7 @@ function createLumiVoice({call,session,play,fixedAudio=()=>null,preload=()=>{},o
   const value=valid?d:null;cache=value?{owner:owner(s),at:now(),device:value}:null;return value;
  }
  async function speech(text,language,s,e,prepareGate=Promise.resolve(),playGate=Promise.resolve(),releaseNext=()=>{}){
-  const began=now(),attempt=++trace;const mark=(stage,extra={})=>{try{observe({trace:attempt,stage,ms:Math.max(0,now()-began),...extra});}catch{}};mark('start');
+  const began=now(),attempt=++trace;const mark=(stage,extra={})=>{try{observe({trace:attempt,stage,ms:Math.max(0,now()-began),...extra});}catch{}};mark('start',{beforeSpeechMs:typeof AS!=='undefined'&&Number.isFinite(AS.beforeSpeechMs)?AS.beforeSpeechMs:null});
   let failed=false;const live=()=>!failed&&active(s,e);
   await prepareGate;
   if(!live())return 'cancelled';
@@ -68749,6 +68749,7 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
   }
   async function asDecir(t, encolar){
     t = asParaVoz(asTrVoz(t), asEn() ? 'en' : (AS.idiomaResp || 'es')); if(!t) return 0;
+    AS.beforeSpeechMs=AS.turnStartedAt?Date.now()-AS.turnStartedAt:null;
     asEstado(SES.role==='manager'?'pensando':'hablando', SES.role==='manager'?'Preparando la voz…':''); if(window.Cara){ try{ Cara.hablando(true, t); }catch(err){} }
     setTimeout(asVigilarInterrupcion, 250);   // barge-in (si está prendido): también con frases encoladas del stream
     // Keep listening paused while the local model generates and plays the actual audio.
@@ -69520,7 +69521,16 @@ async function lumiCheckWorkspaceArrivals(){
  }catch(e){/* A failed refresh is unknown, never an empty inbox. */}
  finally{LUMI_MESSAGE_CHECK=false;}
 }
+function lumiQuickReviewIntent(text){
+ const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.]/g,'').replace(/\s+/g,' ').replace(/^(?:(?:lumi|oye|pues|bueno|por favor|please|dime|revisa|mira)[, ]+)+/,'').replace(/(?: por favor| please)$/,'');
+ if(/^(?:tenemos|hay|tengo|llegaron|recibimos) (?:alguna |algunas |nuevas |nuevas? )?novedad(?:es)?$/.test(t)||/^(?:hay|tenemos|llego|recibimos) algo nuevo$/.test(t)||/^(?:any (?:news|updates)|anything new|what's new|do we have any (?:news|updates))$/.test(t))return 'inbox';
+ if(/^(?:(?:ve|ver|a ver) si )?(?:hay|tenemos|tengo|llego|llegaron|recibimos) (?:(?:alguna|algunas|una|nuevas?) )?(?:peticion|peticiones|solicitud|solicitudes)(?: (?:nuevas?|pendientes?))?$/.test(t)||/^(?:any (?:new |pending )?requests|do we have any (?:new |pending )?requests)$/.test(t))return 'requests';
+ // A noisy dictated prefix is not enough evidence to choose between reports and requests.
+ if(t.length<180&&/\b(?:tenemos|hay) alguna peticion$/.test(t)&&/^(?:ver|a ver|ve) si recibimos\b/.test(t))return 'clarify';
+ return null;
+}
 function lumiPaymentRequestIntent(text){
+ if(lumiQuickReviewIntent(text)==='requests')return 'todos';
  const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.]/g,'').replace(/\s+/g,' ').replace(/^(?:lumi[, ]+|dime |revisa |checa )+/, '').replace(/(?:,? por favor| please)$/,'').trim();
  const who=/^(?:quien|quienes|hay alguien que|hay alguien) (?:me |nos )?(?:(?:esta|estan|anda|andan) )?(?:pidiendo|solicitando|pide|piden|pidio|pidieron|ha pedido|han pedido) (?:un |el |su )?(?:pago|pagos|adelanto|adelantos|dinero)$/.test(t);
  const list=/^(?:que|hay|tenemos) solicitudes de (?:pago|adelanto|pago y adelanto|pagos|adelantos)(?: pendientes| nuevas)?$/.test(t);
@@ -69529,7 +69539,8 @@ function lumiPaymentRequestIntent(text){
  return /adelanto|advance/.test(t)&&!/pago/.test(t)?'adelanto':'dinero';
 }
 function lumiPaymentRequestSummary(rows,kind,en=false){
- const pending=rows.filter(m=>m&&m.tipo==='peticion'&&(kind==='dinero'?['pago','adelanto'].includes(m.peticion):m.peticion===kind)&&!m.borrado_at&&['pendiente','en_espera','no_recibida'].includes(m.estado||'pendiente'));
+ const pending=rows.filter(m=>m&&m.tipo==='peticion'&&(kind==='todos'?!!m.peticion:kind==='dinero'?['pago','adelanto'].includes(m.peticion):m.peticion===kind)&&!m.borrado_at&&['pendiente','en_espera','no_recibida'].includes(m.estado||'pendiente'));
+ if(kind==='todos'){if(!pending.length)return en?'There are no pending requests in Workspace.':'No hay peticiones pendientes en Workspace.';return (en?'Pending requests in Workspace: ':'Peticiones pendientes en Workspace: ')+[...new Set(pending.map(m=>String(m.de_nombre||'Un compañero').trim()+' ('+String(m.peticion||'petición')+')'))].slice(0,5).join(', ')+'.';}
  if(!pending.length)return en?'There are no pending '+(kind==='adelanto'?'advance':kind==='dinero'?'payment or advance':'payment')+' requests in Workspace. A payment awaiting confirmation is a different status.':'No hay solicitudes de '+(kind==='adelanto'?'adelanto':kind==='dinero'?'pago o adelanto':'pago')+' pendientes en Workspace. Un pago esperando confirmación es otra cosa.';
  const names=[...new Set(pending.map(m=>String(m.de_nombre||'Una persona sin nombre visible').trim()))];
  return (en?'Pending '+(kind==='adelanto'?'advance':kind==='dinero'?'payment or advance':'payment')+' requests in Workspace: ':'Solicitudes de '+(kind==='adelanto'?'adelanto':kind==='dinero'?'pago o adelanto':'pago')+' pendientes en Workspace: ')+names.join(', ')+'.';
@@ -69544,7 +69555,7 @@ async function asPaymentRequestRead(text){
   if(!AS.abierto||owner!==SES.user_id+'|'+SES.company_id)return true;
   const fresh=[];let after='';
   while(true){
-   const url='/rest/v1/mensajes?select=*&tipo=eq.peticion&'+(kind==='dinero'?'peticion=in.(pago,adelanto)':'peticion=eq.adelanto')+'&borrado_at=is.null&or=(estado.is.null,estado.in.(pendiente,en_espera,no_recibida))&order=id.asc&limit=200'+(after?'&id=gt.'+encodeURIComponent(after):'');
+   const url='/rest/v1/mensajes?select=*&tipo=eq.peticion&'+(kind==='todos'?'peticion=not.is.null':kind==='dinero'?'peticion=in.(pago,adelanto)':'peticion=eq.adelanto')+'&borrado_at=is.null&or=(estado.is.null,estado.in.(pendiente,en_espera,no_recibida))&order=id.asc&limit=200'+(after?'&id=gt.'+encodeURIComponent(after):'');
    const response=await authFetch(url,{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});if(!response.ok)throw Error('requests-unavailable');
    const page=await response.json();if(!Array.isArray(page))throw Error('invalid-requests');fresh.push(...page);
    if(page.length<200)break;const next=page.at(-1)?.id;if(!next||next===after)throw Error('invalid-pagination');after=next;
@@ -69577,6 +69588,23 @@ function lumiInboxSummary(data,now=Date.now(),sources=['whatsapp','messages','wo
   else if(health==='visible_only')lines.push('Solo pude revisar la lista visible.');
  }
  return lines.join('\n');
+}
+function lumiInboxBrief(data,sources){
+ const names={whatsapp:'WhatsApp',messages:'Mensajes normales',workspace:'Workspace'};
+ return sources.map(source=>{const rows=(data.inbox||[]).filter(r=>r.source===source);if(data.health?.[source]==='unavailable')return names[source]+': no pude comprobar los mensajes.';return names[source]+': '+(rows.length?rows.length+' '+(rows.length===1?'chat sin leer':'chats sin leer')+(rows.length<=3?', '+rows.map(r=>r.title).join(', '):'')+'.':'no detecté mensajes sin leer en la parte revisada.');}).join('\n');
+}
+async function asQuickReview(texto){
+ const intent=lumiQuickReviewIntent(texto);if(!intent||intent==='requests')return false;
+ asPararOido();asCallar();asTranscribir(texto);
+ if(intent==='clarify'){const answer='¿Quieres revisar los mensajes nuevos o las peticiones de Workspace?';asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);return true;}
+ const owner=SES.user_id+'|'+SES.company_id;if(SES.role!=='manager')return false;AS.enviando=true;
+ try{
+  const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});
+  if(!r.ok)throw Error('No pude actualizar los avisos.');const data=(await r.json())[0]?.valor;
+  if(owner!==SES.user_id+'|'+SES.company_id||!AS.abierto)return true;
+  if(data?.owner!==owner||!Number.isFinite(data.at)||Date.now()-data.at>120000){AS.enviando=false;await asRevisionCompleta({discovery:true,workspace:true,apps:['whatsapp','messages'],english:false},texto);return true;}
+  const sources=lumiInboxSources(texto),answer=lumiInboxBrief(data,sources);asMostrarRespuesta(answer);asRecordarAccionMac(texto,answer);asHablar(answer,asSeguirOyendo);
+ }catch(e){if(owner===SES.user_id+'|'+SES.company_id&&AS.abierto){asMostrarRespuesta(e.message);asHablar(e.message,asSeguirOyendo);}}finally{AS.enviando=false;}return true;
 }
 async function asInboxPending(texto){
  const t=String(texto).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -70435,6 +70463,7 @@ function lumiIncompleteSpeechReply(text){
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
+    AS.turnStartedAt=Date.now();
     if(SES.role==='manager')void asVozLocal().warm().catch(()=>{});
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
@@ -70455,6 +70484,7 @@ function lumiIncompleteSpeechReply(text){
     }
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asBasicWorkspace(texto)))return;
     if(!dictando&&!AS.conf&&SES.role==='manager'&&lumiPaymentRequestIntent(texto)){AS.pregunta=null;if(await asPaymentRequestRead(texto))return;}
+    if(!dictando&&!AS.conf&&!AS.pregunta&&(await asQuickReview(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asInboxPending(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLearnReply(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asReplyAdvice(texto)))return;
