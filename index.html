@@ -69622,25 +69622,42 @@ let LUMI_NOTICE_BUSY=false,LUMI_NOTICE_SPOKEN=[],LUMI_NOTICE_OWNER=null;
 function lumiReplyInProgress(){
  return !!(AS.conf||AS.dictado||AS.pregunta?.tipo?.startsWith('msg_')||(typeof LUMI_MESSAGE_DRAFT!=='undefined'&&['incomplete','draft','sending'].includes(LUMI_MESSAGE_DRAFT?.status)));
 }
-function lumiNoticeSay(text,routes=[]){
- if(!AS.abierto||AS.enviando||AS_DESKTOP_BUSY||lumiReplyInProgress()||AS.estado==='hablando'||AS.estado==='pensando'||AS.estado==='escuchando'&&AS.texto?.trim()){LUMI_NOTICE_SPOKEN.push({text,routes});return;}
- if(AS.abierto){if(routes.length)lumiSetMessageContext(routes);asMostrarRespuesta(text);lumiReplyButtons(routes);asHablar(text,asSeguirOyendo);}
- document.getElementById('lumiArrivalBanner')?.remove();
+function lumiNoticeSeen(ids,owner){
+ if(owner!==SES.user_id+'|'+SES.company_id)return;
+ const key='lumi_notices_seen_'+owner;let seen=[];try{seen=JSON.parse(localStorage.getItem(key)||'[]');}catch{}
+ localStorage.setItem(key,JSON.stringify([...new Set([...(Array.isArray(seen)?seen:[]),...ids])].slice(-500)));
+}
+function lumiNoticeBatch(data,seen=[],pending=[],now=Date.now()){
+ if(!data||!Number.isFinite(data.at)||now-data.at>120000)return null;
+ const excluded=new Set([...seen,...pending]),names={whatsapp:'WhatsApp',messages:'Mensajes normales',workspace:'Workspace',labor:'Labor logs'};
+ const unique=[...new Map((data.events||[]).filter(e=>e.version===2&&names[e.source]&&e.id&&!excluded.has(e.id)&&Number.isFinite(e.at)&&e.at<=now+60000&&now-e.at<900000).map(e=>[e.id,e])).values()].sort((a,b)=>a.at-b.at).slice(0,6);
+ if(!unique.length)return null;
+ const lines=[];for(const [source,name] of Object.entries(names)){const people=[...new Set(unique.filter(e=>e.source===source).map(e=>e.title))];if(people.length)lines.push(name+': '+people.slice(0,3).join(', ')+(people.length>3?' y '+(people.length-3)+' más':'')+'.');}
+ return {ids:unique.map(e=>e.id),events:unique,text:'Amílcar, tienes mensajes por revisar. '+lines.join(' '),at:now};
+}
+function lumiNoticeSay(text,routes=[],meta={}){
+ const blocked=!AS.abierto||AS.enviando||AS_DESKTOP_BUSY||lumiReplyInProgress()||AS.estado==='hablando'||AS.estado==='pensando'||AS.estado==='escuchando'&&AS.texto?.trim();
+ if(blocked){if(!meta.ids||!LUMI_NOTICE_SPOKEN.some(n=>n.ids?.some(id=>meta.ids.includes(id))))LUMI_NOTICE_SPOKEN.push({text,routes,...meta});return false;}
+ if(routes.length)lumiSetMessageContext(routes);
+ const last=document.getElementById('asConversacion')?.lastElementChild;if(last?.dataset.role==='assistant')last.dataset.keepPreview='1';
+ asMostrarRespuesta(text);const current=document.getElementById('asConversacion')?.lastElementChild;if(current)current.dataset.keepPreview='1';
+ lumiReplyButtons(routes);asHablar(text,asSeguirOyendo);
+ if(meta.ids)lumiNoticeSeen(meta.ids,meta.owner);
+ document.getElementById('lumiArrivalBanner')?.remove();return true;
 }
 async function lumiProactiveTick(){
  if(typeof SES==='undefined'||SES.role!=='manager'||!SES.user_id){LUMI_NOTICE_SPOKEN=[];LUMI_NOTICE_OWNER=null;document.getElementById('lumiArrivalBanner')?.remove();return;}
  if(LUMI_NOTICE_BUSY||document.hidden)return;
  const owner=SES.user_id+'|'+SES.company_id;if(LUMI_NOTICE_OWNER!==owner){LUMI_NOTICE_OWNER=owner;LUMI_NOTICE_SPOKEN=[];document.getElementById('lumiArrivalBanner')?.remove();}
- if(LUMI_NOTICE_SPOKEN.length&&AS.abierto&&!AS.enviando&&!AS_DESKTOP_BUSY&&!lumiReplyInProgress()&&['esperando','escuchando'].includes(AS.estado)&&!(AS.estado==='escuchando'&&AS.texto?.trim())){const next=LUMI_NOTICE_SPOKEN.shift();lumiNoticeSay(next.text,next.routes);}
+ LUMI_NOTICE_SPOKEN=LUMI_NOTICE_SPOKEN.filter(n=>!n.at||Date.now()-n.at<900000);
+ if(LUMI_NOTICE_SPOKEN.length&&AS.abierto&&!AS.enviando&&!AS_DESKTOP_BUSY&&!lumiReplyInProgress()&&['esperando','escuchando'].includes(AS.estado)&&!(AS.estado==='escuchando'&&AS.texto?.trim())){const next=LUMI_NOTICE_SPOKEN.shift();lumiNoticeSay(next.text,next.routes,next);}
  LUMI_NOTICE_BUSY=true;
  try{
  const key='lumi_notices_seen_'+owner;let seen;try{seen=JSON.parse(localStorage.getItem(key)||'[]');if(!Array.isArray(seen))seen=[];}catch{seen=[];}
- const notices=[];
- const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders()});
- if(r.ok){const data=(await r.json())[0]?.valor;if(data?.owner===owner){for(const e of data.events||[]){if(!seen.includes(e.id)&&Date.now()-e.at<86400000){notices.push({id:e.id,route:lumiNoticeRoutes([e],owner)[0],text:({whatsapp:'WhatsApp',messages:'Mensajes normales',workspace:'Workspace',labor:'Labor log'}[e.source]||'Workspace')+': '+e.title+(e.preview?' — '+e.preview:'')+(e.suggestion?' '+e.suggestion:'')});}}}}
- if(owner!==SES.user_id+'|'+SES.company_id)return;
- if(owner!==SES.user_id+'|'+SES.company_id)return;
- if(notices.length){const unique=[...new Map(notices.map(n=>[n.id,n])).values()];lumiNoticeSay('Amílcar, hay novedades. '+[...new Set(unique.map(n=>n.text))].slice(0,4).join('. ')+(unique.length>4?'. Hay más por revisar.':'.')+' Puedes pedirme que las lea.',unique.slice(0,4).map(n=>n.route).filter(Boolean));seen.push(...unique.map(n=>n.id));localStorage.setItem(key,JSON.stringify(seen.slice(-500)));}
+ const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});
+ if(!r.ok||owner!==SES.user_id+'|'+SES.company_id)return;const data=(await r.json())[0]?.valor;if(data?.owner!==owner)return;
+ const batch=lumiNoticeBatch(data,seen,LUMI_NOTICE_SPOKEN.flatMap(n=>n.ids||[]));
+ if(batch)lumiNoticeSay(batch.text,lumiNoticeRoutes(batch.events,owner),{ids:batch.ids,at:batch.at,owner});
  }catch{}finally{LUMI_NOTICE_BUSY=false;}
 }
 setInterval(lumiProactiveTick,15000);
@@ -70413,6 +70430,7 @@ function lumiReplyButtons(routes){
 
 let LUMI_MESSAGE_DRAFT=null,LUMI_MESSAGE_CONTEXT=null;
 async function asComposeMessage(command,texto){
+ const transcribed=command.needsRewrite===true;
  const owner=SES.user_id+'|'+SES.company_id;
  if(SES.role!=='manager'){asMostrarRespuesta('Esta acción requiere Manager.');return;}
  if(command.needsRewrite){
@@ -70427,7 +70445,7 @@ async function asComposeMessage(command,texto){
  }
  const r=lumiComposePlan(LUMI_MESSAGE_DRAFT,command,owner);if(r.send)r.state.attemptAt=Date.now();LUMI_MESSAGE_DRAFT=r.state;
  if(r.state?.query&&r.state?.app)lumiSetMessageContext([{owner,app:r.state.app,query:r.state.query,key:r.state.key,at:Date.now()}]);
- asPararOido();asCallar();asTranscribir(texto);
+ asPararOido();asCallar();if(!transcribed)asTranscribir(texto);
  if(!r.send){const d=r.state;const reply=r.message||(d?'Le diría a '+lumiContactFirst(d.query)+': «'+d.text+'»':'');asMostrarRespuesta(reply);asRecordarAccionMac(texto,reply);asHablar(reply,asSeguirOyendo);return;}
  const d=r.state;AS.enviando=true;asMostrarRespuesta('Le envío a '+lumiContactFirst(d.query)+': «'+d.text+'»');
  try{
