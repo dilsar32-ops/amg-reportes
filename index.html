@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R318';
+  const APP_BUILD = '2026-11-08-R319';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71903,12 +71903,20 @@ function lumiIncompleteSpeechReply(text){
     const preg = r.grupo ? (en ? ' Do you want to reply in ' + r.nombre + '?' : ' ¿Quieres responder en ' + r.nombre + '?') : (en ? ' Do you want to reply to ' + asMsgPila(r.nombre) + '?' : ' ¿Le quieres responder a ' + asMsgPila(r.nombre) + '?');
     return asMedirPregunta({ tipo: 'msg_responder_si', r, voz: voz ? voz.id : null }, pre + texto + oir + preg);
   }
+  function asMsgLatestSource(person, rows){
+    const valid=(rows||[]).filter(m=>m&&!m.borrado_at&&Number.isFinite(Date.parse(m.created_at)));
+    const direct=valid.filter(m=>!m.para_grupo_id&&msgOtro(m)===person);
+    const newestDirect=Math.max(0,...direct.map(m=>Date.parse(m.created_at)));
+    const group=valid.filter(m=>m.para_grupo_id&&msgKeyDe(m)===person&&msgEsParaMi(m)&&(typeof msgVisible!=='function'||msgVisible(m))).sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at))[0];
+    return group&&Date.parse(group.created_at)>newestDirect?'g:'+group.para_grupo_id:person;
+  }
   // "léeme los mensajes de Harold": los nuevos de esa plática; si no hay nuevos, lo último (lo mío también)
   async function asMsgLeerDe(n){
     const en = asEn(), r = await asMsgResolver(n, true);
     if(r.varios) return asMedirPregunta({ tipo: 'msg_cual', para: 'leer', opciones: r.varios }, (en ? 'Which one: ' : '¿Cuál: ') + r.varios.map(function(h){ return h.nombre; }).join(en ? ' or ' : ' o ') + '?');
     if(!r.key) return asCmdDecir((en ? "I can't find " : 'No encuentro a ') + n.join(' ') + (en ? ' in Messages.' : ' en Mensajes.'), null, 'pregunta');
-    return asMsgLeerChat(r.key);
+    const latest=/^[ct]:/.test(r.key)?asMsgLatestSource(r.key,MSG.lista):r.key;
+    return asMsgLeerChat(latest);
   }
   function asMsgLeerChat(key){
     const en = asEn(), orden = function(a, b){ return String(a.created_at).localeCompare(String(b.created_at)); };
