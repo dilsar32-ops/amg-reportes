@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R319';
+  const APP_BUILD = '2026-11-08-R320';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -78800,6 +78800,15 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(msgEsCasual()){ const s = msgSes() || {}; return { join_code: (msgCodigos(s) || [])[0] || '', name: s.name || '', pin: s.pin || '' }; }
     return { access_token: (typeof SES !== 'undefined' && SES && SES.access_token) || '' };
   }
+  async function radioRegistroVigente(){
+    if(msgEsCasual())return radioRegistro();
+    const owner=SES.user_id+'|'+SES.company_id;
+    const r=await authFetch('/auth/v1/user',{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});
+    if(!r.ok)throw new Error('Su sesión necesita renovarse. Vuelva a iniciar sesión antes de unirse a la radio.');
+    const user=await r.json();
+    if(owner!==SES.user_id+'|'+SES.company_id||user.id!==SES.user_id)throw new Error('La cuenta cambió. Abra de nuevo la radio con su cuenta.');
+    return radioRegistro();
+  }
   function radioNombreCanal(key){ return key === 'todos' ? 'Todo el equipo' : (msgNombre(key) || 'Equipo'); }
 
   // el botón de la cabecera del chat: solo en grupos y "todo el equipo", y solo con el iPhone nuevo
@@ -78855,8 +78864,9 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(que === 'unir'){ RADIO.error=null;
       b.disabled = true; radioAviso('Uniéndote…');
       try{
+        const registro = await radioRegistroVigente();
         await radioPrepararGrupo(P,key);
-        const r = await P.unir({ canal: key, uuid: await radioUUID(key), nombre: 'Radio · ' + radioNombreCanal(key), servidor: CLOUD.url, llave: CLOUD.key, registro: radioRegistro() });
+        const r = await P.unir({ canal: key, uuid: await radioUUID(key), nombre: 'Radio · ' + radioNombreCanal(key), servidor: CLOUD.url, llave: CLOUD.key, registro });
         if(r && r.ok){ radioGuardar({ canal: key, nombre: radioNombreCanal(key) }); RADIO.est = await P.estado(); radioPintar(); radioPintarCab(key); }
         else { radioAviso(r && r.motivo === 'no-disponible' ? 'La radio funciona en el iPhone (no en el simulador ni en la web).' : r && r.motivo === 'salir-primero' ? 'Salga de la radio anterior antes de unirse a esta.' : 'No se pudo unir. Revise su conexión y permiso de micrófono.'); b.disabled = false; }
       }catch(err){ radioAviso(err.message || 'No se pudo unir.'); b.disabled = false; }
