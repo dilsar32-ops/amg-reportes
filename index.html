@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R317';
+  const APP_BUILD = '2026-11-08-R318';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70305,11 +70305,19 @@ async function asCommercialQuote(order,texto){
  finally{AS.enviando=false;}
 }
 
+function lumiIncompleteSpeechReply(text){
+ const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[.,!?¿¡]+$/,'').replace(/\s+/g,' ');
+ if(/^(?:pues cuando|pero cuando|y cuando|es que|lo que pasa es que|quiero que|necesito que|porque yo|y entonces yo)$/.test(t))return 'Te escucho. ¿Puedes completar la frase?';
+ if(/^(?:but when|and when|i want to|i need to|the thing is|because i)$/.test(t))return 'I’m listening. Could you finish your thought?';
+ return null;
+}
+
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando&&!AS.conf&&!AS.pregunta){const incomplete=lumiIncompleteSpeechReply(texto);if(incomplete){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(incomplete);asHablar(incomplete,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta&&typeof lumiResolveLaborSpeech==='function'){
       if(AS.laborTermPending){const intended=AS.laborTermPending;AS.laborTermPending=null;
         if(/^(?:si|sí|yes|correcto|exacto)[.! ]*$/i.test(texto.trim()))texto=intended;
