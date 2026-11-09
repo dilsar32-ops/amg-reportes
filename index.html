@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R311';
+  const APP_BUILD = '2026-11-08-R312';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -78746,7 +78746,6 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   function radioCerrar(){ if(RADIO.cambiando)return;RADIO.seleccion=null;const v = document.getElementById('radioVelo'); if(!v) return; if(RADIO.hablando) radioSoltar(); v.classList.remove('ver'); setTimeout(() => { v.hidden = true; }, 220); RADIO.abierta = null; radioBanner(); }
 
   function radioPintar(){
-    if(RADIO.seleccion)return;
     const v = document.getElementById('radioVelo'); if(!v || !RADIO.abierta) return; const key = RADIO.abierta, est = RADIO.est || {}, g = radioGuardado();
     const aqui = !!(g && g.canal === key && est.unido), otro = !!(g && g.canal !== key && est.unido);
     const grupo = key.startsWith('g:') ? msgGrupoDe(key) : null;
@@ -78757,14 +78756,13 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       + '<button type="button" class="radio-x" data-radio="cerrar" aria-label="Cerrar">✕</button></div>'
       + '<div class="radio-pie">' + (grupo ? 'Canal de este grupo. Solo sus miembros pueden unirse.' : 'Canal general: puede escuchar todo el equipo que se una.') + '</div>' + lista
       + (grupo && !String(grupo.nombre||'').startsWith('Radio privada') ? '<button type="button" class="radio-salir" data-radio="participantes">Ver participantes</button>' : '')
-      + (grupo && radioPuedeElegir() ? '<button type="button" class="radio-unir" data-radio="elegir">Elegir con quién hablar / agregar</button>' : '')
       + (aqui
         ? '<div class="radio-estado">' + (RADIO.hablando ? (RADIO.emitiendo ? 'Hablando… <b class="radio-t">0:00</b>' : 'Conectando el micrófono…') : (RADIO.escucha ? esc(RADIO.hablante || 'Equipo') + (RADIO.fase==='hablando' ? ' está hablando' : ' está conectando…') : 'Mantén apretado para hablar')) + '</div>'
           + '<button type="button" class="radio-boton' + (RADIO.hablando ? ' on' : '') + '" data-radio="hablar"' + (RADIO.escucha ? ' disabled aria-disabled="true"' : '') + '>' + RADIO_MIC + '<span>' + (RADIO.hablando ? 'SUELTA PARA TERMINAR' : (RADIO.escucha ? 'ESCUCHANDO' : 'HABLAR')) + '</span></button>'
           + '<div class="radio-pie">Voz en vivo. No se guarda como nota de audio.</div>'
           + '<button type="button" class="radio-salir" data-radio="salir">Salir de la radio</button>'
-        : '<div class="radio-txt">' + (otro ? 'Estás en la radio de <b>' + esc(g.nombre || '') + '</b>. Solo se puede estar en una.' : 'Únase con ambos iPhone actualizados. La voz se escucha en vivo y no queda guardada en el chat.') + '</div>'
-          + '<button type="button" class="radio-unir" data-radio="unir">' + (otro ? 'Salga de la otra radio primero' : 'Unirme a la radio') + '</button>'
+        : '<div class="radio-txt">' + (otro ? 'Está conectado a <b>' + esc(g.nombre || '') + '</b>. Al continuar, se cambiará a la radio de este grupo.' : 'Esta es la radio de este mismo grupo de mensajes. Sus miembros deben conectarse aquí para escucharse.') + '</div>'
+          + '<button type="button" class="radio-unir" data-radio="unir">' + (otro ? 'Conectarme a este grupo' : 'Unirme a la radio') + '</button>'
           + '<div class="radio-pie">Cada participante debe unirse a esta misma radio. Botón de Acción: pulse para hablar y vuelva a pulsar para terminar.</div>')
       + '<div class="radio-msj" aria-live="polite"></div></div>';
     if(RADIO.error && Date.now()-(RADIO.errorAt || 0)<=6000)radioAviso('Último intento: '+RADIO.error);
@@ -78777,17 +78775,15 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const b = e.target.closest('[data-radio]'); if(!b) return; const P = radioPlugin(); if(!P) return;
     const que = b.dataset.radio, key = RADIO.abierta;
     if(que === 'cerrar'){ radioCerrar(); return; }
-    if(que === 'elegir'){await radioElegir();return;}
-    if(que === 'cancelar-seleccion'){if(RADIO.cambiando)return;RADIO.seleccion=null;radioPintar();return;}
-    if(que === 'guardar-seleccion'){await radioSeleccionAplicar();return;}
     if(que === 'participantes'){if(RADIO.hablando || RADIO.escucha){radioAviso('Espere a que termine la transmisión para revisar los participantes.');return;}radioCerrar();if(MSG.con!==key)await msgAbrir(key);msgMiembrosAbrir();return;}
     if(que === 'unir'){ RADIO.error=null;
       b.disabled = true; radioAviso('Uniéndote…');
       try{
+        await radioPrepararGrupo(P,key);
         const r = await P.unir({ canal: key, uuid: await radioUUID(key), nombre: 'Radio · ' + radioNombreCanal(key), servidor: CLOUD.url, llave: CLOUD.key, registro: radioRegistro() });
         if(r && r.ok){ radioGuardar({ canal: key, nombre: radioNombreCanal(key) }); RADIO.est = await P.estado(); radioPintar(); radioPintarCab(key); }
         else { radioAviso(r && r.motivo === 'no-disponible' ? 'La radio funciona en el iPhone (no en el simulador ni en la web).' : r && r.motivo === 'salir-primero' ? 'Salga de la radio anterior antes de unirse a esta.' : 'No se pudo unir. Revise su conexión y permiso de micrófono.'); b.disabled = false; }
-      }catch(err){ radioAviso('No se pudo unir.'); b.disabled = false; }
+      }catch(err){ radioAviso(err.message || 'No se pudo unir.'); b.disabled = false; }
       return;
     }
     if(que === 'salir'){ try{ await P.salir(); }catch(err){} radioGuardar(null); RADIO.est = Object.assign({}, RADIO.est, { unido: false }); radioPintar(); radioPintarCab(key); return; }
@@ -78827,7 +78823,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       else if(ev === 'salio'){ radioGuardar(null); if(RADIO.est) RADIO.est.unido = false; if(RADIO.abierta) radioPintar(); if(MSG && MSG.con) radioPintarCab(MSG.con); }
       else if(ev === 'salida'){RADIO.altavoz=!!d.altavoz;if(RADIO.abierta&&!RADIO.hablando)radioPintar();}
       else if(ev === 'recibido'){ RADIO.escucha = true;RADIO.hablante=d.hablante || 'Equipo';RADIO.fase=d.fase || 'conectando';radioBanner(); if(RADIO.abierta) radioPintar();  }
-      else if(ev === 'error'){ RADIO.hablando=false;clearInterval(RADIO.reloj);if(RADIO.abierta)radioPintar();const reasons={'sin-oyentes':'Ningún teléfono está listo para escuchar. Comprueben que ambos estén unidos.','ocupado':'La radio está ocupada o hay una llamada activa. Espere un momento.','aviso-rechazado':'Apple no aceptó el aviso. No se transmitió la voz.','activacion':'iOS no permitió iniciar la transmisión.','microfono':'No se pudo activar el micrófono.','altavoz':'No se pudo activar la salida de audio.','audio-interrumpido':'El teléfono interrumpió la salida de audio.','conexion':'Se interrumpió la conexión.','conexion-lenta':'La conexión está demasiado lenta.','actualizar-radio':'Actualice Workspace en ambos teléfonos.'}; RADIO.error=reasons[d.que] || 'No se pudo conectar la radio.';RADIO.errorAt=Date.now();radioAviso('Último intento: '+RADIO.error); }
+      else if(ev === 'error'){ RADIO.hablando=false;clearInterval(RADIO.reloj);if(RADIO.abierta)radioPintar();const reasons={'sin-oyentes':'No hay otro teléfono conectado a la radio de este grupo. Pídales abrir este mismo grupo, tocar Radio y Unirme.','ocupado':'La radio está ocupada o hay una llamada activa. Espere un momento.','aviso-rechazado':'Apple no aceptó el aviso. No se transmitió la voz.','activacion':'iOS no permitió iniciar la transmisión.','microfono':'No se pudo activar el micrófono.','altavoz':'No se pudo activar la salida de audio.','audio-interrumpido':'El teléfono interrumpió la salida de audio.','conexion':'Se interrumpió la conexión.','conexion-lenta':'La conexión está demasiado lenta.','actualizar-radio':'Actualice Workspace en ambos teléfonos.'}; RADIO.error=reasons[d.que] || 'No se pudo conectar la radio.';RADIO.errorAt=Date.now();radioAviso('Último intento: '+RADIO.error); }
       else if(ev === 'hablando' && d.si === true){RADIO.hablando=true;RADIO.emitiendo=true;radioActualizarVista();}
       else if(ev === 'hablando' && d.si === false && RADIO.hablando){ RADIO.hablando = false; clearInterval(RADIO.reloj); if(RADIO.abierta) radioPintar(); }   // Apple cortó (llamada, otro canal)
     });
@@ -78843,6 +78839,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   function radioAplicarEstado(est){
     if(RADIO.error && Date.now()-(RADIO.errorAt || 0)>6000)RADIO.error=null;
+    if(est && est.unido && est.canal)radioGuardar({canal:est.canal,nombre:radioNombreCanal(est.canal)});
     RADIO.est=est || {};RADIO.emitiendo=!!RADIO.est.hablando;RADIO.hablando=!!(RADIO.est.hablando || RADIO.est.solicitando);RADIO.hablante=RADIO.est.hablante || '';RADIO.fase=RADIO.est.recepcion || '';
     RADIO.escucha=!!RADIO.hablante;radioBanner();
   }
@@ -78865,45 +78862,15 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
 
   setInterval(()=>{if(!document.hidden && (RADIO.abierta || RADIO.escucha))radioSincronizar();},1500);
 
-  async function radioPrivadoRPC(grupo,personas){
-    const r=await authFetch('/rest/v1/rpc/radio_privado',{method:'POST',headers:cloudHeaders(),body:JSON.stringify({p_grupo:grupo,p_personas:personas})});
-    if(!r.ok)throw new Error(r.status===403 ? 'Solo quien administra esta radio puede elegir participantes.' : 'No se pudo guardar la selección privada. Intente otra vez.');
-    return r.json();
-  }
-  function radioPuedeElegir(){return typeof msgEsCasual==='function' && !msgEsCasual() && typeof SES!=='undefined' && SES && (typeof isManager==='function' && isManager() || (msgGrupoDe(RADIO.abierta)||{}).creado_por===SES.user_id);}
-  async function radioElegir(){
-    if(RADIO.cambiando || RADIO.hablando || RADIO.escucha){radioAviso('Termine la transmisión antes de cambiar participantes.');return;}
-    const key=RADIO.abierta;if(!key || !key.startsWith('g:'))return;
-    RADIO.cambiando=true;radioAviso('Buscando participantes…');
-    try{
-      const data=await radioPrivadoRPC(key.slice(2),null);if(RADIO.abierta!==key)return;
-      RADIO.seleccion={key,data};radioPintarSelector();
-    }catch(e){radioAviso(e.message);}finally{RADIO.cambiando=false;}
-  }
-  function radioPintarSelector(){
-    const v=document.getElementById('radioVelo'),sel=RADIO.seleccion;if(!v || !sel || sel.key!==RADIO.abierta)return;
-    const chosen=new Set(sel.data.seleccion||[]);
-    v.innerHTML='<div class="radio-hoja" role="dialog" aria-label="Elegir participantes de radio"><div class="radio-cab"><b>¿Con quién quiere hablar?</b><button type="button" class="radio-x" data-radio="cancelar-seleccion" aria-label="Volver">✕</button></div><p class="radio-pie">Usted está incluido. Solo las personas elegidas podrán unirse a esta radio privada.</p><div style="max-height:36vh;overflow:auto;text-align:left">'+sel.data.opciones.map(p=>'<label style="display:flex;gap:12px;align-items:center;padding:12px"><input type="checkbox" data-radio-persona value="'+esc(p.key)+'" '+(chosen.has(p.key)?'checked':'')+'><span>'+esc(p.name)+'</span></label>').join('')+'</div><button type="button" class="radio-unir" data-radio="guardar-seleccion">Usar esta selección</button><p class="radio-pie">Cada persona debe abrir este canal y unirse. Cambiar participantes no modifica una transmisión en curso.</p><div class="radio-msj" aria-live="polite"></div></div>';
-  }
-  async function radioSeleccionAplicar(){
-    const sel=RADIO.seleccion,P=radioPlugin();if(!sel || !P || RADIO.cambiando)return;
-    const personas=[...document.querySelectorAll('#radioVelo [data-radio-persona]:checked')].map(i=>i.value);
-    if(!personas.length){radioAviso('Elija al menos una persona.');return;}
-    RADIO.cambiando=true;radioAviso('Preparando su radio privada…');
-    try{
-      const current=await P.estado();if(current.hablando || current.solicitando || current.hablante)throw new Error('Termine la transmisión antes de cambiar participantes.');
-      // Disconnect before saving: an error can never fall back to the general channel.
-      await P.salir();radioGuardar(null);RADIO.est={unido:false};
-      const deadline=Date.now()+5000;
-      while((await P.estado()).unido){if(Date.now()>deadline)throw new Error('La radio anterior todavía está cerrando. Intente otra vez.');await new Promise(r=>setTimeout(r,100));}
-      const group=await radioPrivadoRPC(sel.key.slice(2),personas);
-      if(!group || !/^[0-9a-f-]{36}$/i.test(group.id))throw new Error('No se pudo comprobar el canal privado.');
-      MSG.grupos=MSG.grupos||[];MSG.grupos=MSG.grupos.filter(g=>g.id!==group.id);MSG.grupos.push(group);
-      RADIO.seleccion=null;RADIO.abierta='g:'+group.id;RADIO.hablando=false;RADIO.escucha=false;
-      radioPintar();radioAviso('Selección guardada. Toque Unirme a la radio. Los elegidos deben unirse al mismo canal.');
-      // Refresh chat list without sending a chat message or starting the microphone.
-      try{await msgCargarGrupos();msgPintarGente();}catch(e){}
-    }catch(e){radioAviso(e.message);}finally{RADIO.cambiando=false;}
+
+  async function radioPrepararGrupo(P,key){
+    const current=await P.estado();
+    if(current.hablando || current.solicitando || current.hablante)throw new Error('Termine la transmisión antes de cambiar de grupo.');
+    if(current.saliendo || current.unido && current.canal!==key){
+      await P.salir();radioGuardar(null);
+      const deadline=Date.now()+6000;
+      while(true){const pending=await P.estado();if(!pending.unido && !pending.saliendo)break;if(Date.now()>deadline)throw new Error('La radio anterior todavía está cerrando. Intente otra vez.');await new Promise(r=>setTimeout(r,100));}
+    }
   }
   window.__rdx = { soltarYa: rdxSoltarYa, todo: rdxTodo, filas: rdxFilas, sumar: rdxSumar, activar: rdxActivar, otro: rdxOtro, hoja: () => rdxHojaHtml(rdxHojaDatos()), estado: RDX, son: RDX_SON };   // para las pruebas
   window.__rds = { todo: rdsTodo, estado: RDS };
