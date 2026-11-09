@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R326';
+  const APP_BUILD = '2026-11-08-R327';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70144,7 +70144,9 @@ function lumiComposeParse(input,draft,context){
   if(ch){app=channel(ch[1]);rest=rest.slice(0,ch.index).trim();}
   if(rest&&rest.length<=120&&!/\b(y|and|dijo|said)\b/i.test(rest))return target(rest,app,text);
  }
- if(draft?.status==='incomplete'&&draft.query&&draft.app&&!draft.text&&!/^(?:busca|abre|lee|revisa|cu[aá]nto|qu[eé]|tenemos|hay|look|open|read|check)\b/i.test(raw)&&!/[?¿]/.test(raw))return {...draft,kind:'partial',text:unquote(raw)};
+ // After "What do you want to say?", a question is message content too.
+ // Explicit navigation or a new internal balance query still leaves composition.
+ if(draft?.status==='incomplete'&&draft.query&&draft.app&&!draft.text&&!/^[¿? ]*(?:busca|abre|lee|revisa|look|open|read|check|cu[aá]nto(?: le| les)? debo|tenemos mensajes|hay mensajes)\b/i.test(raw))return {...draft,kind:'partial',text:unquote(raw)};
  return null;
 }
 function lumiComposeReduce(state,command,owner){
@@ -70305,7 +70307,7 @@ function lumiReplyButtons(routes){
  const rows=lumiMessageContexts(routes,SES.user_id+'|'+SES.company_id),log=document.getElementById('asConversacion');if(!rows.length||!log)return;
  const card=document.createElement('div');card.className='as-chat-docs';
  for(const route of rows.slice(0,4)){
-  const b=document.createElement('button');b.type='button';b.textContent='Responder a '+route.query+' · '+({workspace:'Workspace',whatsapp:'WhatsApp',messages:'Mensajes'}[route.app]);
+  const b=document.createElement('button');b.type='button';b.textContent='Responder a '+route.query+' · '+({workspace:'Workspace',whatsapp:'WhatsApp',messages:'Mensajes'}[route.app]);b.style.cssText='padding:10px 14px;min-height:44px;border:1px solid #394754;border-radius:16px;background:#182630;color:#e8f3ff;text-align:left;font:inherit;cursor:pointer;';
   b.addEventListener('click',()=>{if(route.owner!==SES.user_id+'|'+SES.company_id)return;lumiSetMessageContext([{...route,at:Date.now()}]);AS.pregunta=null;void asComposeMessage({kind:'partial',query:route.query,app:route.app,key:route.key,text:''},'Responder a '+route.query);});
   card.appendChild(b);
  }
