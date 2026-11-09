@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R315';
+  const APP_BUILD = '2026-11-08-R316';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69474,15 +69474,18 @@ async function lumiCheckWorkspaceArrivals(){
  finally{LUMI_MESSAGE_CHECK=false;}
 }
 function lumiPaymentRequestIntent(text){
- const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.]/g,'').replace(/^lumi[, ]+/, '').trim();
- if(/^(?:quien|quienes) (?:esta|estan|anda|andan) (?:pidiendo|solicitando) (?:pago|pagos|un pago|adelanto|adelantos|un adelanto)$/.test(t)||/^(?:que|hay|tenemos) solicitudes de (?:pago|adelanto|pagos) (?:pendientes|nuevas)$/.test(t)||/^who (?:is|are) (?:asking for|requesting) (?:payment|an advance|a payment|payments)$/.test(t))return /adelanto|advance/.test(t)&&!/pago/.test(t)?'adelanto':'pago';
- return null;
+ const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.]/g,'').replace(/^(?:lumi[, ]+|dime |revisa |checa )+/, '').trim();
+ const who=/^(?:quien|quienes|hay alguien que|hay alguien) (?:me |nos )?(?:(?:esta|estan|anda|andan) )?(?:pidiendo|solicitando|pide|piden|pidio|pidieron|ha pedido|han pedido) (?:un |el |su )?(?:pago|pagos|adelanto|adelantos|dinero)$/.test(t);
+ const list=/^(?:que|hay|tenemos) solicitudes de (?:pago|adelanto|pago y adelanto|pagos|adelantos)(?: pendientes| nuevas)?$/.test(t);
+ const english=/^who (?:is|are) (?:asking for|requesting) (?:payment|an advance|a payment|payments|money)$/.test(t);
+ if(!who&&!list&&!english)return null;
+ return /adelanto|advance/.test(t)&&!/pago/.test(t)?'adelanto':'dinero';
 }
 function lumiPaymentRequestSummary(rows,kind,en=false){
- const pending=rows.filter(m=>m&&m.tipo==='peticion'&&m.peticion===kind&&!m.borrado_at&&['pendiente','en_espera','no_recibida'].includes(m.estado||'pendiente'));
- if(!pending.length)return en?'There are no pending '+(kind==='adelanto'?'advance':'payment')+' requests in Workspace. A payment awaiting confirmation is a different status.':'No hay solicitudes de '+(kind==='adelanto'?'adelanto':'pago')+' pendientes en Workspace. Un pago esperando confirmación es otra cosa.';
+ const pending=rows.filter(m=>m&&m.tipo==='peticion'&&(kind==='dinero'?['pago','adelanto'].includes(m.peticion):m.peticion===kind)&&!m.borrado_at&&['pendiente','en_espera','no_recibida'].includes(m.estado||'pendiente'));
+ if(!pending.length)return en?'There are no pending '+(kind==='adelanto'?'advance':kind==='dinero'?'payment or advance':'payment')+' requests in Workspace. A payment awaiting confirmation is a different status.':'No hay solicitudes de '+(kind==='adelanto'?'adelanto':kind==='dinero'?'pago o adelanto':'pago')+' pendientes en Workspace. Un pago esperando confirmación es otra cosa.';
  const names=[...new Set(pending.map(m=>String(m.de_nombre||'Una persona sin nombre visible').trim()))];
- return (en?'Pending '+(kind==='adelanto'?'advance':'payment')+' requests in Workspace: ':'Solicitudes de '+(kind==='adelanto'?'adelanto':'pago')+' pendientes en Workspace: ')+names.join(', ')+'.';
+ return (en?'Pending '+(kind==='adelanto'?'advance':kind==='dinero'?'payment or advance':'payment')+' requests in Workspace: ':'Solicitudes de '+(kind==='adelanto'?'adelanto':kind==='dinero'?'pago o adelanto':'pago')+' pendientes en Workspace: ')+names.join(', ')+'.';
 }
 async function asPaymentRequestRead(text){
  const kind=lumiPaymentRequestIntent(text);if(!kind||SES.role!=='manager')return false;
@@ -69493,7 +69496,7 @@ async function asPaymentRequestRead(text){
   if(!AS.abierto||owner!==SES.user_id+'|'+SES.company_id)return true;
   const fresh=[];let after='';
   while(true){
-   const url='/rest/v1/mensajes?select=*&tipo=eq.peticion&peticion=eq.'+kind+'&borrado_at=is.null&or=(estado.is.null,estado.in.(pendiente,en_espera,no_recibida))&order=id.asc&limit=200'+(after?'&id=gt.'+encodeURIComponent(after):'');
+   const url='/rest/v1/mensajes?select=*&tipo=eq.peticion&'+(kind==='dinero'?'peticion=in.(pago,adelanto)':'peticion=eq.adelanto')+'&borrado_at=is.null&or=(estado.is.null,estado.in.(pendiente,en_espera,no_recibida))&order=id.asc&limit=200'+(after?'&id=gt.'+encodeURIComponent(after):'');
    const response=await authFetch(url,{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});if(!response.ok)throw Error('requests-unavailable');
    const page=await response.json();if(!Array.isArray(page))throw Error('invalid-requests');fresh.push(...page);
    if(page.length<200)break;const next=page.at(-1)?.id;if(!next||next===after)throw Error('invalid-pagination');after=next;
