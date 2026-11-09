@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R323';
+  const APP_BUILD = '2026-11-08-R324';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -19087,7 +19087,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     b.id = 'appUpdateBar'; b.setAttribute('role', 'button');
     b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:400;background:#1f6f5b;color:#fff;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top));'
       + 'font-weight:700;display:flex;gap:10px;align-items:center;justify-content:center;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.35);';
-    b.innerHTML = '<span></span>'; b.querySelector('span').textContent = 'Versión nueva lista (' + v + ') — tocar para usarla';
+    b.innerHTML = '<span></span>'; b.querySelector('span').textContent = 'Actualizar pantallas (' + v + ') — no instala la parte de iPhone';
     b.addEventListener('click', async ()=>{
       if(b.dataset.ocupada) return; b.dataset.ocupada = '1';
       if(await usarVersionBajada(v)) return;
@@ -19097,6 +19097,8 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   }
   async function actNativoNueva(latest){
     const A = actPlugin(); if(!A) return 'sin-plugin';
+    await checkAppUpdate();
+    if(document.getElementById('appUpdateBar')?.dataset.instalar==='1')return 'necesita-instalador';
     let e = null; try{ e = await A.estado(); }catch(err){}
     // (R87) esa versión pide un aparato más nuevo (cable o TestFlight): no se vuelve a bajar cada minuto (son ~4.5 MB cada vez)
     if(e && e.esperandoCable && !selloMasNuevo(latest, e.esperandoCable)) return 'necesita-cable';
@@ -60253,9 +60255,13 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       try{
         const r = await fetch(NATIVO_TXT + '?cb=' + Date.now(), { cache: 'no-store' });
         const v = r.ok ? String(await r.text()).trim() : '';
-        if(/^\d{4}-\d{2}-\d{2}/.test(v) && e && e.nativo && v > e.nativo) nativoNuevo = v;
+        if(/^\d{4}-\d{2}-\d{2}/.test(v) && e && e.nativo && selloMasNuevo(v, e.nativo)) nativoNuevo = v;
       }catch(err){}
-      if(avisoAppPuesto || document.getElementById('appUpdateBar')) return;
+      const previousBar = document.getElementById('appUpdateBar');
+      const nativeRequired=!!(e && e.esperandoCable || nativoNuevo);
+      if(previousBar && (!nativeRequired || previousBar.dataset.instalar==='1')) return;
+      if(previousBar)previousBar.remove();
+      avisoAppPuesto=false;
       // (20-oct) Su queja: "en Scanova toco la barra y me lleva a instalar; en Field
       // Reports la toco y no hace NADA". La barra que salia casi siempre era la de
       // "Ya se bajo la version X" (cada web publicada la trae), y tocarla solo la
@@ -60269,7 +60275,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
                 'Esa parte no se baja sola: toque aqui para instalarla desde Safari.';
         color = '#8a5c08'; instalar = true;
       }else if(nativoNuevo){
-        texto = 'Hay una version nueva del aparato (' + nativoNuevo + '): reconocedor y traductor del iPhone. Toque aqui para instalarla desde Safari.';
+        texto = 'Instalar actualización de Workspace para iPhone (' + nativoNuevo + '). Incluye correcciones de la radio. Toque para abrir Safari.';
         color = '#8a5c08'; instalar = true;
       }else if(e && e.lista){
         texto = 'Ya se bajo la version nueva (' + e.lista + '). Toque aqui para usarla.';
@@ -60278,7 +60284,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       if(!texto) return;
       avisoAppPuesto = true;
       const b = document.createElement('div');
-      b.id = 'appUpdateBar';
+      b.id = 'appUpdateBar'; b.dataset.instalar=instalar?'1':'0';
       // el padding corto va PRIMERO y el de arriba DESPUES: al reves, el corto
       // le borraba el margen del reloj (la isla le tapaba el texto).
       b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:400;background:' + color +
@@ -60288,7 +60294,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       b.innerHTML = '<span>' + esc(texto) + '</span>';
       b.setAttribute('role', 'button');
       b.addEventListener('click', async ()=>{
-        if(instalar){ abrirEnSafari(NATIVO_PAGINA); b.remove(); avisoAppPuesto = false; return; }
+        if(instalar){ abrirEnSafari(NATIVO_PAGINA); b.querySelector('span').textContent='En Safari, toque Actualizar Workspace y después Instalar. Si Safari no abrió, toque aquí otra vez.'; return; }
         if(usarYa){
           if(b.dataset.ocupada) return;
           b.dataset.ocupada = '1';
@@ -78853,6 +78859,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
         : '<div class="radio-txt">' + (otro ? 'Está conectado a <b>' + esc(g.nombre || '') + '</b>. Al continuar, se cambiará a la radio de este grupo.' : 'Esta es la radio de este mismo grupo de mensajes. Sus miembros deben conectarse aquí para escucharse.') + '</div>'
           + '<button type="button" class="radio-unir" data-radio="unir">' + (otro ? 'Conectarme a este grupo' : 'Unirme a la radio') + '</button>'
           + '<div class="radio-pie">Cada participante debe unirse a esta misma radio. Botón de Acción: pulse para hablar y vuelva a pulsar para terminar.</div>')
+      + '<button type="button" class="radio-salir" data-radio="actualizar">Instalar actualización de Workspace en Safari</button>'
       + '<div class="radio-msj" aria-live="polite"></div></div>';
     if(RADIO.error && Date.now()-(RADIO.errorAt || 0)<=6000)radioAviso('Último intento: '+RADIO.error);
   }
@@ -78864,6 +78871,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const b = e.target.closest('[data-radio]'); if(!b) return; const P = radioPlugin(); if(!P) return;
     const que = b.dataset.radio, key = RADIO.abierta;
     if(que === 'cerrar'){ radioCerrar(); return; }
+    if(que === 'actualizar'){ abrirEnSafari(NATIVO_PAGINA); radioAviso('En Safari, toque Actualizar Workspace y después Instalar. No borre la app.'); return; }
     if(que === 'participantes'){if(RADIO.hablando || RADIO.escucha){radioAviso('Espere a que termine la transmisión para revisar los participantes.');return;}radioCerrar();if(MSG.con!==key)await msgAbrir(key);msgMiembrosAbrir();return;}
     if(que === 'unir'){ RADIO.error=null;
       b.disabled = true; radioAviso('Uniéndote…');
