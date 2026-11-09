@@ -11429,7 +11429,7 @@ html body #asPanel[data-lumi-theme="restoration"] :is(.as-prev-tit,.as-prev-sub,
 html body #asPanel[data-lumi-theme="restoration"] :is(.as-prev-tipo,.as-tarjeta-tipo,.as-gal-tipo){color:#b31930!important;}
 html body #asPanel[data-lumi-theme="restoration"] :is(.as-prev,.as-tarjeta,.as-gal,.as-chat-docs) button{background:#fff;color:#a6172d;border-color:#d4c1c5;}
 html body #asPanel[data-lumi-theme="restoration"] button:focus-visible{outline-color:#145fc1;}
-/* R343: traveling water, small crests and spray; blue comet with a fading tail. */
+/* R346: water sloshes across the entire container at constant volume; blue comet preserved. */
 html body:is(.rd-home,.rd-perfil,.rd-pant) #rdCab{
   background:#fafafa;border-color:#dc2632;animation:none;
 }
@@ -11684,7 +11684,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
        La curva va en su propia caja recortada a las esquinas, para que el brillo de arriba pueda salirse del borde. -->
   <div class="rd-cab" id="rdCab">
     <span class="rd-cab-caja" aria-hidden="true"><svg class="rd-cab-ola" viewBox="0 0 400 52" preserveAspectRatio="none">
-      <defs><linearGradient id="rdLiquidFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dd1635" stop-opacity=".65"/><stop offset="1" stop-color="#ed4256" stop-opacity=".18"/></linearGradient></defs>
+      <defs><linearGradient id="rdLiquidFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#df2440" stop-opacity=".45"/><stop offset="1" stop-color="#f04a60" stop-opacity=".12"/></linearGradient></defs>
       <path class="rd-cab-liquid-back" d="M0 52C200 52 250 48 286 28S340 3 400 4V54H0Z"/>
       <path class="rd-cab-liquid" d="M0 52C200 52 250 48 286 28S340 3 400 4V54H0Z"/>
       <path class="rd-cab-liquid-crest" d="M0 52C200 52 250 48 286 28S340 3 400 4"/>
@@ -19103,7 +19103,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R345';
+  const APP_BUILD = '2026-11-09-R346';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -83515,45 +83515,56 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
 
 <script>
   (function(){
-    // Traveling waves are generated once; SVG interpolates them without a JS frame loop.
+    // Art-directed container slosh: fixed volume, whole-mass tilt, lag and rebound.
+    // Frames are generated once; SVG interpolates without a JS animation loop.
     function rdHeaderWater(svg){
       if(!svg||svg.dataset.waterReady)return;
       svg.dataset.waterReady='1';
-      const NS='http://www.w3.org/2000/svg',TAU=Math.PI*2,steps=64;
-      const base=x=>52-48/(1+Math.exp(-(x-286)/25));
+      const NS='http://www.w3.org/2000/svg',TAU=Math.PI*2,steps=96,T=7.6;
+      const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
       function surface(phase,back){
-        const points=[];
+        const angle=TAU*(phase+(back ? .024 : 0));
+        const tilt=.36*Math.cos(angle)+.025*Math.sin(3*angle);
+        const front=200-152*Math.cos(angle-.18);
+        const speed=Math.sin(angle),raw=[];
         for(let x=0;x<=400;x+=5){
-          const ramp=.32+.68/(1+Math.exp(-(x-235)/25));
-          const a=TAU*(x/(back?116:92)-(back?2:3)*phase)+(back?1.2:0);
-          const swell=2.1*Math.sin(TAU*(x/390-phase));
-          const chop=.55*Math.sin(TAU*(x/31-8*phase)+.7);
-          const y=base(x)+(back?2.4:0)+swell+ramp*((back?3.8:6)*Math.sin(a)+1.15*Math.sin(2*a)+chop);
-          points.push((x?'L':'M')+x+' '+y.toFixed(2));
+          const swell=4.2*Math.exp(-Math.pow((x-front)/43,2))*Math.sin(angle+.7);
+          const ripple=(1.5+1.7*Math.abs(speed))*Math.sin(TAU*x/115-2*angle);
+          const rebound=2.3*Math.sin(4*angle-x/39)*Math.pow(Math.abs(Math.cos(angle)),5);
+          raw.push(tilt*(x-200)+swell+ripple+rebound);
         }
-        return points.join('');
+        // Solve the waterline after clipping at the bottle's walls. No water appears/disappears.
+        const target=400*(back?14.2:15),dx=5;
+        let low=-200,high=250;
+        for(let k=0;k<22;k++){
+          const level=(low+high)/2;
+          const volume=raw.reduce((sum,h,i)=>sum+clamp(52-level-h,0,52)*(i===0||i===80 ? .5 : 1)*dx,0);
+          if(volume>target)low=level;else high=level;
+        }
+        const level=(low+high)/2;
+        return raw.map(h=>clamp(level+h,0,54));
       }
+      const path=ys=>ys.map((y,i)=>(i?'L':'M')+(i*5)+' '+y.toFixed(2)).join('');
       function animate(el,attribute,values,opts={}){
         const a=document.createElementNS(NS,'animate');
-        for(const [k,v] of Object.entries({attributeName:attribute,values:values.join(';'),dur:'6.4s',repeatCount:'indefinite',calcMode:'linear',...opts}))a.setAttribute(k,v);
+        for(const [k,v] of Object.entries({attributeName:attribute,values:values.join(';'),dur:T+'s',repeatCount:'indefinite',calcMode:'linear',...opts}))a.setAttribute(k,v);
         el.appendChild(a);
       }
       const front=[],back=[];
-      for(let i=0;i<=steps;i++){const phase=(i===steps?0:i/steps);front.push(surface(phase,false));back.push(surface(phase,true)+'L400 54L0 54Z');}
+      for(let i=0;i<=steps;i++){const p=i===steps?0:i/steps;front.push(path(surface(p,false)));back.push(path(surface(p,true))+'L400 54L0 54Z');}
       const liquid=svg.querySelector('.rd-cab-liquid'),rear=svg.querySelector('.rd-cab-liquid-back'),crest=svg.querySelector('.rd-cab-liquid-crest');
-      const closed=front.map(p=>p+'L400 54L0 54Z');
-      for(const [path,frames] of [[liquid,closed],[rear,back],[crest,front]]){path.setAttribute('d',frames[0]);animate(path,'d',frames);}
-      // Small droplets break where the moving crests meet the curved divider.
+      for(const [el,values] of [[liquid,front.map(p=>p+'L400 54L0 54Z')],[rear,back],[crest,front]]){el.setAttribute('d',values[0]);animate(el,'d',values);}
+      // A brief spray at each reversal follows the returning liquid, not a fixed corner.
       const spray=svg.querySelector('.rd-cab-spray');
-      for(let i=0;i<8;i++){
-        const x=286+(i%4)*10,y=base(x)-1,dx=5+(i%3)*3,lift=5+(i%4)*1.6;
-        const drop=document.createElementNS(NS,'circle');drop.setAttribute('r',i%3===0?'1.05':'.65');
-        drop.setAttribute('cx',x);drop.setAttribute('cy',y);drop.setAttribute('opacity','0');
-        const timing={dur:'3.2s',begin:(-i*.12-(i>3?1.1:0))+'s',keyTimes:'0;.09;.22;.35;1'};
-        animate(drop,'cx',[x,x+dx*.4,x+dx,x+dx*1.4,x+dx*1.4],timing);
-        animate(drop,'cy',[y,y-lift,y-lift*.5,y+2,y+2],timing);
-        animate(drop,'opacity',[0,.65,.4,0,0],timing);
-        spray.appendChild(drop);
+      for(let side=0;side<2;side++)for(let i=0;i<5;i++){
+        const x=side?280-i*5:120+i*5,dir=side?-1:1;
+        const y=surface(side*.5,false)[x/5]-1,lift=5+(i%3)*2,dx=dir*(9+i*1.8);
+        const drop=document.createElementNS(NS,'circle');
+        drop.setAttribute('r',i%3===0?'1':'.6');drop.setAttribute('cx',x);drop.setAttribute('cy',y);drop.setAttribute('opacity','0');
+        const timing={begin:(side*T/2+i*.055)+'s',keyTimes:'0;.035;.08;.13;1'};
+        animate(drop,'cx',[x,x+dx*.4,x+dx,x+dx*1.5,x+dx*1.5],timing);
+        animate(drop,'cy',[y,y-lift,y-lift*.45,y+3,y+3],timing);
+        animate(drop,'opacity',[0,.65,.4,0,0],timing);spray.appendChild(drop);
       }
     }
     const svg=document.querySelector('#rdCab .rd-cab-ola');
