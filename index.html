@@ -70000,7 +70000,17 @@ function extract(source,today){
 return {order,extract};
 })();
   let AS_DESKTOP_BUSY=false;
-  async function asEscritorioMac(order){
+  // LUMI_RESPONSE_STYLE_BEGIN
+function lumiWindowSummary(result){
+ const windows=result.windows||[];if(!windows.length)return 'No veo ventanas abiertas.';
+ const groups=new Map();for(const w of windows){const name=String(w.application||'Aplicación').replace(/[\u200e\u200f]/g,'').trim();if(!groups.has(name))groups.set(name,[]);groups.get(name).push(w);}
+ const apps=[...groups].map(([name,rows])=>{const min=rows.filter(w=>w.minimized).length;return (rows.length>1?rows.length+' de ':'')+name+(min===rows.length?' (minimizada'+(min>1?'s':'')+')':min?' ('+min+' minimizada'+(min>1?'s':'')+')':'');});
+ return 'Veo '+windows.length+' ventana'+(windows.length>1?'s':'')+': '+apps.slice(0,8).join(', ')+(apps.length>8?' y '+(apps.length-8)+' aplicaciones más':'')+'. ¿Cuál quiere al frente?';
+}
+if(typeof module==='object'&&module.exports)module.exports={lumiWindowSummary};
+// LUMI_RESPONSE_STYLE_END
+
+async function asEscritorioMac(order){
     if(order.action==='clarify'){asPararOido();asCallar();asMostrarRespuesta(order.reason);asHablar(order.reason,asSeguirOyendo);return;}
     if(AS_DESKTOP_BUSY){asMostrarRespuesta('Estoy terminando la consulta anterior.');return;}
     const started=Date.now(),owner=SES.user_id+'|'+SES.company_id,active=()=>AS.abierto&&SES.role==='manager'&&owner===SES.user_id+'|'+SES.company_id;
@@ -70015,7 +70025,7 @@ return {order,extract};
       if(order.app==='desktop'){
        if(order.action==='window_pair'&&['layout_done','layout_review'].includes(result.status))LUMI_LAYOUT_CONTEXT={owner,at:Date.now(),queries:[...order.queries],screen:order.screen};
        const labels=result.windows.map(w=>w.application+' — '+(w.title||'Sin título')+(w.minimized?' (minimizada)':''));
-       const answer=result.status==='bulk_closed'?'Revisé las ventanas.\n'+labels.join('\n'):result.status==='layout_done'?'Listo, dejé '+labels[0]+' a la izquierda y '+labels[1]+' a la derecha, del mismo tamaño y con espacio abajo para el Dock.':result.status==='layout_review'?'No pude dejar las dos ventanas bien acomodadas. Una ventana limita su tamaño o está a pantalla completa; el acomodo puede haber quedado parcial.':result.status==='files_denied'?'No pude acceder a algunas carpetas de la Mac. No puedo confirmar si el archivo está ahí; falta revisar el acceso del conector.':result.status==='files'?'Encontré estos archivos por nombre (búsqueda parcial por nombre, máximo 25):\n'+(labels.join('\n')||'Sin coincidencias en las ubicaciones revisadas; la búsqueda no cubre todo el disco.'):result.status==='close_review'?'Dejé la ventana abierta o pendiente de revisar. No descarté cambios ni pulsé No guardar.':result.status==='window_closed'?'Cerré la ventana sin descartar cambios.':result.status==='screen_missing'?'Esa pantalla no está conectada. Pídeme la lista de pantallas.':result.status==='windows'?'Estas son las ventanas abiertas:\n'+labels.join('\n'):result.status==='window_choice'?'Hay varias ventanas. Dime el título exacto:\n'+labels.join('\n'):result.status==='window_not_found'?'No encontré esa ventana. Pídeme la lista de ventanas.':'Listo: '+labels.join(', ')+'.';
+       const answer=result.status==='bulk_closed'?'Revisé las ventanas.\n'+labels.join('\n'):result.status==='layout_done'?'Listo, dejé '+labels[0]+' a la izquierda y '+labels[1]+' a la derecha, del mismo tamaño y con espacio abajo para el Dock.':result.status==='layout_review'?'No pude dejar las dos ventanas bien acomodadas. Una ventana limita su tamaño o está a pantalla completa; el acomodo puede haber quedado parcial.':result.status==='files_denied'?'No pude acceder a algunas carpetas de la Mac. No puedo confirmar si el archivo está ahí; falta revisar el acceso del conector.':result.status==='files'?'Encontré estos archivos por nombre (búsqueda parcial por nombre, máximo 25):\n'+(labels.join('\n')||'Sin coincidencias en las ubicaciones revisadas; la búsqueda no cubre todo el disco.'):result.status==='close_review'?'Dejé la ventana abierta o pendiente de revisar. No descarté cambios ni pulsé No guardar.':result.status==='window_closed'?'Cerré la ventana sin descartar cambios.':result.status==='screen_missing'?'Esa pantalla no está conectada. Pídeme la lista de pantallas.':result.status==='windows'?lumiWindowSummary(result):result.status==='window_choice'?'Hay varias ventanas. Dime el título exacto:\n'+labels.join('\n'):result.status==='window_not_found'?'No encontré esa ventana. Pídeme la lista de ventanas.':'Listo: '+labels.join(', ')+'.';
        asMostrarRespuesta(answer);asAccionVisible('Ventanas comprobadas','done');asHablar(answer,asSeguirOyendo);return;
       }
       if(order.calendar && result.status==='chat_messages'){
