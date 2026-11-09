@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R332';
+  const APP_BUILD = '2026-11-09-R333';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67882,12 +67882,13 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
     const nearEnd = AS_CHAT_RESTORING || role==='user' || role==='assistant' || newReply || box.scrollHeight-box.scrollTop-box.clientHeight<60;
     let row = role==='user'?Array.from(log.children).find(r=>r.dataset.transient==='1'):null;
     row = row || log.lastElementChild;
-    if(!row || row.dataset.role !== role || row.dataset.sharedRemote==='1' || partial&&row.dataset.transient!=='1'){
+    if(!row || row.dataset.role !== role || row.dataset.sharedRemote==='1' || row.dataset.keepPreview==='1'&&row.lastElementChild?.textContent!==texto || partial&&row.dataset.transient!=='1'){
       row = document.createElement('p'); row.dataset.role = role;
       const label = document.createElement('strong'); label.textContent = role === 'user' ? (asEn() ? 'You: ' : 'Tú: ') : 'Lumi: ';
       row.appendChild(label); row.appendChild(document.createElement('span')); log.appendChild(row);
     }
     row.lastElementChild.textContent = texto;
+    if(role==='assistant'&&/^(?:Le env[ií]o a |Le diría a |Le enviaré a |I'll send |I would send ).*[«“]/s.test(texto))row.dataset.keepPreview='1';
     if(partial)row.dataset.transient='1';else delete row.dataset.transient;
     if(!partial&&!AS_CHAT_RESTORING&&SES.role==='manager'){try{row.dataset.sharedId=asShared().put(row.dataset.sharedId,role,texto)||'';delete row.dataset.sharedRemote;}catch(e){asBit('Historial pendiente: '+e.message);}}
     asChatFollow(log,nearEnd);
@@ -69317,7 +69318,7 @@ function lumiWindowPairOrder(text){
 function lumiWindowOrder(text){
  const pair=lumiWindowPairOrder(text);if(pair)return pair;
  const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿?!.]+$/,'').replace(/^(?:oye )?lumi[, ]+/,'').replace(/[, ]+(?:por favor|please|porfa)$/,'');
- if(/^(?:que ventanas tengo abiertas|muestrame las ventanas|lista las ventanas|list windows|show my windows)$/.test(t))return {app:'desktop',action:'list_windows'};
+ if(/^(?:(?:dime|muestrame|ensename|tell me|show me) )?(?:que ventanas (?:tengo|estan|hay)(?: abiertas)?(?: en (?:la|mi) (?:mac|computadora))?|(?:las )?ventanas abiertas(?: en (?:la|mi) mac)?|(?:the )?open windows(?: on (?:my|the) mac)?|what windows are open(?: on (?:my|the) mac)?|lista las ventanas|list windows|show my windows|muestrame las ventanas)$/.test(t))return {app:'desktop',action:'list_windows'};
  const bulk=/^(?:cierra|cierrame|close) (?:todas las (?:pantallas|ventanas)|todo|all windows)(?: (?:en|de) (?:la )?(?:pantalla|screen) (\d+))?$/.exec(t);
  if(bulk)return {app:'desktop',action:'window_close',query:'*',...(bulk[1]?{screen:Number(bulk[1])}:{})};
  if(/^(?:cierra esas|cierralas|close those)$/.test(t)){const owner=SES.user_id+'|'+SES.company_id;if(!LUMI_LAYOUT_CONTEXT||LUMI_LAYOUT_CONTEXT.owner!==owner||Date.now()-LUMI_LAYOUT_CONTEXT.at>600000)return {app:'desktop',action:'clarify',reason:'¿Cuáles ventanas quieres cerrar?'};return {app:'desktop',action:'window_close',query:'@pair',queries:LUMI_LAYOUT_CONTEXT.queries,screen:LUMI_LAYOUT_CONTEXT.screen};}
@@ -70103,7 +70104,7 @@ async function lumiBrainRequest(payload){
  const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(company)+'&clave=eq.lumi_local_model_device');const d=rows?.[0]?.valor;
  if(!same()||!d?.available||d.userId!==user||Date.now()-Date.parse(d.updatedAt)>180000)throw Error('La Mac no está disponible.');
  const id=crypto.randomUUID(),route='/rest/v1/lumi_model_jobs?id=eq.'+id;
- await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:user,company_id:company,worker_id:d.workerId,state:'queued',payload:{...payload,local_profile:'lumi_reply_brain'}})});
+ await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:user,company_id:company,worker_id:d.workerId,state:'queued',payload:{...payload,local_profile:payload.operation==='rewrite'?'lumi_message_draft':'lumi_reply_brain'}})});
  try{const until=Date.now()+65000;while(Date.now()<until){if(!same())throw Error('La sesión cambió.');const j=(await call(route+'&select=state,result'))?.[0];if(j?.state==='failed')throw Error('No pude preparar una sugerencia con el modelo local.');if(j?.state==='done'){const r=j.result?.data;if(!r||r.sent!==false)throw Error('Respuesta no válida.');return r;}await new Promise(r=>setTimeout(r,500));}throw Error('La sugerencia tardó demasiado.');}
  finally{if(same())await call(route,{method:'DELETE'}).catch(()=>{});}
 }
@@ -70177,7 +70178,10 @@ function lumiComposeParse(input,draft,context){
  const t=String(input||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/^(?:(?:lumi|oye|hey|por favor|please)[, ]+)+/,'');
  const preview=/^(?:prepara|redacta|draft|write)(?:\s|$)/.test(t)||/\b(?:sin enviar|no (?:lo )?envies|no (?:lo )?mandes|don't send|do not send|not yet)\b/.test(t);
  const direct=/^(?:mandale|manda un mensaje|enviale|envia un mensaje|escribele|escribile|dile|diles|respondele|responde|contestale|preguntale|preguntele|send a message|message|text|reply|respond|tell|ask (?:him|her|them))(?:\s|:|[.!]*$)/.test(t);
- if(['partial','draft','replace','recipient'].includes(command.kind))command.intent=preview?'preview':direct?'send':draft?.status==='incomplete'?(draft.intent||'send'):'preview';
+ if(command.text&&!/["“][\s\S]*["”]/.test(input)&&/\b(?:o que|y que|para poder ayudarlo|para poder ayudarla|tell him|tell her|ask him|ask her)\b/i.test(command.text)){
+  command.instruction=command.text;command.text='';command.needsRewrite=true;command.intent='preview';
+ }
+ if(['partial','draft','replace','recipient'].includes(command.kind)&&!command.intent)command.intent=preview?'preview':direct?'send':draft?.status==='incomplete'?(draft.intent||'send'):'preview';
  return command;
 }
 function lumiContactFirst(name){
@@ -70201,11 +70205,17 @@ function lumiComposeParseIntent(input,draft,context){
  if(draft&&/^(?:muestrame (?:lo que le enviaras|el mensaje)|que (?:le )?(?:vas a enviar|le enviaras)|me puedes decir que es lo que le vas a enviar(?: para ver)?|show me (?:the message|what you will send))[¿?.!]*$/.test(n))return {kind:'preview'};
  if(draft&&/^(?:cancela(?: el mensaje)?|cancel(?: the message)?|olvidalo|descarta el borrador)[.!]*$/.test(n))return {kind:'cancel'};
  if(draft&&/^(?:no (?:lo )?envies|todavia no|espera|don't send|do not send|not yet)[.!]*$/.test(n))return {kind:'hold'};
- if(draft&&/^(?:envialo|mandalo|envialo ahora|send it|send it now|si,? envialo)[.!]*$/.test(n))return {kind:'send'};
+ if(/^(?:envialo|mandalo|envialo ahora|send it|send it now|si,? envialo)[.!]*$/.test(n))return {kind:'send'};
  let m;
  if(draft&&(m=/^(?:cambia(?: el texto)?|corrige(?: el texto)?|replace(?: the text)?|change(?: the text)?)\s*(?::|por\s+|to\s+)([\s\S]+)$/i.exec(raw)))return {kind:'replace',text:unquote(m[1])};
  if(draft&&(m=/^(?:agrega|añade|anade|append|add)\s*:\s*([\s\S]+)$/i.exec(raw)))return {kind:'replace',text:draft.text+' '+unquote(m[1])};
  if(draft&&(m=new RegExp('^(?:mejor para|cambia el destinatario a|change recipient to)\\s+(.+?)\\s+(?:en|in|on)\\s+('+via+')[.!]*$','i').exec(raw)))return {kind:'recipient',query:m[1].trim(),app:channel(m[2]),key:null};
+ // A new action or a recipient correction is never the body of an unfinished message.
+ if(draft?.status==='incomplete'&&/^(?:no[, ]+)?(?:(?:el|ella) se llama|se llama|his name is|her name is|the name is)\s+/i.test(n)){
+  const name=raw.replace(/^(?:no[, ]+)?(?:(?:[eé]l|ella) se llama|se llama|his name is|her name is|the name is)\s+/i,'').trim();
+  return {...draft,kind:'partial',query:name,key:null,intent:'preview'};
+ }
+ if(draft?.status==='incomplete'&&/^[¿? ]*(?:pon|ponme|acomoda|ordena|cierra|cerrar|minimiza|maximiza|expande|mueve|mover|traslada|abre|abrir|busca|buscar|lee|revisa|verifica|cambia de|mu[eé]strame|ens[eé]ñame|put|close|move|minimize|maximize|resize|arrange|open|find|read|check|show)\b/i.test(raw))return null;
  if(draft?.status==='incomplete'){
   if(!draft.query&&draft.choices?.length){const chosen=channel(raw),hasChannel=new RegExp('(?:^|\\s)('+via+')(?:[.!]*$)','i').test(raw);const name=n.replace(new RegExp('(?:^|\\s+)(?:(?:en|por|in|on)\\s+)?(?:'+via+')[.!]*$','i'),'').trim();const pick=draft.choices.filter(r=>(!hasChannel||r.app===chosen)&&(!name||norm(r.query)===name||norm(r.query).startsWith(name+' ')));if(pick.length===1)return {...draft,...pick[0],text:draft.text,kind:'partial'};}
   const ch=new RegExp('^(?:(?:resp[oó]ndele|cont[eé]stale|reply)\\s+)?(?:en |por |in |on )?('+via+')[.!]*$','i').exec(raw);
@@ -70232,7 +70242,7 @@ function lumiComposeParseIntent(input,draft,context){
  }
  // After "What do you want to say?", a question is message content too.
  // Explicit navigation or a new internal balance query still leaves composition.
- if(draft?.status==='incomplete'&&draft.query&&draft.app&&!draft.text&&!/^[¿? ]*(?:busca|abre|lee|revisa|look|open|read|check|cu[aá]nto(?: le| les)? debo|tenemos mensajes|hay mensajes)\b/i.test(raw))return {...draft,kind:'partial',text:unquote(raw)};
+ if(draft?.status==='incomplete'&&draft.query&&draft.app&&!draft.text&&!/^[¿? ]*(?:busca|abre|lee|revisa|look|open|read|check|cu[aá]nto(?: le| les)? debo|tenemos mensajes|hay mensajes)\b/i.test(raw))return {...draft,kind:'partial',text:unquote(raw),intent:'preview'};
  return null;
 }
 function lumiComposeReduce(state,command,owner){
@@ -70405,6 +70415,16 @@ let LUMI_MESSAGE_DRAFT=null,LUMI_MESSAGE_CONTEXT=null;
 async function asComposeMessage(command,texto){
  const owner=SES.user_id+'|'+SES.company_id;
  if(SES.role!=='manager'){asMostrarRespuesta('Esta acción requiere Manager.');return;}
+ if(command.needsRewrite){
+  asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;asEstado('pensando');
+  try{
+   const wording=await lumiBrainRequest({operation:'rewrite',recipient:command.query||'',instruction:command.instruction});
+   if(owner!==SES.user_id+'|'+SES.company_id||!AS.abierto)return;
+   if(typeof wording.text!=='string'||!wording.text.trim()||wording.sent!==false)throw Error('No pude preparar el mensaje para revisarlo.');
+   command={...command,text:wording.text,needsRewrite:false,intent:'preview'};
+  }catch(e){if(owner===SES.user_id+'|'+SES.company_id)asMostrarRespuesta(e.message);return;}
+  finally{AS.enviando=false;asSeguirOyendo();}
+ }
  const r=lumiComposePlan(LUMI_MESSAGE_DRAFT,command,owner);if(r.send)r.state.attemptAt=Date.now();LUMI_MESSAGE_DRAFT=r.state;
  if(r.state?.query&&r.state?.app)lumiSetMessageContext([{owner,app:r.state.app,query:r.state.query,key:r.state.key,at:Date.now()}]);
  asPararOido();asCallar();asTranscribir(texto);
