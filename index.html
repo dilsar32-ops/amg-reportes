@@ -69594,7 +69594,7 @@ const HEALTH=['visible_only','local_messages','latest_800_received','accessible_
 const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¿?¡!.,]/g,' ').replace(/\s+/g,' ').trim();
 const clean=x=>String(x||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/,\s*(?:Unread|Read|Pinned|Calling|Callin|Delivered)(?:,|$)[\s\S]*$/i,'').trim();
 const normal=x=>norm(x).replace(/^(?:(?:hey|oye|lumi|bueno|pues|ok|por favor|please)\s+)+/,'').replace(/\s+(?:por favor|please)$/,'');
-function sources(text){const t=normal(text),out=[];if(/\b(?:whatsapp|wasap|guasap)\b/.test(t))out.push('whatsapp');if(/\b(?:workspace|field reports)\b/.test(t))out.push('workspace');if(/mensajes (?:normales|de apple)|apple messages|imessage|\bsms\b/.test(t))out.push('messages');return out.length?out:Object.keys(APPS);}
+function sources(text){const t=normal(text),out=[];if(/\b(?:whatsapp|wasap|guasap)\b/.test(t))out.push('whatsapp');if(/\b(?:workspace|field reports)\b/.test(t))out.push('workspace');if(/mensajes (?:normales|de apple)|apple messages|imessage|\bsms\b|\b(?:en|in|on) (?:mensajes|messages)$/.test(t))out.push('messages');return out.length?out:Object.keys(APPS);}
 function english(text){const t=normal(text);return /\b(?:any|have|read|messages|texts|who|what|reply|next|yes)\b/.test(t)&&! /\b(?:tenemos|hay|tengo|mensajes|leeme|leemelos|que|quien|dime|si)\b/.test(t);}
 function adviceRequest(text){
  let t=normal(text),query='',last=false;
@@ -69602,7 +69602,7 @@ function adviceRequest(text){
  if(deictic.test(t)){last=/ultimo|last|revisamos|reviewed|leimos/.test(t.match(deictic)[0]);t=t.replace(deictic,'');}
  else{const named=t.match(/\s+(?:a|para|to)\s+(.+)$/);if(named){query=named[1];t=t.slice(0,named.index);}}
  if(!/^(?:y (?:ahora )?)?(?:que (?:le |les |podemos |puedo |deberiamos |podriamos )*(?:respondo|respondemos|contestamos|contesto|decimos|digo|responder|contestar|decir)|que (?:sugieres|recomiendas)(?: (?:que )?(?:le |les )?(?:respondamos|contestemos))?|como le respondo|what (?:should|can|do) (?:i|we) (?:reply|say|answer|tell (?:him|her|them))|what do you suggest)$/.test(t))return null;
- const selected=sources(query);query=query.replace(/\s+(?:en|in|on)\s+(?:whatsapp|workspace|mensajes normales|apple messages|imessage)$/,'');
+ const selected=sources(query);query=query.replace(/\s+(?:en|in|on)\s+(?:whatsapp|workspace|mensajes(?: normales| de apple)?|(?:apple )?messages|imessage)$/,'');
  return {query,last,selected,english:english(text)};
 }
 function resumeAdvice(request,remembered,active,owner,now=Date.now()){
@@ -69616,6 +69616,8 @@ function resumeAdvice(request,remembered,active,owner,now=Date.now()){
 }
 function intent(text){
  const t=normal(text);if(!t||t.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|he said|she said)/.test(t))return null;
+ // Naming the Messages app in an advice request does not request the inbox.
+ if(adviceRequest(text))return null;
  if(/\b(?:envia\w*|manda\w*|send|borra|delete|paga|pay|dile|escribe\w*|respond\w*|reply to)\b/.test(t))return null;
  const noun=/\b(?:mensajes?|messages?|texts|inbox|novedades)\b/.test(t);
  const ask=/\b(?:hay|tenemos|tengo|llego|llegaron|recibimos|recibido|nuevos|nuevas|revisa|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|leeme|leemelos|read|check|look|show|any|have|unread|new)\b/.test(t);
@@ -69663,7 +69665,7 @@ function follow(text,s,owner,now=Date.now()){
  if(/^\d+$/.test(q))return {action:'read',index:Number(q)-1};
  const chosen=sources(q),filtered=chosen.length===1?s.items.filter(r=>r.app===chosen[0]):s.items;
  if(/^(?:whatsapp|wasap|guasap|workspace|mensajes normales|mensajes de apple|apple messages|imessage)$/.test(q))return {action:'read',index:s.items.indexOf(filtered[0])};
- q=q.replace(/\s+(?:en|in|on)\s+(?:whatsapp|workspace|mensajes normales|apple messages|imessage)$/,'');
+ q=q.replace(/\s+(?:en|in|on)\s+(?:whatsapp|workspace|mensajes(?: normales| de apple)?|(?:apple )?messages|imessage)$/,'');
  const matches=filtered.filter(r=>norm(r.query)===q||q.split(' ').every(w=>norm(r.query).split(' ').includes(w)));
  if(matches.length===1)return {action:'read',index:s.items.indexOf(matches[0])};
  if(matches.length>1)return {action:'clarify',text:'Hay más de una conversación de '+q+': '+matches.map(r=>APPS[r.app]).join(', ')+'. ¿Cuál quieres leer?'};
@@ -69720,7 +69722,6 @@ function reading(item,rows,advice,index,total,en=false){
 const api={APPS,norm,clean,sources,english,adviceRequest,resumeAdvice,intent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
-
 // LUMI_INBOX_DIALOGUE_CORE_END
 // LUMI_INBOX_DIALOGUE_APP_BEGIN
 let LUMI_INBOX_SESSION=null;
