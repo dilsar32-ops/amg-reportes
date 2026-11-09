@@ -19097,7 +19097,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R347';
+  const APP_BUILD = '2026-11-09-R348';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -56495,7 +56495,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     const list = $('#inboxList'); if(!list) return;
     // The badge always reflects the active queue, even while looking at
     // Archivados - archived reports don't need attention anymore.
-    const unread = inboxRows.filter(r => !r.seen && inboxKindOf(r) === laborMode).length;
+    const unread = inboxRows.filter(r => !r.archived_at && inboxKindOf(r) === laborMode && (!r.seen || (laborMode === 'restauracion' && !r.sent_group_at && !r.returned_at))).length;
     const badge = $('#mgrBadge');
     if(badge){ badge.textContent = unread || ''; badge.hidden = !unread; }
     const rows = currentInboxRows();
@@ -56506,7 +56506,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     if(note) note.textContent = inboxArchivedView
       ? (rows.length ? '' : (mg ? 'Ninguna mudanza archivada todavía' : 'Nada archivado todavía'))
       : (unread
-          ? (unread === 1 ? (mg ? 'Hay 1 mudanza nueva' : 'Hay 1 labor log nuevo') : 'Hay ' + unread + (mg ? ' mudanzas nuevas' : ' labor logs nuevos'))
+          ? (unread === 1 ? (mg ? 'Hay 1 mudanza nueva' : 'Hay 1 labor log por revisar o enviar') : 'Hay ' + unread + (mg ? ' mudanzas nuevas' : ' labor logs por revisar o enviar'))
           : (rows.length ? (mg ? 'Nada nuevo en mudanzas' : 'Nada nuevo') : (mg ? 'Todavía no hay mudanzas' : 'Todavía no llega nada')));
     // Nada de mudanzas aqui: los reportes de AMG Moving se avisan y se abren solo en AMG Moving -> Mudanzas recibidas.
     // EL PANEL VIVE DENTRO DE LA LISTA, y esta linea la reescribe entera. Si
@@ -71421,6 +71421,7 @@ function lumiIncompleteSpeechReply(text){
   // Por voz con la galería abierta: "la siguiente", "la anterior", "la primera", "la segunda", "ciérrala", "regresa".
   function asOrdenEnviarLote(texto, cantidad){
     const t=String(texto).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¡!¿?.,;:]/g,' ').replace(/\s+/g,' ').trim();
+    if(/^(?:(?:si|yes|ok|okay) )?(?:envialo|mandalo|envia ese|manda ese|send it|send that)(?: al grupo| to the group)?$/.test(t)) return cantidad===1;
     if(/^(envia|manda|send)( estos dos| los dos| ambos| these two| both)( al grupo| to the group)?$/.test(t)) return cantidad===2;
     return /^(enviar|mandar|envialos|mandalos|envialos al grupo|mandalos al grupo|envia estos|manda estos|send these|send them|send them to the group)$/.test(t);
   }
@@ -76578,7 +76579,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       if(!(typeof isManager === 'function' && isManager()) || !cloudOn()) { WSA.labor = { rd: 0, amg: 0, at: Date.now() }; return; }
       if(Date.now() - WSA.labor.at < 60000) return;
       WSA.labor.at = Date.now();
-      const r = await authFetch('/rest/v1/labor_logs?select=id,work_kind&archived_at=is.null&seen=eq.false&limit=500', { headers: cloudHeaders() });
+      const r = await authFetch('/rest/v1/labor_logs?select=id,work_kind,seen,sent_group_at&archived_at=is.null&or=(seen.eq.false,and(work_kind.eq.restauracion,sent_group_at.is.null,returned_at.is.null))&limit=500', { headers: cloudHeaders() });
       if(!r.ok) return;
       const filas = await r.json(); let rd = 0, amg = 0;
       filas.forEach(f => { if(f.work_kind === 'mudanza') amg++; else rd++; });
@@ -76588,8 +76589,8 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   function wsaArmar(){
     const it = [], man = typeof isManager === 'function' && isManager();
     const plural = (n, a, b) => n + ' ' + (n === 1 ? a : b);
-    if(man && WSA.labor.rd) it.push({ k: 'log-rd', c: '#ff4b42', t: plural(WSA.labor.rd, wsaEs('labor log nuevo', 'new labor log'), wsaEs('labor logs nuevos', 'new labor logs')), s: 'Restoration Doctor', ir: 'logs-rd' });
-    if(man && WSA.labor.amg) it.push({ k: 'log-amg', c: '#f0c93a', t: plural(WSA.labor.amg, wsaEs('labor log nuevo', 'new labor log'), wsaEs('labor logs nuevos', 'new labor logs')), s: 'AMG Moving', ir: 'logs-amg' });
+    if(man && WSA.labor.rd) it.push({ k: 'log-rd', c: '#ff4b42', t: plural(WSA.labor.rd, wsaEs('labor log por revisar o enviar', 'labor log to review or send'), wsaEs('labor logs por revisar o enviar', 'labor logs to review or send')), s: 'Restoration Doctor', ir: 'logs-rd' });
+    if(man && WSA.labor.amg) it.push({ k: 'log-amg', c: '#f0c93a', t: plural(WSA.labor.amg, wsaEs('labor log por revisar o enviar', 'labor log to review or send'), wsaEs('labor logs por revisar o enviar', 'labor logs to review or send')), s: 'AMG Moving', ir: 'logs-amg' });
     let pet = 0; try{ pet = (typeof msgPetNuevas === 'function' && MSG && MSG.yo) ? msgPetNuevas() : 0; }catch(e){}
     if(pet) it.push({ k: 'pet', c: '#a77bff', t: man ? plural(pet, wsaEs('petición esperando', 'request waiting'), wsaEs('peticiones esperando', 'requests waiting'))
       : plural(pet, wsaEs('novedad en tus peticiones', 'update on your requests'), wsaEs('novedades en tus peticiones', 'updates on your requests')), s: wsaEs('Toca para verlas', 'Tap to see them'), ir: 'peticiones' });
@@ -76716,7 +76717,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(Date.now() - RDMG.at < 30000) return; RDMG.at = Date.now();
     try{
       const [l, g] = await Promise.all([
-        authFetch('/rest/v1/labor_logs?select=id,work_kind&archived_at=is.null&seen=eq.false&limit=500', { headers: cloudHeaders() }),
+        authFetch('/rest/v1/labor_logs?select=id,work_kind,seen,sent_group_at&archived_at=is.null&or=(seen.eq.false,and(work_kind.eq.restauracion,sent_group_at.is.null,returned_at.is.null))&limit=500', { headers: cloudHeaders() }),
         authFetch('/rest/v1/expenses?select=id,work_kind&approved_at=is.null&reimbursed_at=is.null&limit=500', { headers: cloudHeaders() })]);
       if(l.ok){ const f = await l.json(); RDMG.cuentas.rdLogs = f.filter(x => x.work_kind !== 'mudanza').length; RDMG.cuentas.amgLogs = f.filter(x => x.work_kind === 'mudanza').length; }
       if(g.ok){ const f = await g.json(); RDMG.cuentas.rdGastos = f.filter(x => x.work_kind === 'restauracion').length; RDMG.cuentas.amgGastos = f.filter(x => x.work_kind === 'mudanza').length; }
@@ -76741,7 +76742,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       ['amgSegCal', 'cal', '#4dabff', 'Calendario', 'La semana de mudanzas', 'Qué días hay trabajo y quién va']];
     const s = rdmgSolicitudes(), det = [s.pago ? rdmgPl(s.pago, 'pago', 'pagos') : '', s.adel ? rdmgPl(s.adel, 'adelanto', 'adelantos') : ''].filter(Boolean).join(' · ');
     return [
-      ['mgrGoLogs', 'bandeja', '#ff6b6b', 'Labor logs recibidos', num(c.rdLogs, 'reporte nuevo', 'reportes nuevos', 'Nada nuevo'), c.rdLogs ? 'Sin revisar' : 'Todo revisado'],
+      ['mgrGoLogs', 'bandeja', '#ff6b6b', 'Labor logs recibidos', num(c.rdLogs, 'reporte pendiente', 'reportes pendientes', 'Sin pendientes'), c.rdLogs ? 'Por revisar o enviar al grupo' : 'Todo al día'],
       ['mgrGoGastos', 'recibo', '#2ee6a0', 'Gastos recibidos', num(c.rdGastos, 'gasto por aprobar', 'gastos por aprobar', 'Nada por aprobar'), ''],
       ['rdmgPeticiones', 'mano', '#f5c542', 'Solicitudes de pago y adelanto', s.n ? rdmgPl(s.n, 'solicitud pendiente', 'solicitudes pendientes') : 'Ninguna pendiente', det]];
   }
