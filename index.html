@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R327';
+  const APP_BUILD = '2026-11-08-R328';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68490,8 +68490,8 @@ function packLumiSpeech(text){
  }
  return packed;
 }
-function createLumiVoice({call,session,play,observe=()=>{},stream=true,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
- let epoch=0,trace=0,chain=Promise.resolve(),prepareChain=Promise.resolve(),current=null,cache=null,playing=new Set(),jobs=new Set();
+function createLumiVoice({call,session,play,fixedAudio=()=>null,preload=()=>{},observe=()=>{},stream=true,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
+ let epoch=0,trace=0,chain=Promise.resolve(),prepareChain=Promise.resolve(),current=null,cache=null,playing=new Set(),jobs=new Set(),recentAudio=new Map();
  const owner=s=>s.user_id+'|'+s.company_id;
  const active=(s,e)=>e===epoch&&owner(s)===owner(session())&&session().role==='manager';
  async function device(s){
@@ -68506,6 +68506,14 @@ function createLumiVoice({call,session,play,observe=()=>{},stream=true,now=Date.
   let failed=false;const live=()=>!failed&&active(s,e);
   await prepareGate;
   if(!live())return 'cancelled';
+  const audioKey=owner(s)+'|'+language+'|'+text;
+  const cached=recentAudio.get(audioKey)||fixedAudio(text,language);
+  if(cached?.voice==='calida-tranquila-v1'&&cached.mime==='audio/mpeg'&&cached.audio&&Number.isFinite(cached.seconds)&&cached.seconds>0&&cached.seconds<=120){
+   await playGate;if(!live())return 'cancelled';
+   mark('audio_downloaded',{cached:true});mark('playback_requested',{cached:true});
+   const handle=play(cached);playing.add(handle);releaseNext();
+   try{await handle.done;mark(live()?'completed':'cancelled');return live()?'played':'cancelled';}finally{playing.delete(handle);}
+  }
   const d=await device(s);mark('device',{ready:!!d});if(!live())return 'cancelled';if(!d)return 'unavailable';
   const useStream=typeof stream==='function'?await stream():stream;mark('capability',{stream:!!useStream});
   if(!live())return 'cancelled';
@@ -68535,8 +68543,12 @@ function createLumiVoice({call,session,play,observe=()=>{},stream=true,now=Date.
     }
     if(!live())return null;
     if(!data||data.voice!=='calida-tranquila-v1'||data.mime!=='audio/mpeg'||typeof data.audio!=='string'||data.audio.length>2200000||!Number.isFinite(data.seconds)||data.seconds<=0||data.seconds>120)throw Error('Invalid voice audio');
-    downloadedAudio(data);return {...data,streamed:seen>0};
-   }finally{jobs.delete(job);if(owner(s)===owner(session()))await call(route,{method:'DELETE'}).catch(()=>{});}
+    downloadedAudio(data);
+    // Memory only, scoped to account/company. No private speech goes to public assets.
+    const key=owner(s)+'|'+language+'|'+chunk;recentAudio.delete(key);recentAudio.set(key,data);
+    while(recentAudio.size>12)recentAudio.delete(recentAudio.keys().next().value);
+    warmed={owner:owner(s),at:now()};return {...data,streamed:seen>0};
+   }finally{jobs.delete(job);if(owner(s)===owner(session()))void call(route,{method:'DELETE'}).catch(()=>{});}
   }
   async function prepare(chunk,onPartial){
    let emitted=false;
@@ -68581,15 +68593,15 @@ function createLumiVoice({call,session,play,observe=()=>{},stream=true,now=Date.
  }
  let warmed=null,warming=null;
  async function warm(){
-  const s={...session()},key=owner(s);
+  const s={...session()},key=owner(s);void Promise.resolve().then(preload).catch(()=>{});
   if(s.role!=='manager'||!s.user_id||!s.company_id)return false;
-  if(warmed?.owner===key&&now()-warmed.at<300000)return true;
+  if(warmed?.owner===key&&now()-warmed.at<60000)return true;
   if(warming?.owner===key)return warming.promise;
   const run=(async()=>{
    const d=await device(s);if(!d||owner(session())!==key)return false;
    const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id);
    try{
-    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:'Hola.',language:'Spanish',stream:false}})});
+    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:'Hola.',language:'Spanish',stream:false,warmup:true}})});
     const deadline=now()+60000;
     while(now()<deadline&&owner(session())===key){
      const rows=await call(route+'&select=state,result');const job=rows?.[0];
@@ -68690,6 +68702,18 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
  }};
 }
 
+  // Public assets contain only these generic phrases in the unchanged selected voice.
+  const LUMI_FIXED_VOICE=new Map();let LUMI_FIXED_LOADING=null;
+  function lumiFixedKey(text,language){return language+'|'+String(text).trim().replace(/\s+/g,' ');}
+  function lumiPreloadFixedVoice(){
+   if(LUMI_FIXED_LOADING)return LUMI_FIXED_LOADING;
+   LUMI_FIXED_LOADING=fetch('https://dilsar32-ops.github.io/amg-reportes/assets/lumi-voice1-r328.json',{signal:AbortSignal.timeout(4000)}).then(async r=>{
+    if(!r.ok)throw Error('Voice phrases unavailable');const bundle=await r.json();
+    if(bundle.voice!=='calida-tranquila-v1'||!Array.isArray(bundle.clips)||bundle.clips.length>16)throw Error('Invalid voice phrases');
+    for(const clip of bundle.clips){if(clip.voice!=='calida-tranquila-v1'||clip.mime!=='audio/mpeg'||typeof clip.audio!=='string'||clip.audio.length>200000||!Number.isFinite(clip.seconds)||clip.seconds<=0||clip.seconds>15)throw Error('Invalid voice phrase');}
+    for(const clip of bundle.clips)LUMI_FIXED_VOICE.set(lumiFixedKey(clip.text,clip.language),clip);
+   }).catch(()=>{LUMI_FIXED_LOADING=null;});return LUMI_FIXED_LOADING;
+  }
   let AS_VOZ_LOCAL=null,AS_AUDIO_PLAYER=null;
   function asVozLocal(){
     if(AS_VOZ_LOCAL)return AS_VOZ_LOCAL;
@@ -68698,7 +68722,9 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
     const nativeVoice=isNative()?asPlugin():null;
     if(useMedia&&nativeVoice){audioPlayer=createLumiNativePlayer({plugin:nativeVoice,fallback:audioPlayer});audioPlayer=createLumiNativeStreamPlayer({plugin:nativeVoice,fallback:audioPlayer});}
     AS_AUDIO_PLAYER=audioPlayer;
+    void lumiPreloadFixedVoice();
     AS_VOZ_LOCAL=createLumiVoice({
+      preload:lumiPreloadFixedVoice,fixedAudio:(text,language)=>LUMI_FIXED_VOICE.get(lumiFixedKey(text,language)),
       observe:typeof createLumiVoiceDiagnostics==='function'?createLumiVoiceDiagnostics({session:()=>SES,device:useMedia?'mobile':'desktop',native:isNative(),version:APP_BUILD,send:record=>authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:{...cloudHeaders(),Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(record)})}):()=>{},
       stream:async()=>useMedia?(audioPlayer.supportsStreaming?await audioPlayer.supportsStreaming():false):true,
       session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),
@@ -69718,7 +69744,7 @@ return {order,extract};
       if(reading)LUMI_REPLY_EVIDENCE={owner,at:Date.now(),result};
       if(result.status==='unread_list')lumiSetMessageContext((result.chats||[]).map(c=>({owner,app:order.app,query:c.title,at:Date.now()})));
       if(result.status==='unread_list'||(order.action==='read_chat'&&result.status==='needs_choice'))AS.desktopReadReceipt=lumiDesktopReadReceipt(result,owner);
-      const text=reading?lumiDesktopReadText(result,order.verifyReply):result.status==='message_submitted'?'Listo, envié el mensaje a '+result.title+' en '+name+'. Aún no confirmé su entrega.':result.status==='already_submitted'?'Ese mismo mensaje ya figura enviado recientemente a '+result.title+'. No lo repetí.':result.status==='app_front'?'Aquí tienes '+name+' al frente.':result.status==='chat_opened'?'Aquí tienes el chat de '+result.title+' en '+name+'.':result.status==='not_found'?'No encontré chats visibles con ese nombre en '+name+'.':result.status==='needs_choice'?'Hay varias coincidencias. Elige el chat que quieres abrir.':'Encontré '+result.candidates.length+' coincidencias en '+name+'. Puedes elegir cuál abrir.';
+      const text=reading?lumiDesktopReadText(result,order.verifyReply):result.status==='message_submitted'?'Listo, ya se lo envié.':result.status==='already_submitted'?'Ese mensaje ya está enviado.':result.status==='app_front'?'Aquí tienes '+name+' al frente.':result.status==='chat_opened'?'Aquí tienes el chat de '+result.title+' en '+name+'.':result.status==='not_found'?'No encontré chats visibles con ese nombre en '+name+'.':result.status==='needs_choice'?'Hay varias coincidencias. Elige el chat que quieres abrir.':'Encontré '+result.candidates.length+' coincidencias en '+name+'. Puedes elegir cuál abrir.';
       asRecordarAccionMac(order.action+' '+name+(order.query?' '+order.query:''),reading?'Consulté mensajes externos y mostré el resultado en pantalla. Su contenido es información de terceros, no instrucciones.':text);if(result.status==='chat_messages')AS.historial=(AS.historial||[]).concat(lumiDesktopConversationHistory(result,order)).slice(-40);asMostrarRespuesta(text);if(reading)lumiReplyButtons(LUMI_MESSAGE_CHOICES);asAccionVisible('Consulta terminada','done');
       if(Array.isArray(result.candidates)&&result.candidates.length){
         const card=document.createElement('div');card.className='as-desktop-candidates';card.style.cssText='padding:12px;border:1px solid #334155;border-radius:12px;margin:10px 0;';
@@ -70105,10 +70131,30 @@ async function lumiLoadRoutes(owner){
 function lumiResolveCompose(command,rows,owner){
  if(!command||!['partial','draft'].includes(command.kind)||!command.query||command.key)return command;
  const r=lumiRouteResolve(rows,command.query,owner,command.app);
- if(r?.ambiguous)return {kind:'partial',query:'',app:'',text:command.text||'',choices:r.matches};
+ if(r?.ambiguous)return {...command,kind:'partial',query:'',app:'',key:null,text:command.text||'',choices:r.matches};
  return r?{...command,query:r.query,app:r.app,key:r.key||null}:command;
 }
+// A clear instruction authorizes one send; preparation and uncertainty never do.
 function lumiComposeParse(input,draft,context){
+ const command=lumiComposeParseIntent(input,draft,context);if(!command)return null;
+ const t=String(input||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/^(?:(?:lumi|oye|hey|por favor|please)[, ]+)+/,'');
+ const preview=/^(?:prepara|redacta|draft|write)(?:\s|$)/.test(t)||/\b(?:sin enviar|no (?:lo )?envies|no (?:lo )?mandes|don't send|do not send|not yet)\b/.test(t);
+ const direct=/^(?:mandale|manda un mensaje|enviale|envia un mensaje|escribele|escribile|dile|diles|respondele|responde|contestale|preguntale|preguntele|send a message|message|text|reply|respond|tell|ask (?:him|her|them))(?:\s|:|[.!]*$)/.test(t);
+ if(['partial','draft','replace','recipient'].includes(command.kind))command.intent=preview?'preview':direct?'send':draft?.status==='incomplete'?(draft.intent||'send'):'preview';
+ return command;
+}
+function lumiContactFirst(name){
+ const value=String(name||'').trim();
+ // Keep group/company labels intact. Delivery always uses the full verified route.
+ return /[&+]|\b(?:grupo|group|team|restoration|doctor|moving|construction|llc|rd|pro|nova)\b/i.test(value)&&!/^an[ií]bal\b/i.test(value)?value:value.split(/\s+/)[0];
+}
+function lumiComposePlan(state,command,owner){
+ let result=lumiComposeReduce(state,command,owner);
+ if(state?.owner===owner&&state.attemptAt&&Date.now()-state.attemptAt<120000&&['sending','sent','uncertain'].includes(state.status)&&result.state?.query===state.query&&result.state?.app===state.app&&result.state?.text===state.text&&['partial','draft'].includes(command.kind))return {state,message:state.status==='sent'?'Ese mensaje ya está enviado.':'Estoy comprobando ese envío. No lo repetiré.'};
+ if(result.state?.status==='draft'&&result.state.intent==='send'&&['partial','draft'].includes(command.kind))result=lumiComposeReduce(result.state,{kind:'send'},owner);
+ return result;
+}
+function lumiComposeParseIntent(input,draft,context){
  const raw=String(input||'').trim().replace(/^(?:(?:lumi|oye|hey|por favor|please)[, ]+)+/i,''),norm=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
  const n=norm(raw),unquote=x=>{x=x.trim();return /^(?:"[\s\S]*"|“[\s\S]*”)$/.test(x)?x.slice(1,-1):x;};
  const channel=x=>/whatsapp/i.test(x)?'whatsapp':/workspace/i.test(x)?'workspace':'messages';
@@ -70152,23 +70198,23 @@ function lumiComposeParse(input,draft,context){
 function lumiComposeReduce(state,command,owner){
  const same=state&&state.owner===owner,old=same?state:null;
  if(command.kind==='clarify')return {state:old,message:command.text};
- if(command.kind==='cancel')return {state:null,message:'Borrador descartado. No envié nada.'};
+ if(command.kind==='cancel')return {state:null,message:'Está bien.'};
  if(command.kind==='partial'){
-  const d={owner,query:command.query||'',app:command.app||'',key:command.key||null,text:command.text||'',choices:command.choices||null,status:'incomplete'};
+  const d={owner,query:command.query||'',app:command.app||'',key:command.key||null,text:command.text||'',choices:command.choices||null,intent:command.intent||'preview',status:'incomplete'};
   if(!d.query)return {state:d,message:d.choices?.length?'¿A cuál conversación te refieres: '+d.choices.map(x=>x.query+' en '+x.app).join(', ')+'?':'¿A quién quieres responder?'};
   if(!d.app)return {state:d,message:'¿Por dónde le escribo a '+d.query+': WhatsApp, Mensajes normales o Workspace?'};
-  if(!d.text)return {state:d,message:'¿Qué quieres decirle a '+d.query+'?'};
+  if(!d.text)return {state:d,message:'¿Qué le digo?' };
   return lumiComposeReduce(null,{...d,kind:'draft'},owner);
  }
  if(command.kind==='draft'){
   if(!command.query||command.query.length>120||/[\n\r\0]/.test(command.query)||!command.text||command.text.length>2000||command.text.includes('\0'))return {state:old,message:'Necesito un destinatario claro y un mensaje de hasta 2000 caracteres.'};
-  return {state:{owner,app:command.app,query:command.query,key:command.key||null,text:command.text,status:'draft'}};
+  return {state:{owner,app:command.app,query:command.query,key:command.key||null,text:command.text,intent:command.intent||'preview',status:'draft'}};
  }
- if(!old)return {state:null,message:'No hay un borrador de esta cuenta para enviar.'};
- if(command.kind==='hold')return {state:old,message:'Lo dejo como borrador. No lo envío.'};
- if(command.kind==='send'&&old.status==='incomplete')return {state:old,message:'Falta completar el destinatario, el canal o el texto. No envié nada.'};
- if(command.kind==='send')return old.status==='draft'?{state:{...old,status:'sending'},send:true}:{state:old,message:'Este envío ya se intentó. Revisa el chat antes de repetirlo.'};
- if(old.status!=='draft')return {state:old,message:'Ese envío ya se intentó; prepara un borrador nuevo para otro mensaje.'};
+ if(!old)return {state:null,message:'¿Qué mensaje quiere que envíe?'};
+ if(command.kind==='hold')return {state:{...old,intent:'preview'},message:'Está bien, espero.'};
+ if(command.kind==='send'&&old.status==='incomplete')return {state:old,message:!old.query?'¿A quién le escribo?':!old.app?'¿En qué aplicación?':'¿Qué le digo?'};
+ if(command.kind==='send')return old.status==='draft'?{state:{...old,status:'sending'},send:true}:{state:old,message:old.status==='sent'?'Ese mensaje ya está enviado.':'No pude confirmar el envío. Hay que revisar el chat antes de repetirlo.'};
+ if(old.status!=='draft')return {state:old,message:'¿Qué otro mensaje quiere enviar?'};
  if(command.kind==='replace')return lumiComposeReduce(null,{...old,...command,kind:'draft'},owner);
  if(command.kind==='recipient')return lumiComposeReduce(null,{...old,...command,kind:'draft'},owner);
  return {state:old};
@@ -70318,11 +70364,11 @@ let LUMI_MESSAGE_DRAFT=null,LUMI_MESSAGE_CONTEXT=null;
 async function asComposeMessage(command,texto){
  const owner=SES.user_id+'|'+SES.company_id;
  if(SES.role!=='manager'){asMostrarRespuesta('Esta acción requiere Manager.');return;}
- const r=lumiComposeReduce(LUMI_MESSAGE_DRAFT,command,owner);LUMI_MESSAGE_DRAFT=r.state;
+ const r=lumiComposePlan(LUMI_MESSAGE_DRAFT,command,owner);if(r.send)r.state.attemptAt=Date.now();LUMI_MESSAGE_DRAFT=r.state;
  if(r.state?.query&&r.state?.app)lumiSetMessageContext([{owner,app:r.state.app,query:r.state.query,key:r.state.key,at:Date.now()}]);
  asPararOido();asCallar();asTranscribir(texto);
- if(!r.send){const d=r.state;const reply=r.message||(d?'Para '+d.query+' en '+(d.app==='messages'?'Mensajes':d.app==='whatsapp'?'WhatsApp':'Workspace')+':\n'+d.text+'\n\nBorrador listo. Puedes corregirlo o decir «envíalo».':'');asMostrarRespuesta(reply);asRecordarAccionMac(texto,reply);asHablar(reply,asSeguirOyendo);return;}
- const d=r.state;AS.enviando=true;
+ if(!r.send){const d=r.state;const reply=r.message||(d?'Le diría a '+lumiContactFirst(d.query)+': «'+d.text+'»':'');asMostrarRespuesta(reply);asRecordarAccionMac(texto,reply);asHablar(reply,asSeguirOyendo);return;}
+ const d=r.state;AS.enviando=true;asMostrarRespuesta('Le envío a '+lumiContactFirst(d.query)+': «'+d.text+'»');
  try{
   if(d.app==='workspace'){
    if(lumiPrivatePayrollReply(d.text))throw Error('No comparto cantidades ni detalles de pagos de trabajadores en Workspace. Puedo confirmar si hay saldo pendiente, sin indicar el monto.');
@@ -70332,7 +70378,7 @@ async function asComposeMessage(command,texto){
    if(!recipient.key||recipient.varios||recipient.prohibido)throw Error('No pude identificar un único destinatario en Workspace. Escribe su nombre completo.');
    if(owner!==SES.user_id+'|'+SES.company_id)throw Error('La sesión cambió.');
    const sent=await msgEnviar(d.text,{para:recipient.key});if(!sent?.id)throw Error('No pude confirmar el envío. Revisa el chat antes de repetirlo.');
-   LUMI_MESSAGE_DRAFT={...d,status:'sent'};asMostrarRespuesta('Listo, envié el mensaje a '+d.query+' en Workspace.');
+   LUMI_MESSAGE_DRAFT={...d,status:'sent'};const reply='Listo, ya se lo envié.';asMostrarRespuesta(reply);asRecordarAccionMac(texto,reply);asHablar(reply,asSeguirOyendo);
   }else{
    const result=await asEscritorioMac({app:d.app,action:'send_message',query:d.query,text:d.text});
    LUMI_MESSAGE_DRAFT={...d,status:result&&['message_submitted','already_submitted'].includes(result.status)?'sent':'uncertain'};
@@ -70389,6 +70435,7 @@ function lumiIncompleteSpeechReply(text){
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
+    if(SES.role==='manager')void asVozLocal().warm().catch(()=>{});
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
     if(!dictando&&!AS.conf&&!AS.pregunta){const incomplete=lumiIncompleteSpeechReply(texto);if(incomplete){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(incomplete);asHablar(incomplete,asSeguirOyendo);return;}}
@@ -70412,6 +70459,12 @@ function lumiIncompleteSpeechReply(text){
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLearnReply(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asReplyAdvice(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&window.LumiCommunications){const unavailable=LumiCommunications.unavailable(texto);if(unavailable){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(unavailable);asHablar(unavailable,asSeguirOyendo);return;}}
+    if(!dictando&&!AS.conf&&['msg_dictar','msg_responder_si'].includes(AS.pregunta?.tipo)){
+      const p=AS.pregunta,owner=SES.user_id+'|'+SES.company_id,context={owner,app:'workspace',query:p.r.nombre,key:p.r.key,at:Date.now()};
+      const pending=p.tipo==='msg_dictar'?{...context,text:'',status:'incomplete',intent:'send'}:null;
+      const command=lumiComposeParse(texto,pending,context);
+      if(command?.kind==='partial'){AS.pregunta=null;AS_MSG.cola=[];await asComposeMessage(command,texto);return;}
+    }
     if(!dictando&&!AS.conf&&!AS.pregunta){const owner=SES.user_id+'|'+SES.company_id;const context=lumiCurrentMessageContext(owner);let compose=lumiComposeParse(texto,LUMI_MESSAGE_DRAFT?.owner===owner?LUMI_MESSAGE_DRAFT:null,context);if(compose?.query){if(!compose.app){await lumiLoadRoutes(owner);if(owner!==SES.user_id+'|'+SES.company_id)return;}compose=lumiResolveCompose(compose,lumiRouteRows(owner),owner);}if(compose){await asComposeMessage(compose,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const quote=lumiQuoteOrder(texto);if(quote){await asCommercialQuote(quote,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const pdf=lumiPdfOrder(texto);if(pdf){await asCrearPdf(pdf,texto);return;}}
