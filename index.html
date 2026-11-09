@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R312';
+  const APP_BUILD = '2026-11-08-R313';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69473,10 +69473,19 @@ async function lumiCheckWorkspaceArrivals(){
  }catch(e){/* A failed refresh is unknown, never an empty inbox. */}
  finally{LUMI_MESSAGE_CHECK=false;}
 }
-function lumiInboxSummary(data,now=Date.now()){
+function lumiInboxSources(text){
+ const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+ const sources=[];
+ if(/\b(?:whatsapp|guasap)\b/.test(t))sources.push('whatsapp');
+ if(/\b(?:workspace|field reports)\b/.test(t))sources.push('workspace');
+ if(/(?:mensajes (?:normales|de apple)|apple messages|imessage|sms)/.test(t))sources.push('messages');
+ return sources.length?sources:['whatsapp','messages','workspace'];
+}
+function lumiInboxSummary(data,now=Date.now(),sources=['whatsapp','messages','workspace']){
  if(!data||now-data.at>120000)return 'No tengo una revisión reciente. No puedo confirmar qué mensajes siguen sin leer.';
  const names={whatsapp:'WhatsApp',messages:'Mensajes normales',workspace:'Workspace'},lines=[];
  for(const [source,name] of Object.entries(names)){
+  if(!sources.includes(source))continue;
   const rows=(data.inbox||[]).filter(x=>x.source===source),health=data.health?.[source];
   if(rows.length){lines.push(name+': '+rows.length+' conversaciones detectadas con mensajes sin leer.');for(const r of rows.slice(0,3))lines.push('• '+r.title+': '+r.preview+(r.suggestion?' '+r.suggestion:''));}
   else lines.push(name+': '+(health==='unavailable'?'no pude consultar esta aplicación.':'no detecté pendientes en la parte revisada.'));
@@ -69490,7 +69499,7 @@ async function asInboxPending(texto){
  if(!/\b(?:mensajes|messages)\b/.test(t)||!/(?:sin leer|no he leido|siguen pendientes|unread)/.test(t))return false;
  if(/\b(envia|manda|send|responde|reply)\b/.test(t))return false;
  const owner=SES.user_id+'|'+SES.company_id;asPararOido();asCallar();asTranscribir(texto);
- try{const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('No pude actualizar los pendientes.');const d=(await r.json())[0]?.valor;if(owner!==SES.user_id+'|'+SES.company_id||d?.owner!==owner)return true;const text=lumiInboxSummary(d);asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);}catch(e){asMostrarRespuesta(e.message);asSeguirOyendo();}return true;
+ try{const r=await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(SES.company_id)+'&clave=eq.'+encodeURIComponent('lumi_arrival_watch_'+SES.user_id),{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('No pude actualizar los pendientes.');const d=(await r.json())[0]?.valor;if(owner!==SES.user_id+'|'+SES.company_id||d?.owner!==owner)return true;const text=lumiInboxSummary(d,Date.now(),lumiInboxSources(texto));asMostrarRespuesta(text);asHablar(text,asSeguirOyendo);}catch(e){asMostrarRespuesta(e.message);asSeguirOyendo();}return true;
 }
 
 // Proactive notices: no reply, send, payment, or read-marking occurs here.
