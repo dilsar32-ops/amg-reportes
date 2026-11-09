@@ -19014,7 +19014,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-08-R314';
+  const APP_BUILD = '2026-11-08-R315';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69473,6 +69473,38 @@ async function lumiCheckWorkspaceArrivals(){
  }catch(e){/* A failed refresh is unknown, never an empty inbox. */}
  finally{LUMI_MESSAGE_CHECK=false;}
 }
+function lumiPaymentRequestIntent(text){
+ const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡?!.]/g,'').replace(/^lumi[, ]+/, '').trim();
+ if(/^(?:quien|quienes) (?:esta|estan|anda|andan) (?:pidiendo|solicitando) (?:pago|pagos|un pago|adelanto|adelantos|un adelanto)$/.test(t)||/^(?:que|hay|tenemos) solicitudes de (?:pago|adelanto|pagos) (?:pendientes|nuevas)$/.test(t)||/^who (?:is|are) (?:asking for|requesting) (?:payment|an advance|a payment|payments)$/.test(t))return /adelanto|advance/.test(t)&&!/pago/.test(t)?'adelanto':'pago';
+ return null;
+}
+function lumiPaymentRequestSummary(rows,kind,en=false){
+ const pending=rows.filter(m=>m&&m.tipo==='peticion'&&m.peticion===kind&&!m.borrado_at&&['pendiente','en_espera','no_recibida'].includes(m.estado||'pendiente'));
+ if(!pending.length)return en?'There are no pending '+(kind==='adelanto'?'advance':'payment')+' requests in Workspace. A payment awaiting confirmation is a different status.':'No hay solicitudes de '+(kind==='adelanto'?'adelanto':'pago')+' pendientes en Workspace. Un pago esperando confirmación es otra cosa.';
+ const names=[...new Set(pending.map(m=>String(m.de_nombre||'Una persona sin nombre visible').trim()))];
+ return (en?'Pending '+(kind==='adelanto'?'advance':'payment')+' requests in Workspace: ':'Solicitudes de '+(kind==='adelanto'?'adelanto':'pago')+' pendientes en Workspace: ')+names.join(', ')+'.';
+}
+async function asPaymentRequestRead(text){
+ const kind=lumiPaymentRequestIntent(text);if(!kind||SES.role!=='manager')return false;
+ const owner=SES.user_id+'|'+SES.company_id;
+ asPararOido();asCallar();asTranscribir(text);asEstado('pensando','Revisando solicitudes de pago…');
+ try{
+  await asMsgDatos();
+  if(!AS.abierto||owner!==SES.user_id+'|'+SES.company_id)return true;
+  const fresh=[];let after='';
+  while(true){
+   const url='/rest/v1/mensajes?select=*&tipo=eq.peticion&peticion=eq.'+kind+'&borrado_at=is.null&or=(estado.is.null,estado.in.(pendiente,en_espera,no_recibida))&order=id.asc&limit=200'+(after?'&id=gt.'+encodeURIComponent(after):'');
+   const response=await authFetch(url,{headers:cloudHeaders(),signal:AbortSignal.timeout(10000)});if(!response.ok)throw Error('requests-unavailable');
+   const page=await response.json();if(!Array.isArray(page))throw Error('invalid-requests');fresh.push(...page);
+   if(page.length<200)break;const next=page.at(-1)?.id;if(!next||next===after)throw Error('invalid-pagination');after=next;
+  }
+  if(!AS.abierto||owner!==SES.user_id+'|'+SES.company_id)return true;
+  const rows=fresh.filter(m=>!msgMio(m)&&msgEsParaMi(m)&&(typeof msgVisible!=='function'||msgVisible(m)));
+  const answer=lumiPaymentRequestSummary(rows,kind,asEn());asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);
+ }catch{const answer=asEn()?"I couldn't refresh payment requests. I can't confirm who is asking for payment.":'No pude actualizar las solicitudes. No puedo confirmar quién está pidiendo pago.';asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);}
+ return true;
+}
+
 function lumiInboxSources(text){
  const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
  const sources=[];
@@ -70288,6 +70320,7 @@ async function asCommercialQuote(order,texto){
       if(explicit&&!/\b(envia|manda|send|borra|delete)\b/i.test(explicit[1])){asTranscribir(texto);await asEscritorioMac({app:/^whatsapp$/i.test(explicit[2])?'whatsapp':'messages',action:'read_chat',query:explicit[1].trim()});return;}
     }
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asBasicWorkspace(texto)))return;
+    if(!dictando&&!AS.conf&&!AS.pregunta&&(await asPaymentRequestRead(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asInboxPending(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLearnReply(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asReplyAdvice(texto)))return;
@@ -71674,7 +71707,21 @@ async function asCommercialQuote(order,texto){
     o = o || {}; const en = !!o.en;
     const unos = (ms || []).map(m => ({ de: m.de, mio: !!m.mio, t: asMsgUno(m, en), dia: m.dia })).filter(x => x.t);
     if(!unos.length) return '';
-    if(o.mezcla) return (en ? 'The last messages with ' : 'Lo último con ') + nombre + '. ' + unos.map(x => (x.mio ? (en ? 'You said: ' : 'Tú dijiste: ') : x.de + (en ? ' said: ' : ' dijo: ')) + x.t).join(' ');
+    if(o.mezcla){
+      const parts=[];let previous=null;
+      for(const m of ms||[]){
+        if(!asMsgUno(m,en))continue;
+        const photoOnly=!String(m.texto||'').trim()&&!m.voz&&m.fotos>0;
+        if(photoOnly&&previous&&previous.photoOnly&&previous.de===m.de&&previous.mio===!!m.mio&&previous.dia===m.dia){previous.fotos+=m.fotos;continue;}
+        previous={...m,mio:!!m.mio,photoOnly};parts.push(previous);
+      }
+      const when=m=>m.dia?(m.dia===o.hoy?(en?' (today)':' (hoy)'):m.dia===o.ayer?(en?' (yesterday)':' (ayer)'):' ('+m.dia+')'):'';
+      return (en?'Latest in Workspace with ':'Lo último en Workspace con ')+nombre+'. '+parts.map(m=>{
+        const who=m.mio?(en?'You':'Usted'):m.de;
+        if(m.photoOnly)return who+(en?' sent ':' envió ')+m.fotos+(en?(m.fotos===1?' photo':' photos'):(m.fotos===1?' foto':' fotos'))+when(m)+'.';
+        return who+when(m)+(en?' said: ':' dijo: ')+asMsgUno(m,en);
+      }).join(' ');
+    }
     const cuando = x => (x.dia && o.hoy && x.dia !== o.hoy) ? (x.dia === o.ayer ? (en ? ' (yesterday)' : ' (de ayer)') : (en ? ' (from ' + x.dia.slice(5).replace('-', '/') + ')' : ' (del ' + (+x.dia.slice(8, 10)) + '/' + (+x.dia.slice(5, 7)) + ')')) : '';
     if(o.grupo || o.todos){
       const cab = o.todos ? (en ? 'To the whole team. ' : 'Para todo el equipo. ') : (en ? 'In ' + nombre + '. ' : 'En ' + nombre + '. ');
@@ -71856,7 +71903,7 @@ async function asCommercialQuote(order,texto){
     const nuevos = todos.filter(function(m){ return msgEsParaMi(m) && !msgLeido(m); });
     if(!todos.length){ const r = asMsgAQuien(key, []); return asMedirPregunta({ tipo: 'msg_responder_si', r }, (en ? 'There are no messages with ' : 'No hay mensajes con ') + asMsgNombreChat(key) + (en ? '. Do you want to write?' : '. ¿Le quieres escribir?')); }
     AS_MSG.cola = [nuevos.length ? { key, ms: nuevos } : { key, ms: todos.slice(-3), viejos: true }];
-    return asMsgLeerSiguiente(nuevos.length ? '' : (en ? 'Nothing new.' : 'No hay nuevos.'));
+    return asMsgLeerSiguiente(nuevos.length ? '' : (en ? 'There are no unread messages in this Workspace chat.' : 'No hay mensajes sin leer en este chat de Workspace.'));
   }
   // mandar / responder / decir / preguntar
   async function asMsgPara(mc){
