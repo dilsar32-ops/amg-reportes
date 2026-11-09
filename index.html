@@ -69714,11 +69714,13 @@ async function asInboxDialogue(texto){
  const D=LumiInboxDialogue,owner=SES.user_id+'|'+SES.company_id;
  const fresh=LUMI_INBOX_SESSION?.owner===owner&&Date.now()-LUMI_INBOX_SESSION.at<900000;
  const request=D.intent(texto),follow=fresh?D.follow(texto,LUMI_INBOX_SESSION,owner):null;
+ if(!request&&LUMI_MESSAGE_DRAFT&&!LUMI_MESSAGE_DRAFT.fromInbox&&['incomplete','draft','sending'].includes(LUMI_MESSAGE_DRAFT.status))return false;
  if(!request&&!follow){if(LUMI_INBOX_SESSION?.phase==='offer')LUMI_INBOX_SESSION.phase='idle';return false;}
  if(!request&&follow?.action==='read'&&/^(si|yes|claro|dale|ok|okay|sure)$/i.test(D.norm(texto))&&LUMI_INBOX_SESSION.phase!=='offer'){
   asPararOido();asCallar();asTranscribir(texto);lumiInboxPresent('¿Quieres que envíe la respuesta que ves o que lea el siguiente mensaje?');return true;
  }
  if(AS_DESKTOP_BUSY)return false;
+ if(AS.sandbox){asPararOido();asCallar();asTranscribir(texto);lumiInboxPresent('Modo de prueba: no abriré conversaciones reales.');return true;}
  const epoch=AS.requestEpoch=(AS.requestEpoch||0)+1,active=()=>AS.abierto&&SES.role==='manager'&&owner===SES.user_id+'|'+SES.company_id&&AS.requestEpoch===epoch;
  asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;AS_DESKTOP_BUSY=true;asEstado('pensando','Revisando mensajes…');
  try{
@@ -69759,6 +69761,7 @@ async function asInboxDialogue(texto){
  return true;
 }
 // LUMI_INBOX_DIALOGUE_APP_END
+
 
 function lumiInboxSources(text){
  const t=String(text).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
