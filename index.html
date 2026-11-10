@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R389';
+  const APP_BUILD = '2026-11-10-R390';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68726,6 +68726,8 @@ function createLumiWebEar({Recognition,language,active,onText,onError,schedule=s
       const EN = /^(the|you|your|you're|is|are|was|were|has|have|had|and|of|to|in|it|it's|this|that|for|with|on|at|i|i'm|i'll|what|how|there|left|today|yesterday|hours|owe|can|can't|couldn't|do|did|will|would|should|got|from|by|which|want|here|shall)$/;
       const ES = /^(el|la|los|las|de|del|que|en|un|una|por|para|con|es|son|hay|tienes|debes|hoy|ayer|quedan|horas|solo|puedo|ya|sin|tu|tus|te|le|se|y|lo|al|está|están|qué|cuál|dime)$/;
       for(const x of w){ if(EN.test(x)) ne++; if(ES.test(x)) ns++; } en = ne > ns; }
+    // Spoken cash amounts need currency grouping too, without changing the visible message.
+    if(!en)s=s.replace(/\$?\b(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?\s+(?:cash|en efectivo)\b/gi,(_,n,c)=>'$'+n+(c||'')+' en efectivo');
     const MES = en ? ['January','February','March','April','May','June','July','August','September','October','November','December'] : ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
     const DIA = en ? ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'] : ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
     const decimal = function(e, d){ return e + (en ? ' point ' : ' punto ') + d; };
@@ -69638,14 +69640,10 @@ function lumiReplyVerificationOrder(text){
 function lumiDesktopReadOrder(text){
  let t=String(text||'').trim().replace(/[?!.]+$/,'').replace(/\s*,?\s*(?:por favor|please)$/i,'').trim();
  t=t.replace(/(?:[.;,]\s*|\s+)(?:no respondas(?: ni env[ií]es nada)?|no env[ií]es (?:respuestas|nada)|sin (?:enviar|mandar) nada|do not (?:reply|send anything)|don['’]t (?:reply|send anything))$/i,'').trim().replace(/[?!.]+$/,'');
+ t=t.replace(/^(?:(?:oye|lumi|hey|por favor|please|ahora|now)[, ]+)+/i,'').replace(/^(?:puedes|podrias|podrías|can you|could you)\s+/i,'');
+ // Keep a requested chat read ahead of payment keywords in the requested explanation.
+ t=t.replace(/\s+(?:y dime (?:c[oó]mo|qu[eé]|cu[aá]nto|si)|and tell me (?:how|what|whether))\s+.+$/i,'').trim();
  const apps='(WhatsApp|Mensajes de Apple|Mensajes normales|Mensajes|Apple Messages|Messages|iMessage)';
- t=t.replace(/^Lumi[, ]+/i,'');
- const openRead=new RegExp('^(?:abre|open) '+apps+' (?:y dime|y revisa|and (?:tell me|check)) (?:qu[eé] mensajes (?:nuevos )?tenemos|si (?:hay|tenemos) mensajes(?: nuevos)?|(?:our |the )?(?:new |unread )?messages)$','i').exec(t);
- if(openRead)return {app:/^whatsapp$/i.test(openRead[1])?'whatsapp':'messages',action:'read_unread'};
- const replyCheck=new RegExp('^(?:(?:mira|revisa|checa|verifica) si |(?:ya )?)(.+?) (?:ya )?(?:contesto|contestó|respondio|respondió|ha respondido) (?:en|por) '+apps+'(?: y (?:dime|lee|leeme|léeme) (?:que|qué|lo que) (?:dijo|respondio|respondió|contesto|contestó))?$','i').exec(t)
-  ||new RegExp('^(?:check (?:if|whether) |has )(.+?) (?:replied|answered)(?: yet)? (?:in|on) '+apps+'(?: and (?:tell me|read) (?:what (?:they|he|she) said|the reply))?$','i').exec(t);
- if(replyCheck&&!/^(?:no |don't |do not )/i.test(t)&&replyCheck[1].trim().length<=120&&!/\b(?:envia|envía|manda|send|delete|borra)\b/i.test(replyCheck[1]))return {app:/^whatsapp$/i.test(replyCheck[2])?'whatsapp':'messages',action:'read_chat',query:replyCheck[1].trim()};
-
  const verb='(?:leer|revisar|revisa(?:me)?|rev[ií]same|checa|check|lee|l[eé]eme|leme|read)(?: (?:y|and) (?:lee|l[eé]eme|leme|read))?';
  let m=new RegExp('^'+verb+' (?:los |mis |my |the )?(?:nuevos |new |unread )?(?:mensajes|messages)(?: nuevos| pendientes| sin leer)? (?:de|en|in|on|from) '+apps+'$','i').exec(t);
  if(!m)m=new RegExp('^(?:qu[eé] mensajes (?:tengo|hay)|tengo mensajes|any new messages|do i have (?:any )?(?:new )?messages) (?:en|de|in|on) '+apps+'$','i').exec(t);
@@ -69653,6 +69651,7 @@ function lumiDesktopReadOrder(text){
  m=new RegExp('^'+verb+' (?:los |mis |my |the )?(?:[uú]ltimos |last |recent )?(?:mensajes|messages)(?: (?:del?|from|de la|in)(?: el| the)? (?:grupo |chat )?)(.+?) (?:en|in|on) '+apps+'$','i').exec(t);
  if(!m)m=new RegExp('^'+verb+' (?:el |la |the )?(?:chat|grupo|conversaci[oó]n|conversation|group) (?:de |con |with )?(.+?) (?:en|in|on) '+apps+'$','i').exec(t);
  if(!m)m=new RegExp('^(?:qu[eé] (?:me )?dijo|what did) (.+?) (?:en|in|on) '+apps+'$','i').exec(t);
+ if(!m)m=new RegExp('^'+verb+' (?:lo [uú]ltimo|lo que dijo|lo que escribi[oó]|the latest)(?: de| from)? (.+?) (?:en|in|on) '+apps+'$','i').exec(t);
  if(m&&m[1].trim().length<=120&&!/\b(?:env[ií]a|manda|borra|send|delete)\b/i.test(m[1]))return {app:/^whatsapp$/i.test(m[2])?'whatsapp':'messages',action:'read_chat',query:m[1].trim()};
  return null;
 }
@@ -71569,7 +71568,7 @@ const money=x=>'$'+Number(x).toLocaleString('en-US',{minimumFractionDigits:2,max
 const cents=x=>Math.round(Number(x)*100);
 const clean=x=>String(x||'').replace(/[\r\n<>]/g,' ').trim();
 function method(text){
- let t=norm(text).replace(/\bzell\b/g,'zelle').replace(/(?:no (?:hay|tiene|tengo|por)|sin|not by|no)\s+(?:el )?(zelle|cheque|check|efectivo|cash)/g,'').replace(/(?:en vez de|instead of)\s+(zelle|cheque|check|efectivo|cash)/g,'');
+ let t=norm(text).replace(/\bzell\b/g,'zelle').replace(/(?:no (?:hay|tiene|tengo|es|por)|sin|not by|no)\s+(?:el )?(zelle|cheque|check|efectivo|cash)/g,'').replace(/(?:en vez de|instead of)\s+(zelle|cheque|check|efectivo|cash)/g,'');
  const found=[...t.matchAll(/\b(zelle|cheque|cheke|check|efectivo|cash)\b/g)].map(m=>/cheque|cheke|check/.test(m[1])?'cheque':/cash|efectivo/.test(m[1])?'efectivo':'zelle');
  const unique=[...new Set(found)];return unique.length===1?unique[0]:unique.length>1?'ambiguous':'';
 }
@@ -71590,7 +71589,7 @@ function amount(text){
 }
 function reference(text){const m=norm(text).match(/\b(?:cheque|check)\s*(?:numero|number|no\.?|#)\s*(\d{1,12})\b/);return m?m[1]:'';}
 function intent(text){
- const t=norm(text).replace(/^(?:(?:oye|este|ok|okay|bueno|a ver|lumi|hey)[, ]+)+/,'');
+ const t=norm(text).replace(/^(?:(?:oye|este|ok|okay|bueno|a ver|lumi|hey|tambien|also)[, ]+)+/,'');
  if(t.length>1000)return null;
  if(/^(?:si[, ]+)?(?:registralo|anotalo|registra ese pago|confirma el registro|guardar pago|yes record it|record it|confirm the record)[. ]*$/.test(t))return {action:'confirm'};
  if(/^(?:no[, ]+)?(?:cancelalo|cancela|no lo registres|todavia no|espera|cancel|don't record it|do not record it)[. ]*$/.test(t))return {action:'cancel'};
@@ -71601,7 +71600,11 @@ function intent(text){
  const en=/\b(?:i |what|which|pay|paid|check|payment|advance|owe|show|give|how much)\b/.test(t)&&!/[ñ¿]|\b(?:cheque|le|cuanto|debo)\b/.test(t);
  const base={method:method(t),amount:amount(t),reference:reference(t),kind:/\b(adelanto|advance)\b/.test(t)?'adelanto':'pago',english:en,text:String(text)};
  if(/^(?:(?:y |ahora |oye )?)(?:cuanto|cuantos|dame|datos|nombre|numero|telefono|correo|muestrame|revisa|verifica|saldo|que|debo|debemos|how much|details|full name|phone|owe|show|give me)\b/.test(t))return {...base,action:'info'};
- if(/\b(?:voy a|vamos a|le voy|voy hacer|voy pagarle|hare|haremos|dejare|manana|despues|pronto|will|going to|gonna|tomorrow|later|quiero|necesito|i need|i want)\b/.test(t))return {...base,action:'plan'};
+ const planText=t.replace(/\b(?:quiero|necesito|i want|i need)\b(?=\s+(?:que (?:quede|lo registres|lo anotes)|to (?:record|log)))/g,'');
+ if(/\b(?:voy a|vamos a|le voy|voy hacer|voy pagarle|hare|haremos|dejare|manana|despues|pronto|will|going to|gonna|tomorrow|later|quiero|necesito|i need|i want)\b/.test(planText))return {...base,action:'plan'};
+ // An explicit request to record the physical handover can accompany present tense.
+ // A future promise still matches the plan rule above; saying it alone never writes.
+ if(/\b(?:anota(?:lo)?|apunta(?:lo)?|registra(?:lo)?|registrar|guarda(?:lo)?|marcalo|record|log|mark)\b/.test(t)&&/\b(?:pagad[oa]|entregad[oa]|paid|delivered)\b/.test(t))return {...base,action:'record'};
  if(/\b(?:estoy (?:dejando|entregando|haciendo)|le estoy|i am (?:leaving|writing)|i'm (?:leaving|writing))\b/.test(t))return {...base,action:'prepared'};
  if(/\b(?:ya )?(?:le )?(?:escribi|prepare|hice|llene|escrito|preparado|written|wrote|prepared)\b/.test(t)&&base.method==='cheque')return {...base,action:'prepared'};
  if(/\b(?:pague|pagado|ya mande|ya le mande|ya envie|ya le envie|transferi|deposite|deje|entregue|entregado|le di|paid|sent|delivered|left|dropped off|handed|gave)\b/.test(t))return {...base,action:'record'};
@@ -71695,7 +71698,7 @@ function details(snapshot,order){
 function review(snapshot,order){
  const s=snapshot,p=s.person;
  if(!Number.isFinite(s.balance)||s.unverified)return {error:'No pude verificar el saldo completo. No registraré un pago con datos incompletos.'};
- if(s.warning)return {error:s.warning+' Revisa esa diferencia antes de registrar.'};
+ if(s.warning&&s.warning!==s.hourWarning)return {error:s.warning+' Revisa esa diferencia antes de registrar.'};
  if(!Number.isFinite(order.amount)||order.amount<=0)return {error:'¿De cuánto fue el pago? Necesito el monto entregado; no usaré el saldo como si ya lo hubieras pagado.'};
  if(order.amount>20000)return {error:'Ese monto debe registrarse desde Pagos.'};
  if(!['cheque','zelle','efectivo'].includes(order.method))return {error:'¿Lo entregaste por cheque, Zelle o efectivo?'};
@@ -71703,7 +71706,7 @@ function review(snapshot,order){
  if(order.kind==='pago'&&cents(order.amount)>Math.max(0,cents(s.balance)))return {error:'Ese monto supera el saldo. Confirma si la diferencia es un adelanto; no lo descontaré como un pago normal.'};
  const after=(cents(s.balance)-cents(order.amount))/100;
  const closes=!!s.request&&(Number.isFinite(s.request.amount)&&s.request.amount>0?cents(order.amount)+cents(s.request.paid||0)>=cents(s.request.amount):order.kind==='pago'&&after<=0);
- return {amount:order.amount,after,closes,summary:'Registrar '+money(order.amount)+' como '+order.kind+' de '+p.name+' por '+order.method+'. '+(after>0?'Quedarán '+money(after)+' pendientes.':after<0?'Quedará '+money(-after)+' a su favor.':'Quedará al día.')+(s.request?(closes?' La petición quedará enviada, esperando su confirmación.':' La petición seguirá pendiente por el resto.'):' No hay una petición abierta que cerrar.')};
+ return {amount:order.amount,after,closes,summary:(s.hourWarning?'Hay una diferencia pendiente en las horas. Registrar este pago no modifica esas horas ni el Labor Log. ':'')+'Registrar '+money(order.amount)+' como '+order.kind+' de '+p.name+' por '+order.method+'. '+(after>0?'Quedarán '+money(after)+' pendientes.':after<0?'Quedará '+money(-after)+' a su favor.':'Quedará al día.')+(s.request?(closes?' La petición quedará enviada, esperando su confirmación.':' La petición seguirá pendiente por el resto.'):' No hay una petición abierta que cerrar.')};
 }
 function fingerprint(s){return JSON.stringify([s.person.key,s.person.fullName,s.person.zelle,cents(s.balance),s.request?.id,s.request?.state,s.request?.amount,s.request?.paid,s.warning||'',(s.ledgerIds||[]).slice().sort()]);}
 function verifyReceipt(receipt,flow){return !!receipt&&receipt.personKey===flow.person.key&&receipt.company===flow.company&&receipt.id===flow.id&&cents(receipt.amount)===cents(flow.order.amount)&&receipt.method===flow.order.method&&receipt.kind===flow.order.kind;}
@@ -71821,11 +71824,12 @@ async function lumiPaySnapshot(person,order,owner=lumiPayOwner()){
   if(!result?.ok||result.unpriced||result.sinPrecio)throw Error('Faltan horas o tarifas verificadas. Abre Pagos para resolverlo.');
   balance=result.balance;
  }
+ const hourWarning=warning.trim();
  const selection=lumiPayCore().request(messages.map(m=>({id:m.id,key:p.key,kind:m.peticion,amount:m.monto==null?null:Number(m.monto),state:m.estado||'pendiente',deleted:!!m.borrado_at})),p.key,order.kind||'pago');
  if(selection.error)warning+=' '+selection.error;
  if(selection.request)selection.request.paid=ledger.filter(x=>String(x.note||'').includes('Petición #'+selection.request.id)&&x.kind===order.kind&&x.accepted!==false&&!x.settlement).reduce((sum,x)=>sum+Number(x.amount||0),0);
  if(ledger.some(x=>x.accepted===false&&!x.resolved_accepted&&!ledger.some(y=>y.corrige_id===x.id)))warning+=' Hay un pago rechazado sin resolver; compruébalo en Pagos.';
- lumiPayGuard(owner);return {person:p,balance,request:selection.request||null,warning:warning.trim(),ledgerIds:ledger.map(x=>x.id).sort(),ledger,verifiedAt:Date.now()};
+ lumiPayGuard(owner);return {person:p,balance,request:selection.request||null,warning:warning.trim(),hourWarning,ledgerIds:ledger.map(x=>x.id).sort(),ledger,verifiedAt:Date.now()};
 }
 function lumiPaySay(text,{append=false,speak=true}={}){
  if(append){const last=document.getElementById('asConversacion')?.lastElementChild;if(last?.dataset.role==='assistant')last.dataset.keepPreview='1';}
@@ -71862,7 +71866,7 @@ async function lumiPayPrepare(snapshot,order,owner){
  const date=lumiPayDate(order.text);
  if(snapshot.ledger.some(x=>lumiPayCore().cents(x.amount)===lumiPayCore().cents(order.amount)&&x.metodo===order.method&&x.kind===order.kind&&String(x.paid_on||x.created_at||'').slice(0,10)===date&&x.accepted!==false&&!x.settlement))return {error:'Ya existe un registro de ese monto, método y fecha para esta persona. Revísalo en Pagos; no crearé otro igual.'};
  const flow={owner,user:SES.user_id,company:SES.company_id,person:snapshot.person,order,date,fingerprint:P.fingerprint(snapshot),request:snapshot.request,review,at:Date.now()};
- const note=['Seguimiento de pago Lumi',order.reference?'Cheque #'+order.reference:'',snapshot.request?'Petición #'+snapshot.request.id:''].filter(Boolean).join(' · ');
+ const note=['Seguimiento de pago Lumi',order.reference?'Cheque #'+order.reference:'',snapshot.request?'Petición #'+snapshot.request.id:'',snapshot.hourWarning?'Registro declarado por el dueño. Revisión de horas pendiente: '+snapshot.hourWarning:''].filter(Boolean).join(' · ');
  const prompt='Registra un '+order.kind+' de $'+order.amount.toFixed(2)+' a '+snapshot.person.name+' por '+order.method+' con fecha '+flow.date+'. Nota: '+note+'. Solo esa persona; no hagas una lista.';
  const r=await asLlamar({texto:prompt,historial:[],sandbox:false,area:null});lumiPayGuard(owner);
  const card=r.json?.confirmacion;if(!r.ok||!r.json?.ok||!card)throw Error(r.json?.texto||'No pude preparar el registro. No cambié ningún pago.');
@@ -72286,6 +72290,7 @@ function lumiIncompleteSpeechReply(text){
       if(await asPdfFollowup(texto))return;
     }
     if(!dictando&&!AS.conf&&!AS.pregunta){const verify=lumiReplyVerificationOrder(texto);if(verify){asTranscribir(texto);await asEscritorioMac(verify);return;}}
+    if(!dictando&&!AS.conf&&!AS.pregunta&&typeof lumiDesktopReadOrder==='function'){const read=lumiDesktopReadOrder(texto);if(read){asTranscribir(texto);await asEscritorioMac(read);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){
       const explicit=/^(?:lee|leeme|léeme|revisa|read) (?:el chat |el grupo |the chat )?(?:de |con |with )?(.+?) (?:en|in|on) (whatsapp|mensajes normales|mensajes|messages)(?: y dime qu[eé] (?:contestaron|respondieron|dijeron)| and tell me what they said)?[.!?]*$/i.exec(texto);
       if(explicit&&!/\b(envia|manda|send|borra|delete)\b/i.test(explicit[1])){asTranscribir(texto);await asEscritorioMac({app:/^whatsapp$/i.test(explicit[2])?'whatsapp':'messages',action:'read_chat',query:explicit[1].trim()});return;}
