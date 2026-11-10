@@ -19097,7 +19097,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R354';
+  const APP_BUILD = '2026-11-09-R355';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68996,6 +68996,22 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
   // Una sola llamada. Si la red se corta (Safari: "Load failed"), avisa claro; las LECTURAS se reintentan una
   // vez solas (asLlamar), las acciones (confirmar) nunca: el servidor ya puede haberlas hecho.
   const AS_RED_RE = /Load failed|Failed to fetch|NetworkError|network connection was lost|cancelled|abort|se cortó/i;
+  function asMensajeErrorRespuesta(error, en){
+    const em=String(error && error.message || error || '');
+    if(/401|venció|expired session/i.test(em))return en?'Your session expired. Sign in again.':'Tu sesión venció. Entra otra vez.';
+    if(/429|demasiados/i.test(em))return en?'Too many requests at once. Please try again in a moment.':'Hay muchos pedidos seguidos. Intenta de nuevo en un momento.';
+    if(/546|WORKER_RESOURCE_LIMIT|compute resources|tardó demasiado|timed? ?out/i.test(em))return en?'I couldn’t finish the answer in time. Please try again.':'No pude terminar la respuesta a tiempo. Puedes intentarlo de nuevo.';
+    if(/llave|modelo|sin_llave/i.test(em))return en?'I couldn’t connect to Lumi on your Mac. Check that it’s on and connected.':'No pude conectar con Lumi en tu Mac. Comprueba que esté encendida y conectada.';
+    if(AS_RED_RE.test(em))return en?'The connection was interrupted. Please try again.':'Se cortó la conexión. Puedes intentarlo de nuevo.';
+    return en?'I couldn’t complete the answer. Please try again.':'No pude completar la respuesta. Puedes intentarlo de nuevo.';
+  }
+  function asMostrarFalloRespuesta(error){
+    AS.enviando=false; clearTimeout(AS.tmrRelleno); asCallar();
+    const message=asMensajeErrorRespuesta(error,asEn());
+    // Keep the failed turn visible in the conversation, not only below the orb.
+    asMostrarRespuesta(message);
+    asEstado('esperando',message);
+  }
   async function asLlamar(body, onTexto){
     try{ return await asLlamarUnaVez(body, onTexto); }
     catch(e){
@@ -70899,7 +70915,7 @@ const LUMI_LABOR_READ = (() => {
     let t=norm(text).replace(/^(?:hey |hola |oye )?lumi\s*/,'').replace(/^(?:oye|hola|hey)\s+/, '').replace(/^(?:por favor|please)\s+/, '').replace(/\.$/,'');
     if(!validDate(today)||t.length>1200||!/(?:\b(?:labor|labour|label|leibor|leiber)\s*logs?\b|\breportes? (?:de trabajo|de mudanza|recibidos)\b|\bmoving reports?\b)/.test(t))return null;
     if(/^(?:no |don't |do not )/.test(t))return null;
-    if(/^(?:que (?:significa|es|quiere decir)|cual es (?:el|la)|what (?:does|is)|how (?:do|does)|como|por que|why)\b/.test(t))return null;
+    if(/^(?:(?:dime|digame|explicame|cuentame|tell me|explain)\s+)?(?:que (?:significa|es|son|quiere decir|puedes|podrias|puedo|debo|debe|deberia)|cual es (?:el|la)|para que|what (?:does|is|are|can|could|should)|how (?:do|does|can|could|should|to)|como|por que|why)\b/.test(t))return null;
     // A query can mention sending as a status, but cannot execute a send.
     if(!/^(?:hay|queda|quedan|quedaron|nos quedan?|aun hay|todavia hay|tenemos|tengo|que |cuales |cuantos |revisa|revisame|dime|muestra|muestrame|ensena|ensename|busca|buscame|quiero ver|puedes (?:ver|revisar|mostrar|buscar)|me puedes (?:mostrar|decir|ensenar)|do we have|do i have|have we got|are there|is there|are any|any|what |which |how many |show |check |find |can you (?:show|check|find))\b/.test(t))return null;
     if(/\b(?:y|and|luego|then)\s+(?:me )?(?:envia|envialo|envialos|manda|mandalo|mandalos|send|share|archiva|archive|borra|delete)\b/.test(t))return null;
@@ -71219,11 +71235,9 @@ function lumiIncompleteSpeechReply(text){
       return;
     }catch(e){
       if(!vigente())return;
-      AS.enviando = false; clearTimeout(AS.tmrRelleno);
       const em = String((e && e.message) || e);
       if(window.Cara){ try{ Cara.gesto(AS_RED_RE.test(em) ? 'sin_senal' : 'triste'); }catch(err){} }
-      const m = /llave|modelo|sin_llave/i.test(em) ? 'No pude conectar con Lumi en tu Mac. Comprueba que esté encendida y conectada.' : /401|venció/.test(em) ? 'Tu sesión venció. Entra otra vez.' : /429|demasiados/.test(em) ? 'Muchos pedidos seguidos. Espera un momento.' : AS_RED_RE.test(em) ? 'Se cortó la conexión. Intenta otra vez.' : 'No se pudo: ' + em + '.';
-      asEstado('esperando', m + ' Toca la esfera para intentar otra vez.');
+      asMostrarFalloRespuesta(e);
     }
   }
   // ---- (22 oct 2026) PREVIEW: una tarjeta chica y reutilizable para ver LO QUE LUMI LLENÓ y decir OK ----
