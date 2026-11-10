@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R392';
+  const APP_BUILD = '2026-11-10-R393';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71874,19 +71874,63 @@ function lumiPayDate(text){
  if(/\b(?:lunes|martes|miercoles|jueves|viernes|sabado|domingo|last|anteayer|pasad[oa]|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/.test(t))throw Error('Dime la fecha del pago como año-mes-día para registrarlo en el día correcto.');
  return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
 }
+// A notice is part of the owner's reviewed payment, never an instruction to pay.
+function lumiPayNoticePlan(order){
+ const t=lumiPayCore().norm(order.text||'');
+ if(/\b(?:no (?:le |les )?(?:avises|avise|mandes|envies|notifiques)|sin (?:aviso|mensaje)|do not (?:notify|send)|don't (?:notify|send))\b/.test(t))return null;
+ const method={cheque:'por cheque',efectivo:'en efectivo',zelle:'por Zelle'}[order.method];if(!method)return null;
+ let location='';
+ // Only an unambiguous, explicitly reported handover can provide a location.
+ if(/\b(?:deje|dejando|left|leaving)\b/.test(t)&&!(/\b(?:no|not|otra|otro|other|o|or)\b/.test(t))){
+  const places=[/\b(?:en la bodega|at the warehouse|in the warehouse)\b/.test(t)?'la bodega':'',/\b(?:en su gavetero|in (?:his|her|their) drawer)\b/.test(t)?'su gavetero':''].filter(Boolean);
+  if(places.length===1&&order.method!=='zelle')location=places[0];
+ }
+ return {version:1,text:'Su '+(order.kind==='adelanto'?'adelanto':'pago')+' '+method+' ya quedó registrado.'+(location?' Le dejé '+(order.method==='cheque'?'el cheque':'el efectivo')+' en '+location+'.':'')+' Por favor confirme cuando lo reciba.'};
+}
+async function lumiPayNoticeId(f){
+ const b=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('lumi-payment-notice-v1|'+f.company+'|'+f.id)));
+ b[6]=(b[6]&15)|80;b[8]=(b[8]&63)|128;const s=Array.from(b.slice(0,16),x=>x.toString(16).padStart(2,'0')).join('');
+ return s.slice(0,8)+'-'+s.slice(8,12)+'-'+s.slice(12,16)+'-'+s.slice(16,20)+'-'+s.slice(20);
+}
+function lumiPayNoticeMatches(row,want){
+ return !!row&&!row.borrado_at&&row.id===want.id&&row.company_id===want.company_id&&row.de_user_id===want.de_user_id&&row.para_user_id===want.para_user_id&&row.para_casual_id===want.para_casual_id&&!row.para_todos&&!row.para_grupo_id&&row.texto===want.texto;
+}
+async function lumiPayNotify(f,receipt,owner){
+ if(!f.notice)return {state:'disabled',text:''};
+ lumiPayGuard(owner);
+ if(f.owner!==owner||f.user!==SES.user_id||f.company!==SES.company_id||!lumiPayCore().verifyReceipt(receipt,f)||!['crew','casual'].includes(f.person.kind)||f.person.key!==(f.person.kind==='crew'?'c:':'t:')+f.person.id)throw Error('El aviso no coincide con el pago verificado.');
+ if(f.notice.version!==1||f.notice.text!==lumiPayNoticePlan(f.order)?.text)throw Error('El texto del aviso cambió después de revisarlo.');
+ const people=await lumiPayPeople(owner);if(!people.some(p=>p.key===f.person.key&&p.active))throw Error('La persona ya no está disponible para avisarle.');
+ const row={id:await lumiPayNoticeId(f),company_id:f.company,de_user_id:f.user,de_nombre:String(SES.full_name||SES.name||'Manager'),para_user_id:f.person.kind==='crew'?f.person.id:null,para_casual_id:f.person.kind==='casual'?f.person.id:null,para_grupo_id:null,para_todos:false,para_nombre:f.person.name,texto:f.notice.text};
+ const route='/rest/v1/mensajes?select=id,company_id,de_user_id,para_user_id,para_casual_id,para_grupo_id,para_todos,texto,borrado_at&company_id=eq.'+encodeURIComponent(f.company)+'&id=eq.'+row.id;
+ const read=async()=>{const rows=await lumiBasicGet(route,owner);lumiPayGuard(owner);return rows[0];};
+ let saved=await read();
+ if(!saved){
+  // Stable message id survives retries, lost responses and concurrent sessions.
+  // Never overwrite an existing message, even if someone edited or removed it.
+  lumiPayGuard(owner);
+  try{await authFetch('/rest/v1/mensajes?on_conflict=id',{method:'POST',headers:{...cloudHeaders(),Prefer:'resolution=ignore-duplicates,return=representation'},body:JSON.stringify(row),signal:AbortSignal.timeout(15000)});}catch{}
+  saved=await read();
+ }
+ if(!lumiPayNoticeMatches(saved,row))throw Error('No pude comprobar el aviso en su chat.');
+ return {state:'sent',id:row.id,text:' Ya le avisé por su chat privado de Workspace.'};
+}
+
 async function lumiPayPrepare(snapshot,order,owner){
  const P=lumiPayCore(),review=P.review(snapshot,order);if(review.error)return {error:review.error};
  const date=lumiPayDate(order.text);
  if(snapshot.ledger.some(x=>lumiPayCore().cents(x.amount)===lumiPayCore().cents(order.amount)&&x.metodo===order.method&&x.kind===order.kind&&String(x.paid_on||x.created_at||'').slice(0,10)===date&&x.accepted!==false&&!x.settlement))return {error:'Ya existe un registro de ese monto, método y fecha para esta persona. Revísalo en Pagos; no crearé otro igual.'};
  // Keep the original audit evidence in the private review; do not feed it back as a new instruction.
- const flow={hourWarning:snapshot.hourWarning||'',owner,user:SES.user_id,company:SES.company_id,person:snapshot.person,order,date,fingerprint:P.fingerprint(snapshot),request:snapshot.request,review,at:Date.now()};
+ const flow={notice:lumiPayNoticePlan(order),hourWarning:snapshot.hourWarning||'',owner,user:SES.user_id,company:SES.company_id,person:snapshot.person,order,date,fingerprint:P.fingerprint(snapshot),request:snapshot.request,review,at:Date.now()};
  const note=['Lumi',snapshot.hourWarning?'Revisión de horas pendiente':'',order.reference?'Cheque #'+order.reference:'',snapshot.request?'Petición #'+snapshot.request.id:''].filter(Boolean).join(' · ');
  const prompt='Registra un '+order.kind+' de $'+order.amount.toFixed(2)+' a '+snapshot.person.name+' por '+order.method+' con fecha '+flow.date+'. Nota: '+note+'. Solo esa persona; no hagas una lista.';
  const r=await asLlamar({texto:prompt,historial:[],sandbox:false,area:null});lumiPayGuard(owner);
  const card=r.json?.confirmacion;if(!r.ok||!r.json?.ok||!card)throw Error(r.json?.texto||'No pude preparar el registro. No cambié ningún pago.');
  Object.assign(flow,P.issuedAction(card,flow));flow.token=card.token;
  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(flow.company+'|'+flow.person.key+'|'+flow.fingerprint));flow.claimKey='lumi_payment_claim_'+Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
- return {flow,card:{...card,resumen:review.summary,efecto:review.summary,lumiPayment:flow}};
+ const preview=review.summary+(flow.notice?'\nAl confirmarlo, le avisaré por su chat privado de Workspace: «'+flow.notice.text+'»':'');
+ flow.review={...review,summary:preview};
+ return {flow,card:{...card,resumen:preview,efecto:preview,lumiPayment:flow}};
 }
 function lumiPayIO(owner,escrito){
  const P=lumiPayCore();
@@ -71895,7 +71939,7 @@ function lumiPayIO(owner,escrito){
   snapshot:(p,o)=>lumiPaySnapshot(p,o,owner),
   claim:async f=>{lumiPayGuard(owner);const r=await authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:{...cloudHeaders(),Prefer:'resolution=ignore-duplicates,return=representation'},body:JSON.stringify({company_id:f.company,clave:f.claimKey,valor:f}),signal:AbortSignal.timeout(15000)});lumiPayGuard(owner);if(!r.ok)throw Error('No pude reservar el registro. No inicié el pago.');const rows=await r.json();if(Array.isArray(rows)&&rows.length===1){await lumiPaySetting(owner,'lumi_payment_last_'+SES.user_id,{owner,claimKey:f.claimKey});return true;}return false;},
   confirm:async f=>{lumiPayGuard(owner);return asLlamar({confirmar:f.token,escrito,historial:[],sandbox:false,area:null});},
-  receipt:async f=>{lumiPayGuard(owner);const table=f.person.kind==='crew'?'crew_payments':'casual_payments';const rows=await lumiBasicGet('/rest/v1/'+table+'?select=*&company_id=eq.'+encodeURIComponent(f.company)+'&id=eq.'+encodeURIComponent(f.id),owner);const x=rows[0];if(!x)return null;return {id:x.id,company:x.company_id,personKey:(f.person.kind==='crew'?'c:'+x.user_id:'t:'+x.casual_worker_id),amount:Number(x.amount),method:x.metodo,kind:x.kind};},
+  receipt:async f=>{lumiPayGuard(owner);const table=f.person.kind==='crew'?'crew_payments':'casual_payments';const rows=await lumiBasicGet('/rest/v1/'+table+'?select=*&company_id=eq.'+encodeURIComponent(f.company)+'&id=eq.'+encodeURIComponent(f.id),owner);const x=rows[0];if(!x||x.accepted===false||x.settlement||Number(x.amount)<=0)return null;return {id:x.id,company:x.company_id,personKey:(f.person.kind==='crew'?'c:'+x.user_id:'t:'+x.casual_worker_id),amount:Number(x.amount),method:x.metodo,kind:x.kind};},
   finish:async(f,receipt)=>{
    lumiPayGuard(owner);let requestText='';
    if(f.request&&f.review.closes){
@@ -71913,7 +71957,10 @@ function lumiPayIO(owner,escrito){
     }else requestText=' Conservé el estado actual de la petición.';
    }else if(f.request)requestText=' La petición sigue pendiente por el resto.';
    const fresh=await lumiPaySnapshot(f.person,f.order,owner);
-   return {state:'recorded',id:receipt.id,text:'Registré '+P.money(f.order.amount)+' para '+f.person.name+' por '+f.order.method+'. '+(fresh.balance>0?'Quedan '+P.money(fresh.balance)+' pendientes.':fresh.balance<0?'Queda '+P.money(-fresh.balance)+' a su favor.':'Quedó al día.')+requestText};
+   let notice={state:'disabled',text:''};
+   try{notice=await lumiPayNotify(f,receipt,owner);}catch{lumiPayGuard(owner);notice={state:'pending',text:' El pago quedó registrado; falta comprobar el aviso en su chat. Puede pedirme revisar ese pago para reintentar solo el aviso.'};}
+   lumiPayGuard(owner);
+   return {notice:notice.state,noticeId:notice.id||null,state:'recorded',id:receipt.id,text:'Registré '+P.money(f.order.amount)+' para '+f.person.name+' por '+f.order.method+'. '+(fresh.balance>0?'Quedan '+P.money(fresh.balance)+' pendientes.':fresh.balance<0?'Queda '+P.money(-fresh.balance)+' a su favor.':'Quedó al día.')+requestText+notice.text};
   }
  };
 }
