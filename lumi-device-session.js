@@ -10,7 +10,7 @@ function createLumiDeviceSession({session, call, device, uuid=()=>crypto.randomU
  function valid(value,s){return value?.userId===s.user&&value?.sessionId===id&&value?.active===true&&Number.isFinite(value.expiresAt)&&value.expiresAt>now()&&value.expiresAt-now()<=120000;}
  async function read(s){const rows=await call(route(s)+'&select=valor');return rows?.[0]?.valor;}
  function activate(){
-  const s=scope(),e=++epoch;if(!s)return Promise.resolve(lose());
+  const s=scope(),e=++epoch;checking=null;if(!s)return Promise.resolve(lose());
   // Serialize local taps; only explicit user interaction can take ownership.
   const run=pending.catch(()=>{}).then(async()=>{
    await read(s); // also samples the server clock before writing expiration
@@ -35,7 +35,7 @@ function createLumiDeviceSession({session, call, device, uuid=()=>crypto.randomU
     saved=rows?.[0]?.valor;if(!valid(saved,s))return lose();
    }
    local={owner:s.key,expires:saved.expiresAt};return true;
-  }catch{return lose();}})();checking=run;try{return await run;}finally{if(checking===run)checking=null;}
+  }catch{return e===epoch&&scope()?.key===s.key?lose():false;}})();checking=run;try{return await run;}finally{if(checking===run)checking=null;}
  }
  async function release(){const s=scope(),e=++epoch;local=null;await pending;if(!s||scope()?.key!==s.key||e!==epoch)return;try{await call(route(s)+'&valor->>sessionId=eq.'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json',Prefer:'return=minimal'},body:JSON.stringify({valor:{userId:s.user,sessionId:id,device,active:false,expiresAt:now()}})});}catch{}}
  return {activate,owns,release,active,identity:()=>({device,sessionId:id})};
