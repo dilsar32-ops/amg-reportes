@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R381';
+  const APP_BUILD = '2026-11-10-R382';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70939,6 +70939,11 @@ function lumiComposeInput(input){
   .replace(/^(?:enviar|env[ií]es)\b/i,'envía').replace(/^(?:mandar|mandes)\b/i,'manda')
   .replace(/^(?:mandar|enviar) un mensaje\b/i,'envía un mensaje').replace(/^responder a\b/i,'respóndele a')
   .replace(/^reply a\b/i,'reply to');
+ // Recover a narrow spoken/typed omission only when the message instruction is explicit.
+ t=t.replace(/^envale(?=\s+(?:(?:el|ese|un) mensaje|a [\p{L}]))/iu,'envíale');
+ // A channel can precede the short reply command as in everyday speech.
+ const front=/^(?:en|por|in|on)\s+(whatsapp|workspace|mensajes normales|mensajes|messages|imessage)\s+((?:resp[oó]ndele|cont[eé]stale|reply to)\s+(?:a\s+)?[\p{L}][\p{L}'’ -]{0,100})[.!]*$/iu.exec(t);
+ if(front&&!/\b(?:que|that|saying|y|and)\b/i.test(front[2]))t=front[2]+' en '+front[1];
  t=t.replace(/^let (.{1,120}?) know that\s+/i,'tell $1 that ')
   .replace(/^send (.{1,120}?) a message (saying|that)\s+/i,'send a message to $1 $2 ');
  return t;
@@ -71019,7 +71024,7 @@ function lumiComposeParseIntent(input,draft,context){
  if(/^(?:responde|responder|contesta|contestar|reply|respond)(?: (?:a|to))? (?:(?:todos|all) )?(?:(?:los|mis|the|my) )?(?:mensajes|messages)(?: (?:en|de|in|on|from) (?:whatsapp|workspace|mensajes normales|apple messages))?[.!?]*$/.test(n))return {kind:'clarify',text:/^(?:reply|respond)\b/.test(n)?'Which conversation would you like to reply to? I can read the pending messages and suggest a reply.':'¿Cuál conversación quieres que respondamos? Puedo leer los pendientes y proponerte una respuesta.'};
  const channel=x=>/whatsapp/i.test(x)?'whatsapp':/workspace/i.test(x)?'workspace':'messages';
  const via='whatsapp|workspace|mensajes normales|mensajes|messages|imessage';
- const target=(query,app='',text='')=>{const same=context&&(!query||norm(context.query)===norm(query)||norm(context.query).startsWith(norm(query)+' '));return {kind:'partial',query:same?context.query:query,app:app||(same?context.app:''),...(same&&(!app||app===context.app)&&context.key?{key:context.key}:{}),text:unquote(text)};};
+ const target=(query,app='',text='')=>{const routeNorm=x=>norm(x).replace(/\brestauracion\b/g,'restoration');const same=context&&(!query||routeNorm(context.query)===routeNorm(query)||routeNorm(context.query).startsWith(routeNorm(query)+' '));return {kind:'partial',query:same?context.query:query,app:app||(same?context.app:''),...(same&&(!app||app===context.app)&&context.key?{key:context.key}:{}),text:unquote(text)};};
  const implicit=text=>context?.query?target('',context.app,text):context?.choices?.length?{kind:'partial',query:'',app:'',text,choices:context.choices}:{kind:'clarify',text:'¿A quién quieres responder?'};
  if(draft&&/^(?:muestrame (?:lo que le enviaras|el mensaje)|que (?:le )?(?:vas a enviar|le enviaras)|me puedes decir que es lo que le vas a enviar(?: para ver)?|show me (?:the message|what you will send))[¿?.!]*$/.test(n))return {kind:'preview'};
  if(draft&&/^(?:no(?:,? mejor no)?|cancela(?: el mensaje| ese mensaje)?|cancel(?: the message)?|olvidalo|descarta el borrador|mejor no)[.!]*$/.test(n))return {kind:'cancel'};
