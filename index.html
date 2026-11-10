@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R379';
+  const APP_BUILD = '2026-11-10-R380';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -76527,7 +76527,14 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   //   - Guardar y salir: se queda (el cliente, los turnos, los extras) para seguir después; un turno sin cliente no se guarda: el aviso.
   //   - Salir sin guardar: vuelve a lo último guardado; si nunca se guardó, en blanco (resetLabor, el de siempre).
   // Lo guardado vive en su llave (rdlb:guardado), con los valores del borrador de siempre (fieldKey) y cuántos turnos y extras eran.
-  const RDLB = { llave: () => 'rdlbG:' + ((typeof SES !== 'undefined' && SES && SES.user_id) || 'yo'), reponiendo: false };
+  const RDLB = {
+    llave: () => 'rdlbG:' + [SES?.company_id||'guest',SES?.user_id||'guest',formKind()].map(encodeURIComponent).join(':'),
+    legado: () => 'rdlbG:' + (SES?.user_id||'yo'), reponiendo: false
+  };
+  function rdlbRevisionActual(){
+    const r=laborContinuityReview;
+    return r && r.fingerprint===laborContinuityStamp(buildPayload()) ? r : null;
+  }
   function rdlbEn(){ const c = document.querySelector('.tab-panel.active'); return !!(c && c.dataset.tab === 'labor' && typeof rdEsRd === 'function' && rdEsRd() && !document.body.classList.contains('mgr')); }
   // lo de los turnos (sin el líder ni la fecha, que se ponen solos)
   function rdlbFoto(){
@@ -76540,13 +76547,28 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       vals[k] = v; if(v !== '' && v !== 0 && !el.matches('.s-gas-who, .l-ex-who')) lleno = true;
     });
     const cards = [...p.querySelectorAll('#shiftsContainer > .shift-card')];
-    return { vals, n: cards.length, xs: cards.map(c => c.querySelectorAll('.s-extra-row').length), lleno };
+    return { vals, n: cards.length, xs: cards.map(c => c.querySelectorAll('.s-extra-row').length), lleno, continuityReview: rdlbRevisionActual() };
   }
   function rdlbLeer(){
-    try{ const g = JSON.parse(localStorage.getItem(RDLB.llave()) || 'null'); if(!g || !g.vals) return null;
-      if(Date.now() - (+g.at || 0) > 3 * 864e5){ localStorage.removeItem(RDLB.llave()); return null; } return g; }catch(e){ return null; }
+    try{
+      let g=JSON.parse(localStorage.getItem(RDLB.llave())||'null');
+      if(!g){
+        const old=JSON.parse(localStorage.getItem(RDLB.legado())||'null');
+        // Claim an old unscoped saved copy only with matching account-owned form evidence.
+        const owned=typeof readDraftForAccount==='function' ? readDraftForAccount() : null;
+        if(old?.vals && owned?.uid===SES?.user_id && owned?.company===SES?.company_id && owned?.side===formKind()
+           && Object.keys(old.vals).length && Object.entries(old.vals).every(([k,v])=>owned.vals?.[k]===v)){
+          g={...old,scope:laborContinuityScope()};
+          localStorage.setItem(RDLB.llave(),JSON.stringify(g));
+          localStorage.removeItem(RDLB.legado());
+        }
+      }
+      if(!g?.vals || g.scope?.company!==SES?.company_id || g.scope?.user!==SES?.user_id || g.scope?.kind!==formKind())return null;
+      if(Date.now()-(+g.at||0)>3*864e5){localStorage.removeItem(RDLB.llave());return null;}
+      return g;
+    }catch(e){return null;}
   }
-  const rdlbMismo = (a, b) => JSON.stringify(a.vals) === JSON.stringify(b.vals) && a.n === b.n && JSON.stringify(a.xs) === JSON.stringify(b.xs);
+  const rdlbMismo = (a, b) => JSON.stringify(a.vals) === JSON.stringify(b.vals) && a.n === b.n && JSON.stringify(a.xs) === JSON.stringify(b.xs) && JSON.stringify(a.continuityReview||null) === JSON.stringify(b.continuityReview||null);
   // ¿hay algo sin guardar? (lo de ahora no es lo guardado, y tiene algo)
   function rdlbSinGuardar(){
     const f = rdlbFoto(), g = rdlbLeer();
@@ -76555,7 +76577,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   function rdlbGuardar(){
     const f = rdlbFoto();
-    try{ localStorage.setItem(RDLB.llave(), JSON.stringify({ at: Date.now(), vals: f.vals, n: f.n, xs: f.xs })); }catch(e){ return false; }
+    try{ localStorage.setItem(RDLB.llave(), JSON.stringify({ at: Date.now(), scope: laborContinuityScope(), vals: f.vals, n: f.n, xs: f.xs, continuityReview: f.continuityReview })); }catch(e){ return false; }
     try{ if(typeof saveDraft === 'function') saveDraft(); }catch(e){}
     return true;
   }
@@ -76576,8 +76598,15 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
           el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
         });
       }
+      // Restoring the hidden names alone leaves empty chips and can erase names on the next edit.
+      [...shiftsContainer.querySelectorAll(':scope > .shift-card')].forEach(c=>{
+        const names=c.querySelector('.s-names'); if(names) setNames(c,names.value);
+      });
       try{ if(typeof recalcGrandTotal === 'function') recalcGrandTotal(); }catch(e){}
       try{ if(typeof scRefrescar === 'function') scRefrescar(); }catch(e){}
+      // Restore the explanation only for the exact account, report and restored shifts.
+      laborContinuityReview=g?.continuityReview||null;
+      laborContinuityReview=rdlbRevisionActual();
       try{ if(typeof saveDraft === 'function') saveDraft(); }catch(e){}
     }finally{ RDLB.reponiendo = false; }
   }
