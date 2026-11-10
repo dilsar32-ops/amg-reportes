@@ -19097,7 +19097,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R349';
+  const APP_BUILD = '2026-11-09-R352';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70878,19 +70878,21 @@ const LUMI_LABOR_READ = (() => {
   const validDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d) && Number.isFinite(Date.parse(d+'T12:00:00Z')) && new Date(d+'T12:00:00Z').toISOString().slice(0,10)===d;
   const months = ['enero|january','febrero|february','marzo|march','abril|april','mayo|may','junio|june','julio|july','agosto|august','septiembre|september','octubre|october','noviembre|november','diciembre|december'];
   function parse(text,today,area=null) {
-    let t=norm(text).replace(/^(?:hey |hola |oye )?lumi\s*/,'').replace(/^(?:por favor|please)\s+/, '').replace(/\.$/,'');
+    let t=norm(text).replace(/^(?:hey |hola |oye )?lumi\s*/,'').replace(/^(?:oye|hola|hey)\s+/, '').replace(/^(?:por favor|please)\s+/, '').replace(/\.$/,'');
     if(!validDate(today)||t.length>1200||!/(?:\b(?:labor|labour|label|leibor|leiber)\s*logs?\b|\breportes? (?:de trabajo|de mudanza|recibidos)\b|\bmoving reports?\b)/.test(t))return null;
     if(/^(?:no |don't |do not )/.test(t))return null;
+    if(/^(?:que (?:significa|es|quiere decir)|cual es (?:el|la)|what (?:does|is)|how (?:do|does)|como|por que|why)\b/.test(t))return null;
     // A query can mention sending as a status, but cannot execute a send.
-    if(!/^(?:hay|tenemos|tengo|que |cuales |cuantos |revisa|revisame|dime|muestra|muestrame|ensena|ensename|busca|buscame|quiero ver|puedes (?:ver|revisar|mostrar|buscar)|me puedes (?:mostrar|decir|ensenar)|do we have|are there|what |which |how many |show |check |find |can you (?:show|check|find))\b/.test(t))return null;
+    if(!/^(?:hay|queda|quedan|quedaron|nos quedan?|aun hay|todavia hay|tenemos|tengo|que |cuales |cuantos |revisa|revisame|dime|muestra|muestrame|ensena|ensename|busca|buscame|quiero ver|puedes (?:ver|revisar|mostrar|buscar)|me puedes (?:mostrar|decir|ensenar)|do we have|do i have|have we got|are there|is there|are any|any|what |which |how many |show |check |find |can you (?:show|check|find))\b/.test(t))return null;
     if(/\b(?:y|and|luego|then)\s+(?:me )?(?:envia|envialo|envialos|manda|mandalo|mandalos|send|share|archiva|archive|borra|delete)\b/.test(t))return null;
-    const en=/^(?:do we have|are there|what |which |how many |show |check |find |can you )/.test(t);
+    const en=/^(?:do we have|do i have|have we got|are there|is there|are any|any|what |which |how many |show |check |find |can you )/.test(t);
     let kind=/\b(?:mudanzas?|moving|amg)\b/.test(t)?'mudanza':/\b(?:restauracion|restoration|doctor)\b/.test(t)?'restauracion':area==='moving'?'mudanza':area==='restoration'?'restauracion':null;
     const pending=/\b(?:pendientes?|sin (?:mandar|enviar)|faltan? (?:de |por )?(?:mandar|enviar)|por (?:mandar|enviar)|unsent|not sent|pending|still.*send)\b/.test(t);
     if(!kind&&pending&&/\b(?:grupo|group)\b/.test(t))kind='restauracion';
-    const unread=/\b(?:sin (?:ver|leer|revisar)|no (?:he|hemos) (?:visto|leido)|unread|unseen|unreviewed)\b/.test(t);
+    const unread=/\b(?:sin (?:ver|leer|revisar)|no (?:he|hemos) (?:visto|leido)|faltan? (?:por )?(?:ver|leer|revisar)|unread|unseen|unreviewed)\b/.test(t);
     const archived=/\b(?:archivados?|archived)\b/.test(t);
-    const sent=!pending&&/\b(?:enviados?|mandados?|sent)\b/.test(t);
+    const returned=/\b(?:devueltos?|devolvi|devolvimos|devolvieron|regresados?|returned|sent back|para corregir|for (?:fixes|correction))\b/.test(t);
+    const sent=!pending&&!returned&&/\b(?:enviados?|mandados?|sent)\b/.test(t);
     let from=null,to=null,error=null;
     const iso=t.match(/\b\d{4}-\d{2}-\d{2}\b/g)||[];
     if(iso.length>1)error=en?'Please give me one date at a time.':'Dígame una fecha a la vez.';
@@ -70911,11 +70913,11 @@ const LUMI_LABOR_READ = (() => {
     if(from&&!validDate(from))error=en?'That date is not valid. Which date should I check?':'Esa fecha no es válida. ¿Qué día reviso?';
     // Name after "de/from/by/for"; dates, report types and status words are not people.
     let leader=null;
-    const name=t.match(/\b(?:de|from|by|for)\s+([a-z][a-z .'-]*?)(?=\s+(?:de|del|al|para|en|que|con|from|on|to|in|for|hoy|ayer|today|yesterday|pendientes?|sin|recientes?|nuevos?|enviados?|archivados?|por favor|please)\b|$)/);
-    if(name){const candidate=name[1].replace(/\.$/,'').trim();if(!/^(?:hoy|ayer|anteayer|esta|la|el|los|las|trabajo|mandar|enviar|revisar|grupo|send|sending|group|mudanza|mudanzas|restauracion|restoration|moving|today|yesterday|the|last|noviembre|november)\b/.test(candidate)&&!months.some(m=>new RegExp('^(?:'+m+')$').test(candidate)))leader=candidate;}
+    const name=t.match(/\b(?:de|from|by|for)\s+([a-z][a-z .'-]*?)(?=\s+(?:de|del|al|para|en|que|con|from|on|to|in|for|hoy|ayer|today|yesterday|devueltos?|devolvi|devolvimos|devolvieron|regresados?|returned|sent back|pendientes?|sin|recientes?|nuevos?|enviados?|archivados?|por favor|please)\b|$)/);
+    if(name){const candidate=name[1].replace(/\.$/,'').trim();if(!/^(?:hoy|ayer|anteayer|esta|la|el|los|las|trabajo|mandar|enviar|revisar|grupo|fixes|correction|send|sending|group|mudanza|mudanzas|restauracion|restoration|moving|today|yesterday|the|last|noviembre|november)\b/.test(candidate)&&!months.some(m=>new RegExp('^(?:'+m+')$').test(candidate)))leader=candidate;}
     // Unknown relative/date constraints must not silently become "all".
     if(!from&&/\b(?:lunes|martes|miercoles|jueves|viernes|sabado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|sunday|semana pasada|last week|mes pasado|last month)\b/.test(t))error=en?'What date should I check?':'¿Qué fecha quiere que revise?';
-    return {text:t,kind,pending,unread,archived,sent,from,to,leader,en,error,show:/\b(?:muestra|muestrame|ensena|ensename|ver|show)\b/.test(t)};
+    return {text:t,kind,pending,unread,archived,sent,returned,from,to,leader,en,error,show:/\b(?:muestra(?:me|melos|melas)?|ensena(?:me|melos|melas)?|quiero ver|puedes ver|show(?: me)?)\b/.test(t)};
   }
   function select(rows,q) {
     const matched=[];const seen=new Set();
@@ -70935,8 +70937,9 @@ const LUMI_LABOR_READ = (() => {
       if(q.pending&&(r.sent_group_at||r.returned_at||(!q.archived&&r.archived_at)))continue;
       if(q.unread&&(r.seen||r.sent_group_at||r.archived_at||r.returned_at))continue;
       if(q.sent&&!r.sent_group_at)continue;
+      if(q.returned&&!r.returned_at)continue;
       // Generic "do we have logs?" reads the active inbox, including sent ones.
-      if(!q.archived&&!q.pending&&!q.unread&&!q.sent&&!q.from&&!q.leader&&r.archived_at)continue;
+      if(!q.archived&&!q.pending&&!q.unread&&!q.sent&&!q.returned&&!q.from&&!q.leader&&r.archived_at)continue;
       matched.push(r);
     }
     return matched.sort((a,b)=>String(b.log_date||b.created_at).localeCompare(String(a.log_date||a.created_at))||String(a.id).localeCompare(String(b.id)));
@@ -71002,7 +71005,10 @@ async function asLaborRead(texto) {
     if(query.show&&!query.error){
       const selected=LUMI_LABOR_READ.select(rows,query).slice(0,12);
       if(selected.length){const ids=selected.map(r=>r.id).join(',');const full=await get('/rest/v1/labor_logs?select=id,payload,crew_leader,log_date,work_kind,seen,sent_group_at,archived_at,returned_at&company_id=eq.'+encodeURIComponent(company)+'&id=in.('+ids+')');
-        if(active()){const map=new Map(full.map(r=>[r.id,r]));const items=selected.map(r=>map.get(r.id)).filter(Boolean).map(r=>({id:r.id,fecha:r.log_date,lider:r.crew_leader,empresa:r.work_kind||'restauracion',payload:r.payload,visto:r.seen,archivado:!!r.archived_at,devuelto:!!r.returned_at,mandado:!!r.sent_group_at}));asGaleriaMostrar({tipo:'labor_logs',titulo:query.en?'Received reports':'Reportes recibidos',total:items.length,items});}
+        if(active()){
+          if(!Array.isArray(full)||full.length!==selected.length||new Set(full.map(r=>r.id)).size!==full.length||full.some(r=>!r.payload||typeof r.payload!=='object')||selected.some(r=>!full.some(x=>x.id===r.id)))throw Error(query.en?'The preview is incomplete. Please try again; nothing was sent.':'La vista previa está incompleta. Vuelva a pedir las hojas; no envié nada.');
+          const map=new Map(full.map(r=>[r.id,r]));const items=selected.map(r=>map.get(r.id)).map(r=>({id:r.id,fecha:r.log_date,lider:r.crew_leader,empresa:r.work_kind||'restauracion',payload:r.payload,visto:r.seen,archivado:!!r.archived_at,devuelto:!!r.returned_at,mandado:!!r.sent_group_at}));asGaleriaMostrar({tipo:'labor_logs',titulo:query.en?'Received reports':'Reportes recibidos',total:LUMI_LABOR_READ.select(rows,query).length,items});
+        }
       }
     }
     if(active()){asEstado('esperando','');asHablar(answer,asSeguirOyendo);}
