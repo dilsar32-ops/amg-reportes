@@ -19097,7 +19097,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R358';
+  const APP_BUILD = '2026-11-10-R359';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71045,7 +71045,64 @@ const LUMI_LABOR_READ = (() => {
   return {parse,select,summarize,state,readAll};
 })();
 
+// R359: explicit send language stays out of the read-only handler.
+// Recognize explicit report-send requests. This prepares the existing signed flow;
+// it never sends, chooses a destination, or turns a status question into approval.
+function lumiLaborSendIntent(input) {
+  let t=String(input||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+    .replace(/[¿¡?!,;:]/g,' ').replace(/\s+/g,' ').trim().replace(/[.!]+$/,'');
+  if(!t || t.length>1200)return null;
+  t=t.replace(/\b(labor|labour|label|leibor|leiber)\s*logs?\b/g,'labor logs');
+  if(!/\b(?:labor logs|reportes?|reports?)\b/.test(t))return null;
+  // A reminder not to duplicate is a constraint on the same send, not another action.
+  t=t.replace(/(?:[.]\s*|\s+)(?:no (?:repitas|vuelvas a (?:mandar|enviar)) los que ya (?:enviaste|mandaste)|(?:do not|don't) (?:repeat|resend) (?:the ones|those) (?:you |already )?(?:already )?sent)[.!]*$/,'').trim();
+  for(let n=0;n<4;n++)t=t.replace(/^(?:(?:hey|hola|oye|oiga)\s+)?lumi\s+|^(?:oye|oiga|hola|hey|a ver|mira|mire|bueno|okay|ok|por favor|please)\s+/,'');
+  // Never reinterpret quoted, hypothetical, instructional, or third-party speech as an order.
+  if(/^(?:si (?:digo|te digo|alguien)|if (?:i|someone)|como|how|por que|why|que significa|what does|dime si|tell me if|me dices si|dile |tell |pregunta |ask |recuerda |remember )/.test(t))return null;
+  if(/[“”«»"]/.test(t))return null;
+  const cancel=/\b(?:no (?:los? |las? )?(?:envies|mandes|compartas|pases)|no (?:envies|mandes|compartas|pases)(?:los|las|lo|la)?|(?:don't|do not|never) (?:send|share|forward)|todavia no|aun no|not yet)\b/.test(t);
+  if(cancel)return {kind:'cancel',text:t};
+  for(let n=0;n<3;n++)t=t.replace(/^(?:puedes|puede|podrias|podria|me puedes|me podrias|can you|could you|would you|will you)\s+(?:por favor |please )?/, '')
+    .replace(/^(?:hazme el favor de|hagame el favor de|me haces el favor de|me ayuda(?:s)? a|ayudame a|help me)\s+/,'')
+    .replace(/^(?:quiero que|necesito que|te pido que|i need you to|i want you to)\s+/,'');
+  const verb='(?:envia(?:r|me|lo|los|la|las|le|les)?|mande(?:s|lo|los|la|las)?|manda(?:r|me|lo|los|la|las|le|les)?|envie(?:s|lo|los|la|las)?|comparte(?:lo|los|la|las)?|compartir|pasa(?:r|lo|los|la|las|le|les)?|haz llegar|hacer llegar|send|share|forward)';
+  let m=t.match(new RegExp('^('+verb+')\\b\\s*(.*)$'));
+  let body;
+  if(m)body=m[2];
+  else {
+    // Read/check then send: preserve the report name/date from the first clause.
+    const sequence=t.match(new RegExp('^(.+?)\\s+(?:y (?:luego |despues )?|luego |despues |and (?:then )?|then )('+verb+')\\b\\s*(.*)$'));
+    if(sequence && /^(?:revisa|revisame|checa|checame|verifica|busca|buscame|ve (?:a |y )?(?:ver|revisa|busca)|mira|fijate|check|look for|find|see|si hay|si llegaron|if there are)\b/.test(sequence[1])) {
+      const obj=sequence[1].match(/\b(?:(?:los?|las?|the|any|new|all|pending)\s+)*(?:labor logs|reportes?|reports?)\b.*$/);
+      if(!obj)return null;
+      const tail=sequence[3].replace(/^(?:los|las|lo|la|them|it|those|the reports)\b\s*/,'');
+      // A fresh object in the second clause may narrow or contradict the first; ask rather than widen.
+      if(/\b(?:labor logs|reportes?|reports?)\b/.test(tail))return {kind:'clarify',text:t};
+      body=obj[0]+' '+tail;
+    } else {
+      // "El labor log de Vero, mándalo al grupo."
+      const trailing=t.match(new RegExp('^((?:el|los|la|las|the) (?:labor logs|reportes?|reports?)\\b.*?)\\s+('+verb+')\\b\\s*(.*)$'));
+      if(!trailing)return null;
+      body=trailing[1]+' '+trailing[3];
+    }
+  }
+  if(!/\b(?:labor logs|reportes?|reports?)\b/.test(body))return null;
+  const beforeName=body.match(/^(?:the )?([a-z][a-z '\-]*?)\s+labor logs\b(.*)$/);
+  if(beforeName&&!beforeName[1].split(/\s+/).every(w=>/^(?:el|la|los|las|the|all|new|pending|both|two|todos|nuevos|pendientes|dos|ambos|un|una|a|one|estos|esos)$/.test(w))){
+    body='labor logs de '+beforeName[1].replace(/'s$/,'')+beforeName[2];
+  }
+  // Plural aliases alone do not change a singular target; retain quantity explicitly.
+  const singular=/\b(?:labor|labour|label|leibor|leiber)\s*log\b/i.test(String(input))&&!/\b(?:logs|todos|all|ambos|both|dos|two)\b/i.test(String(input));
+  if(singular)body=body.replace(/\blabor logs\b/,'labor log');
+  body=body.replace(/\s+(?:por favor|please|cuando puedas|when you can|ahora|now)[.!]?$/,'').trim();
+  body=body.replace(/\b(?:los |las |the )?(?:que (?:(?:todavia |aun )?(?:esten?|siguen?) )?sin (?:enviar|mandar)|que (?:todavia |aun )?no (?:se han|hemos|has) (?:enviado|mandado)|that (?:are |have )?(?:still )?(?:unsent|not (?:been )?sent))\b/g,'pendientes');
+  body=body.replace(/\b(?:al grupo|to the group)\s+pendientes\b/g,'pendientes al grupo');
+  // Do not erase unhandled restrictions or additional actions. The original router asks for precision.
+  return {kind:'send',text:'envia '+body};
+}
+
 async function asLaborRead(texto) {
+  if(lumiLaborSendIntent(texto))return false;
   if(SES.role!=='manager')return false;
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const query=LUMI_LABOR_READ.parse(texto,today,asAreaActual());if(!query)return false;
