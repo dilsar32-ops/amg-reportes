@@ -16640,6 +16640,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
           + (ex.length ? ex.map(e => `<div class="line"><span>&nbsp;&nbsp;💵 ${esc(EX_LABEL[e.w] || e.w)} · lo pagó ${esc(e.who || '—')} <span class="muted">· no se cobra al cliente</span></span><span>${finMoney(e.a)}</span></div>`).join('') : ''); })() : ''}
     </div>`;
     laborShownCfg = (formKind() === 'mudanza') ? mgClientPrice(formClient()) : null;   // lo que el manager LEYO; sendToManager lo compara con el precio fresco
+    box.insertAdjacentHTML('beforeend', laborContinuitySummary(buildPayload()));
   }
 
   // The dock is built out of each panel's OWN .action-bar rather than a
@@ -18977,6 +18978,192 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       + 'Todo lo demás va al precio normal.';
   }
 
+// BEGIN LABOR CONTINUITY
+// Pure report validation. No network, payroll writes, or automatic time corrections.
+const LaborContinuity = (() => {
+  const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const names = s => [...new Map(String(s || '').split(/[,;\n/&]|\s+y\s+|\s+and\s+/i).map(n => [norm(n), n.trim()]).filter(([n]) => n)).entries()];
+  function clock(s){ const m=/^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(String(s || '')); return m && +m[1]<24 && +m[2]<60 ? +m[1]*60 + +m[2] : null; }
+  function timeline(payload){
+    const out=[];
+    for(const [i,s] of (Array.isArray(payload?.s) ? payload.s : []).entries()){
+      let start=clock(s.f), end=clock(s.o);
+      if(start===null || end===null || start===end) continue;
+      if(end<start) end+=1440;
+      // Match the established Labor Log overnight convention; never reorder names by card index.
+      if(out.some(p => p.end>=1440 && p.start<1440 && start<p.start && start<=p.end-1440+180)){start+=1440;end+=1440;}
+      out.push({index:i,start,end,names:names(s.n)});
+    }
+    return out.sort((a,b)=>a.start-b.start || a.end-b.end);
+  }
+  function union(spans){
+    const out=[];
+    for(const s of spans.slice().sort((a,b)=>a.start-b.start || a.end-b.end)){
+      const p=out[out.length-1]; if(p && s.start<=p.end) p.end=Math.max(p.end,s.end); else out.push({start:s.start,end:s.end});
+    } return out;
+  }
+  function fingerprint(payload,scope={}){
+    return JSON.stringify([String(scope.company||''),String(scope.user||''),String(scope.report||''),scope.kind||'restauracion',String(payload?.d||''),norm(payload?.l),norm(payload?.t),(payload?.s||[]).map(s=>[s.f||'',s.o||'',names(s.n).map(([n])=>n).sort(),norm(s.a)])]);
+  }
+  function analyze(payload){
+    const shifts=timeline(payload), people=new Map(shifts.flatMap(s=>s.names)), gaps=[];
+    for(const [key,name] of people){
+      const worked=union(shifts.filter(s=>s.names.some(([n])=>n===key)));
+      for(let i=1;i<worked.length;i++){
+        const start=worked[i-1].end,end=worked[i].start;
+        if(end<=start)continue;
+        const missing=shifts.filter(s=>s.start<end && s.end>start && !s.names.some(([n])=>n===key));
+        const full=missing.filter(s=>s.start>=start && s.end<=end);
+        const coverage=union(full);
+        // Adding a name is only safe for whole, nonoverlapping shifts covering exactly the gap.
+        const canAdd=coverage.length===1 && coverage[0].start===start && coverage[0].end===end && full.reduce((n,s)=>n+s.end-s.start,0)===end-start;
+        gaps.push({id:JSON.stringify([key,start,end]),key,name,start,end,minutes:end-start,indices:missing.map(s=>s.index),addIndices:canAdd?full.map(s=>s.index):[],canAdd});
+      }
+    }
+    return gaps.sort((a,b)=>a.start-b.start || a.name.localeCompare(b.name));
+  }
+  function validDecision(d){return !!d && ['break','other_team'].includes(d.reason) && String(d.note||'').trim().length>=3 && (d.reason!=='other_team' || (String(d.team||'').trim().length>=2 && ['matched','pending'].includes(d.verification) && (d.verification!=='pending' || d.acknowledged===true)));}
+  function ready(payload,scope,review){
+    const gaps=analyze(payload); if(!gaps.length)return true;
+    return !!review && review.version===1 && review.fingerprint===fingerprint(payload,scope) && gaps.every(g=>validDecision(review.decisions?.[g.id]));
+  }
+  function evidence(gap,payload,scope,rows,team){
+    const base=Date.parse(payload.d+'T00:00:00Z');const spans=[],ids=new Set();
+    if(!Number.isFinite(base))return {status:'pending',minutes:0,ids:[]};
+    for(const r of rows||[]){
+      if(r.company_id!==scope.company || (r.work_kind||'restauracion')!==(scope.kind||'restauracion') || String(r.id)===String(scope.report||'') || r.returned_at || r.cancelled_at || r.rejected_at)continue;
+      if(team && ![r.crew_leader,r.payload?.l,r.payload?.t].some(x=>norm(x)===norm(team)))continue;
+      const day=(Date.parse(r.log_date+'T00:00:00Z')-base)/86400000;
+      if(!Number.isInteger(day)||Math.abs(day)>1)continue;
+      for(const sh of timeline(r.payload)){
+        if(!sh.names.some(([n])=>n===gap.key))continue;
+        const start=Math.max(gap.start,sh.start+day*1440),end=Math.min(gap.end,sh.end+day*1440);
+        if(end>start){spans.push({start,end});if(r.id)ids.add(String(r.id));}
+      }
+    }
+    const minutes=union(spans).reduce((n,s)=>n+s.end-s.start,0);
+    return {status:minutes>=gap.minutes?'matched':'pending',minutes,ids:[...ids]};
+  }
+  return {norm,names,clock,timeline,union,fingerprint,analyze,validDecision,ready,evidence};
+})();
+
+var laborContinuityReview = null;
+var laborContinuityBusy = false;
+function laborContinuityScope(){return {company:SES?.company_id||'',user:SES?.user_id||'',report:fixingLogId||openLogId||'',kind:formKind()};}
+function laborContinuityStamp(p){return LaborContinuity.fingerprint(p,laborContinuityScope());}
+function laborContinuityAttach(p){
+  if(laborContinuityReview?.scope?.company===laborContinuityScope().company && laborContinuityReview.scope.kind===formKind() && laborContinuityReview.fingerprint===LaborContinuity.fingerprint(p,laborContinuityReview.scope) && LaborContinuity.analyze(p).length)p.continuity_review=JSON.parse(JSON.stringify(laborContinuityReview));
+  return p;
+}
+function laborContinuityTime(m){return minAHora(m)+(m>=1440?' (+1 día)':'');}
+function laborContinuitySummary(p,scope=laborContinuityScope()){
+  const gaps=LaborContinuity.analyze(p);if(!gaps.length)return '';
+  const review=p.continuity_review;
+  const current=review?.scope?.company===scope.company && review.scope.kind===scope.kind && review.fingerprint===LaborContinuity.fingerprint(p,review.scope);
+  return '<section class="paysum" data-no-idioma style="margin:12px 0;padding:14px;border:1px solid #d9a441;border-radius:12px;background:#fff9ec;color:#34250f"><b>Continuidad de la cuadrilla</b>'
+    +gaps.map(g=>{const d=current&&review.decisions?.[g.id];return '<p style="margin:8px 0"><b>'+esc(g.name)+'</b>: no aparece de '+esc(laborContinuityTime(g.start))+' a '+esc(laborContinuityTime(g.end))+'. '
+      +(LaborContinuity.validDecision(d)?esc(d.reason==='break'?'Confirmado: no trabajó durante ese intervalo. '+d.note:'Otra cuadrilla: '+d.team+'. '+d.note+(d.verification==='matched'?' · Coincide con otro reporte al revisar.':' · Pendiente de verificar por el manager.')):'Falta aclarar dónde estuvo antes de enviar.')+'</p>';}).join('')
+    +'<button type="button" class="btn" data-labor-continuity-review>Revisar ausencias entre turnos</button></section>';
+}
+async function laborContinuitySearch(gap,p,scope,team){
+  if(!navigator.onLine)return {status:'pending',minutes:0,ids:[],message:'Sin conexión. No se comprobó otra cuadrilla.'};
+  const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),12000);
+  try{
+    // Narrow, authenticated lookup. Never expose entire coworkers’ reports to a leader.
+    const res=await authFetch('/rest/v1/rpc/labor_continuity_evidence',{
+      method:'POST',headers:cloudHeaders(),signal:ctl.signal,
+      body:JSON.stringify({p_date:p.d,p_kind:scope.kind,p_worker:gap.name,p_team:team,p_start:gap.start,p_end:gap.end,p_exclude:scope.report||null})
+    });
+    if(res.ok){
+      const data=await res.json();if(!data || typeof data.covered!=='boolean' || typeof data.found!=='boolean' || !Array.isArray(data.evidence_ids))throw Error('invalid response');
+      return {status:data.covered?'matched':'pending',ids:data.evidence_ids,message:data.ambiguous?'Hay varias personas con ese nombre. Use el nombre completo en los turnos o deje la comprobación pendiente.':data.covered?'Otro reporte cubre todo ese intervalo.':data.found?'Solo se encontró respaldo para parte del intervalo. Falta verificar el resto.':'No encontré un reporte que confirme ese intervalo. Puede faltar por enviar.'};
+    }
+    // Compatible before the RPC is installed; existing RLS remains in force.
+    if(![400,404].includes(res.status))throw Error('lookup unavailable');
+    const date=new Date(p.d+'T00:00:00Z');if(!Number.isFinite(+date))throw Error('invalid date');
+    const day=n=>new Date(+date+n*86400000).toISOString().slice(0,10);let rows=[];
+    for(let offset=0;offset<2000;offset+=200){
+      const q='/rest/v1/labor_logs?select=id,company_id,log_date,crew_leader,payload,work_kind,returned_at&company_id=eq.'+encodeURIComponent(scope.company)+'&work_kind=eq.'+encodeURIComponent(scope.kind)+'&log_date=gte.'+day(-1)+'&log_date=lte.'+day(1)+'&order=id&limit=200&offset='+offset;
+      const r=await authFetch(q,{headers:cloudHeaders(),signal:ctl.signal});if(!r.ok)throw Error('lookup unavailable');
+      const page=await r.json();if(!Array.isArray(page))throw Error('invalid response');rows.push(...page);if(page.length<200)break;
+    }
+    const ev=LaborContinuity.evidence(gap,p,scope,rows,team);
+    return {...ev,message:ev.status==='matched'?'Un reporte disponible confirma ese intervalo.':'No se pudo confirmar con los reportes a los que tiene acceso. El manager deberá verificarlo.'};
+  }catch(e){return {status:'pending',minutes:0,ids:[],message:'No pude comprobar los otros reportes. No significa que no haya trabajado.'};}
+  finally{clearTimeout(timer);}
+}
+function laborContinuityAsk(gap,p,scope){
+  return new Promise(resolve=>{
+    const modal=document.createElement('dialog');modal.setAttribute('aria-label','Revisar continuidad de '+gap.name);
+    modal.style.cssText='position:fixed;inset:0;margin:auto;width:min(520px,calc(100% - 24px));max-height:88dvh;overflow:auto;box-sizing:border-box;border:1px solid #d9a441;border-radius:18px;background:#fff;color:#20242a;padding:22px;z-index:2147483647;font:16px/1.45 system-ui;box-shadow:0 16px 70px #0008';
+    modal.innerHTML='<h2 style="margin:0 0 10px;font-size:22px">¿Dónde estuvo '+esc(gap.name)+'?</h2>'
+      +'<p>Sale antes y después, pero no aparece de <b>'+esc(laborContinuityTime(gap.start))+' a '+esc(laborContinuityTime(gap.end))+'</b>'+(gap.indices.length?' en '+esc(gap.indices.map(i=>'el turno '+(i+1)).join(', ')):' en ningún turno intermedio')+'.</p>'
+      +'<p>No cambie sus horas personales solo por esta diferencia. Aclare qué pasó antes de enviar.</p>'
+      +'<label style="display:block;margin:12px 0"><input type="radio" name="continuity-reason" value="break"> No trabajó en ese intervalo / descansó y luego volvió</label>'
+      +'<label style="display:block;margin:12px 0"><input type="radio" name="continuity-reason" value="other_team"> Estuvo con otra cuadrilla</label>'
+      +'<div data-other hidden><label style="display:block">Nombre del líder o grupo<input data-team type="text" maxlength="120" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #aaa;border-radius:8px;color:#20242a;background:#fff"></label><button type="button" data-search style="margin:8px 0">Buscar en otros Labor Logs</button><p data-result role="status"></p><label data-pending hidden><input data-ack type="checkbox"> Confirmo dónde estuvo; si falta el reporte, dejarlo pendiente para el manager.</label></div>'
+      +'<label style="display:block;margin:12px 0">Explique brevemente qué pasó<textarea data-note maxlength="400" rows="2" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #aaa;border-radius:8px;background:#fff;color:#20242a"></textarea></label>'
+      +'<p style="font-size:14px">Si terminó su jornada y no volvió, corrija los turnos posteriores donde todavía aparece.</p>'
+      +'<p data-error role="alert" style="color:#a31d24"></p>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" data-save>Confirmar explicación</button>'
+      +(gap.canAdd?'<button type="button" data-add>Faltó agregarlo: añadir a esos turnos</button>':'')
+      +'<button type="button" data-edit>Volver a editar</button></div>';
+    for(const b of modal.querySelectorAll('button'))b.style.cssText+=';padding:10px 12px;border:1px solid #777;border-radius:9px;background:#f4f5f7;color:#20242a;font:600 14px system-ui;cursor:pointer';
+    const q=s=>modal.querySelector(s);let evidence=null,done=false,searchId=0;
+    const finish=value=>{if(done)return;done=true;searchId++;modal.close();modal.remove();resolve(value);};
+    const changed=()=>laborContinuityStamp(buildPayload())!==LaborContinuity.fingerprint(p,scope);
+    q('[data-edit]').onclick=()=>finish({action:'edit'});
+    const add=q('[data-add]');if(add)add.onclick=()=>finish({action:'add'});
+    modal.addEventListener('cancel',e=>{e.preventDefault();finish({action:'edit'});});
+    modal.querySelectorAll('[name="continuity-reason"]').forEach(r=>r.onchange=()=>{q('[data-other]').hidden=r.value!=='other_team';});
+    q('[data-team]').oninput=()=>{evidence=null;searchId++;q('[data-result]').textContent='';q('[data-pending]').hidden=true;q('[data-ack]').checked=false;};
+    q('[data-search]').onclick=async()=>{
+      const team=q('[data-team]').value.trim();if(team.length<2){q('[data-error]').textContent='Escriba el nombre del líder o grupo.';return;}
+      const id=++searchId;q('[data-search]').disabled=true;q('[data-result]').textContent='Buscando reportes de esa cuadrilla…';
+      const found=await laborContinuitySearch(gap,p,scope,team);if(done)return;
+      q('[data-search]').disabled=false;if(id!==searchId)return;
+      if(changed()){q('[data-error]').textContent='Cambió la cuenta o el reporte. Vuelva a revisar.';return;}
+      evidence=found;q('[data-result]').textContent=found.message;q('[data-pending]').hidden=found.status==='matched';
+    };
+    q('[data-save]').onclick=()=>{
+      if(changed()){q('[data-error]').textContent='Cambió la cuenta o el reporte. Vuelva a revisar.';return;}
+      const reason=q('[name="continuity-reason"]:checked')?.value,note=q('[data-note]').value.trim();
+      const decision={reason,note,team:q('[data-team]').value.trim(),verification:evidence?.status,acknowledged:q('[data-ack]').checked,evidence_ids:evidence?.ids||[],checked_at:new Date().toISOString()};
+      if(!LaborContinuity.validDecision(decision)){q('[data-error]').textContent=reason==='other_team'&&!evidence?'Busque el otro reporte antes de continuar.':'Seleccione qué pasó, escriba una explicación y confirme lo pendiente.';return;}
+      finish({action:'resolve',decision});
+    };
+    document.body.appendChild(modal);modal.showModal();
+  });
+}
+async function laborConfirmContinuity(force=false){
+  if(laborContinuityBusy)return false;
+  laborContinuityBusy=true;
+  try{
+    commitPending();const p=buildPayload(),scope=laborContinuityScope(),stamp=LaborContinuity.fingerprint(p,scope),gaps=LaborContinuity.analyze(p);
+    if(!gaps.length)return true;
+    if(!force && LaborContinuity.ready(p,scope,laborContinuityReview))return true;
+    const review={version:1,scope,fingerprint:stamp,checked_by:scope.user,checked_at:new Date().toISOString(),decisions:force?{}:{...(laborContinuityReview?.fingerprint===stamp?laborContinuityReview.decisions:{})}};
+    for(const gap of gaps){
+      if(LaborContinuity.validDecision(review.decisions[gap.id]))continue;
+      const answer=await laborContinuityAsk(gap,p,scope);
+      if(laborContinuityStamp(buildPayload())!==stamp)return false;
+      if(answer.action==='add'){
+        // Explicit choice only. Never add to overlapping/partial shifts or edit personal hours.
+        for(const i of gap.addIndices){const c=$$('.shift-card',shiftsContainer)[i];if(c)addName(c,gap.name);}
+        laborContinuityReview=null;laborIrATurnos();saveDraft();return false;
+      }
+      if(answer.action!=='resolve'){laborIrATurnos();return false;}
+      review.decisions[gap.id]=answer.decision;
+      laborContinuityReview=review;saveDraft();
+    }
+    if(laborContinuityStamp(buildPayload())!==stamp)return false;
+    laborContinuityReview=review;saveDraft();renderLaborReview();if(typeof rdlRevisarPintar==='function')rdlRevisarPintar();
+    return LaborContinuity.ready(buildPayload(),scope,review);
+  }finally{laborContinuityBusy=false;}
+}
+document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continuity-review]'))laborConfirmContinuity(true);});
+// END LABOR CONTINUITY
+
   // ---------- crew -> manager transfer code ----------
   function buildPayload(){
     const p = {
@@ -19021,7 +19208,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
         if(Array.isArray(sh.xs)) sh.xs.forEach(it => { if(it.e && (it.x === '' || it.x == null)) it.x = '0'; });
       });
     }
-    return p;
+    return laborContinuityAttach(p);
   }
   function buildCode(){
     return 'RD1:' + btoa(unescape(encodeURIComponent(JSON.stringify(buildPayload()))));
@@ -19035,6 +19222,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   }
   let loadedTr = '';                       // Camion de un reporte viejo: ya no hay casilla, pero lo guardado se respeta
   function loadPayload(d, kind){
+    laborContinuityReview = d?.continuity_review || null;
     openLogHadRate = !!(d && d.r && d.r.d != null);
     loadedTr = (d && d.tr) ? String(d.tr) : '';
     kind = (kind === 'mudanza') ? 'mudanza' : 'restauracion';
@@ -19098,7 +19286,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R377';
+  const APP_BUILD = '2026-11-10-R378';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -24788,6 +24976,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     html += `<div style="font-size:11.5px; color:var(--ink-soft); margin-top:8px; line-height:1.45;">`
           + `Calculado a ${esc(rateStamp(ratesInForce()))}${mg ? ' (precio de AMG Moving)' : ''}.`
           + `<br>Este precio queda guardado con el reporte &mdash; cambiar el precio no cambia los reportes ya calculados.</div>`;
+    html += laborContinuitySummary(buildPayload());
     rows.innerHTML = html;
     if($('#convPdf')) $('#convPdf').disabled = anyNoPrice;
     if($('#convSave')) $('#convSave').disabled = anyNoPrice;
@@ -24835,6 +25024,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
 
   $('#convSave').addEventListener('click', async ()=>{
     if(!openLogId) return;
+    if(!(await laborConfirmContinuity())) return;
     const btn = $('#convSave'); const old = btn.textContent;
     btn.textContent = 'Guardando…'; btn.disabled = true;
     if(formKind() === 'mudanza' && !openLogHadRate){
@@ -25664,6 +25854,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // en septiembre.
   async function resendFixedLog(){
     const id = fixingLogId; if(!id) return;
+    if(!(await laborConfirmContinuity())) return;
     if(!cloudOn() || !navigator.onLine){
       return alert('Sin internet no se puede mandar la corrección. Inténtelo cuando haya señal.\n\nNo se guarda en la cola a propósito: el reporte ya está en la oficina y hay que actualizar ESE, no mandar otro.');
     }
@@ -25702,6 +25893,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   });
 
   function resetLabor(){
+    laborContinuityReview = null;
     try{ if(typeof RDLB !== 'undefined' && !RDLB.reponiendo) localStorage.removeItem(RDLB.llave()); }catch(e){}   // (R145) en blanco: ya no hay nada guardado
     // Y tampoco sigue siendo la correccion de uno devuelto: si se quedara
     // puesto, el formulario en blanco pisaria el reporte del muchacho.
@@ -52846,6 +53038,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   };
 
   async function submitToCloud(){
+    if(!(await laborConfirmContinuity())) return 'review-required';
     const row = {
       // Stamped once, kept through every retry. The database has a unique index
       // on it, so the same report can never land twice.
@@ -53054,7 +53247,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     if(!gaps.length) return '';
     const time = offset => { const m=(start+offset)%1440; return fmtTime12(String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')); };
     return 'El Labor Log no reporta tiempo trabajado entre ' + gaps.map(g => time(g[0])+' y '+time(g[1])).join('; entre ')
-      + '. Si hubo una pausa, registre los tramos por separado; no la incluya como tiempo trabajado.';
+      + '. Revise si falta agregarlo al Labor Log o si hubo una pausa o cambio de equipo. No reduzca sus horas personales solo por esta diferencia.';
   }
   function myCorrectionGapHint(row){
     if(!Array.isArray(myLaborShifts)) return '';
@@ -57104,6 +57297,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     // la consecuencia, que es lo que faltaba -- el reporte de Susan se fue con
     // "Ridrigo" y nadie lo supo hasta el cierre, con el invoice ya mandado.
     if(!(await laborAvisarNombres())) return;
+    if(!(await laborConfirmContinuity())) return;
     // CORRIGIENDO UNO DEVUELTO: se actualiza EL MISMO reporte, no se manda otro.
     // Dos reportes del mismo dia es como se le cobro dos veces a Susan.
     if(fixingLogId) return resendFixedLog();
@@ -57123,6 +57317,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       showOverlay('Enviando… / Sending…');
       const outcome = await submitToCloud();
       hideOverlay();
+      if(outcome === 'review-required'){ return; }
       if(outcome === 'storage-error') return alert('No se pudo guardar el reporte en el teléfono. No cierres esta pantalla. Libera espacio y vuelve a intentar.');
       // Se limpia y se sale al menu, igual que restauracion. El aviso se queda
       // en la casilla verde encima del menu hasta que la cierren.
@@ -57157,6 +57352,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       recalcGrandTotal();
       const outcome = await submitToCloud();
       hideOverlay();
+      if(outcome === 'review-required'){ return; }
       if(outcome === 'storage-error') return alert('No se pudo guardar el reporte en el teléfono. No cierres esta pantalla. Libera espacio y vuelve a intentar.');
       if(outcome === 'sent'){
         if(typeof refreshInbox === 'function') refreshInbox();
@@ -57175,6 +57371,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       showOverlay('Enviando… / Sending…');
       const outcome = await submitToCloud();
       hideOverlay();
+      if(outcome === 'review-required'){ return; }
       if(outcome === 'storage-error') return alert('No se pudo guardar el reporte en el teléfono. No cierres esta pantalla. Libera espacio y vuelve a intentar.');
       if(outcome === 'already-queued'){
         return alert('Este reporte ya está guardado esperando señal. No lo mande otra vez.');
@@ -67654,7 +67851,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
         vals[fieldKey(el)] = (el.type === 'checkbox' || el.type === 'radio')
           ? (el.checked ? 1 : 0) : el.value;
       });
-      (typeof lsGuardarConSitio === 'function' ? lsGuardarConSitio : (k, v) => localStorage.setItem(k, v))(draftKey(), JSON.stringify({ at: Date.now(), uid: SES && SES.user_id, company: SES && SES.company_id, side: sideKind(), rows: rowCounts(), vals, openLogId: openLogId,
+      (typeof lsGuardarConSitio === 'function' ? lsGuardarConSitio : (k, v) => localStorage.setItem(k, v))(draftKey(), JSON.stringify({ at: Date.now(), uid: SES && SES.user_id, company: SES && SES.company_id, side: sideKind(), rows: rowCounts(), vals, openLogId: openLogId, continuityReview: laborContinuityReview,
         medJobId: (typeof medPantalla !== 'undefined' && medPantalla && medPantalla.id) || null }));
     }catch(e){
       // "nothing we can do" era falso: se puede DECIRLO. Y ahora que los planos
@@ -67712,6 +67909,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
       });
     }, 0);
 
+    laborContinuityReview = d.continuityReview || null;
     // Un log recibido que quedo en pantalla NO es un borrador: las puertas ven
     // openLogId !== null y lo cierran en vez de mandarlo como propio.
     if(d.openLogId) openLogId = d.openLogId;
@@ -74542,6 +74740,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
         + '<div class="rdl-tsec"><b>Extras</b><span>' + (xs.length ? '<span data-no-idioma>' + esc(xs.join(' · ')) + '</span>' : 'Ninguno') + '</span></div>'
         + '<div class="rdl-tpie"><button type="button" data-rdl-turno="' + i + '">Editar turno</button></div></section>';
     });
+    h += laborContinuitySummary(buildPayload());
     h += '<button type="button" class="rdl-rc rdl-rc-pdf" data-rdl-pdf>' + RDL_SV.bajar + '<b>Descargar PDF</b>' + RDL_SV.der + '</button></div>';
     if(RDL.html !== h){ RDL.html = h; box.innerHTML = h; }
   }
