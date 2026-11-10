@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R386';
+  const APP_BUILD = '2026-11-10-R387';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70893,16 +70893,18 @@ function lumiPdfOrder(input){
  return {kind:'compose',title:'Documento de Lumi',request:raw};
 }
 function lumiPdfFollow(input){
- const raw=String(input||'').trim().replace(/^(?:lumi|oye|hey)[, ]+/i,'');const n=lumiPdfNorm(raw).replace(/[.!?]+$/,'');let m;
+ const raw=String(input||'').trim().replace(/^(?:(?:lumi|oye|hey|ahora|entonces|ok|okay|bueno|please|por favor|now)[, ]+)+/i,'').replace(/^(?:puedes|podrias|podrías|can you|could you)\s+/i,'').replace(/[, ]+(?:por favor|please)[.!?]*$/i,'');const n=lumiPdfNorm(raw).replace(/[.!?]+$/,'');let m;
  if(/^(?:cancela|cancel|cierra|close) (?:el |the )?(?:pdf|documento|document|editor)$/.test(n))return {kind:'cancel'};
  if(/^(?:genera(?:lo)?|hazlo|listo|create it|generate|generate it|ya esta|termina(?:lo)?|crealo)(?: (?:el |the )?pdf)?$/.test(n))return {kind:'generate'};
- if(/^(?:lee|saca|extrae|reconstruye|extract|read)(?:me)? (?:el |the )?(?:texto|text)(?: (?:de |from )?(?:las |estas |the |these )?(?:fotos|imagenes|photos|images))?$/.test(n))return {kind:'ocr'};
+ if(/^(?:lee|leer|saca|sacar|extrae|extraer|reconstruye|reconstruir|extract|read)(?:me)? (?:el |the )?(?:texto|text)(?: (?:de |from )?(?:las |estas |the |these )?(?:fotos|imagenes|photos|images))?$/.test(n))return {kind:'ocr'};
+ if(/^(?:ya revise el texto|el texto esta bien|texto correcto|i reviewed the text|the text is correct|looks correct)(?: y generalo| and generate it)?$/.test(n))return {kind:'reviewed',generate:/y generalo|and generate it/.test(n)};
+ if(/^(?:muestrame|muéstrame|abre|show|open) (?:el |the )?pdf$/.test(n))return {kind:'show'};
  if(/^(?:solo (?:las )?fotos|pdf (?:de|con) fotos|photos only)$/.test(n))return {kind:'photos'};
- if((m=/^(?:ponle|pon|cambia|cambiale|set|change)(?: el| the)? (?:titulo|título|title)(?: (?:a|por|to))?\s*[:]?\s+(.+)$/i.exec(raw)))return {kind:'title',text:m[1]};
- if((m=/^(?:agrega|agregale|agrégale|añade|añádele|anade|add|append|ponle)(?: (?:al|en el|to the) (?:pdf|documento|document))?\s*:?\s+([\s\S]+)$/i.exec(raw)))return {kind:'append',text:m[1]};
+ if((m=/^(?:ponle|pon|poner|cambia|cambiar|cambiale|set|change)(?: el| the)? (?:titulo|título|title)(?: (?:a|por|to))?\s*[:]?\s+(.+)$/i.exec(raw)))return {kind:'title',text:m[1]};
+ if((m=/^(?:agrega|agregar|agregale|agrégale|añade|añadir|añádele|anade|add|append|ponle)(?: (?:al|en el|to the) (?:pdf|documento|document))?\s*:?\s+([\s\S]+)$/i.exec(raw)))return {kind:'append',text:m[1]};
  if((m=/^(?:el texto es|que diga|pon este texto|escribe en el pdf|the text is|put this text)\s*:?\s+([\s\S]+)$/i.exec(raw)))return {kind:'body',text:m[1]};
  if((m=/^(?:cambia|reemplaza|replace)\s+["“]?(.+?)["”]?\s+(?:por|con|with)\s+["“]?(.+?)["”]?$/i.exec(raw)))return {kind:'replace',from:m[1],text:m[2]};
- if(/^(?:quita|borra|elimina|remove|delete) (?:el |the )?(?:ultimo parrafo|ultima linea|last paragraph|last line)$/.test(n))return {kind:'removeLast'};
+ if(/^(?:quita|quitar|borra|borrar|elimina|eliminar|remove|delete) (?:el |the )?(?:ultimo parrafo|ultima linea|last paragraph|last line)$/.test(n))return {kind:'removeLast'};
  if(/^(?:m[aá]nda(?:lo|selo)?|env[ií]a(?:lo|selo)?|send it)(?:\s|$)/i.test(raw))return {kind:'sendBlocked'};
  return null;
 }
@@ -71060,6 +71062,8 @@ async function asCrearPdf(order,request){
    if(!active())throw Error('Abre un documento en esta sesión.');session.at=Date.now();
    if(change.kind==='cancel'){session.cancel?.();AS.pdfEditor=null;return 'Dejé de editar el PDF. No envié nada.';}
    if(change.kind==='sendBlocked')return 'El PDF está aquí para revisarlo. Usa Compartir PDF para elegir a quién enviarlo; esta orden no envió nada.';
+   if(change.kind==='reviewed'){check.checked=true;ocrReview=false;changed();if(change.generate){const r=generate();return 'Listo, generé el PDF con el texto revisado.';}return 'Texto revisado. Dime «genéralo» para preparar el PDF.';}
+   if(change.kind==='show'){ready();preview.hidden=false;return 'Aquí tienes el PDF.';}
    if(change.kind==='ocr'){await readPhotos();return status.textContent;}
    if(change.kind==='photos'){mode='photosOnly';changed();return 'Conservaré las fotos dentro del PDF.';}
    if(change.kind==='generate'){const r=generate();return 'Listo, el PDF tiene '+r.pages+' página'+(r.pages===1?'':'s')+'. Lo puedes revisar y descargar aquí.';}
