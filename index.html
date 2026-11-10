@@ -19098,7 +19098,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R373';
+  const APP_BUILD = '2026-11-10-R374';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70958,7 +70958,7 @@ const money=x=>'$'+Number(x).toLocaleString('en-US',{minimumFractionDigits:2,max
 const cents=x=>Math.round(Number(x)*100);
 const clean=x=>String(x||'').replace(/[\r\n<>]/g,' ').trim();
 function method(text){
- let t=norm(text).replace(/(?:no (?:hay|tiene|tengo|por)|sin|not by|no)\s+(?:el )?(zelle|cheque|check|efectivo|cash)/g,'').replace(/(?:en vez de|instead of)\s+(zelle|cheque|check|efectivo|cash)/g,'');
+ let t=norm(text).replace(/\bzell\b/g,'zelle').replace(/(?:no (?:hay|tiene|tengo|por)|sin|not by|no)\s+(?:el )?(zelle|cheque|check|efectivo|cash)/g,'').replace(/(?:en vez de|instead of)\s+(zelle|cheque|check|efectivo|cash)/g,'');
  const found=[...t.matchAll(/\b(zelle|cheque|cheke|check|efectivo|cash)\b/g)].map(m=>/cheque|cheke|check/.test(m[1])?'cheque':/cash|efectivo/.test(m[1])?'efectivo':'zelle');
  const unique=[...new Set(found)];return unique.length===1?unique[0]:unique.length>1?'ambiguous':'';
 }
@@ -70984,13 +70984,13 @@ function intent(text){
  if(/^(?:si[, ]+)?(?:registralo|anotalo|registra ese pago|confirma el registro|guardar pago|yes record it|record it|confirm the record)[. ]*$/.test(t))return {action:'confirm'};
  if(/^(?:no[, ]+)?(?:cancelalo|cancela|no lo registres|todavia no|espera|cancel|don't record it|do not record it)[. ]*$/.test(t))return {action:'cancel'};
  if(/^(?:dile|respondele|contestale|mandale|enviale|escribele|tell|reply|send|text)\b/.test(t))return null; // normal messaging owns this command
- if(!/\b(?:cheque|cheke|check|zelle|pago|pagar|pague|pagado|pagare|adelanto|adelante|advance|payment|pay|paid|saldo|debo|debemos|owe|efectivo|cash)\b/.test(t))return null;
+ if(!/\b(?:cheque|cheke|check|zelle|zell|pago|pagar|pague|pagado|pagare|adelanto|adelante|advance|payment|pay|paid|saldo|debo|debemos|owe|efectivo|cash)\b/.test(t))return null;
  if(/\b(?:dijo|dice|me dijo|el dice|ella dice|he said|she said|message says|mensaje dice|si le|if i|ejemplo|por ejemplo|for example|suppose|supongamos)\b/.test(t))return {action:'clarify',reason:'quoted'};
  if(/\b(?:no|nunca|not|never|todavia no)\s+(?:(?:le|lo|he|se|i|have|aun|he)\s+){0,3}(?:pague|pagado|deje|entregue|mande|escribi|paid|sent|left|delivered|written)\b/.test(t))return {action:'not_done'};
- const en=/\b(?:i |pay|paid|check|payment|advance|owe|show|give|how much)\b/.test(t)&&!/[ñ¿]|\b(?:cheque|le|cuanto|debo)\b/.test(t);
+ const en=/\b(?:i |what|which|pay|paid|check|payment|advance|owe|show|give|how much)\b/.test(t)&&!/[ñ¿]|\b(?:cheque|le|cuanto|debo)\b/.test(t);
  const base={method:method(t),amount:amount(t),reference:reference(t),kind:/\b(adelanto|advance)\b/.test(t)?'adelanto':'pago',english:en,text:String(text)};
  if(/^(?:(?:y |ahora |oye )?)(?:cuanto|cuantos|dame|datos|nombre|numero|telefono|correo|muestrame|revisa|verifica|saldo|que|debo|debemos|how much|details|full name|phone|owe|show|give me)\b/.test(t))return {...base,action:'info'};
- if(/\b(?:voy a|vamos a|le voy|voy hacer|hare|haremos|dejare|manana|despues|pronto|will|going to|gonna|tomorrow|later|quiero|necesito|i need|i want)\b/.test(t))return {...base,action:'plan'};
+ if(/\b(?:voy a|vamos a|le voy|voy hacer|voy pagarle|hare|haremos|dejare|manana|despues|pronto|will|going to|gonna|tomorrow|later|quiero|necesito|i need|i want)\b/.test(t))return {...base,action:'plan'};
  if(/\b(?:estoy (?:dejando|entregando|haciendo)|le estoy|i am (?:leaving|writing)|i'm (?:leaving|writing))\b/.test(t))return {...base,action:'prepared'};
  if(/\b(?:ya )?(?:le )?(?:escribi|prepare|hice|llene|escrito|preparado|written|wrote|prepared)\b/.test(t)&&base.method==='cheque')return {...base,action:'prepared'};
  if(/\b(?:pague|pagado|ya mande|ya le mande|ya envie|ya le envie|transferi|deposite|deje|entregue|entregado|le di|paid|sent|delivered|left|dropped off|handed|gave)\b/.test(t))return {...base,action:'record'};
@@ -70998,17 +70998,31 @@ function intent(text){
  return {...base,action:'info'};
 }
 function resolve(text,people,context){
- const t=' '+norm(text).replace(/[.,:;]/g,' ')+' ';
+ const original=norm(text),t=' '+original.replace(/([a-z])['’]s\b/g,'$1').replace(/[.,:;]/g,' ')+' ';
  const candidates=people.filter(p=>p&&p.key&&p.name&&p.active!==false);
+ const possessives=[...original.matchAll(/([a-z]+)['’]s\b/g)].map(m=>m[1]).filter(w=>!['what','it','that','there','here','who','he','she','let'].includes(w));
+ if(possessives.some(w=>!candidates.some(p=>(' '+norm(p.name)+' '+norm(p.fullName)+' ').includes(' '+w+' '))))return {error:'No identifiqué a esa persona. Dime su nombre completo.'};
  const full=candidates.filter(p=>t.includes(' '+norm(p.name)+' ')||p.fullName&&t.includes(' '+norm(p.fullName)+' '));
- let found=full.length?full:candidates.filter(p=>t.includes(' '+norm(p.name).split(' ')[0]+' '));
+ const exactFirsts=new Set(full.map(p=>norm(p.name).split(' ')[0]));
+ let found=full.concat(candidates.filter(p=>!exactFirsts.has(norm(p.name).split(' ')[0])&&t.includes(' '+norm(p.name).split(' ')[0]+' ')));
  found=[...new Map(found.map(p=>[p.key,p])).values()];
  if(found.length===1)return {person:found[0]};
  if(found.length>1)return {error:'¿De cuál persona hablamos? '+found.map(p=>p.name).join(', ')+'.'};
- // An explicit unknown name must not fall back to the previous worker.
- if(/\b(?:a|to|para|for|de|of)\s+(?!hacer|pagar|escribir|dejar|entregar|el|la|su|un|mi|ese|this|the|him|her|it|pay|write|leave|zelle|cheque|cheke|check|cash|efectivo)([a-z]+)\b/.test(norm(text)))return {error:'No identifiqué a esa persona. Dime su nombre completo.'};
+ // Explicit unknown names, including short corrections, cannot inherit a prior worker.
+ if(/\b(?:a|to|para|for|de|of|about|meant)\s+(?!hacer|pagar|escribir|dejar|entregar|el|la|su|un|mi|ese|this|the|him|her|it|pay|write|leave|zelle|zell|cheque|cheke|check|cash|efectivo)([a-z]+)\b/.test(original)||/^(?:no ese no|no era|no es) [a-z]+/.test(original))return {error:'No identifiqué a esa persona. Dime su nombre completo.'};
  const prior=context&&candidates.find(p=>p.key===context.key);
  return prior?{person:prior}:{error:'¿A quién le vamos a preparar el pago?'};
+}
+function queryContinuation(text,context){
+ if(!context||!context.stage||!context.key)return null;
+ const t=norm(text).replace(/[.,]/g,'').trim();
+ if(t.length>160)return null;
+ const field=/^(?:(?:y|ahora|and|now) )?(?:(?:su|el|his|her) )?(?:nombre(?: completo)?|numero(?: de zelle)?|telefono|correo|saldo|full name|phone number|name|balance)(?: nada mas| solamente| por favor| please)?$/.test(t);
+ const other=/^(?:y|ahora|and|now) (?:para|de|for|about) [a-zá-úñ][a-zá-úñ'’ -]*(?: lo mismo| the same| same thing)?$/.test(t);
+ const correction=/^(?:no ese no|no era|no es|me referia a|i meant) [a-zá-úñ][a-zá-úñ'’ -]*$/.test(t);
+ const balance=/^(?:y )?(?:cuanto le toca|cuanto queda|how much does he get|how much does she get)$/.test(t);
+ if(!field&&!other&&!correction&&!balance)return null;
+ return {action:'info',method:context.method||'',amount:null,reference:'',kind:context.kind||'pago',english:/^(?:and|now|i meant)|full name|phone number|how much/.test(t),text:String(text),contextual:true,field:field?(/nombre|name/.test(t)?'name':/saldo|balance/.test(t)?'balance':'contact'):balance?'balance':''};
 }
 // Short corrections are accepted only while reviewing a specific payment.
 function continuation(text,context){
@@ -71040,6 +71054,10 @@ function request(rows,key,kind){
 function details(snapshot,order){
  const s=snapshot,p=s.person,en=order.english,lines=[];
  lines.push((en?'For ':'Para ')+clean(p.name)+':');
+ if(order.field==='name')return lines.concat((en?'Full check payee name: ':'Nombre completo para el cheque: ')+(clean(p.fullName)||(en?'not recorded.':'sin registrar.'))).join('\n');
+ if(order.field==='contact')return lines.concat((order.method==='zelle'?'Zelle: ':(en?'Registered payment contact: ':'Contacto registrado para pagos: '))+(clean(p.zelle)||(en?'not recorded.':'sin registrar.'))).join('\n');
+ if(order.field==='balance')return lines.concat((en?'Current balance: ':'Saldo actual: ')+(Number.isFinite(s.balance)?money(s.balance):(en?'not verified':'sin verificar'))+'.',s.warning||'').filter(Boolean).join('\n');
+
  lines.push((en?'Current balance: ':'Saldo actual: ')+(Number.isFinite(s.balance)?money(s.balance):(en?'not verified':'sin verificar'))+'.');
  if(order.method==='cheque'){
   lines.push(p.fullName?(en?'Pay the check to: ':'Nombre para el cheque: ')+clean(p.fullName)+'.':(en?'The full check payee name is missing. Do not use the nickname.':'Falta el nombre completo para el cheque; no uses el apodo.'));
@@ -71111,7 +71129,7 @@ async function commit(flow,io){
  if(!verifyReceipt(receipt,flow))return {state:'uncertain',text:'No pude comprobar que el pago quedara registrado. No lo repetiré; revisa Pagos.'};
  return io.finish(flow,receipt);
 }
-const api={norm,money,cents,method,amount,reference,intent,resolve,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit};
+const api={norm,money,cents,method,amount,reference,intent,resolve,queryContinuation,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiPaymentFollowup=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
@@ -71285,7 +71303,7 @@ async function lumiPayEditCard(texto){
 async function asPaymentFollowup(texto){
  const P=lumiPayCore();if(!P)return false;
  const owner=lumiPayOwner();let order=P.intent(texto),continuationContext=null;
- if(!order&&owner&&/^(?:ya |i |lo |se lo )/.test(P.norm(texto))){continuationContext=await lumiPayContext(owner);order=P.continuation(texto,continuationContext);}
+ if(!order&&owner&&/^(?:ya |i |lo |se lo |y |ahora |and |now |su |el nombre|el numero|nombre|numero|telefono|correo|saldo|full name|phone number|his |her |no ese|no era|no es|me referia|cuanto le toca|cuanto queda|how much)/.test(P.norm(texto))){continuationContext=await lumiPayContext(owner);order=P.continuation(texto,continuationContext)||P.queryContinuation(texto,continuationContext);}
  if(/^(?:revisa ese pago|verifica ese pago|comprueba ese pago|revisa si quedo registrado|verifica si quedo registrado|check that payment|verify that payment|did that payment go through)[.!? ]*$/.test(P.norm(texto))){asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;try{lumiPayGuard(owner);const text=await lumiPayReconcile(owner);lumiPayGuard(owner);lumiPaySay(text);}catch(e){if(owner===lumiPayOwner()||!owner)lumiPaySay(e.message);}finally{AS.enviando=false;}return true;}
  const pending=LUMI_PAY_PENDING?.owner===owner&&Date.now()-LUMI_PAY_PENDING.at<300000?LUMI_PAY_PENDING:null;
  if(pending){const corrected=P.amendment(texto,pending.order);if(corrected)order=corrected;}
@@ -71293,7 +71311,7 @@ async function asPaymentFollowup(texto){
  if(['confirm','cancel'].includes(order.action)){if(!pending)return false;LUMI_PAY_PENDING=null;lumiPaySay(order.action==='cancel'?'De acuerdo. No registré un pago.':'Faltan datos del pago; revisa el monto y el método.');return true;}
  // General company balances and payment-request inbox queries retain their existing routes.
  if(/\b(?:peticiones|solicitudes|quien|quienes|todos|todas|everyone|all workers|how many|requests)\b/i.test(P.norm(texto)))return false;
- if(order.action==='info'&&!pending&&!/\b(?:cheque|check|zelle|efectivo|cash)\b/.test(P.norm(texto))&&!/(?:\ba\b|\bto\b|\bde\b)\s+[\p{L}]/u.test(P.norm(texto)))return false;
+ if(order.action==='info'&&!order.contextual&&!pending&&!/\b(?:cheque|check|zelle|efectivo|cash)\b/.test(P.norm(texto))&&!/(?:\ba\b|\bto\b|\bde\b)\s+[\p{L}]/u.test(P.norm(texto)))return false;
  asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;
  try{
   lumiPayGuard(owner);
