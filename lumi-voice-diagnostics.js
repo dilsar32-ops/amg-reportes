@@ -18,6 +18,8 @@ function createLumiVoiceDiagnostics({session,device,native,version,send,now=Date
   if(typeof event.cached==='boolean')item.cached=event.cached;
   if(Number.isFinite(event.beforeSpeechMs))item.beforeSpeechMs=Math.max(0,Math.min(300000,Math.round(event.beforeSpeechMs)));
   if(typeof event.ready==='boolean')item.ready=event.ready;
+  if(['ready','missing','owner','voice','worker','timestamp','clock','stale'].includes(event.reason))item.reason=event.reason;
+  if(Number.isFinite(event.ageMs))item.ageMs=Math.max(-3600000,Math.min(3600000,Math.round(event.ageMs)));
   if(typeof event.stream==='boolean')item.stream=event.stream;
   if(Number.isFinite(event.engineMs))item.engineMs=Math.max(0,Math.min(300000,Math.round(event.engineMs)));
   if(event.stage==='queued'&&queued)return;

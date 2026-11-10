@@ -11365,7 +11365,8 @@ html body #asPanel #asSharedNotice{display:none!important;}
 <script src="lumi-communications.js?v=R246"></script>
 <script src="lumi-attachments.js?v=R250"></script>
 <script src="lumi-attachment-cloud.js?v=R251"></script>
-<script src="https://dilsar32-ops.github.io/amg-reportes/lumi-voice-diagnostics.js?v=R329"></script>
+<script src="https://dilsar32-ops.github.io/amg-reportes/lumi-voice-diagnostics.js?v=R364"></script>
+<script src="https://dilsar32-ops.github.io/amg-reportes/lumi-device-session.js?v=R364"></script>
 <script src="lumi-ear-health.js?v=R362"></script>
 <style id="lumi-home-r336">
 /* Lumi lives beside the greeting, within its existing vertical space. */
@@ -19097,7 +19098,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R363';
+  const APP_BUILD = '2026-11-10-R364';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68056,7 +68057,7 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
     if(SES.role==='manager')void asVozLocal().warm().catch(()=>{});
     asOyeLiberar();
     { asChatRestore(); asAccionVisible('', ''); }
-    AS.abierto = true; AS.dictado = null; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asMapa(null); asTranscribir('');
+    AS.abierto = true; void asDeviceClaim(); AS.dictado = null; AS.conf = null; AS.pregunta = null; asQuitarTarjeta(); asMostrarRespuesta(''); asMapa(null); asTranscribir('');
     const p = $('#asPanel'); if(p){ p.hidden = !!AS.enPuerta; p.classList.toggle('as-prueba-on', AS.sandbox); if(!AS.enPuerta) asPanelAlFrente(p); }   // (R88) en la puerta: sin panel, todo pasa ahí mismo; desde el menú o Mensajes, al frente
     asEstado('esperando', '');
     { const v = $('#asVersion'); if(v) v.textContent = 'Versión ' + String(APP_BUILD).replace(/^\d{4}-\d{2}-\d{2}-/, '') + ' · ' + String(APP_BUILD).slice(0, 10); }
@@ -68103,6 +68104,7 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
     return Promise.race([pedido, tope]);
   }
   function asCerrar(){
+    if(AS_DEVICE_SESSION)void AS_DEVICE_SESSION.release();
     asPdfLimpiar();
     AS.requestEpoch=(AS.requestEpoch||0)+1; AS.enviando=false; clearTimeout(AS.tmrRelleno); AS.desktopReadReceipt=null;
     asAccionVisible('', '');
@@ -68150,6 +68152,7 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
     if(AS.micBusy)return; AS.micBusy=true;
     const control=$('#asMicToggle');if(control)control.disabled=true;
     try{
+    if(SES.role==='manager'&&!asDeviceSession().active()){await asDeviceClaim();AS.micMuted=true;}
     AS.micMuted=!AS.micMuted;asMicPintar();
     if(AS.micMuted){
       AS.texto='';AS.oidoMantiene=false;
@@ -68372,6 +68375,7 @@ function createLumiWebEar({Recognition,language,active,onText,onError,schedule=s
 }
 
   async function asEscuchar(recovering=false){
+    if(!await asDeviceOwns())return;
     if(AS.micMuted)return;
     if(!AS.abierto || AS.estado === 'escuchando' || AS.estado === 'pensando') return;
     asCallar();
@@ -68608,7 +68612,8 @@ function lumiVoiceStreamSelect(offset){
 }
 function lumiVoiceFinalRow(row){return row?.result?.data||{voice:row?.voice,mime:row?.mime,audio:row?.audio,seconds:row?.seconds};}
 const LUMI_VOICE_FINAL_SELECT='state,voice:result->data->>voice,mime:result->data->>mime,audio:result->data->>audio,seconds:result->data->seconds';
-function createLumiVoice({call,session,play,fixedAudio=()=>null,preload=()=>{},observe=()=>{},stream=true,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
+function createLumiVoice({call,session,play,fixedAudio=()=>null,preload=()=>{},observe=()=>{},stream=true,playback=()=>null,now=Date.now,wait=ms=>new Promise(r=>setTimeout(r,ms)),uuid=()=>crypto.randomUUID()}){
+ let deviceStatus={reason:'ready',ageMs:null};
  let epoch=0,trace=0,chain=Promise.resolve(),prepareChain=Promise.resolve(),current=null,cache=null,playing=new Set(),jobs=new Set(),recentAudio=new Map();
  const owner=s=>s.user_id+'|'+s.company_id;
  const active=(s,e)=>e===epoch&&owner(s)===owner(session())&&session().role==='manager';
@@ -68616,8 +68621,10 @@ function createLumiVoice({call,session,play,fixedAudio=()=>null,preload=()=>{},o
   if(cache&&cache.owner===owner(s)&&now()-cache.at<30000)return cache.device;
   const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(s.company_id)+'&clave=eq.lumi_local_model_device');
   const d=rows?.[0]?.valor;
-  const valid=d?.userId===s.user_id&&d.voice==='calida-tranquila-v1'&&!!d.workerId&&Number.isFinite(Date.parse(d.updatedAt))&&now()-Date.parse(d.updatedAt)>=0&&now()-Date.parse(d.updatedAt)<180000;
-  const value=valid?d:null;cache=value?{owner:owner(s),at:now(),device:value}:null;return value;
+  const checkedAt=Number.isFinite(d?.serverNow)?d.serverNow:now(),age=checkedAt-Date.parse(d?.updatedAt);
+  const reason=!d?'missing':d.userId!==s.user_id?'owner':d.voice!=='calida-tranquila-v1'?'voice':!d.workerId?'worker':!Number.isFinite(age)?'timestamp':age < -60000?'clock':age>=180000?'stale':'ready';
+  deviceStatus={reason,ageMs:Number.isFinite(age)?age:null};
+  const value=reason==='ready'?d:null;cache=value?{owner:owner(s),at:now(),device:value}:null;return value;
  }
  async function speech(text,language,s,e,prepareGate=Promise.resolve(),playGate=Promise.resolve(),releaseNext=()=>{}){
   const began=now(),attempt=++trace;const mark=(stage,extra={})=>{try{observe({trace:attempt,stage,ms:Math.max(0,now()-began),...extra});}catch{}};mark('start',{beforeSpeechMs:typeof AS!=='undefined'&&Number.isFinite(AS.beforeSpeechMs)?AS.beforeSpeechMs:null});
@@ -68632,7 +68639,7 @@ function createLumiVoice({call,session,play,fixedAudio=()=>null,preload=()=>{},o
    const handle=play(cached);playing.add(handle);releaseNext();
    try{await handle.done;mark(live()?'completed':'cancelled');return live()?'played':'cancelled';}finally{playing.delete(handle);}
   }
-  const d=await device(s);mark('device',{ready:!!d});if(!live())return 'cancelled';if(!d)return 'unavailable';
+  const d=await device(s);mark('device',{ready:!!d,...deviceStatus});if(!live())return 'cancelled';if(!d)return 'unavailable';
   const useStream=typeof stream==='function'?await stream():stream;mark('capability',{stream:!!useStream});
   if(!live())return 'cancelled';
   const chunks=useStream?packLumiSpeech(text):splitLumiSpeech(text);
@@ -68641,7 +68648,7 @@ function createLumiVoice({call,session,play,fixedAudio=()=>null,preload=()=>{},o
    if(!live())return null;
    const id=uuid(),route='/rest/v1/lumi_model_jobs?id=eq.'+encodeURIComponent(id),job={route,owner:owner(s)};jobs.add(job);
    try{
-    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:chunk,language,stream:!!onPartial}})});mark('queued');
+    await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:s.user_id,company_id:s.company_id,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_voice',text:chunk,language,stream:!!onPartial,...(playback()?{playback:playback()}:{})}})});mark('queued');
     const deadline=now()+160000;let data=null,seen=0;
     while(now()<deadline){
      if(!live())return null;
@@ -68839,10 +68846,25 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
     for(const clip of bundle.clips)LUMI_FIXED_VOICE.set(lumiFixedKey(clip.text,clip.language),clip);
    }).catch(()=>{LUMI_FIXED_LOADING=null;});return LUMI_FIXED_LOADING;
   }
-  let AS_VOZ_LOCAL=null,AS_AUDIO_PLAYER=null;
+  let AS_VOZ_LOCAL=null,AS_AUDIO_PLAYER=null,AS_DEVICE_SESSION=null,AS_SERVER_CLOCK=0,AS_SERVER_CLOCK_AT=0;
+  const asDeviceKind=()=>lumiDeviceKind(navigator,window.Capacitor?.getPlatform?.()||'');
+  const asServerNow=()=>Date.now()+AS_SERVER_CLOCK;
+  async function asDeviceCall(route,init={}){
+    const r=await authFetch(route,{...init,headers:{...cloudHeaders(),...init.headers},signal:AbortSignal.timeout(6000)});
+    const server=Date.parse(r.headers.get('Date'));if(Number.isFinite(server)){AS_SERVER_CLOCK=server-Date.now();AS_SERVER_CLOCK_AT=Date.now();}
+    if(!r.ok)throw Error('Device session HTTP '+r.status);const text=await r.text();return text?JSON.parse(text):null;
+  }
+  function asDeviceSession(){return AS_DEVICE_SESSION||(AS_DEVICE_SESSION=createLumiDeviceSession({
+    session:()=>({...SES,sandbox:AS.sandbox}),call:asDeviceCall,device:asDeviceKind(),now:asServerNow,
+    onHandoff:()=>{if(!AS.abierto)return;asCallar();void asPararOido();if(window.Cara)Cara.hablando(false);asEstado('reposo','Toca el micrófono o escribe para continuar aquí.');}
+  }));}
+  function asDeviceClaim(){if(SES.role!=='manager'||AS.sandbox)return Promise.resolve(true);return asDeviceSession().activate();}
+  const asDeviceOwns=()=>SES.role!=='manager'||AS.sandbox?Promise.resolve(true):asDeviceSession().owns();
+  setInterval(()=>{if(AS.abierto&&AS_DEVICE_SESSION&&!document.hidden)void AS_DEVICE_SESSION.owns(true);},5000);
+
   function asVozLocal(){
     if(AS_VOZ_LOCAL)return AS_VOZ_LOCAL;
-    const useMedia=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+    const useMedia=asDeviceKind()==='mobile';
     let audioPlayer=useMedia?createLumiMediaPlayer({audio:()=>new Audio()}):createLumiAudioPlayer({context:()=>new (window.AudioContext||window.webkitAudioContext)(),beforeResume:()=>{try{if(navigator.audioSession)navigator.audioSession.type='playback';}catch(e){}}});
     const nativeVoice=isNative()?asPlugin():null;
     if(useMedia&&nativeVoice){audioPlayer=createLumiNativePlayer({plugin:nativeVoice,fallback:audioPlayer});audioPlayer=createLumiNativeStreamPlayer({plugin:nativeVoice,fallback:audioPlayer});}
@@ -68853,9 +68875,10 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
       observe:typeof createLumiVoiceDiagnostics==='function'?createLumiVoiceDiagnostics({session:()=>SES,device:useMedia?'mobile':'desktop',native:isNative(),version:APP_BUILD,send:record=>authFetch('/rest/v1/asistente_ajustes?on_conflict=company_id,clave',{method:'POST',headers:{...cloudHeaders(),Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(record)})}):()=>{},
       stream:async()=>useMedia?(audioPlayer.supportsStreaming?await audioPlayer.supportsStreaming():false):true,
       session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),
+      playback:()=>asDeviceSession().identity(),
       call:async(route,init={})=>{
         const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);
-        try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('Local voice HTTP '+r.status);const t=await r.text();return t?JSON.parse(t):null;}finally{clearTimeout(timer);}
+        try{const r=await authFetch(route,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('Local voice HTTP '+r.status);const t=await r.text(),data=t?JSON.parse(t):null;const server=Date.parse(r.headers.get('Date'));if(route.includes('clave=eq.lumi_local_model_device')&&Array.isArray(data)&&Number.isFinite(server)){for(const row of data)if(row.valor)row.valor={...row.valor,serverNow:server};}return data;}finally{clearTimeout(timer);}
       },
       play:data=>{asEstado('hablando','');return audioPlayer.play(data);}
     });
@@ -68869,12 +68892,15 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
   function asAudioRepetirBoton(){
     let b=$('#asAudioRepetir');if(b)return b;
     b=document.createElement('button');b.id='asAudioRepetir';b.type='button';b.textContent='Activar audio y repetir';b.className='btn btn-outline';
-    b.onclick=()=>{asPrepararAudio();const t=$('#asRespuesta')?.textContent;if(t&&AS.abierto)asHablar(t,asSeguirOyendo);};
+    b.onclick=()=>{void asDeviceClaim();asPrepararAudio();const t=$('#asRespuesta')?.textContent;if(t&&AS.abierto)asHablar(t,asSeguirOyendo);};
     const n=$('#asVozAviso');if(n&&n.parentNode)n.parentNode.insertBefore(b,n.nextSibling);return b;
   }
-  async function asDecir(t, encolar){
+  async function asDecir(t, encolar, expectedEpoch=AS.hablaEpoch){
+    const owns=await asDeviceOwns();
+    if(expectedEpoch!==AS.hablaEpoch)return 0;
+    if(!owns){if(AS.abierto)asEstado('reposo','Toca el micrófono o escribe para continuar aquí.');return 0;}
     t = asParaVoz(asTrVoz(t), asEn() ? 'en' : (AS.idiomaResp || 'es')); if(!t) return 0;
-    AS.beforeSpeechMs=AS.turnStartedAt?Date.now()-AS.turnStartedAt:null;
+    AS.beforeSpeechMs=AS.turnStartedAt&&Date.now()-AS.turnStartedAt<120000?Date.now()-AS.turnStartedAt:null;
     asEstado(SES.role==='manager'?'pensando':'hablando', SES.role==='manager'?'Preparando la voz…':''); if(window.Cara){ try{ Cara.hablando(true, t); }catch(err){} }
     setTimeout(asVigilarInterrupcion, 250);   // barge-in (si está prendido): también con frases encoladas del stream
     // Keep listening paused while the local model generates and plays the actual audio.
@@ -70052,7 +70078,7 @@ function lumiNoticeBatch(data,seen=[],pending=[],now=Date.now()){
  return {ids:unique.map(e=>e.id),events:unique,text:'Amílcar, '+(total?'tienes mensajes nuevos en '+total+' '+(total===1?'conversación':'conversaciones')+'. ':'hay reportes nuevos. ')+lines.join(' ')+(total?' ¿Te los leo?':''),at:now};
 }
 function lumiNoticeSay(text,routes=[],meta={}){
- const blocked=!AS.abierto||AS.enviando||AS_DESKTOP_BUSY||lumiReplyInProgress()||AS.estado==='hablando'||AS.estado==='pensando'||AS.estado==='escuchando'&&AS.texto?.trim();
+ const blocked=(SES.role==='manager'&&!asDeviceSession().active())||!AS.abierto||AS.enviando||AS_DESKTOP_BUSY||lumiReplyInProgress()||AS.estado==='hablando'||AS.estado==='pensando'||AS.estado==='escuchando'&&AS.texto?.trim();
  if(blocked){if(!meta.ids||!LUMI_NOTICE_SPOKEN.some(n=>n.ids?.some(id=>meta.ids.includes(id))))LUMI_NOTICE_SPOKEN.push({text,routes,...meta});return false;}
  if(routes.length){lumiSetMessageContext(routes);LUMI_INBOX_SESSION={owner:SES.user_id+'|'+SES.company_id,at:Date.now(),items:routes.map(r=>({...r,unreadCount:null})),index:-1,phase:'offer',english:false,selected:[...new Set(routes.map(r=>r.app))],health:{}};}
  const last=document.getElementById('asConversacion')?.lastElementChild;if(last?.dataset.role==='assistant')last.dataset.keepPreview='1';
@@ -70063,7 +70089,7 @@ function lumiNoticeSay(text,routes=[],meta={}){
 }
 async function lumiProactiveTick(){
  if(typeof SES==='undefined'||SES.role!=='manager'||!SES.user_id){LUMI_NOTICE_SPOKEN=[];LUMI_NOTICE_OWNER=null;document.getElementById('lumiArrivalBanner')?.remove();return;}
- if(LUMI_NOTICE_BUSY||document.hidden)return;
+ if(LUMI_NOTICE_BUSY||document.hidden||!await asDeviceOwns())return;
  const owner=SES.user_id+'|'+SES.company_id;if(LUMI_NOTICE_OWNER!==owner){LUMI_NOTICE_OWNER=owner;LUMI_NOTICE_SPOKEN=[];document.getElementById('lumiArrivalBanner')?.remove();}
  LUMI_NOTICE_SPOKEN=LUMI_NOTICE_SPOKEN.filter(n=>!n.at||Date.now()-n.at<900000);
  if(LUMI_NOTICE_SPOKEN.length&&AS.abierto&&!AS.enviando&&!AS_DESKTOP_BUSY&&!lumiReplyInProgress()&&['esperando','escuchando'].includes(AS.estado)&&!(AS.estado==='escuchando'&&AS.texto?.trim())){const next=LUMI_NOTICE_SPOKEN.shift();lumiNoticeSay(next.text,next.routes,next);}
@@ -71159,7 +71185,7 @@ function lumiIncompleteSpeechReply(text){
     texto = String(texto || '').trim();
     if(!texto || AS.enviando) return;
     AS.turnStartedAt=Date.now();
-    if(SES.role==='manager')void asVozLocal().warm().catch(()=>{});
+    void asDeviceClaim(); // User input chooses the reply device; warming here delayed short replies.
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
     if(!dictando&&!AS.conf&&!AS.pregunta){const incomplete=lumiIncompleteSpeechReply(texto);if(incomplete){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(incomplete);asHablar(incomplete,asSeguirOyendo);return;}}
@@ -71195,7 +71221,7 @@ function lumiIncompleteSpeechReply(text){
     if(!dictando&&!AS.conf&&!AS.pregunta){const owner=SES.user_id+'|'+SES.company_id;const context=lumiCurrentMessageContext(owner);let compose=lumiComposeParse(texto,LUMI_MESSAGE_DRAFT?.owner===owner?LUMI_MESSAGE_DRAFT:null,context);if(compose?.query){if(!compose.app){await lumiLoadRoutes(owner);if(owner!==SES.user_id+'|'+SES.company_id)return;}compose=lumiResolveCompose(compose,lumiRouteRows(owner),owner);}if(compose){await asComposeMessage(compose,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const quote=lumiQuoteOrder(texto);if(quote){await asCommercialQuote(quote,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const pdf=lumiPdfOrder(texto);if(pdf){await asCrearPdf(pdf,texto);return;}}
-    if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
+    if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiDeviceAnswer(texto,asDeviceKind())||lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const follow=lumiReviewFollowup(texto,LUMI_REVIEW_DETAIL,SES.user_id+'|'+SES.company_id);if(follow){asTranscribir(texto);if(follow.action==='chat'){await asEscritorioMac({app:follow.app,action:'read_chat',query:follow.query});return;}asPararOido();asCallar();const answer=follow.action==='details'?LUMI_REVIEW_DETAIL.text:follow.text;asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const review=lumiReviewOrder(texto);if(review){await asRevisionCompleta(review,texto);return;}}
     if(!dictando&&!AS.conf){const calendar=LUMI_CAL_CHAT.order(texto);if(calendar){asTranscribir(texto);await asEscritorioMac({...calendar,originalText:texto});return;}}
@@ -73531,7 +73557,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const atras = $('#asAtras'); if(atras) atras.addEventListener('click', asCerrar);
     const esf = $('#asEsfera');
     if(esf) esf.addEventListener('click', function(){
-      asPrepararAudio();
+      void asDeviceClaim();asPrepararAudio();
       if(window.Cara){ try{ Cara.parallax(); }catch(err){} }   /* giroscopio: pide permiso UNA vez, desde un toque */
       if(AS.estado === 'escuchando'){ asPararOido().then(function(){ if(AS.texto.trim()) asEnviarVoz(AS.texto); else asReposar(); }); }
       else if(AS.estado === 'hablando'){ AS.oidoMantiene = false; asCallar(); asEstado('esperando', ''); asEscuchar(); }
