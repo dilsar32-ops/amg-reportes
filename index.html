@@ -19097,7 +19097,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R352';
+  const APP_BUILD = '2026-11-09-R353';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69704,6 +69704,10 @@ const clean=x=>String(x||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(
 const normal=x=>norm(x).replace(/^(?:(?:hey|oye|lumi|bueno|pues|ok|por favor|please)\s+)+/,'').replace(/\s+(?:por favor|please)$/,'');
 function sources(text){const t=normal(text),out=[];if(/\b(?:whatsapp|wasap|guasap)\b/.test(t))out.push('whatsapp');if(/\b(?:workspace|field reports)\b/.test(t))out.push('workspace');if(/mensajes (?:normales|de apple)|apple messages|imessage|\bsms\b|\b(?:en|in|on) (?:mensajes|messages)$/.test(t))out.push('messages');return out.length?out:Object.keys(APPS);}
 function english(text){const t=normal(text);return /\b(?:any|have|read|messages|texts|who|what|reply|next|yes)\b/.test(t)&&! /\b(?:tenemos|hay|tengo|mensajes|leeme|leemelos|que|quien|dime|si)\b/.test(t);}
+function channelReading(text){
+ const t=normal(text).replace(/^(?:ahora |now )?(?:puedes |puede |podrias |can you |could you )?/,''),m=t.match(/^(?:(lee|leer|leeme|leme|lee me|muestrame|read|show)(?: me)?\s+)?(?:solo |solamente |only |just )?(?:(?:los|las|the)\s+)?(?:(?:mensajes|messages|texts|ones)(?:\s+(?:nuevos|new|sin leer|unread))?\s+)?(?:(?:de|del|en|from|in|on)\s+)?(whatsapp|wasap|guasap|workspace|field reports|mensajes normales|mensajes de apple|apple messages|imessage|sms)$/);
+ return m?{action:'read',sources:sources(m[2]),english:english(text),explicit:!!m[1]}:null;
+}
 function adviceRequest(text){
  let t=normal(text),query='',last=false;
  const deictic=/\s+(?:al (?:ultimo )?mensaje(?: que (?:revisamos|leimos))?|a (?:eso|ese mensaje)|to (?:that|the last message)(?: we (?:read|reviewed))?)$/;
@@ -69727,6 +69731,7 @@ function intent(text){
  // Naming the Messages app in an advice request does not request the inbox.
  if(adviceRequest(text))return null;
  if(/\b(?:envia\w*|manda\w*|send|borra|delete|paga|pay|dile|escribe\w*|respond\w*|reply to)\b/.test(t))return null;
+ const channel=channelReading(text);if(channel?.explicit){const {explicit,...request}=channel;return request;}
  const noun=/\b(?:mensajes?|messages?|texts|inbox|novedades)\b/.test(t);
  const ask=/\b(?:hay|tenemos|tengo|llego|llegaron|recibimos|recibido|nuevos|nuevas|revisa|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|leeme|leemelos|read|check|look|show|any|have|unread|new)\b/.test(t);
  const standalone=/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron)|(?:me|nos) han escrito|any (?:news|updates)|anything new|what s new|do we have anything new)$/.test(t)||sources(t).length===1&&/^(?:revisa|checa|mira|check|que hay en|any news in)\b/.test(t);
@@ -69764,8 +69769,9 @@ function follow(text,s,owner,now=Date.now()){
  if(s.phase==='idle')return null;
  const t=normal(text);
  if(/^(?:no|ahora no|despues|luego|not now|later|cancel|cancela)$/.test(t))return {action:'cancel'};
+ const channel=channelReading(text);if(channel)return {action:'scope',sources:channel.sources};
  if(/^(?:si|si leelos|si leemelos|claro|dale|adelante|ok|okay|yes|sure|go ahead|leelos|leemelos|lee los mensajes|read them|read the messages)$/.test(t))return {action:'read',index:s.phase==='offer'?0:s.index+1};
- if(/^(?:el |la |los |las |the )?(?:siguiente|siguientes|otro|otra|next)(?: mensaje| chat| message| one)?$/.test(t)||/^(?:sigue|continua|sigue con el siguiente|vamos con el siguiente|continue|keep going)$/.test(t))return {action:'read',index:s.index+1};
+ if(/^(?:el |la |los |las |the )?(?:siguiente|siguientes|otro|otra|next)(?: mensaje| chat| message| one)?$/.test(t)||/^(?:(?:sigue|continua)(?: leyendo)?|sigue con el siguiente|vamos (?:con el|al) siguiente|el que sigue|ahora el otro|(?:lee|leeme) el siguiente(?: mensaje)?|continue|keep (?:going|reading)|read (?:the )?next(?: message| one)?|read another)$/.test(t))return {action:'read',index:s.index+1};
  const advice=adviceRequest(text);if(advice&&!advice.query)return {action:'advice',index:s.index};
  let q=t.replace(/^(?:lee|leeme|abre|muestrame|read|open|show)\s+/,'').replace(/^(?:el|la|los|las|the)\s+/,'').replace(/^(?:de|from|one from)\s+/,'');
  if(q==='primero'||q==='first')return {action:'read',index:0};
@@ -69859,7 +69865,8 @@ async function asInboxDialogue(texto){
  if(SES.role!=='manager')return false;
  const D=LumiInboxDialogue,owner=SES.user_id+'|'+SES.company_id;
  const fresh=LUMI_INBOX_SESSION?.owner===owner&&Date.now()-LUMI_INBOX_SESSION.at<900000;
- const request=D.intent(texto),adviceRequest=D.adviceRequest(texto);let follow=fresh?D.follow(texto,LUMI_INBOX_SESSION,owner):null;
+ let request=D.intent(texto);const adviceRequest=D.adviceRequest(texto);let follow=fresh?D.follow(texto,LUMI_INBOX_SESSION,owner):null;
+ if(!request&&follow?.action==='scope')request={action:'read',sources:follow.sources,english:D.english(texto)};
  const resume=!request&&adviceRequest&&(adviceRequest.query||!follow||follow.index<0);
  if(!request&&LUMI_MESSAGE_DRAFT&&!LUMI_MESSAGE_DRAFT.fromInbox&&['incomplete','draft','sending'].includes(LUMI_MESSAGE_DRAFT.status))return false;
  if(!request&&!follow&&!resume){if(LUMI_INBOX_SESSION?.phase==='offer')LUMI_INBOX_SESSION.phase='idle';return false;}
@@ -70657,7 +70664,9 @@ function lumiComposeReduce(state,command,owner){
 // Company replies may use private evidence internally, never disclose payroll details.
 function lumiPrivatePayrollReply(text){
  const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
- const payroll=/\b(?:debemos|debo|debe|saldo|sueldo|salario|nomina|adelanto|pago|pagamos|gana|cobra|tarifa|horas|owe|balance|salary|payroll|wage|paid|earned|hourly)\b/.test(t);
+ // 'Debe actualizar la app a R353' is an instruction, not a worker balance.
+ const financialText=t.replace(/\bdebe(?:n)?\s+(?:de\s+)?(?:actualizar|reiniciar|abrir|cerrar|adjuntar|enviar|mandar|seleccionar|tocar|pulsar|revisar|intentar|escribir|traducir|explicar|describir|compartir)(?:me|le|les|nos|lo|la|los|las)?\b/g,'');
+ const payroll=/\b(?:debemos|debo|debe|deben|saldo|sueldo|salario|nomina|adelanto|pago|pagos|pagar|pagamos|gana|cobra|tarifa|horas|owe|balance|salary|payroll|wage|paid|earned|hourly)\b/.test(financialText);
  const quantity=/\d|[$€£]|\b(?:dolares|dollars|[a-z]*cientos?|mil|hundred|thousand|one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieci[a-z]+|veinti[a-z]+|veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)\b/.test(t);
  return payroll&&quantity;
 }
