@@ -19097,7 +19097,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R356';
+  const APP_BUILD = '2026-11-10-R357';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69720,6 +69720,16 @@ const clean=x=>String(x||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(
 const normal=x=>norm(x).replace(/^(?:(?:hey|oye|lumi|bueno|pues|ok|por favor|please)\s+)+/,'').replace(/\s+(?:por favor|please)$/,'');
 function sources(text){const t=normal(text),out=[];if(/\b(?:whatsapp|wasap|guasap)\b/.test(t))out.push('whatsapp');if(/\b(?:workspace|field reports)\b/.test(t))out.push('workspace');if(/mensajes (?:normales|de apple)|apple messages|imessage|\bsms\b|\b(?:en|in|on) (?:mensajes|messages)$/.test(t))out.push('messages');return out.length?out:Object.keys(APPS);}
 function english(text){const t=normal(text);return /\b(?:any|anyone|have|read|messages|texts|who|what|reply|next|yes)\b/.test(t)&&! /\b(?:tenemos|hay|tengo|mensajes|leeme|leemelos|que|quien|dime|si)\b/.test(t);}
+// Explain the existing inbox workflow without loading private records or a model.
+// Whole requests only: quoted instructions, names and combined actions pass on.
+function helpAnswer(text){
+ const t=normal(text),en=/^(?:how|explain|what)\b/.test(t);
+ if(/^(?:que (?:significa|son) (?:los )?mensajes sin leer|what (?:are|does) unread messages(?: mean)?)$/.test(t))return en?'Unread means the conversation is marked as not read; it does not necessarily mean it still needs a reply.':'Sin leer significa que la conversación está marcada como no leída; eso no significa necesariamente que todavía necesite respuesta.';
+ const noun='(?:(?:los|mis|the|my) )?(?:(?:new|unread) )?(?:mensajes|messages|texts)(?: nuevos| sin leer)?';
+ const ask='(?:como (?:leo|reviso|consulto)|como (?:puedo |hago para )?(?:leer|revisar|consultar|read|check)|(?:explicame|dime) como (?:leer|revisar)|how (?:do i|can i) (?:read|check|review|see|leer|revisar)|explain how to (?:read|check))';
+ if(!new RegExp('^'+ask+' '+noun+'$').test(t))return null;
+ return en?'Ask “Any new messages?” and I’ll group them by app. Then say “read them” or “only Workspace”; we can review one conversation at a time and suggest a reply.':'Dime «¿hay mensajes?» y los separo por aplicación. Después puedes decir «léemelos» o «solo los de Workspace»; revisamos una conversación a la vez y te propongo qué responder.';
+}
 function channelReading(text){
  const t=normal(text).replace(/^(?:ahora |now )?(?:puedes |puede |podrias |can you |could you )?/,''),m=t.match(/^(?:(lee|leer|leeme|leme|lee me|muestrame|read|show)(?: me)?\s+)?(?:solo |solamente |only |just )?(?:(?:los|las|the)\s+)?(?:(?:mensajes|messages|texts|ones)(?:\s+(?:nuevos|new|sin leer|unread))?\s+)?(?:(?:de|del|en|from|in|on)\s+)?(whatsapp|wasap|guasap|workspace|field reports|mensajes normales|mensajes de apple|apple messages|imessage|sms)$/);
  return m?{action:'read',sources:sources(m[2]),english:english(text),explicit:!!m[1]}:null;
@@ -69866,7 +69876,7 @@ function reading(item,rows,advice,index,total,en=false){
  else lines.push(en?'That is the last conversation on this list.':'Es la última conversación de esta lista.');
  return lines.join('\n');
 }
-const api={APPS,norm,clean,sources,english,adviceRequest,resumeAdvice,intent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading};
+const api={APPS,norm,clean,sources,english,helpAnswer,adviceRequest,resumeAdvice,intent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 // LUMI_INBOX_DIALOGUE_CORE_END
@@ -69893,6 +69903,8 @@ async function lumiInboxRead(item,active){
 async function asInboxDialogue(texto){
  if(SES.role!=='manager')return false;
  const D=LumiInboxDialogue,owner=SES.user_id+'|'+SES.company_id;
+ const help=D.helpAnswer(texto);
+ if(help){asPararOido();asCallar();asTranscribir(texto);lumiInboxPresent(help);return true;}
  const fresh=LUMI_INBOX_SESSION?.owner===owner&&Date.now()-LUMI_INBOX_SESSION.at<900000;
  let request=D.intent(texto);const adviceRequest=D.adviceRequest(texto);let follow=fresh?D.follow(texto,LUMI_INBOX_SESSION,owner):null;
  if(!request&&follow?.action==='scope')request={action:'read',sources:follow.sources,english:D.english(texto)};
