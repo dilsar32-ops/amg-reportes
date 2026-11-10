@@ -19101,7 +19101,7 @@ function laborContinuityAsk(gap,p,scope){
       +'<p>No cambie sus horas personales solo por esta diferencia. Aclare qué pasó antes de enviar.</p>'
       +'<label style="display:block;margin:12px 0"><input type="radio" name="continuity-reason" value="break"> No trabajó en ese intervalo / descansó y luego volvió</label>'
       +'<label style="display:block;margin:12px 0"><input type="radio" name="continuity-reason" value="other_team"> Estuvo con otra cuadrilla</label>'
-      +'<div data-other hidden><label style="display:block">Nombre del líder o grupo<input data-team type="text" maxlength="120" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #aaa;border-radius:8px;color:#20242a;background:#fff"></label><button type="button" data-search style="margin:8px 0">Buscar en otros Labor Logs</button><p data-result role="status"></p><label data-pending hidden><input data-ack type="checkbox"> Confirmo dónde estuvo; si falta el reporte, dejarlo pendiente para el manager.</label></div>'
+      +'<div data-other hidden><label style="display:block">Líder o grupo (opcional)<input data-team type="text" maxlength="120" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #aaa;border-radius:8px;color:#20242a;background:#fff"></label><button type="button" data-search style="margin:8px 0">Buscar en otros Labor Logs</button><p data-result role="status"></p><label data-pending hidden><input data-ack type="checkbox"> Confirmo dónde estuvo; si falta el reporte, dejarlo pendiente para el manager.</label></div>'
       +'<label style="display:block;margin:12px 0">Explique brevemente qué pasó<textarea data-note maxlength="400" rows="2" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #aaa;border-radius:8px;background:#fff;color:#20242a"></textarea></label>'
       +'<p style="font-size:14px">Si terminó su jornada y no volvió, corrija los turnos posteriores donde todavía aparece.</p>'
       +'<p data-error role="alert" style="color:#a31d24"></p>'
@@ -19115,11 +19115,11 @@ function laborContinuityAsk(gap,p,scope){
     q('[data-edit]').onclick=()=>finish({action:'edit'});
     const add=q('[data-add]');if(add)add.onclick=()=>finish({action:'add'});
     modal.addEventListener('cancel',e=>{e.preventDefault();finish({action:'edit'});});
-    modal.querySelectorAll('[name="continuity-reason"]').forEach(r=>r.onchange=()=>{q('[data-other]').hidden=r.value!=='other_team';});
+    modal.querySelectorAll('[name="continuity-reason"]').forEach(r=>r.onchange=()=>{q('[data-error]').textContent='';q('[data-other]').hidden=r.value!=='other_team';if(r.value==='other_team'&&!evidence)q('[data-search]').click();});
     q('[data-team]').oninput=()=>{evidence=null;searchId++;q('[data-result]').textContent='';q('[data-pending]').hidden=true;q('[data-ack]').checked=false;};
     q('[data-search]').onclick=async()=>{
-      const team=q('[data-team]').value.trim();if(team.length<2){q('[data-error]').textContent='Escriba el nombre del líder o grupo.';return;}
-      const id=++searchId;q('[data-search]').disabled=true;q('[data-result]').textContent='Buscando reportes de esa cuadrilla…';
+      const team=q('[data-team]').value.trim();if(team && team.length<2){q('[data-error]').textContent='Escriba el nombre completo del líder o deje el campo vacío para buscar todas las cuadrillas.';return;}
+      const id=++searchId;q('[data-search]').disabled=true;q('[data-result]').textContent='Buscando en otros reportes…';
       const found=await laborContinuitySearch(gap,p,scope,team);if(done)return;
       q('[data-search]').disabled=false;if(id!==searchId)return;
       if(changed()){q('[data-error]').textContent='Cambió la cuenta o el reporte. Vuelva a revisar.';return;}
@@ -19128,12 +19128,16 @@ function laborContinuityAsk(gap,p,scope){
     q('[data-save]').onclick=()=>{
       if(changed()){q('[data-error]').textContent='Cambió la cuenta o el reporte. Vuelva a revisar.';return;}
       const reason=q('[name="continuity-reason"]:checked')?.value,note=q('[data-note]').value.trim();
-      const decision={reason,note,team:q('[data-team]').value.trim(),verification:evidence?.status,acknowledged:q('[data-ack]').checked,evidence_ids:evidence?.ids||[],checked_at:new Date().toISOString()};
+      const decision={reason,note,team:q('[data-team]').value.trim()||'Otra cuadrilla',verification:evidence?.status,acknowledged:q('[data-ack]').checked,evidence_ids:evidence?.ids||[],checked_at:new Date().toISOString()};
       if(!LaborContinuity.validDecision(decision)){q('[data-error]').textContent=reason==='other_team'&&!evidence?'Busque el otro reporte antes de continuar.':'Seleccione qué pasó, escriba una explicación y confirme lo pendiente.';return;}
       finish({action:'resolve',decision});
     };
     document.body.appendChild(modal);modal.showModal();
   });
+}
+function laborContinuityEdit(){
+  const edit = openLogId && !fixingLogId && $('#convEdit');
+  if(edit) edit.click(); else laborIrATurnos();
 }
 async function laborConfirmContinuity(force=false){
   if(laborContinuityBusy)return false;
@@ -19150,9 +19154,9 @@ async function laborConfirmContinuity(force=false){
       if(answer.action==='add'){
         // Explicit choice only. Never add to overlapping/partial shifts or edit personal hours.
         for(const i of gap.addIndices){const c=$$('.shift-card',shiftsContainer)[i];if(c)addName(c,gap.name);}
-        laborContinuityReview=null;laborIrATurnos();saveDraft();return false;
+        laborContinuityReview=null;laborContinuityEdit();saveDraft();return false;
       }
-      if(answer.action!=='resolve'){laborIrATurnos();return false;}
+      if(answer.action!=='resolve'){laborContinuityEdit();return false;}
       review.decisions[gap.id]=answer.decision;
       laborContinuityReview=review;saveDraft();
     }
@@ -19286,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R378';
+  const APP_BUILD = '2026-11-10-R379';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
