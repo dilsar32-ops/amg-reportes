@@ -19098,7 +19098,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R375';
+  const APP_BUILD = '2026-11-10-R376';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71013,7 +71013,7 @@ function lumiReplyButtons(routes){
  const card=document.createElement('div');card.className='as-chat-docs';
  for(const route of rows.slice(0,4)){
   const b=document.createElement('button');b.type='button';b.textContent='Responder a '+route.query+' · '+({workspace:'Workspace',whatsapp:'WhatsApp',messages:'Mensajes'}[route.app]);b.style.cssText='padding:10px 14px;min-height:44px;border:1px solid #394754;border-radius:16px;background:#182630;color:#e8f3ff;text-align:left;font:inherit;cursor:pointer;';
-  b.addEventListener('click',()=>{if(route.owner!==SES.user_id+'|'+SES.company_id)return;lumiSetMessageContext([{...route,at:Date.now()}]);AS.pregunta=null;void asComposeMessage({kind:'partial',query:route.query,app:route.app,key:route.key,text:''},'Responder a '+route.query);});
+  b.addEventListener('click',()=>{if(route.owner!==SES.user_id+'|'+SES.company_id)return;lumiSetMessageContext([{...route,source:'selected',at:Date.now()}]);AS.pregunta=null;void asComposeMessage({kind:'partial',query:route.query,app:route.app,key:route.key,text:''},'Responder a '+route.query);});
   card.appendChild(b);
  }
  log.appendChild(card);asChatFollow(log,true);
@@ -71230,7 +71230,11 @@ async function lumiPayContext(owner){
  const prior=saved?.owner===owner&&Date.now()-saved.at<86400000?saved:null;
  // An explicit payment question outranks the older conversation it started from.
  // A later selected conversation must not borrow a different worker's payment.
- if(prior&&(!route||prior.routeStamp===lumiPayRouteStamp(route)))return prior;
+ const offered=route?.choices||[route].filter(Boolean);
+ const onlyNotices=offered.length>0&&offered.every(r=>r.source==='notice'&&!r.reviewedAt);
+ // Arrival announcements are not a request to change worker. Reading a chat or
+ // choosing its Reply button is an explicit topic change and still invalidates.
+ if(prior&&(!route||onlyNotices||prior.routeStamp===lumiPayRouteStamp(route)))return prior;
  if(route?.app==='workspace'&&/^[ct]:/.test(route.key||''))return {key:route.key,owner,at:route.at,method:prior?.key===route.key?prior.method:''};
  return null;
 }
