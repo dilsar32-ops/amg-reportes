@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R390';
+  const APP_BUILD = '2026-11-10-R391';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71865,8 +71865,9 @@ async function lumiPayPrepare(snapshot,order,owner){
  const P=lumiPayCore(),review=P.review(snapshot,order);if(review.error)return {error:review.error};
  const date=lumiPayDate(order.text);
  if(snapshot.ledger.some(x=>lumiPayCore().cents(x.amount)===lumiPayCore().cents(order.amount)&&x.metodo===order.method&&x.kind===order.kind&&String(x.paid_on||x.created_at||'').slice(0,10)===date&&x.accepted!==false&&!x.settlement))return {error:'Ya existe un registro de ese monto, método y fecha para esta persona. Revísalo en Pagos; no crearé otro igual.'};
- const flow={owner,user:SES.user_id,company:SES.company_id,person:snapshot.person,order,date,fingerprint:P.fingerprint(snapshot),request:snapshot.request,review,at:Date.now()};
- const note=['Seguimiento de pago Lumi',order.reference?'Cheque #'+order.reference:'',snapshot.request?'Petición #'+snapshot.request.id:'',snapshot.hourWarning?'Registro declarado por el dueño. Revisión de horas pendiente: '+snapshot.hourWarning:''].filter(Boolean).join(' · ');
+ // Keep the original audit evidence in the private review; do not feed it back as a new instruction.
+ const flow={hourWarning:snapshot.hourWarning||'',owner,user:SES.user_id,company:SES.company_id,person:snapshot.person,order,date,fingerprint:P.fingerprint(snapshot),request:snapshot.request,review,at:Date.now()};
+ const note=['Lumi',snapshot.hourWarning?'Revisión de horas pendiente':'',order.reference?'Cheque #'+order.reference:'',snapshot.request?'Petición #'+snapshot.request.id:''].filter(Boolean).join(' · ');
  const prompt='Registra un '+order.kind+' de $'+order.amount.toFixed(2)+' a '+snapshot.person.name+' por '+order.method+' con fecha '+flow.date+'. Nota: '+note+'. Solo esa persona; no hagas una lista.';
  const r=await asLlamar({texto:prompt,historial:[],sandbox:false,area:null});lumiPayGuard(owner);
  const card=r.json?.confirmacion;if(!r.ok||!r.json?.ok||!card)throw Error(r.json?.texto||'No pude preparar el registro. No cambié ningún pago.');
