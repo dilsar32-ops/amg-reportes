@@ -19097,7 +19097,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R355';
+  const APP_BUILD = '2026-11-09-R356';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69719,7 +69719,7 @@ const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLo
 const clean=x=>String(x||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/,\s*(?:Unread|Read|Pinned|Calling|Callin|Delivered)(?:,|$)[\s\S]*$/i,'').trim();
 const normal=x=>norm(x).replace(/^(?:(?:hey|oye|lumi|bueno|pues|ok|por favor|please)\s+)+/,'').replace(/\s+(?:por favor|please)$/,'');
 function sources(text){const t=normal(text),out=[];if(/\b(?:whatsapp|wasap|guasap)\b/.test(t))out.push('whatsapp');if(/\b(?:workspace|field reports)\b/.test(t))out.push('workspace');if(/mensajes (?:normales|de apple)|apple messages|imessage|\bsms\b|\b(?:en|in|on) (?:mensajes|messages)$/.test(t))out.push('messages');return out.length?out:Object.keys(APPS);}
-function english(text){const t=normal(text);return /\b(?:any|have|read|messages|texts|who|what|reply|next|yes)\b/.test(t)&&! /\b(?:tenemos|hay|tengo|mensajes|leeme|leemelos|que|quien|dime|si)\b/.test(t);}
+function english(text){const t=normal(text);return /\b(?:any|anyone|have|read|messages|texts|who|what|reply|next|yes)\b/.test(t)&&! /\b(?:tenemos|hay|tengo|mensajes|leeme|leemelos|que|quien|dime|si)\b/.test(t);}
 function channelReading(text){
  const t=normal(text).replace(/^(?:ahora |now )?(?:puedes |puede |podrias |can you |could you )?/,''),m=t.match(/^(?:(lee|leer|leeme|leme|lee me|muestrame|read|show)(?: me)?\s+)?(?:solo |solamente |only |just )?(?:(?:los|las|the)\s+)?(?:(?:mensajes|messages|texts|ones)(?:\s+(?:nuevos|new|sin leer|unread))?\s+)?(?:(?:de|del|en|from|in|on)\s+)?(whatsapp|wasap|guasap|workspace|field reports|mensajes normales|mensajes de apple|apple messages|imessage|sms)$/);
  return m?{action:'read',sources:sources(m[2]),english:english(text),explicit:!!m[1]}:null;
@@ -69729,7 +69729,8 @@ function adviceRequest(text){
  const deictic=/\s+(?:al (?:ultimo )?mensaje(?: que (?:revisamos|leimos))?|a (?:eso|ese mensaje)|to (?:that|the last message)(?: we (?:read|reviewed))?)$/;
  if(deictic.test(t)){last=/ultimo|last|revisamos|reviewed|leimos/.test(t.match(deictic)[0]);t=t.replace(deictic,'');}
  else{const named=t.match(/\s+(?:a|para|to)\s+(.+)$/);if(named){query=named[1];t=t.slice(0,named.index);}}
- if(!/^(?:y (?:ahora )?)?(?:que (?:le |les |podemos |puedo |deberiamos |podriamos )*(?:respondo|respondemos|contestamos|contesto|decimos|digo|responder|contestar|decir)|que (?:sugieres|recomiendas)(?: (?:que )?(?:le |les )?(?:respondamos|contestemos))?|como le respondo|what (?:should|can|do) (?:i|we) (?:reply|say|answer|tell (?:him|her|them))|what do you suggest)$/.test(t))return null;
+ const conversational=/^(?:y )?que seria (?:bueno|mejor) (?:contestarle|responderle|decirle)$/.test(t)||/^what would you suggest (?:replying|saying)$/.test(t);
+ if(!conversational&&!/^(?:y (?:ahora )?)?(?:que (?:le |les |podemos |puedo |deberiamos |podriamos )*(?:respondo|respondemos|contestamos|contesto|decimos|digo|responder|contestar|decir)|que (?:sugieres|recomiendas)(?: (?:que )?(?:le |les )?(?:respondamos|contestemos))?|como le respondo|what (?:should|can|do) (?:i|we) (?:reply|say|answer|tell (?:him|her|them))|what do you suggest)$/.test(t))return null;
  const selected=sources(query);query=query.replace(/\s+(?:en|in|on)\s+(?:whatsapp|workspace|mensajes(?: normales| de apple)?|(?:apple )?messages|imessage)$/,'');
  return {query,last,selected,english:english(text)};
 }
@@ -69746,11 +69747,14 @@ function intent(text){
  const t=normal(text);if(!t||t.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|he said|she said)/.test(t))return null;
  // Naming the Messages app in an advice request does not request the inbox.
  if(adviceRequest(text))return null;
+ // Explanations and quoted third-party instructions do not read the inbox.
+ if(/^(?:(?:dime|explicame|tell me|explain)\s+)?(?:como|que (?:significa|son|es)|para que|how (?:do|does|can|to)|what (?:is|are|does))\b/.test(t)||/^(?:el|la) (?:cliente|persona|trabajador|trabajadora) (?:dice|dijo)\b/.test(t))return null;
  if(/\b(?:envia\w*|manda\w*|send|borra|delete|paga|pay|dile|escribe\w*|respond\w*|reply to)\b/.test(t))return null;
  const channel=channelReading(text);if(channel?.explicit){const {explicit,...request}=channel;return request;}
  const noun=/\b(?:mensajes?|messages?|texts|inbox|novedades)\b/.test(t);
- const ask=/\b(?:hay|tenemos|tengo|llego|llegaron|recibimos|recibido|nuevos|nuevas|revisa|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|leeme|leemelos|read|check|look|show|any|have|unread|new)\b/.test(t);
- const standalone=/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron)|(?:me|nos) han escrito|any (?:news|updates)|anything new|what s new|do we have anything new)$/.test(t)||sources(t).length===1&&/^(?:revisa|checa|mira|check|que hay en|any news in)\b/.test(t);
+ const ask=/\b(?:hay|tenemos|tengo|llego|llegaron|entro|entraron|recibimos|recibido|nuevos|nuevas|revisa|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|leeme|leemelos|read|check|look|show|any|have|unread|new)\b/.test(t);
+ const personal=/^(?:(?:mira|revisa|checa|dime) si )?(?:(?:me|nos) ha(?:n)? escrito(?: alguien)?|alguien (?:me |nos )?escribio|(?:me|nos) escribio alguien|did anyone (?:message|text) (?:me|us)|has anyone (?:messaged|texted) (?:me|us))$/.test(t);
+ const standalone=personal||/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron)|(?:me|nos) han escrito|any (?:news|updates)|anything new|what s new|do we have anything new)$/.test(t)||sources(t).length===1&&/^(?:revisa|checa|mira|check|que hay en|any news in)\b/.test(t);
  if(!standalone&&!(noun&&ask))return null;
  // Named requests stay with the existing single-conversation reader.
  if(/(?:chat|grupo|conversation|group) (?:de |con |with )?[a-z]/.test(t)||/(?:mensajes (?:de|con)|messages from) (?!whatsapp\b|workspace\b|apple\b)[a-z]/.test(t))return null;
@@ -69783,7 +69787,7 @@ function overview(s){
 function follow(text,s,owner,now=Date.now()){
  if(!s||s.owner!==owner||now<s.at||now-s.at>900000)return null;
  if(s.phase==='idle')return null;
- const t=normal(text);
+ const t=normal(text).replace(/^ahora (?=(?:lee|leeme|el |la |los |las ))/,'');
  if(/^(?:no|ahora no|despues|luego|not now|later|cancel|cancela)$/.test(t))return {action:'cancel'};
  const channel=channelReading(text);if(channel)return {action:'scope',sources:channel.sources};
  if(/^(?:si|si leelos|si leemelos|claro|dale|adelante|ok|okay|yes|sure|go ahead|leelos|leemelos|lee los mensajes|read them|read the messages)$/.test(t))return {action:'read',index:s.phase==='offer'?0:s.index+1};
@@ -70913,12 +70917,15 @@ const LUMI_LABOR_READ = (() => {
   const months = ['enero|january','febrero|february','marzo|march','abril|april','mayo|may','junio|june','julio|july','agosto|august','septiembre|september','octubre|october','noviembre|november','diciembre|december'];
   function parse(text,today,area=null) {
     let t=norm(text).replace(/^(?:hey |hola |oye )?lumi\s*/,'').replace(/^(?:oye|hola|hey)\s+/, '').replace(/^(?:por favor|please)\s+/, '').replace(/\.$/,'');
-    if(!validDate(today)||t.length>1200||!/(?:\b(?:labor|labour|label|leibor|leiber)\s*logs?\b|\breportes? (?:de trabajo|de mudanza|recibidos)\b|\bmoving reports?\b)/.test(t))return null;
+    // Conversational lead-in keeps the same read-only intent.
+    t=t.replace(/^a ver\s+(?=(?:nos |hay |queda|tenemos|que |cuales |cuantos |revisa|muestra|los? |las? ))/,'');
+    if(/^(?:los?|las?)\s+(?:labor|labour|label|leibor|leiber)\s*logs?\b/.test(t))t='muestra '+t;
+    if(!validDate(today)||t.length>1200||!/(?:\b(?:labor|labour|label|leibor|leiber)\s*logs?\b|\breportes? (?:de trabajo|de mudanza|de restauracion|recibidos)\b|\b(?:moving|restoration) reports?\b)/.test(t))return null;
     if(/^(?:no |don't |do not )/.test(t))return null;
     if(/^(?:(?:dime|digame|explicame|cuentame|tell me|explain)\s+)?(?:que (?:significa|es|son|quiere decir|puedes|podrias|puedo|debo|debe|deberia)|cual es (?:el|la)|para que|what (?:does|is|are|can|could|should)|how (?:do|does|can|could|should|to)|como|por que|why)\b/.test(t))return null;
     // A query can mention sending as a status, but cannot execute a send.
     if(!/^(?:hay|queda|quedan|quedaron|nos quedan?|aun hay|todavia hay|tenemos|tengo|que |cuales |cuantos |revisa|revisame|dime|muestra|muestrame|ensena|ensename|busca|buscame|quiero ver|puedes (?:ver|revisar|mostrar|buscar)|me puedes (?:mostrar|decir|ensenar)|do we have|do i have|have we got|are there|is there|are any|any|what |which |how many |show |check |find |can you (?:show|check|find))\b/.test(t))return null;
-    if(/\b(?:y|and|luego|then)\s+(?:me )?(?:envia|envialo|envialos|manda|mandalo|mandalos|send|share|archiva|archive|borra|delete)\b/.test(t))return null;
+    if(/\b(?:y|and|luego|then)\s+(?:me )?(?:envia|envialo|envialos|manda|mandalo|mandalos|send|share|archiva(?:lo|los|la|las)?|archive|borra(?:lo|los|la|las)?|delete)\b/.test(t))return null;
     const en=/^(?:do we have|do i have|have we got|are there|is there|are any|any|what |which |how many |show |check |find |can you )/.test(t);
     let kind=/\b(?:mudanzas?|moving|amg)\b/.test(t)?'mudanza':/\b(?:restauracion|restoration|doctor)\b/.test(t)?'restauracion':area==='moving'?'mudanza':area==='restoration'?'restauracion':null;
     const pending=/\b(?:pendientes?|sin (?:mandar|enviar)|faltan? (?:de |por )?(?:mandar|enviar)|por (?:mandar|enviar)|unsent|not sent|pending|still.*send)\b/.test(t);
@@ -70947,7 +70954,7 @@ const LUMI_LABOR_READ = (() => {
     if(from&&!validDate(from))error=en?'That date is not valid. Which date should I check?':'Esa fecha no es válida. ¿Qué día reviso?';
     // Name after "de/from/by/for"; dates, report types and status words are not people.
     let leader=null;
-    const name=t.match(/\b(?:de|from|by|for)\s+([a-z][a-z .'-]*?)(?=\s+(?:de|del|al|para|en|que|con|from|on|to|in|for|hoy|ayer|today|yesterday|devueltos?|devolvi|devolvimos|devolvieron|regresados?|returned|sent back|pendientes?|sin|recientes?|nuevos?|enviados?|archivados?|por favor|please)\b|$)/);
+    const name=t.match(/\b(?:de|from|by|for)\s+([a-z][a-z .'-]*?)(?=\s+(?:de|del|al|para|en|que|con|from|on|to|in|for|hoy|ayer|today|yesterday|siguen?|estan?|still|remain|devueltos?|devolvi|devolvimos|devolvieron|regresados?|returned|sent back|pendientes?|sin|recientes?|nuevos?|enviados?|archivados?|por favor|please)\b|$)/);
     if(name){const candidate=name[1].replace(/\.$/,'').trim();if(!/^(?:hoy|ayer|anteayer|esta|la|el|los|las|trabajo|mandar|enviar|revisar|grupo|fixes|correction|send|sending|group|mudanza|mudanzas|restauracion|restoration|moving|today|yesterday|the|last|noviembre|november)\b/.test(candidate)&&!months.some(m=>new RegExp('^(?:'+m+')$').test(candidate)))leader=candidate;}
     // Unknown relative/date constraints must not silently become "all".
     if(!from&&/\b(?:lunes|martes|miercoles|jueves|viernes|sabado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|sunday|semana pasada|last week|mes pasado|last month)\b/.test(t))error=en?'What date should I check?':'¿Qué fecha quiere que revise?';
