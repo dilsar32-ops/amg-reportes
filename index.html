@@ -19097,7 +19097,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-09-R353';
+  const APP_BUILD = '2026-11-09-R354';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69808,7 +69808,16 @@ function messageSender(row,app){
 function basicAdvice(rows,en=false){
  const last=rows.at(-1);if(!last)return {draft:'',explanation:en?'I could not read the conversation.':'No pude leer el contenido de la conversación.'};
  if(last.outgoing)return {draft:'',explanation:en?'You already replied; I do not see a later message.':'Ya respondiste; no veo un mensaje posterior.'};
+ const tail=rows.slice(rows.map(r=>r.outgoing).lastIndexOf(true)+1);
+ if(tail.some(r=>r.attachment||r.truncated))return {draft:'',explanation:en?'I need to review the attachment or the complete message in this exchange before suggesting a reply.':'Necesito revisar el adjunto o el mensaje completo de esta conversación antes de sugerir una respuesta.'};
  if(last.attachment||last.truncated||!last.text.trim()||/no disponible|can.t be displayed|open whatsapp/i.test(last.text))return {draft:'',explanation:en?'I need to see that attachment or the complete message first.':'Necesito ver ese adjunto o el mensaje completo antes de recomendar una respuesta.'};
+ if(last.source==='workspace'&&last.requestType==='peticion'&&['pago','adelanto'].includes(last.requestKind)){
+  const state=last.requestState;
+  if(['pendiente','en_espera'].includes(state))return {draft:en?'I received your '+(last.requestKind==='pago'?'payment':'advance')+' request.':'Recibí su solicitud de '+(last.requestKind==='pago'?'pago':'adelanto')+'.',explanation:''};
+  if(state==='no_recibida')return {draft:en?'Thank you for letting me know that you have not received it yet.':'Gracias por avisarme que aún no lo ha recibido.',explanation:''};
+  const statuses={enviada:en?'sent, with receipt not yet confirmed':'enviada, sin recepción confirmada',recibida:en?'received':'recibida',recibida_auto:en?'automatically marked as received; explicit receipt is not confirmed':'recibida automáticamente; la recepción expresa no está confirmada',aprobada:en?'approved; that does not confirm payment':'aprobada; eso no confirma el pago',negada:en?'not approved':'no aprobada',hecha:en?'handled':'atendida'};
+  return {draft:'',explanation:statuses[state]?(en?'This request is recorded as ':'Esta solicitud figura como ')+statuses[state]+'.':en?'I need to verify the current request status before suggesting a reply.':'Necesito comprobar el estado actual de esa solicitud antes de sugerir una respuesta.'};
+ }
  if(/reply stop|verification code|codigo de verificacion|automated notification/i.test(last.text))return {draft:'',explanation:en?'This is an automatic notification; it does not need a chat reply.':'Es un aviso automático; no necesita respuesta por chat.'};
  if(/^(?:gracias|muchas gracias|ok|okay|perfecto|entendido|thanks|thank you)[.! ]*$/i.test(last.text.trim())){
   const from=rows.map(r=>r.outgoing).lastIndexOf(true)+1;
@@ -69854,7 +69863,7 @@ async function lumiInboxRead(item,active){
   const known=asMsgCandidatos(),matches=item.key?known.filter(x=>x.key===item.key):known.filter(x=>LumiInboxDialogue.norm(x.nombre)===LumiInboxDialogue.norm(item.query));
   if(matches.length!==1)throw Error('No pude identificar una sola conversación de '+item.query+' en Workspace.');
   const c=matches[0],messages=(MSG.lista||[]).filter(m=>!m.borrado_at&&msgOtro(m)===c.key&&msgVisible(m)).sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at))).slice(-20);
-  return {app:'workspace',status:'chat_messages',title:item.query,key:c.key,capturedAt:new Date().toISOString(),messages:messages.map(m=>({text:m.texto||'',outgoing:msgMio(m),attachment:!!m.adjuntos?.length,truncated:false,dateLabel:m.created_at}))};
+  return {app:'workspace',status:'chat_messages',title:item.query,key:c.key,capturedAt:new Date().toISOString(),messages:messages.map(m=>({text:m.texto||'',outgoing:msgMio(m),attachment:!!m.adjuntos?.length,truncated:false,dateLabel:m.created_at,source:'workspace',requestType:m.tipo||'',requestKind:m.peticion||'',requestState:m.estado||'pendiente'}))};
  }
  const client=createLumiDesktopClient({session:()=>({user_id:SES.user_id,company_id:SES.company_id,role:SES.role}),call:async(route,init={})=>{if(!active())throw Error('La sesión cambió.');const r=await authFetch(route,{...init,signal:AbortSignal.timeout(15000),headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('No pude conectar con la Mac.');const t=await r.text();return t?JSON.parse(t):null;}});
  const result=await client.run({app:item.app,action:'read_chat',query:item.query});
