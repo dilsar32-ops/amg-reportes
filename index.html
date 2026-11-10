@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R382';
+  const APP_BUILD = '2026-11-10-R383';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70683,6 +70683,197 @@ function lumiRenderMessageDigest(sections,owner){
     finally{AS_DESKTOP_BUSY=false;AS.enviando=false;}
   }
 
+
+// BEGIN LUMI LABOR DOCUMENT
+// Labor Log evidence, not a payroll correction. Transport is injected for tests.
+const LumiLaborDocument = (() => {
+  const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const id = s => /^[a-f0-9-]{36}$/i.test(String(s || ''));
+  function order(text, pending=false){
+    const t=norm(text).replace(/^[¿¡]/,'');
+    if(pending && /^(no|no,? mejor no|cancel|cancelar|cancela|descarta)([.!])?$/.test(t))return {action:'cancel'};
+    if(pending && /^(?:lumi[, ]+)?(?:envialo|mandalo|mandaselo|enviaselo|send it)(?:[.!])?$/.test(t))return {action:'send',request:text};
+    if(pending && /^(?:lumi[, ]+)?(?:envia|enviale|manda|mandale|send)(?:me)?\b/.test(t) && /\b(pdf|documento|document|informe|reporte|eso|lo|it)\b/.test(t))return {action:'send',request:text};
+    if(!/\b(pdf|documento|document|informe|captura|screenshot)\b/.test(t) || !/\b(labor\s*log|reporte|hoja|report|sheet)\b/.test(t) || !/\b(marca|marque|marcado|cuadro|recuadro|falta|fallas?|errores?|missing|highlight|box|omision|hueco)\b/.test(t))return null;
+    if(/^(no |no quiero|don't |do not |si |if |que pasaria)/.test(t))return null;
+    const m=/\b(?:falta(?:ba)?|falt[oó]|omiti[oó]|missing)\s+(?:a\s+)?([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,3}?)(?=\s+(?:de|del|en|entre|from|at|in|a las)\b|[.,;]|$)/i.exec(text);
+    return {action:'prepare',worker:m?m[1].trim():'',request:text};
+  }
+  function model(row, scope, continuity, worker=''){
+    if(scope.role!=='manager'||!id(row?.id)||row.company_id!==scope.company)throw Error('No tengo permiso para preparar esta hoja.');
+    if(!['restauracion','mudanza'].includes(row.work_kind||'restauracion')||scope.kind && row.work_kind!==scope.kind)throw Error('La hoja pertenece a otra área.');
+    const p=row.payload;
+    if(!p||!Array.isArray(p.s)||!p.s.length||p.s.length>40||!/^\d{4}-\d{2}-\d{2}$/.test(row.log_date)||p.d!==row.log_date)throw Error('La hoja no contiene una fecha y turnos verificables.');
+    if(p.s.some(s=>continuity.clock(s.f)===null||continuity.clock(s.o)===null||s.f===s.o))throw Error('Hay horarios incompletos. Revise la hoja antes de crear la explicación.');
+    const all=continuity.analyze(p),needle=norm(worker);
+    const candidates=needle?all.filter(g=>g.key===needle||g.key.split(' ').includes(needle)):all;
+    if(!candidates.length)throw Error(needle?'No encontré ese intervalo faltante para '+worker+'. No marcaré una falla sin evidencia.':'No encontré nombres que desaparezcan y vuelvan entre turnos.');
+    if(needle && new Set(candidates.map(g=>g.key)).size>1)throw Error('Hay varias personas con ese nombre. Diga el nombre completo.');
+    if(candidates.some(g=>!g.indices.length))throw Error('El hueco no corresponde a una fila de la hoja. Necesita una revisión de horarios.');
+    // Explicit allowlist: never copy rates, payments, extras, expenses or balances.
+    const safe={d:p.d,l:String(p.l||row.crew_leader||''),t:String(p.t||''),s:p.s.map(s=>({f:s.f,o:s.o,n:String(s.n||''),k:String(s.k||''),a:String(s.a||'')}))};
+    const clock=m=>{const h=Math.floor(m/60)%24;return (h%12||12)+':'+String(m%60).padStart(2,'0')+' '+(h<12?'AM':'PM')+(m>=1440?' (+1 día)':'');};
+    const findings=candidates.map(g=>({...g,text:g.name+' aparece antes y después, pero no figura de '+clock(g.start)+' a '+clock(g.end)+' en '+g.indices.map(i=>'el turno '+(i+1)).join(', ')+'.'}));
+    return {reportId:row.id,company:scope.company,kind:row.work_kind||'restauracion',date:row.log_date,leader:safe.l,payload:safe,findings,
+      fingerprint:continuity.fingerprint(p,{company:scope.company,report:row.id,kind:row.work_kind||'restauracion'}),
+      note:findings.map(g=>g.text).join(' ')+' Por favor revise ese tramo. Si trabajó con usted, agréguelo al turno; si estuvo con otra cuadrilla o no trabajó durante ese intervalo, indíquelo. Esta observación no cambia las horas personales ni registra pagos.'};
+  }
+  function destination(request, leader, target){
+    const t=norm(request);
+    if(/\b(whatsapp|mensajes normales|imessage|sms|grupo|group|todos|everyone)\b/.test(t))throw Error('Esta ficha se comparte por el chat privado de Workspace. No cambiaré de aplicación ni la enviaré a un grupo.');
+    if(!target||target.grupo||!/^c:[a-f0-9-]{36}$/i.test(target.key)||norm(target.nombre)!==norm(leader))throw Error('No pude confirmar un único chat privado del líder de esta hoja.');
+    const m=/\b(?:para|a|to)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+)*?)(?=\s+(?:por|en|in|on|con|with)\b|[.!]?$)/i.exec(t);
+    if(m && !(norm(m[1])===norm(target.nombre)||norm(target.nombre).split(' ').includes(norm(m[1]))))throw Error('La orden nombra a otra persona. Prepare una ficha nueva para ese destinatario.');
+    return target;
+  }
+  function receipt(row, expected){
+    const sameAttachments=Array.isArray(row?.adjuntos)&&row.adjuntos.length===expected.adjuntos.length&&expected.adjuntos.every((a,i)=>Object.keys(a).every(k=>row.adjuntos[i]?.[k]===a[k]));
+    return !!row && row.id===expected.id && row.company_id===expected.company_id && row.de_user_id===expected.de_user_id && row.para_user_id===expected.para_user_id && !row.para_todos && !row.para_grupo_id && !row.para_casual_id && !row.borrado_at && row.texto===expected.texto && sameAttachments;
+  }
+  async function send({ledger, key, uuid, current, fingerprint, upload, create, read, buildRow, active}){
+    if(!active())throw Error('La sesión cambió.');
+    const fresh=await current();if(!active()||fresh!==fingerprint)throw Error('El Labor Log cambió después de preparar el PDF. Créelo otra vez para no enviar una observación desactualizada.');
+    let saved=ledger.get(key);
+    if(saved?.row){const found=await read(saved.row.id);if(!active())throw Error('La sesión cambió.');if(receipt(found,saved.row)){ledger.set(key,{...saved,state:'sent'});return {already:true,row:found};}throw Error('Hay un intento anterior sin confirmación. Revise el chat; no repetiré el mensaje.');}
+    const messageId=uuid();const attachments=await upload(messageId);if(!active())throw Error('La sesión cambió.');
+    const row=buildRow(messageId,attachments);ledger.set(key,{state:'attempting',row});
+    if(!active())throw Error('La sesión cambió.');
+    try{await create(row);}catch(e){/* Read the same ID; never issue a second POST. */}
+    const found=await read(row.id);if(!active())throw Error('La sesión cambió.');
+    if(!receipt(found,row)){ledger.set(key,{state:'uncertain',row});throw Error('No pude confirmar el envío. No lo repetiré sin revisar ese intento.');}
+    ledger.set(key,{state:'sent',row});return {already:false,row:found};
+  }
+  return {norm,id,order,model,destination,receipt,send};
+})();
+if(typeof module!=='undefined')module.exports=LumiLaborDocument;
+
+let LUMI_LABOR_DOCUMENT=null;
+function lumiLaborDocOwner(){return SES.user_id+'|'+SES.company_id+'|'+SES.role;}
+async function lumiLaborDocRow(it,owner){
+  if(owner!==lumiLaborDocOwner()||SES.role!=='manager'||!LumiLaborDocument.id(it?.id))throw Error('Seleccione una hoja válida con la cuenta de Manager.');
+  const r=await authFetch('/rest/v1/labor_logs?select=id,company_id,crew_leader,log_date,work_kind,payload&company_id=eq.'+encodeURIComponent(SES.company_id)+'&id=eq.'+it.id,{headers:cloudHeaders(),signal:AbortSignal.timeout(15000)});
+  if(!r.ok)throw Error('No pude comprobar el Labor Log original.');const rows=await r.json();
+  if(owner!==lumiLaborDocOwner()||!Array.isArray(rows)||rows.length!==1)throw Error('No pude confirmar esta hoja.');return rows[0];
+}
+async function lumiLaborDocRender(model){
+  const p=model.payload,node=document.createElement('div');
+  node.style.cssText='position:fixed;left:-12000px;top:0;width:760px;background:#fff;color:#20242a;padding:20px;box-sizing:border-box;font:16px/1.4 Arial';
+  const h=t=>fmtTime12(t),names=s=>LaborContinuity.names(s).map(x=>x[1]);
+  if(model.kind!=='restauracion')throw Error('El documento marcado de mudanzas todavía no está disponible. No usaré la plantilla de restauración para esa área.');
+  node.innerHTML=rdlHojaHtml({fecha:p.d,lider:p.l,equipo:names(p.t),turnos:p.s.map(s=>({de:h(s.f),a:h(s.o),nombres:names(s.n),tarea:s.k,dir:s.a,extras:[],total:null,gasto:''}))});
+  const footer=document.createElement('div');footer.style.cssText='margin-top:18px;padding:16px;border:2px solid #b52531;border-radius:10px;background:#fff5f4;color:#242424;font:16px/1.45 Arial';
+  const title=document.createElement('strong');title.textContent='REVISIÓN DEL LABOR LOG';footer.appendChild(title);
+  const note=document.createElement('p');note.textContent=model.note;note.style.margin='8px 0 0';footer.appendChild(note);node.appendChild(footer);
+  document.body.appendChild(node);
+  try{
+    await Promise.race([document.fonts?.ready||Promise.resolve(),new Promise(r=>setTimeout(r,2000))]);
+    const shifts=[...node.querySelectorAll('.rdlh-caja')].filter(x=>x.querySelector('.rdlh-shift'));
+    if(shifts.length!==p.s.length)throw Error('No pude localizar las filas exactas para marcarlas.');
+    // Borders are document annotations; the original names are never rewritten.
+    for(const i of new Set(model.findings.flatMap(g=>g.indices))){
+      const rows=shifts[i]?.querySelectorAll('tr');if(!rows||rows.length<2)throw Error('Falta el tramo que se debe marcar.');
+      const box=document.createElement('div'),a=rows[0].getBoundingClientRect(),b=rows[1].getBoundingClientRect(),base=node.getBoundingClientRect();
+      box.style.cssText='position:absolute;pointer-events:none;border:4px solid #d32632;border-radius:5px;box-sizing:border-box;left:'+(a.left-base.left-3)+'px;top:'+(a.top-base.top-3)+'px;width:'+(a.width+6)+'px;height:'+(b.bottom-a.top+6)+'px';node.appendChild(box);
+    }
+    const base=node.getBoundingClientRect(),cuts=shifts.map(s=>Math.floor(s.getBoundingClientRect().bottom-base.top+8));
+    const canvas=await html2canvas(node,{scale:1.5,backgroundColor:'#fff',useCORS:true,logging:false});
+    const pdf=new window.jspdf.jsPDF({unit:'pt',format:'a4',compress:true}),w=pdf.internal.pageSize.getWidth(),height=pdf.internal.pageSize.getHeight(),margin=30;
+    pdf.setProperties({title:'Revisión Labor Log - '+model.leader+' - '+model.date,creator:'Workspace / Lumi',subject:'Observación de continuidad; no modifica el reporte original'});
+    const ratio=(w-margin*2)/canvas.width,max=(height-72)/ratio;let from=0,page=0;
+    while(from<canvas.height){
+      let to=Math.min(canvas.height,Math.floor(from+max));
+      if(to<canvas.height){const candidates=cuts.map(c=>Math.ceil(c*1.5)).filter(c=>c>from+120&&c<=to);if(candidates.length)to=Math.max(...candidates);}
+      if(page++)pdf.addPage();const slice=document.createElement('canvas');slice.width=canvas.width;slice.height=to-from;slice.getContext('2d').drawImage(canvas,0,from,canvas.width,to-from,0,0,canvas.width,to-from);
+      pdf.addImage(slice.toDataURL('image/jpeg',.92),'JPEG',margin,24,w-margin*2,slice.height*ratio);
+      pdf.setFontSize(8);pdf.setTextColor(95);pdf.text('Copia para revisión · Sin importes · '+model.date,margin,height-22);pdf.text(String(page),w-margin,height-22,{align:'right'});from=to;
+    }
+    const image=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('No pude capturar la hoja marcada.')),'image/jpeg',.92));
+    return {pdf:pdf.output('blob'),image,width:canvas.width,height:canvas.height,name:'Revision_Labor_Log_'+model.leader.replace(/[^a-z0-9]/gi,'_')+'_'+model.date+'.pdf'};
+  }finally{node.remove();}
+}
+async function asLaborDocument(text){
+  const existing=LUMI_LABOR_DOCUMENT,owner=lumiLaborDocOwner();
+  const pending=existing&&existing.owner===owner&&!existing.cancelled;
+  const order=LumiLaborDocument.order(text,!!pending);if(!order)return false;
+  asPararOido();asCallar();asTranscribir(text);
+  const say=t=>{asMostrarRespuesta(t);asHablar(t,asSeguirOyendo);};
+  if(order.action==='cancel'){existing.cancelled=true;existing.sendButton.disabled=true;LUMI_LABOR_DOCUMENT=null;say('Está bien, no enviaré ese documento.');return true;}
+  if(order.action==='send'){await lumiLaborDocSend(existing,text);return true;}
+  AS.enviando=true;asEstado('pensando','Preparando la hoja marcada…');
+  try{
+    if(SES.role!=='manager'||AS.sandbox)throw Error('Esta acción requiere Manager y un Labor Log real seleccionado.');
+    const items=AS_GAL.p?.tipo==='labor_logs'?AS_GAL.p.items:[];
+    if(items.length!==1)throw Error('Primero muéstreme un solo Labor Log: por ejemplo, «muéstrame el Labor Log de Vero del 9 de noviembre».');
+    const row=await lumiLaborDocRow(items[0],owner),model=LumiLaborDocument.model(row,{role:SES.role,company:SES.company_id,kind:items[0].empresa||'restauracion'},LaborContinuity,order.worker);
+    await msgCargarGente();if(owner!==lumiLaborDocOwner())throw Error('La sesión cambió.');
+    const target=await asMsgResolver(model.leader.split(/\s+/),false);LumiLaborDocument.destination(text,model.leader,target);
+    const result=await lumiLaborDocRender(model);if(owner!==lumiLaborDocOwner()||!AS.abierto)throw Error('La sesión cambió.');
+    if(existing)existing.cancelled=true;
+    const card=document.createElement('section');card.style.cssText='padding:14px;margin:12px 0;border:1px solid #987451;border-radius:14px;background:#fff;color:#222';
+    const title=document.createElement('strong');title.textContent='Revisión para '+target.nombre+' · Workspace · '+model.date;card.appendChild(title);
+    const imageUrl=URL.createObjectURL(result.image),pdfUrl=URL.createObjectURL(result.pdf);AS.pdfUrls=AS.pdfUrls||[];AS.pdfUrls.push(imageUrl,pdfUrl);
+    const img=document.createElement('img');img.src=imageUrl;img.alt='Labor Log con recuadro en los turnos donde falta '+model.findings.map(g=>g.name).join(', ');img.style.cssText='display:block;width:100%;height:auto;margin-top:12px';card.appendChild(img);
+    const caption=document.createElement('p');caption.textContent=model.note;card.appendChild(caption);
+    const message=model.leader+', le comparto la hoja marcada del '+model.date+'. '+model.note;
+    const info=document.createElement('p');info.textContent='Se enviarán el PDF y una imagen marcada a su chat privado de Workspace. El Labor Log original no se modifica.';card.appendChild(info);
+    const link=document.createElement('a');link.href=pdfUrl;link.download=result.name;link.textContent='Descargar PDF marcado';link.style.cssText='display:inline-block;margin:10px;padding:10px;color:#164a83;text-decoration:underline';card.appendChild(link);
+    const sendButton=document.createElement('button');sendButton.type='button';sendButton.textContent='Enviar revisión a '+target.nombre+' por Workspace';sendButton.style.cssText='padding:12px;border:0;border-radius:10px;background:#175e9c;color:white';card.appendChild(sendButton);
+    const status=document.createElement('p');status.setAttribute('role','status');status.textContent='Preparado; todavía no enviado.';card.appendChild(status);
+    const draft={owner,model,target,result,message,card,status,sendButton,cancelled:false};LUMI_LABOR_DOCUMENT=draft;sendButton.onclick=()=>lumiLaborDocSend(draft,'envía el PDF');
+    const log=document.getElementById('asConversacion');log.appendChild(card);asChatFollow(log,true);
+    say('Preparé el PDF para '+target.nombre+'. Marqué '+model.findings.map(g=>g.name+' de '+laborContinuityTime(g.start)+' a '+laborContinuityTime(g.end)).join('; ')+'. Aquí puede revisar la imagen y la nota. Todavía no lo envié.');
+  }catch(e){say(String(e.message||e));}
+  finally{AS.enviando=false;asEstado('esperando','');}
+  return true;
+}
+async function lumiLaborDocSend(d,request){
+  if(!d||d.busy||d.cancelled)return;
+  const active=()=>d===LUMI_LABOR_DOCUMENT&&!d.cancelled&&d.owner===lumiLaborDocOwner()&&SES.role==='manager'&&AS.abierto;
+  const say=t=>{if(active()){d.status.textContent=t;asMostrarRespuesta(t);asHablar(t,asSeguirOyendo);}};
+  d.busy=true;d.sendButton.disabled=true;
+  try{
+    if(!active())throw Error('Esta ficha ya no pertenece a la sesión actual.');
+    LumiLaborDocument.destination(request,d.model.leader,d.target);
+    if(d.message.length>2000)throw Error('La explicación supera el límite del mensaje. Revise menos intervalos por documento.');
+    const company=SES.company_id,user=SES.user_id,headers=cloudHeaders(),key='lumi-labor-document:'+d.owner+':'+d.model.reportId+':'+d.target.key+':'+await crypto.subtle.digest('SHA-256',new TextEncoder().encode(d.model.fingerprint)).then(b=>Array.from(new Uint8Array(b),x=>x.toString(16).padStart(2,'0')).join(''));
+    const call=async(path,init={})=>{if(!active())throw Error('La sesión cambió.');const r=await authFetch(path,{...init,headers:{...headers,...init.headers},signal:AbortSignal.timeout(20000)});if(!active())throw Error('La sesión cambió.');if(!r.ok)throw Error('No se pudo completar la operación ('+r.status+').');return r.status===204?null:r.json();};
+    const ledger={get:k=>{const v=localStorage.getItem(k);return v?JSON.parse(v):null;},set:(k,v)=>{localStorage.setItem(k,JSON.stringify(v));}};
+    const result=await LumiLaborDocument.send({key,ledger,active,uuid:()=>crypto.randomUUID(),fingerprint:d.model.fingerprint,
+      current:async()=>{const r=await lumiLaborDocRow({id:d.model.reportId},d.owner);return LumiLaborDocument.model(r,{role:SES.role,company,kind:d.model.kind},LaborContinuity).fingerprint;},
+      upload:async messageId=>{
+        const attachments=[];
+        for(const [blob,ext,type] of [[d.result.pdf,'pdf','application/pdf'],[d.result.image,'jpg','image/jpeg']]){
+          if(blob.size>10*1024*1024)throw Error('El documento supera el límite de tamaño.');
+          const path=company+'/'+messageId+'-revision.'+ext;
+          await call('/storage/v1/object/mensajes/'+path,{method:'POST',headers:{'Content-Type':type,'x-upsert':'false'},body:blob});
+          attachments.push(ext==='pdf'?{tipo:'documento',mime:type,path,nombre:d.result.name,bytes:blob.size}:{tipo:'imagen',path,ancho:d.result.width,alto:d.result.height});
+        }return attachments;
+      },
+      buildRow:(id,adjuntos)=>({id,company_id:company,de_user_id:user,de_nombre:String(SES.full_name||SES.name||'Amílcar'),para_user_id:d.target.key.slice(2),para_nombre:d.target.nombre,para_todos:false,para_grupo_id:null,para_casual_id:null,texto:d.message,adjuntos}),
+      create:row=>call('/rest/v1/mensajes',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify(row)}),
+      read:async id=>{const rows=await call('/rest/v1/mensajes?select=id,company_id,de_user_id,para_user_id,para_nombre,para_todos,para_grupo_id,para_casual_id,texto,adjuntos,borrado_at,created_at&id=eq.'+id+'&company_id=eq.'+company);return rows?.[0];}
+    });
+    if(active()){d.sent=true;d.receipt=result.row;d.sendButton.textContent='Enviado por Workspace';say((result.already?'La revisión ya estaba enviada':'Envié el PDF y la imagen marcada')+' a '+d.target.nombre+' por Workspace. No cambié el Labor Log.');}
+  }catch(e){say(String(e.message||e));}
+  finally{d.busy=false;if(!d.sent&&!d.cancelled)d.sendButton.disabled=false;}
+}
+function msgDocumentosHtml(adj){
+  return (Array.isArray(adj)?adj:[]).filter(a=>a?.tipo==='documento'&&a.mime==='application/pdf'&&typeof a.path==='string'&&!/(^\/|\.\.|[:?#\\])/.test(a.path)).map(a=>'<button type="button" data-msg-document="'+esc(a.path)+'" data-document-name="'+esc(a.nombre||'Documento.pdf')+'" style="display:block;padding:12px;margin:8px 0;border:1px solid #7992a3;border-radius:9px;background:#eef6fc;color:#15374f">PDF · '+esc(a.nombre||'Documento.pdf')+'</button>').join('');
+}
+document.addEventListener('click',async e=>{
+  const b=e.target.closest?.('[data-msg-document]');if(!b)return;e.stopPropagation();
+  const owner=lumiLaborDocOwner();b.disabled=true;
+  try{
+    const url=await msgPrivateMedia.resolve(msgFotoUrl(b.dataset.msgDocument));const r=await fetch(url,{signal:AbortSignal.timeout(20000)});if(!r.ok)throw Error('No pude abrir el PDF.');
+    const blob=await r.blob();if(owner!==lumiLaborDocOwner())throw Error('La cuenta cambió.');
+    if(blob.size>16*1024*1024||new TextDecoder().decode(await blob.slice(0,5).arrayBuffer())!=='%PDF-')throw Error('El archivo no es un PDF válido.');
+    if(isNative()){await saveAndShareNative(blob,b.dataset.documentName,'');return;}
+    const local=URL.createObjectURL(blob),a=document.createElement('a');a.href=local;a.download=b.dataset.documentName||'Documento.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(local),60000);
+  }catch(e){msgAvisoBreve(String(e.message||e));}finally{b.disabled=false;}
+});
+
+// END LUMI LABOR DOCUMENT
+
 function lumiPdfOrder(input){
  const raw=String(input||'').trim();if(!raw||raw.length>65000)return null;
  let s=raw.replace(/^(?:(?:oye|hey|lumi|por favor|please)[, ]+)+/i,'').replace(/^(?:puedes|podrías|podrias|can you|could you)\s+/i,'');
@@ -71984,6 +72175,7 @@ function lumiIncompleteSpeechReply(text){
         if(command){await asComposeMessage(command,texto);return;}
       }
     }
+    if(!dictando&&!AS.conf&&!AS.pregunta&&typeof asLaborDocument==='function'&&(await asLaborDocument(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLaborRead(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asBasicWorkspace(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asPaymentFollowup(texto)))return;
@@ -81549,7 +81741,7 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
       + (!mio && grupo && inicio ? '<span class="msg-de" style="color:' + msgColorDe(m.de_nombre) + '">' + esc(m.de_nombre) + '</span>' : '')
       + msgPetCabHtml(m)
       + (m.responde_a ? msgCitaHtml(m.responde_a) : '')
-      + fotos + msgVideosHtml(adj) + stkBurbuja(adj)
+      + fotos + msgDocumentosHtml(adj) + msgVideosHtml(adj) + stkBurbuja(adj)
       + (voz ? msgVozHtml(m, voz, mio) : '')
       + (m.casa ? (cp => '<span class="msg-casa">' + MSG_ICO.casaChica + '<span>' + esc(cp.n) + '</span></span>' + (cp.d ? '<span class="msg-casa-dir">' + esc(cp.d) + '</span>' : ''))(msgCasaPartes(m.casa)) : '')
       + (m.texto ? '<span class="msg-txt">' + (m.tipo === 'peticion' ? esc(msgPetSinTipo(m)) : msgLinkify(esc(m.texto))) + '</span>' : '')
