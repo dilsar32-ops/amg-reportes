@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R393';
+  const APP_BUILD = '2026-11-10-R394';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71294,6 +71294,13 @@ function lumiDictatedEmail(text){
  return {text:original.slice(0,cue.index+cue[0].length)+email,email};
 }
 // A clear instruction authorizes one send; preparation and uncertainty never do.
+function lumiPaymentNoticeWording(text){
+ const raw=String(text||'').trim();
+ // Narrow, deterministic rewrite for a payment handover + receipt request.
+ // Complex or ambiguous instructions continue through the reviewed model route.
+ const m=raw.match(/^((?:(?:ya )?le (?:estoy dejando|dejé|deje) (?:su |el )?(?:pago por cheque|pago en efectivo|pago por Zelle|cheque|efectivo|adelanto en efectivo)(?: en (?:la bodega|su gavetero))?|su (?:cheque|pago por cheque) (?:está listo|esta listo|ya quedó registrado|ya quedo registrado)))\s*,?\s+y que me (?:confirme|avise) (?:cuando lo reciba|cuando le llegue|al recibirlo)[.! ]*$/i);
+ return m?m[1][0].toUpperCase()+m[1].slice(1)+'. Por favor confirme cuando lo reciba.':null;
+}
 function lumiComposeParse(input,draft,context){
  input=lumiComposeInput(input);const command=lumiComposeParseIntent(input,draft,context);if(!command)return null;
  if(command.text&&['partial','draft','replace'].includes(command.kind)&&!/["“][\s\S]*["”]/.test(input)){
@@ -71301,6 +71308,7 @@ function lumiComposeParse(input,draft,context){
   if(formatted.error)return {kind:'clarify',text:formatted.error,clearDraft:true};
   command.text=formatted.text;
  }
+ if(command.text&&!/["“][\s\S]*["”]/.test(input))command.text=lumiPaymentNoticeWording(command.text)||command.text;
  const t=String(input||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/^(?:(?:lumi|oye|hey|por favor|please)[, ]+)+/,'');
  const preview=/^(?:prepara|redacta|draft|write)(?:\s|$)/.test(t)||/\b(?:sin enviar|no (?:lo )?envies|no (?:lo )?mandes|don't send|do not send|not yet)\b/.test(t);
  const direct=/^(?:mandale|manda un mensaje|enviale|envia un mensaje|escribele|escribile|dile|diles|respondele|responde|contestale|preguntale|preguntele|send a message|message|text|reply|respond|tell|ask (?:him|her|them))(?:\s|:|[.!]*$)/.test(t);
@@ -71381,7 +71389,9 @@ function lumiComposeParseIntent(input,draft,context){
   const leading=new RegExp('^(?:en|por|in|on)\\s+('+via+')\\s+(?:a |al |to )(.+)$','i').exec(rest);
   if(leading){app=channel(leading[1]);rest=leading[2].trim();}
   const split=/\s+(?:y\s+|and\s+)?(?:(?:dile|diciendo|say|saying)\s+(?:que\s+)?|que\s+|that\s+)|\s*:\s*/i.exec(rest);
-  if(split){text=rest.slice(split.index+split[0].length);rest=rest.slice(0,split.index).trim();}
+  const quoted=/\s+["“]([\s\S]*)["”]\s*$/.exec(rest);
+  if(quoted&&(!split||split.index>=quoted.index)){text=quoted[1];rest=rest.slice(0,quoted.index).trim();}
+  else if(split){text=rest.slice(split.index+split[0].length);rest=rest.slice(0,split.index).trim();}
   const ch=new RegExp('\\s+(?:en|por|in|on)\\s+('+via+')[.!]*$','i').exec(rest);
   if(ch){app=channel(ch[1]);rest=rest.slice(0,ch.index).trim();}
   if(rest&&rest.length<=120&&!/\b(y|and|dijo|said)\b/i.test(rest))return target(rest,app,text);
