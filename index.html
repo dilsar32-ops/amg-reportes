@@ -19098,7 +19098,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R371';
+  const APP_BUILD = '2026-11-10-R372';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71011,6 +71011,13 @@ function resolve(text,people,context){
  return prior?{person:prior}:{error:'¿A quién le vamos a preparar el pago?'};
 }
 // Short corrections are accepted only while reviewing a specific payment.
+function continuation(text,context){
+ if(!context||context.method!=='cheque'||!['plan','prepared'].includes(context.stage))return null;
+ const t=norm(text).replace(/[.,]/g,'').trim();
+ // "Sent it" could refer to a message, so only explicit physical handover verbs.
+ if(!/^(?:ya |i already |i )?(?:lo deje|se lo deje|lo entregue|se lo entregue|le entregue|lo deje listo en|left it|dropped it off|handed it over)(?: en (?:la bodega|el warehouse)| at (?:the warehouse|the office)| hoy| today)?$/.test(t))return null;
+ return {action:'record',method:'cheque',amount:context.stage==='prepared'&&Number.isFinite(context.amount)?context.amount:null,reference:context.reference||'',kind:context.kind||'pago',english:/left|dropped|handed/.test(t),text:String(text)};
+}
 function amendment(text,previous){
  const t=norm(text).replace(/^(no|perdon|sorry),/,'$1 ').replace(/[.!?]+$/,'').replace(/\s+/g,' ').trim();
  const monetary=/^(?:(?:no|perdon|sorry|mejor) )?(?:(?:son|fueron|era|eran|it's|it was|make it|solo|only) )?\$?\d[\d,.]*(?: dolares| dollars)?$/.test(t)||/^(?:cambia|corrige|change|correct) (?:el )?(?:monto|amount)(?: a| to)? \$?\d[\d,.]*$/.test(t);
@@ -71104,7 +71111,7 @@ async function commit(flow,io){
  if(!verifyReceipt(receipt,flow))return {state:'uncertain',text:'No pude comprobar que el pago quedara registrado. No lo repetiré; revisa Pagos.'};
  return io.finish(flow,receipt);
 }
-const api={norm,money,cents,method,amount,reference,intent,resolve,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit};
+const api={norm,money,cents,method,amount,reference,intent,resolve,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiPaymentFollowup=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
@@ -71140,7 +71147,7 @@ async function lumiPayContext(owner){
  return null;
 }
 async function lumiPayRemember(owner,person,order){
- const ctx={owner,key:person.key,method:order.method||'',stage:order.action,at:Date.now(),routeStamp:lumiPayRouteStamp(lumiCurrentMessageContext(owner))};
+ const ctx={owner,key:person.key,method:order.method||'',stage:order.action,amount:Number.isFinite(order.amount)?order.amount:null,reference:order.reference||'',kind:order.kind||'pago',at:Date.now(),routeStamp:lumiPayRouteStamp(lumiCurrentMessageContext(owner))};
  LUMI_PAY_CONTEXT=ctx;await lumiPaySetting(owner,'lumi_payment_context_'+SES.user_id,ctx);
 }
 async function lumiPayHourWarnings(person,owner){
@@ -71277,7 +71284,8 @@ async function lumiPayEditCard(texto){
 }
 async function asPaymentFollowup(texto){
  const P=lumiPayCore();if(!P)return false;
- const owner=lumiPayOwner();let order=P.intent(texto);
+ const owner=lumiPayOwner();let order=P.intent(texto),continuationContext=null;
+ if(!order&&owner&&/^(?:ya |i |lo |se lo )/.test(P.norm(texto))){continuationContext=await lumiPayContext(owner);order=P.continuation(texto,continuationContext);}
  if(/^(?:revisa ese pago|verifica ese pago|comprueba ese pago|revisa si quedo registrado|verifica si quedo registrado|check that payment|verify that payment|did that payment go through)[.!? ]*$/.test(P.norm(texto))){asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;try{lumiPayGuard(owner);const text=await lumiPayReconcile(owner);lumiPayGuard(owner);lumiPaySay(text);}catch(e){if(owner===lumiPayOwner()||!owner)lumiPaySay(e.message);}finally{AS.enviando=false;}return true;}
  const pending=LUMI_PAY_PENDING?.owner===owner&&Date.now()-LUMI_PAY_PENDING.at<300000?LUMI_PAY_PENDING:null;
  if(pending){const corrected=P.amendment(texto,pending.order);if(corrected)order=corrected;}
@@ -71291,7 +71299,7 @@ async function asPaymentFollowup(texto){
   lumiPayGuard(owner);
   if(order.action==='clarify'){lumiPaySay('¿Me estás confirmando un pago que tú hiciste, o contando lo que dijo otra persona?');return true;}
   if(order.action==='not_done'){LUMI_PAY_PENDING=null;lumiPaySay('Entendido: todavía no se pagó. El saldo y la petición siguen igual.');return true;}
-  const people=await lumiPayPeople(owner),context=await lumiPayContext(owner);
+  const people=await lumiPayPeople(owner),context=continuationContext||await lumiPayContext(owner);
   const resolved=P.resolve(texto,people,pending?{key:pending.person.key}:context);if(resolved.error){lumiPaySay(resolved.error);return true;}
   const person=resolved.person;
   if(!order.method&&context?.key===person.key)order.method=context.method||'';
