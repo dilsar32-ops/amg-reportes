@@ -16,7 +16,7 @@ function lumiResolveLaborSpeech(text,{dictating=false,confirming=false}={}){
  // Never rewrite a dictated message, a recipient, or an ambiguous write action.
  if(/\b(?:dile|mensaje|escribe|dicta|envia|manda|borra|paga|send|message|delete|write)\b/.test(t))return {text:original};
  const query=/\b(?:tenemos|hay|algun|algunos|muestra|muestrame|ver|revisa|lee|have|any|show|check|read)\b/.test(t);
- if(query&&/\b(?:label|leibor|leiber|labor|labour)\s+(?:blogs?|locks?|logs?)\b/.test(t))return {text:original.replace(/\b(?:label|leibor|leiber|labor|labour)\s+(?:blogs?|locks?|logs?)\b/gi,'labor log')};
+ if(query&&/\b(?:label|leibor|leiber|labor|labour)\s+(?:blogs?|locks?|logs?)\b/.test(t))return {text:original.replace(/\b(?:label|leibor|leiber|labor|labour)\s+(blogs?|locks?|logs?)\b/gi,(_whole,noun)=>/s$/i.test(noun)?'labor logs':'labor log')};
  if(query&&/\b(?:label|leibor|leiber)\b/.test(t))return {text:original,clarify:true};
  return {text:original};
 }
