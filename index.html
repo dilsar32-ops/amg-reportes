@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R385';
+  const APP_BUILD = '2026-11-10-R386';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70984,18 +70984,18 @@ async function lumiPdfRecognize(images,{active,progress,setCancel},engine){
  if(!images.length)throw Error('Añade primero las fotos al documento.');
  if(images.length>12||images.some(i=>!/^data:image\/(png|jpeg);base64,/.test(i.data||'')))throw Error('Usa hasta 12 fotos PNG o JPEG.');
  let worker=null,cancelled=false,rejectStop,timer;const stop=new Promise((_,reject)=>{rejectStop=reject;});
- const cancel=()=>{if(cancelled)return;cancelled=true;void worker?.terminate();rejectStop(Error('Lectura cancelada. Las fotos se conservan.'));};setCancel(cancel);
+ const cancel=(message)=>{if(cancelled)return;cancelled=true;void worker?.terminate();rejectStop(Error(typeof message==='string'?message:'Lectura cancelada. Las fotos se conservan.'));};setCancel(cancel);
  const checked=()=>{if(cancelled||!active())throw Error('La sesión cambió. La lectura no se añadió al documento.');};
  const bounded=async(p,ms)=>{timer=setTimeout(cancel,ms);try{return await Promise.race([p,stop]);}finally{clearTimeout(timer);}};
  try{
   const T=engine||await bounded(lumiPdfLoadOcr(),35000);checked();const root=lumiPdfOcrAssets();
-  const pending=T.createWorker('spa+eng',1,{workerPath:root+'worker.min.js',corePath:root,langPath:root,gzip:false,workerBlobURL:true,logger:m=>{if(active()&&!cancelled)progress(m.status==='recognizing text'?'Leyendo texto… '+Math.round((m.progress||0)*100)+'%':'Preparando lector…');}}).then(w=>{if(cancelled||!active()){void w.terminate();throw Error('Lectura cancelada.');}worker=w;return w;});
+  const pending=T.createWorker('spa+eng',1,{workerPath:root+'worker.min.js',corePath:root,langPath:root,gzip:false,workerBlobURL:true,errorHandler:()=>cancel('No pude leer la imagen. Las fotos siguen aquí; comprueba la conexión y vuelve a intentarlo.'),logger:m=>{if(active()&&!cancelled)progress(m.status==='recognizing text'?'Leyendo texto… '+Math.round((m.progress||0)*100)+'%':'Preparando lector…');}}).then(w=>{if(cancelled||!active()){void w.terminate();throw Error('Lectura cancelada.');}worker=w;return w;});
   await bounded(pending,60000);checked();const results=[];
   for(let i=0;i<images.length;i++){checked();progress('Leyendo foto '+(i+1)+' de '+images.length+'…');const r=await bounded(worker.recognize(images[i].data),60000);checked();
    const text=String(r.data?.text||'').trim();results.push({text,confidence:Number(r.data?.confidence)||0,index:i+1});}
   if(!results.some(r=>r.text))throw Error('No pude leer texto en estas fotos. Usa una imagen más nítida o conserva las fotos en el PDF.');
   return results;
- }finally{clearTimeout(timer);setCancel(null);if(worker&&!cancelled)await worker.terminate();}
+ }catch(e){throw e instanceof Error?e:Error(String(e||'No se pudo leer la imagen.'));}finally{clearTimeout(timer);setCancel(null);if(worker&&!cancelled)await worker.terminate();}
 }
 
 function lumiPdfOwner(){return SES.user_id+'|'+SES.company_id+'|'+SES.role+(AS.sandbox?'|sandbox':'')+(AS.entrada?.area?'|'+AS.entrada.area:'');}
