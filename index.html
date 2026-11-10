@@ -19098,7 +19098,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R366';
+  const APP_BUILD = '2026-11-10-R367';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70640,9 +70640,11 @@ function lumiResolveCompose(command,rows,owner){
 function lumiComposeInput(input){
  let t=String(input||'').trim().replace(/^[¿¡]\s*/,'');
  for(let i=0;i<4;i++)t=t.replace(/^(?:(?:lumi|hola|oye|oiga|hey|por favor|please)[, ]+)+/i,'')
+  .replace(/^(?:este|eh|ehm|um|uh|o sea)[, ]+/i,'')
+  .replace(/^(?:(?:ah[, ]+)?(?:y|and)[, ]+|(?:tambi[eé]n|de paso)[, ]+)(?=(?:dile|resp[oó]ndele|cont[eé]stale|m[aá]ndale|env[ií]ale|tell|reply|send)\b)/i,'')
   .replace(/^(?:(?:s[ií]|ok|okay|bueno)[, ]+)(?=(?:dile|resp[oó]ndele|cont[eé]stale|m[aá]ndale|m[aá]ndalo|env[ií]ale|env[ií]alo|tell|reply|send)\b)/i,'')
   .replace(/^(?:(?:me )?(?:puedes|podr[ií]as)|can you|could you|would you|i need you to|i want you to|quiero que|necesito que|hazme el favor de|h[aá]game el favor de)\s+/i,'');
- t=t.replace(/^(?:le (?:puedes|podr[ií]as) decir|le digas|decirle|avisarle|av[ií]sale)\b/i,'dile')
+ t=t.replace(/^(?:le (?:puedes|podr[ií]as) decir|le digas|decirle|avisarle|av[ií]sale|com[eé]ntale)\b/i,'dile')
   .replace(/^(?:le respondas|responderle)\b/i,'respóndele').replace(/^(?:le contestes|contestarle)\b/i,'contéstale')
   .replace(/^escribirle\b/i,'escríbele').replace(/^mandarle\b/i,'mándale').replace(/^enviarle\b/i,'envíale')
   .replace(/^enviarlo\b/i,'envíalo').replace(/^mandarlo\b/i,'mándalo')
@@ -70652,9 +70654,51 @@ function lumiComposeInput(input){
   .replace(/^send (.{1,120}?) a message (saying|that)\s+/i,'send a message to $1 $2 ');
  return t;
 }
+// Dictation is message data, not literal spelling of “arroba/punto”. This local
+// conversion never invents a missing domain or chooses among uncertain addresses.
+function lumiDictatedEmail(text){
+ const original=String(text||'');
+ const cue=/\b(?:(?:mi|el|su|my|the|our)\s+)?(?:correo(?:\s+electr[oó]nico)?|e[- ]?mail)(?:\s+(?:es|is))?\s*[:=]?\s+/i.exec(original);
+ if(!cue)return {text:original};
+ let value=original.slice(cue.index+cue[0].length).trim().replace(/[.!?]+$/,'').replace(/\s+(?:por favor|please)$/i,'').trim();
+ const clarify={error:'No entendí completo el correo. Dígame la dirección otra vez; no envié nada.'};
+ const spoken=/\barroba\b|\bat\b|@/i.test(value);
+ if(!spoken)return clarify;
+ // Corrections/alternatives need clarification, not blind concatenation.
+ if(/\b(?:o|or|quiz[aá]s|creo|maybe|perhaps|mejor|perd[oó]n|sorry|no|not)\b/i.test(value))return clarify;
+ value=value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+  .replace(/\s*,\s*(?=\b(?:arroba|at|punto|dot)\b|@)/g,' ')
+  .replace(/\b(arroba|at|punto|dot)\s*,\s*/g,'$1 ');
+ const parts=value.split(/\s*(?:@|\barroba\b|\bat\b)\s*/);if(parts.length!==2)return clarify;
+ const digits={cero:0,uno:1,dos:2,tres:3,cuatro:4,cinco:5,seis:6,siete:7,ocho:8,nueve:9,zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9};
+ const numbers={diez:10,once:11,doce:12,trece:13,catorce:14,quince:15,dieciseis:16,diecisiete:17,dieciocho:18,diecinueve:19,veinte:20,veintiuno:21,veintidos:22,veintitres:23,veinticuatro:24,veinticinco:25,veintiseis:26,veintisiete:27,veintiocho:28,veintinueve:29,ten:10,eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,sixteen:16,seventeen:17,eighteen:18,nineteen:19};
+ const tens={treinta:30,cuarenta:40,cincuenta:50,sesenta:60,setenta:70,ochenta:80,noventa:90,twenty:20,thirty:30,forty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90};
+ function component(s){
+  s=s.replace(/\b(?:guion bajo|guion al piso|underscore)\b/g,' _ ').replace(/\b(?:punto|dot)\b/g,' . ').replace(/\b(?:guion|dash|hyphen)\b/g,' - ').replace(/\b(?:mas|plus)\b/g,' + ');
+  const tokens=s.trim().split(/\s+/),out=[];
+  for(let i=0;i<tokens.length;i++){
+   const t=tokens[i];if(t in tens){let n=tens[t],next=i+1;if(tokens[next]==='y'||tokens[next]==='and')next++;if(tokens[next] in digits){n+=digits[tokens[next]];i=next;}out.push(String(n));}
+   else if(t in digits)out.push(String(digits[t]));else if(t in numbers)out.push(String(numbers[t]));else out.push(t);
+  }
+  // Only one word-like local token plus numbers/separators is unambiguous.
+  // “maria jose” could mean a space, a dot or a joined name: ask instead.
+  if(out.some(t=>!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(t)))return null;
+  if(out.some((t,i)=>i>0&&/[a-z]$/.test(out[i-1])&&/^[a-z]/.test(t)))return null;
+  return out.join('');
+ }
+ const local=component(parts[0]),domain=component(parts[1]);
+ if(!local||!domain||local.length>64||local.startsWith('.')||local.endsWith('.')||local.includes('..')||!(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/).test(domain))return clarify;
+ const email=local+'@'+domain;if(email.length>254)return clarify;
+ return {text:original.slice(0,cue.index+cue[0].length)+email,email};
+}
 // A clear instruction authorizes one send; preparation and uncertainty never do.
 function lumiComposeParse(input,draft,context){
  input=lumiComposeInput(input);const command=lumiComposeParseIntent(input,draft,context);if(!command)return null;
+ if(command.text&&['partial','draft','replace'].includes(command.kind)&&!/["“][\s\S]*["”]/.test(input)){
+  const formatted=lumiDictatedEmail(command.text);
+  if(formatted.error)return {kind:'clarify',text:formatted.error,clearDraft:true};
+  command.text=formatted.text;
+ }
  const t=String(input||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/^(?:(?:lumi|oye|hey|por favor|please)[, ]+)+/,'');
  const preview=/^(?:prepara|redacta|draft|write)(?:\s|$)/.test(t)||/\b(?:sin enviar|no (?:lo )?envies|no (?:lo )?mandes|don't send|do not send|not yet)\b/.test(t);
  const direct=/^(?:mandale|manda un mensaje|enviale|envia un mensaje|escribele|escribile|dile|diles|respondele|responde|contestale|preguntale|preguntele|send a message|message|text|reply|respond|tell|ask (?:him|her|them))(?:\s|:|[.!]*$)/.test(t);
@@ -70730,7 +70774,7 @@ function lumiComposeParseIntent(input,draft,context){
 }
 function lumiComposeReduce(state,command,owner){
  const same=state&&state.owner===owner,old=same?state:null;
- if(command.kind==='clarify')return {state:old,message:command.text};
+ if(command.kind==='clarify')return {state:command.clearDraft?null:old,message:command.text};
  if(command.kind==='cancel')return {state:null,message:'Está bien.'};
  if(command.kind==='partial'){
   const d={owner,query:command.query||'',app:command.app||'',key:command.key||null,text:command.text||'',choices:command.choices||null,intent:command.intent||'preview',status:'incomplete'};
