@@ -19098,7 +19098,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R374';
+  const APP_BUILD = '2026-11-10-R375';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -52929,7 +52929,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
           <div class="field"><label>Salida / Hora Hasta</label>
             <input type="time" class="tefixTo" value="${esc((e.clock_out||'').slice(0,5))}"></div>
         </div>
-        ${myDayOtherEntriesNote(e)}
+        ${myDayOtherEntriesNote(e)}${myCorrectionGapHint(e)}
         <div style="display:flex; gap:8px; margin-top:8px;">
           <button type="button" class="btn btn-ink tefixSave" style="flex:1; margin:0;">Guardar</button>
           <button type="button" class="btn btn-outline tefixCancel" style="flex:1; margin:0;">Cancelar</button>
@@ -53022,6 +53022,57 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
 
   // "He fixed his hours" - shown to the worker on their own row, and to the
   // manager on theirs (see renderPerson), so a correction is never silent.
+  // A correction stamp records an operation, not proof that the hours changed.
+  function correctionClock(value){
+    const m = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(String(value || ''));
+    return m && +m[1] < 24 && +m[2] < 60 ? +m[1]*60 + +m[2] : null;
+  }
+  function correctionSameTimes(row, from, to){
+    const a = correctionClock(row?.clock_in), b = correctionClock(row?.clock_out);
+    return a !== null && b !== null && a === correctionClock(from) && b === correctionClock(to);
+  }
+  function correctionMatchesOriginal(row){
+    return !!row && correctionSameTimes(row, row.original_clock_in, row.original_clock_out);
+  }
+  function laborGapText(row, shifts){
+    const start = correctionClock(row?.clock_in), total = hoursBetween(row?.clock_in, row?.clock_out);
+    if(start === null || !total || !Array.isArray(shifts) || shifts.length < 2) return '';
+    const spans = shifts.map(s => {
+      const a = correctionClock(s.from), n = hoursBetween(s.from, s.to);
+      if(a === null || !n) return null;
+      const offset = (a - start + 1440) % 1440;
+      return { start:offset, end:offset+n };
+    });
+    // Overlapping, invalid or out-of-range reports need review, not invented breaks.
+    if(spans.some(s => !s || s.end > total)) return '';
+    spans.sort((a,b) => a.start-b.start);
+    const gaps = [];
+    for(let i=1; i<spans.length; i++){
+      if(spans[i].start < spans[i-1].end) return '';
+      if(spans[i].start > spans[i-1].end) gaps.push([spans[i-1].end, spans[i].start]);
+    }
+    if(!gaps.length) return '';
+    const time = offset => { const m=(start+offset)%1440; return fmtTime12(String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')); };
+    return 'El Labor Log no reporta tiempo trabajado entre ' + gaps.map(g => time(g[0])+' y '+time(g[1])).join('; entre ')
+      + '. Si hubo una pausa, registre los tramos por separado; no la incluya como tiempo trabajado.';
+  }
+  function myCorrectionGapHint(row){
+    if(!Array.isArray(myLaborShifts)) return '';
+    const shifts = myLaborShifts.filter(s => s.log_date === row.work_date && (s.work_kind || 'restauracion') === kindOf(row))
+      .map(s => ({from:s.shift_from,to:s.shift_to}));
+    const text = laborGapText(row,shifts);
+    return text ? '<p class="clockhint" style="margin:8px 0;">'+esc(text)+'</p>' : '';
+  }
+  function managerCorrectionLineFor(row){
+    const original = row.original_clock_in || row.original_clock_out;
+    if(!row.corrected_at && !original) return '';
+    const unchanged = correctionMatchesOriginal(row);
+    const text = unchanged ? 'Corrección registrada · el horario actual sigue igual al original'
+      : row.corrected_at ? 'Corrección registrada por el trabajador' : 'Usted cambió estas horas';
+    const before = original ? ' (antes: '+fmtTime12(row.original_clock_in || '')+' - '+fmtTime12(row.original_clock_out || '')+')' : '';
+    return '<br><span class="matchstatus partial" style="cursor:default;">&#9998; '+esc(text+before)+'</span>';
+  }
+
   function myCorrectionLineFor(e){
     if(!e) return '';
     const from = (e.original_clock_in || e.original_clock_out)
@@ -53033,6 +53084,9 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     //    (para que "el corrigio sus horas" siga siendo verdad del otro lado).
     // Sin la segunda rama, al trabajador le cambiaban las horas y en su
     // telefono no aparecia absolutamente nada.
+    if((e.corrected_at || from) && correctionMatchesOriginal(e)){
+      return '<br><span class="matchstatus partial" style="cursor:default;">Corrección registrada · el horario actual sigue igual al original. Revise la entrada y la salida.</span>';
+    }
     if(e.corrected_at){
       return `<br><span class="matchstatus partial" style="cursor:default; color:var(--ink-soft);">`
         + `Corregido${from ? ' (antes: ' + esc(from) + ')' : ''}</span>`;
@@ -53398,26 +53452,51 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     fixingEntryId = null;
     renderMyEntriesStatus();
   }
+  const correctionsSaving = new Set();
   async function saveCorrection(id, rowEl, btn){
     const e = myEntries.find(x => String(x.id) === String(id));
-    if(!e || !rowEl) return;
+    if(!e || !rowEl || correctionsSaving.has(String(id))) return;
     const p_in  = (rowEl.querySelector('.tefixFrom') || {}).value || '';
     const p_out = (rowEl.querySelector('.tefixTo')   || {}).value || '';
-    if(!p_in || !p_out){ alert('Ponga la hora de entrada y la de salida.'); return; }
+    if(correctionClock(p_in) === null || correctionClock(p_out) === null){ alert('Ponga la hora de entrada y la de salida.'); return; }
     const mins = hoursBetween(p_in, p_out);
     if(mins === null || mins <= 0){ alert('Esas horas no forman un turno.'); return; }
+    if(correctionSameTimes(e,p_in,p_out)){
+      alert('El horario sigue igual. No se guardó una corrección. Cambie la entrada o la salida. Si hubo una pausa, registre cada tramo por separado.');
+      return;
+    }
+    const owner = SES?.user_id+'|'+SES?.company_id;
+    const sameOwner = () => owner === SES?.user_id+'|'+SES?.company_id;
+    if(!SES?.user_id || !SES?.company_id) return;
     if(!confirm(`Cambiar a ${fmtTime12(p_in)} - ${fmtTime12(p_out)} (${hhmm(mins)})?\n\nDespués tiene que aprobarlas otra vez.`)) return;
     const old = btn ? btn.textContent : '';
+    correctionsSaving.add(String(id));
     if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
     try{
-      await authPost('/rest/v1/rpc/correct_my_hours',
-        { p_entry: id, p_in: p_in, p_out: p_out }, SES.access_token);
-      fixingEntryId = null;
-      await loadMyEntries();
-      alert('Horas corregidas. Ahora toque Confirmar para aprobarlas.');
-    }catch(err){
-      alert(err && err.message ? err.message : 'No se pudo corregir. Intente otra vez.');
-      if(btn){ btn.disabled = false; btn.textContent = old; }
+      let failed = null;
+      try{
+        await authPost('/rest/v1/rpc/correct_my_hours', {p_entry:id,p_in,p_out}, SES.access_token);
+      }catch(err){ failed = err; }
+      if(!sameOwner()) return;
+      // A response can be lost after saving. Read once; never replay the write.
+      const refreshed = await loadMyEntries();
+      if(!sameOwner()) return;
+      if(!refreshed){
+        alert('No pude comprobar cómo quedaron las horas. Revise esta pantalla cuando vuelva la conexión antes de guardar otra vez.');
+        return;
+      }
+      const saved = myEntries.find(x => String(x.id) === String(id));
+      if(saved && correctionSameTimes(saved,p_in,p_out)){
+        fixingEntryId = null;
+        renderMyEntriesStatus();
+        alert(`Horario guardado: ${fmtTime12(saved.clock_in)} - ${fmtTime12(saved.clock_out)} (${hhmm(mins)}).` + (saved.confirmed ? '' : ' Ahora toque Confirmar para aprobarlo.'));
+      }else{
+        alert(!saved ? 'Ese turno ya no aparece entre sus horas pendientes. Revise con su manager; no repita la corrección.'
+          : 'Las horas guardadas no coinciden con el cambio solicitado. Revise el horario actual antes de intentar de nuevo.' + (failed?.message ? '\n'+failed.message : ''));
+      }
+    }finally{
+      correctionsSaving.delete(String(id));
+      if(btn){ btn.disabled=false; btn.textContent=old; }
     }
   }
 
@@ -54912,21 +54991,12 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
           // phone). A row with the original times kept but no corrected_at was
           // changed from THIS screen instead - say that, rather than crediting
           // the worker with an edit he did not make.
-          const before = (r.original_clock_in || r.original_clock_out)
-            ? ' (antes: ' + esc(fmtTime12(r.original_clock_in||'')) + ' - ' + esc(fmtTime12(r.original_clock_out||'')) + ')'
-            : '';
-          const fixed = r.corrected_at
-            ? '<br><span class="matchstatus partial" style="cursor:default;">&#9998; Él corrigió sus horas'
-              + before
-              + ((r.corrected_count||0) > 1 ? ' &middot; ' + r.corrected_count + ' veces' : '')
-              + '</span>'
-            : (before
-                ? '<br><span class="matchstatus partial" style="cursor:default;">&#9998; Usted cambió estas horas'
-                  + before + '</span>'
-                : '');
+          const fixed = managerCorrectionLineFor(r);
+          const gap = laborGapText(r,matches.map(m => ({from:m.sh.f,to:m.sh.o})));
+          const gapNote = gap ? '<br><span class="clockhint">'+esc(gap)+'</span>' : '';
           return `<div class="entryrow${reviewable ? ' reviewable' : ''}" data-eid="${esc(r.id)}"${reviewable ? ' data-review-date="'+esc(r.work_date)+'" data-review-kind="' + kind + '"' : ''}>
           <span><span class="when">${esc(r.work_date||'')} &middot; ${esc(fmtTime12(r.clock_in||''))} - ${esc(fmtTime12(r.clock_out||''))}</span>
-            ${status.text ? '<br><span class="matchstatus '+status.cls+'">'+status.text+'</span>' : ''}${dupWarn}${fixed}</span>
+            ${status.text ? '<br><span class="matchstatus '+status.cls+'">'+status.text+'</span>' : ''}${dupWarn}${fixed}${gapNote}</span>
           <span style="display:flex;align-items:center;gap:10px;">
             <span class="hrs">${hhmm(workedMins||0)}</span>
             ${r.paid_at ? '<span class="paidtag">PAGADO ' + esc(dayOf(r.paid_at)) + '</span>'
@@ -71171,19 +71241,27 @@ async function lumiPayRemember(owner,person,order){
 async function lumiPayHourWarnings(person,owner){
  if(person.kind!=='crew')return '';
  const q='&company_id=eq.'+encodeURIComponent(SES.company_id)+'&user_id=eq.'+person.id;
- const rows=await lumiBasicAll('/rest/v1/time_entries?select=id,work_date,clock_in,clock_out,confirmed,paid_at,work_kind'+q+'&paid_at=is.null',owner);
+ const rows=await lumiBasicAll('/rest/v1/time_entries?select=id,work_date,clock_in,clock_out,confirmed,paid_at,work_kind,corrected_at,original_clock_in,original_clock_out'+q+'&paid_at=is.null',owner);
  if(!rows.length)return '';
  const dates=rows.map(r=>r.work_date).filter(Boolean).sort();if(dates.length!==rows.length)throw Error('Faltan fechas de las horas.');
  const logs=await lumiBasicAll('/rest/v1/labor_logs?select=id,crew_leader,payload,log_date,work_kind&company_id=eq.'+encodeURIComponent(SES.company_id)+'&log_date=gte.'+dates[0]+'&log_date=lte.'+dates.at(-1),owner);
- const mismatch=new Set(),missing=new Set();
- for(const r of rows){
+ const mismatch=new Map(),missing=new Set(),days=new Map();
+ for(const row of rows){const key=row.work_date+'|'+(row.work_kind||'restauracion');if(!days.has(key))days.set(key,[]);days.get(key).push(row);}
+ for(const dayRows of days.values()){
+  const r=dayRows[0];
   const kind=r.work_kind||'restauracion',dayLogs=logs.filter(l=>l.log_date===r.work_date&&(l.work_kind||'restauracion')===kind);
   const matches=findShiftMatchesAny(dayLogs,[person.name.toLowerCase(),person.alias.toLowerCase()].filter(Boolean));
   const mins=matches.length?matches.reduce((n,m)=>n+(hoursBetween(m.sh.f,m.sh.o)||0),0):null;
-  const status=kind==='mudanza'&&!dayLogs.length?{cls:''}:teMatchStatus(hoursBetween(r.clock_in,r.clock_out),mins,kind);
-  if(status.cls==='mismatch')mismatch.add(r.work_date);else if(status.cls==='partial')missing.add(r.work_date);
+  const mine=dayRows.reduce((n,row)=>n+(hoursBetween(row.clock_in,row.clock_out)||0),0);
+  const status=kind==='mudanza'&&!dayLogs.length?{cls:''}:teMatchStatus(mine,mins,kind);
+  if(status.cls==='mismatch'){
+   let detail=r.work_date+': '+(mine/60).toFixed(2)+' h registradas'+(mins===null?'':', '+(mins/60).toFixed(2)+' h en el Labor Log')+'.';
+   if(dayRows.some(row=>row.corrected_at&&correctionMatchesOriginal(row)))detail+=' Figura una corrección, pero el horario actual sigue igual al original.';
+   if(dayRows.length===1){const gap=laborGapText(r,matches.map(m=>({from:m.sh.f,to:m.sh.o})));if(gap)detail+=' '+gap;}
+   mismatch.set(r.work_date+'|'+kind,detail);
+  }else if(status.cls==='partial')missing.add(r.work_date);
  }
- return [mismatch.size?'Las horas no coinciden con los Labor Logs: '+[...mismatch].join(', ')+'.':'',missing.size?'Hay '+missing.size+' día(s) sin cotejo completo con el Labor Log.':''].filter(Boolean).join(' ');
+ return [mismatch.size?'Las horas no coinciden con los Labor Logs. '+[...mismatch.values()].join(' '):'',missing.size?'Hay '+missing.size+' día(s) sin cotejo completo con el Labor Log.':''].filter(Boolean).join(' ');
 }
 async function lumiPaySnapshot(person,order,owner=lumiPayOwner()){
  lumiPayGuard(owner);const all=await lumiPayPeople(owner),p=all.find(x=>x.key===person.key&&x.active);if(!p)throw Error('Esa persona ya no está disponible.');
