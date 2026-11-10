@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R384';
+  const APP_BUILD = '2026-11-10-R385';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70874,27 +70874,59 @@ document.addEventListener('click',async e=>{
 
 // END LUMI LABOR DOCUMENT
 
+// BEGIN LUMI PDF STUDIO
+// Conversational PDF intents. Content is data, never an instruction to send or execute.
+function lumiPdfNorm(t){return String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();}
 function lumiPdfOrder(input){
  const raw=String(input||'').trim();if(!raw||raw.length>65000)return null;
  let s=raw.replace(/^(?:(?:oye|hey|lumi|por favor|please)[, ]+)+/i,'').replace(/^(?:puedes|podrías|podrias|can you|could you)\s+/i,'');
- s=s.replace(/^(crear|hacer|generar)\b/i,x=>({crear:'crea',hacer:'haz',generar:'genera'}[x.toLowerCase()]));
- if(!/^(?:crea(?:me)?|créame|genera(?:me)?|haz(?:me)?|make|create|generate|convierte|convert|pasa|pon)\b/i.test(s)||! /\bpdf\b/i.test(s))return null;
+ const n=lumiPdfNorm(s);
+ if(!/^(?:crea|crear|creame|gener|haz|hacer|arma|armar|prepara|preparar|make|create|generate|build|recreate|reconstru|convierte|convert|pasa|pon|quiero|necesito|i need|i want|turn)\b|^(?:generame|generar|genera|hazme|armame|preparame|reconstruye|reconstruir)\b/.test(n)||! /\bpdf\b/i.test(s))return null;
  const colon=s.indexOf(':');
- if(colon>=0){const head=s.slice(0,colon),body=s.slice(colon+1).trim();if(!/\bpdf\b/i.test(head))return null;if(/\b(?:sin|excepto|omite|without|exclude)\b/i.test(head))return {kind:'clarify',message:'Primero prepara el texto sin los datos que quieres excluir; después puedo convertirlo a PDF.'};return body?{kind:'text',text:body,title:'Documento de Lumi'}:{kind:'clarify',message:'Dime el texto que quieres incluir en el PDF.'};}
- const n=s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[.!?¿¡]/g,'').trim();
- if(/\b(?:sin|excepto|omite|without|exclude|envia|send|manda)\b/.test(n))return {kind:'clarify',message:'Puedo crear el PDF para revisarlo. Indícame primero el texto exacto que debe incluir; no enviaré nada automáticamente.'};
- if(/^(?:(?:crea|creame|genera|generame|haz|hazme|make|create|generate) (?:un |a )?pdf (?:con |de |of |from )?(?:esto|eso|la ultima respuesta|el ultimo resumen|lo que me mostraste|this|that|the last response|the last summary)|(?:pasa|pon|convierte|convert) (?:esto|eso|this|that|la ultima respuesta|el ultimo resumen) (?:a|en|to|into) (?:un |a )?pdf)$/.test(n))return {kind:'last',title:'Resumen de Lumi'};
+ if(colon>=0&&/\bpdf\b/i.test(s.slice(0,colon))){const head=lumiPdfNorm(s.slice(0,colon)),body=s.slice(colon+1).trim();if(/\b(?:sin|excepto|omite|without|exclude|manda|envia|send)\b/.test(head))return {kind:'clarify',message:'Primero preparo el documento. Dime qué contenido debe quedar; no enviaré nada con esta orden.'};return body?{kind:'text',text:body,title:'Documento de Lumi'}:{kind:'compose',title:'Documento de Lumi'};}
+ if(/\b(?:sin|excepto|omite|without|exclude|envia|send|manda)\b/.test(n))return {kind:'clarify',message:'Dime qué texto debe quedar en el PDF. Puedes revisarlo antes de compartirlo.'};
+ if(/\b(?:fotos?|imagenes?|photos?|pictures?|images?|scans?|escanead[oa])\b/.test(n))return {kind:/\b(?:texto|text|reconstru|recrea|recreate|editable|limpio|clean|extrae|extract)\w*\b/.test(n)?'ocr':'photos',title:'Documento de imágenes'};
+ if(/\b(?:conversacion|platica|lo que hablamos|lo que platicamos|conversation|what we discussed|our chat)\b/.test(n))return {kind:'conversation',title:'Conversación con Lumi'};
+ const direct=/\bpdf\b[\s\S]*?\b(?:que diga|que dice|donde diga|con este texto|with this text|saying)\s+([\s\S]+)/i.exec(s);
+ if(direct)return {kind:'text',text:direct[1].trim(),title:'Documento de Lumi'};
+ if(/\b(?:esto|eso|la ultima respuesta|el ultimo resumen|lo que me mostraste|this|that|the last response|the last summary)\b/.test(n))return {kind:'last',title:'Resumen de Lumi'};
  return {kind:'compose',title:'Documento de Lumi',request:raw};
+}
+function lumiPdfFollow(input){
+ const raw=String(input||'').trim().replace(/^(?:lumi|oye|hey)[, ]+/i,'');const n=lumiPdfNorm(raw).replace(/[.!?]+$/,'');let m;
+ if(/^(?:cancela|cancel|cierra|close) (?:el |the )?(?:pdf|documento|document|editor)$/.test(n))return {kind:'cancel'};
+ if(/^(?:genera(?:lo)?|hazlo|listo|create it|generate|generate it|ya esta|termina(?:lo)?|crealo)(?: (?:el |the )?pdf)?$/.test(n))return {kind:'generate'};
+ if(/^(?:lee|saca|extrae|reconstruye|extract|read)(?:me)? (?:el |the )?(?:texto|text)(?: (?:de |from )?(?:las |estas |the |these )?(?:fotos|imagenes|photos|images))?$/.test(n))return {kind:'ocr'};
+ if(/^(?:solo (?:las )?fotos|pdf (?:de|con) fotos|photos only)$/.test(n))return {kind:'photos'};
+ if((m=/^(?:ponle|pon|cambia|cambiale|set|change)(?: el| the)? (?:titulo|título|title)(?: (?:a|por|to))?\s*[:]?\s+(.+)$/i.exec(raw)))return {kind:'title',text:m[1]};
+ if((m=/^(?:agrega|agregale|agrégale|añade|añádele|anade|add|append|ponle)(?: (?:al|en el|to the) (?:pdf|documento|document))?\s*:?\s+([\s\S]+)$/i.exec(raw)))return {kind:'append',text:m[1]};
+ if((m=/^(?:el texto es|que diga|pon este texto|escribe en el pdf|the text is|put this text)\s*:?\s+([\s\S]+)$/i.exec(raw)))return {kind:'body',text:m[1]};
+ if((m=/^(?:cambia|reemplaza|replace)\s+["“]?(.+?)["”]?\s+(?:por|con|with)\s+["“]?(.+?)["”]?$/i.exec(raw)))return {kind:'replace',from:m[1],text:m[2]};
+ if(/^(?:quita|borra|elimina|remove|delete) (?:el |the )?(?:ultimo parrafo|ultima linea|last paragraph|last line)$/.test(n))return {kind:'removeLast'};
+ if(/^(?:m[aá]nda(?:lo|selo)?|env[ií]a(?:lo|selo)?|send it)(?:\s|$)/i.test(raw))return {kind:'sendBlocked'};
+ return null;
+}
+function lumiPdfConversation(rows){
+ if(!Array.isArray(rows)||!rows.length)throw Error('No tengo una conversación disponible en esta sesión. Díctame lo que debe incluir.');
+ const content=rows.filter(r=>['user','assistant'].includes(r.role)&&typeof r.content==='string').slice(-20).map(r=>(r.role==='user'?'Tú':'Lumi')+': '+r.content).join('\n\n');
+ if(content.length>60000)throw Error('La conversación es muy larga. Indica qué parte quieres incluir.');return lumiPdfText(content);
+}
+function lumiPdfEdit(text,change){
+ if(change.kind==='body')return lumiPdfText(change.text);
+ if(change.kind==='append')return lumiPdfText((text.trim()?text.trim()+'\n\n':'')+change.text);
+ if(change.kind==='removeLast'){const rows=text.trim().split(/\n\s*\n|\n/);rows.pop();return rows.join('\n\n');}
+ if(change.kind==='replace'){const count=text.split(change.from).length-1;if(count!==1)throw Error(count?'Ese texto aparece varias veces; edita la parte exacta en el documento.':'No encuentro ese texto en el documento. Dime qué parte quieres cambiar.');return lumiPdfText(text.replace(change.from,()=>change.text));}
+ throw Error('Cambio no reconocido.');
 }
 function lumiPdfText(raw){
  const s=String(raw||'').normalize('NFC').replace(/\r\n?/g,'\n').replace(/\t/g,'    ').replace(/[\u2010-\u2015]/g,'-').replace(/[“”]/g,'"').replace(/[‘’]/g,"'").replace(/…/g,'...').replace(/[•●]/g,'-').replace(/€/g,'EUR');
- if(/[^@-^H\u000b^L^N-^_\u007f]/.test(s))throw Error('El texto contiene caracteres de control. Revisa el contenido.');
+ if(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(s))throw Error('El texto contiene caracteres de control. Revisa el contenido.');
  if(/[^\x20-\x7e\xa0-\xff\n]/.test(s))throw Error('Este PDF admite español e inglés. Quita emojis o caracteres no compatibles antes de crearlo.');
  if(!s.trim())throw Error('No hay texto para convertir a PDF.');if(s.length>60000)throw Error('El texto supera 60.000 caracteres. Divídelo en documentos más cortos.');return s;
 }
 function lumiBuildPdf({text,title='Documento de Lumi',date,images=[]},JsPDF){
  if(typeof JsPDF!=='function')throw Error('El generador de PDF no está disponible. Actualiza la aplicación e inténtalo otra vez.');
- const body=lumiPdfText(text),heading=lumiPdfText(title).replace(/\n/g,' ').slice(0,100),stamp=date||new Date().toLocaleDateString('es-US');
+ const body=String(text||'').trim()?lumiPdfText(text):images.length?'':lumiPdfText(text),heading=lumiPdfText(title).replace(/\n/g,' ').slice(0,100),stamp=date||new Date().toLocaleDateString('es-US');
  const pdf=new JsPDF({unit:'pt',format:'a4',compress:true});const w=pdf.internal.pageSize.getWidth(),h=pdf.internal.pageSize.getHeight(),margin=48,bottom=h-55;
  pdf.setProperties({title:heading,subject:'Documento preparado en Workspace',creator:'Workspace - Lumi'});
  let y=0;const header=()=>{pdf.setTextColor(37,69,91);pdf.setFont('helvetica','bold');pdf.setFontSize(10);pdf.text('WORKSPACE  /  LUMI',margin,35);pdf.setDrawColor(210,220,228);pdf.line(margin,43,w-margin,43);y=66;};header();
@@ -70908,7 +70940,7 @@ function lumiBuildPdf({text,title='Documento de Lumi',date,images=[]},JsPDF){
   const paragraph=lines[i];if(!paragraph){y+=8;continue;}
   if(paragraph.trim().startsWith('|')&&paragraph.trim().endsWith('|')){
    const rows=[];while(i<lines.length&&/^\s*\|.*\|\s*$/.test(lines[i])){const cells=lines[i].trim().slice(1,-1).split('|').map(x=>x.trim());if(!cells.every(x=>/^:?-{3,}:?$/.test(x)))rows.push(cells);i++;}i--;
-   const cols=rows[0].length;if(cols>6||rows.some(r=>r.length!==cols))throw Error('La tabla debe tener el mismo número de columnas en cada fila, máximo 6.');
+   if(!rows.length)throw Error('La tabla no contiene datos. Añade un encabezado y filas.');const cols=rows[0].length;if(cols>6||rows.some(r=>r.length!==cols))throw Error('La tabla debe tener el mismo número de columnas en cada fila, máximo 6.');
    const cw=(w-margin*2)/cols,head=rows[0];
    const drawRow=(row,heading=false)=>{pdf.setFont('helvetica',heading?'bold':'normal');pdf.setFontSize(10);const wrapped=row.map(c=>pdf.splitTextToSize(c,cw-12));const height=Math.max(...wrapped.map(x=>x.length))*14+12;if(height>bottom-80)throw Error('Una fila de la tabla es demasiado larga. Divídela en varias filas.');
     if(y+height>bottom){next();if(!heading)drawRow(head,true);}
@@ -70933,17 +70965,52 @@ function lumiBuildPdf({text,title='Documento de Lumi',date,images=[]},JsPDF){
  return {pdf,pages,name:'Lumi_'+heading.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'_').slice(0,60)+'.pdf'};
 }
 
-function asPdfLimpiar(){for(const u of AS.pdfUrls||[])URL.revokeObjectURL(u);AS.pdfUrls=[];AS.pdfSource=null;AS.pdfEditor=null;}
-function asPdfRecordar(t){if(AS.pdfBuilding)return;AS.pdfSource=t&&AS.abierto?{text:String(t),owner:SES.user_id+'|'+SES.company_id+'|'+SES.role,at:Date.now()}:null;}
+// Tesseract runs locally in a Web Worker. Only public engine/model assets are downloaded.
+let LUMI_PDF_OCR_LIBRARY=null;
+function lumiPdfOcrAssets(){
+ const base=location.protocol==='http:'||location.protocol==='https:'?document.baseURI:'https://dilsar32-ops.github.io/amg-reportes/';
+ return new URL('assets/ocr-v6/',base).href;
+}
+function lumiPdfLoadOcr(){
+ if(window.Tesseract)return Promise.resolve(window.Tesseract);
+ if(LUMI_PDF_OCR_LIBRARY)return LUMI_PDF_OCR_LIBRARY;
+ LUMI_PDF_OCR_LIBRARY=new Promise((resolve,reject)=>{const script=document.createElement('script');let done=false;
+  const finish=(err)=>{if(done)return;done=true;clearTimeout(timer);script.onload=script.onerror=null;if(err){script.remove();LUMI_PDF_OCR_LIBRARY=null;reject(err);}else resolve(window.Tesseract);};
+  const timer=setTimeout(()=>finish(Error('No se pudo cargar el lector. Comprueba la conexión y vuelve a intentarlo.')),30000);
+  script.src=lumiPdfOcrAssets()+'tesseract.min.js';script.onload=()=>finish(window.Tesseract?null:Error('No se pudo iniciar el lector.'));script.onerror=()=>finish(Error('No se pudo descargar el lector de imágenes.'));document.head.appendChild(script);
+ });return LUMI_PDF_OCR_LIBRARY;
+}
+async function lumiPdfRecognize(images,{active,progress,setCancel},engine){
+ if(!images.length)throw Error('Añade primero las fotos al documento.');
+ if(images.length>12||images.some(i=>!/^data:image\/(png|jpeg);base64,/.test(i.data||'')))throw Error('Usa hasta 12 fotos PNG o JPEG.');
+ let worker=null,cancelled=false,rejectStop,timer;const stop=new Promise((_,reject)=>{rejectStop=reject;});
+ const cancel=()=>{if(cancelled)return;cancelled=true;void worker?.terminate();rejectStop(Error('Lectura cancelada. Las fotos se conservan.'));};setCancel(cancel);
+ const checked=()=>{if(cancelled||!active())throw Error('La sesión cambió. La lectura no se añadió al documento.');};
+ const bounded=async(p,ms)=>{timer=setTimeout(cancel,ms);try{return await Promise.race([p,stop]);}finally{clearTimeout(timer);}};
+ try{
+  const T=engine||await bounded(lumiPdfLoadOcr(),35000);checked();const root=lumiPdfOcrAssets();
+  const pending=T.createWorker('spa+eng',1,{workerPath:root+'worker.min.js',corePath:root,langPath:root,gzip:false,workerBlobURL:true,logger:m=>{if(active()&&!cancelled)progress(m.status==='recognizing text'?'Leyendo texto… '+Math.round((m.progress||0)*100)+'%':'Preparando lector…');}}).then(w=>{if(cancelled||!active()){void w.terminate();throw Error('Lectura cancelada.');}worker=w;return w;});
+  await bounded(pending,60000);checked();const results=[];
+  for(let i=0;i<images.length;i++){checked();progress('Leyendo foto '+(i+1)+' de '+images.length+'…');const r=await bounded(worker.recognize(images[i].data),60000);checked();
+   const text=String(r.data?.text||'').trim();results.push({text,confidence:Number(r.data?.confidence)||0,index:i+1});}
+  if(!results.some(r=>r.text))throw Error('No pude leer texto en estas fotos. Usa una imagen más nítida o conserva las fotos en el PDF.');
+  return results;
+ }finally{clearTimeout(timer);setCancel(null);if(worker&&!cancelled)await worker.terminate();}
+}
+
+function lumiPdfOwner(){return SES.user_id+'|'+SES.company_id+'|'+SES.role+(AS.sandbox?'|sandbox':'')+(AS.entrada?.area?'|'+AS.entrada.area:'');}
+function asPdfLimpiar(){AS.pdfEditor?.cancel?.();for(const u of AS.pdfUrls||[])URL.revokeObjectURL(u);AS.pdfUrls=[];AS.pdfSource=null;AS.pdfEditor=null;}
+function asPdfRecordar(t){if(AS.pdfBuilding)return;AS.pdfSource=t&&AS.abierto?{text:String(t),owner:lumiPdfOwner(),at:Date.now()}:null;}
 async function asCrearPdf(order,request){
- const owner=SES.user_id+'|'+SES.company_id+'|'+SES.role;
- const session=AS.pdfEditor=AS.pdfEditor||{};
- const active=()=>AS.pdfEditor===session&&AS.abierto&&SES.user_id+'|'+SES.company_id+'|'+SES.role===owner;
+ const owner=lumiPdfOwner();
+ AS.pdfEditor?.cancel?.();const session=AS.pdfEditor={owner,at:Date.now(),focused:true};
+ const active=()=>AS.pdfEditor===session&&AS.abierto&&lumiPdfOwner()===owner;
+ const conversation=(AS.historial||[]).map(r=>({...r}));
  asPararOido();asCallar();asTranscribir(request);AS.pdfBuilding=true;
  try{
   if(order.kind==='clarify'){asMostrarRespuesta(order.message);asHablar(order.message,asSeguirOyendo);return;}
-  const source=AS.pdfSource,compose=order.kind==='compose';
-  const text=compose?'':order.kind==='text'?order.text:source&&source.owner===owner&&Date.now()-source.at<30*60*1000?source.text:null;
+  const source=AS.pdfSource,compose=['compose','photos','ocr'].includes(order.kind);
+  const text=compose?'':order.kind==='conversation'?lumiPdfConversation(conversation):order.kind==='text'?order.text:source&&source.owner===owner&&Date.now()-source.at<30*60*1000?source.text:null;
   if(text===null)throw Error('No tengo una respuesta reciente de esta sesión para convertir. Pega el texto después de «Crea un PDF con este texto:».');
   const card=document.createElement('section');card.className='as-pdf-document as-chat-docs';card.style.cssText='display:block;padding:14px;margin:12px 0;border:1px solid #37546a;border-radius:12px;background:#12202b;color:#fff';
   const label=document.createElement('strong');label.textContent='Preparar documento PDF';card.appendChild(label);
@@ -70951,33 +71018,76 @@ async function asCrearPdf(order,request){
   const editor=document.createElement('div');card.appendChild(editor);
   const field=(name,value,multi=false)=>{const l=document.createElement('label');l.textContent=name;l.style.cssText='display:block;margin-top:10px';const el=document.createElement(multi?'textarea':'input');el.value=value;el.setAttribute('aria-label',name);el.style.cssText='display:block;box-sizing:border-box;width:100%;padding:10px;background:#fff;color:#152330;border-radius:8px';if(multi)el.rows=10;l.appendChild(el);editor.appendChild(l);return el;};
   const title=field('Título del PDF',order.title||'Documento de Lumi'),body=field('Contenido del PDF',text,true);title.maxLength=100;body.maxLength=60000;
-  const hint=document.createElement('p');hint.textContent='Usa # para títulos, - para listas y | para separar columnas de tablas. Las fotos se añaden al final. Revisa los datos antes de compartir.';editor.appendChild(hint);
+  const hint=document.createElement('p');hint.textContent='Díctame el contenido o pídeme cambios: «ponle título…», «agrégale…», «cambia… por…». También puedes adjuntar o pegar fotos aquí. Las fotos se procesan en este dispositivo.';editor.appendChild(hint);
   if(compose){const brief=document.createElement('p');brief.textContent='Solicitud: '+request;editor.appendChild(brief);}
   const preview=document.createElement('iframe');preview.title='Vista previa del PDF de Lumi';preview.hidden=true;preview.style.cssText='width:100%;height:480px;border:0;background:white;margin-top:12px';
-  let built=null,blob=null,url=null,dirty=true,images=[],loading=false;
-  const changed=()=>{dirty=true;preview.hidden=true;status.textContent='Hay cambios sin generar. Pulsa Generar PDF para actualizarlo.';};title.oninput=body.oninput=changed;
+  let built=null,blob=null,url=null,dirty=true,images=[],loading=false,ocrBusy=false,ocrReview=false,mode=order.kind==='ocr'?'text':'photos';
+  const changed=()=>{session.at=Date.now();dirty=true;preview.hidden=true;status.textContent='Hay cambios sin generar. Pulsa Generar PDF para actualizarlo.';};title.oninput=body.oninput=changed;
   const button=(label,fn,parent=card)=>{const b=document.createElement('button');b.type='button';b.className='btn btn-outline';b.textContent=label;b.style.margin='8px 8px 0 0';b.onclick=async()=>{if(!active()){status.textContent='Esta vista pertenece a otra sesión. Crea el PDF de nuevo.';return;}try{await fn();}catch(e){if(!/cancel|AbortError/i.test(String(e.name)+' '+String(e.message)))status.textContent=String(e.message||e);}};parent.appendChild(b);return b;};
-  if(compose){
+  if(order.kind==='compose'){
    const templates={Nota:'# Asunto\n[Escribe el asunto]\n\n# Mensaje\n[Escribe la información y las instrucciones]\n\n# Próximo paso\n[Responsable y fecha]',Reporte:'# Datos del trabajo\nCliente: [por completar]\nDirección: [por completar]\nFecha: [por completar]\n\n# Trabajo realizado\n- [Describe lo realizado]\n\n# Observaciones\n[Incluye los hallazgos comprobados]\n\n# Pendientes\n- [Acción, responsable y fecha]',Cuentas:'# Resumen de cuentas\nCliente: [por completar]\nPeriodo: [por completar]\n\n| Fecha | Concepto | Cargo | Abono |\n| --- | --- | --- | --- |\n| [fecha] | [concepto] | [importe] | [importe] |\n\n# Saldo y comprobantes\n[Incluye el saldo verificado y su fuente. No se calculan importes automáticamente.]'};
    for(const [name,value] of Object.entries(templates))button('Plantilla: '+name,()=>{if(body.value.trim()){status.textContent='La plantilla no reemplazará tu texto. Borra el contenido si quieres empezar de nuevo.';return;}title.value=name;body.value=value;changed();},editor);
   }
   const photoList=document.createElement('div');editor.appendChild(photoList);
   const picker=document.createElement('input');picker.type='file';picker.accept='image/png,image/jpeg';picker.multiple=true;picker.setAttribute('aria-label','Añadir fotos al PDF');editor.appendChild(picker);
-  const renderPhotos=()=>{photoList.textContent='';images.forEach((img,i)=>{const row=document.createElement('div');const caption=document.createElement('input');caption.value=img.caption;caption.maxLength=100;caption.setAttribute('aria-label','Descripción de la foto '+(i+1));caption.oninput=()=>{img.caption=caption.value;changed();};row.appendChild(caption);button('Quitar foto '+(i+1),()=>{images.splice(i,1);renderPhotos();changed();},row);photoList.appendChild(row);});};
-  picker.onchange=async()=>{if(!active())return;picker.disabled=true;loading=true;changed();status.textContent='Cargando fotos…';try{const files=Array.from(picker.files||[]);if(images.length+files.length>12)throw Error('Máximo 12 fotos por documento.');const added=[];for(const f of files){if(!['image/png','image/jpeg'].includes(f.type)||f.size>8*1024*1024)throw Error('Usa fotos PNG o JPEG de hasta 8 MB cada una.');let timer;const bytes=await Promise.race([f.arrayBuffer(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('La foto tardó demasiado. Vuelve a seleccionarla desde una carpeta local.')),15000);})]).finally(()=>clearTimeout(timer));if(!active())return;const u=new Uint8Array(bytes);let binary='';for(let i=0;i<u.length;i+=8192)binary+=String.fromCharCode(...u.subarray(i,i+8192));const data='data:'+f.type+';base64,'+btoa(binary);window.jspdf.jsPDF.API.getImageProperties(data);added.push({data,caption:f.name.slice(0,100)});}images.push(...added);renderPhotos();changed();}catch(e){if(active())status.textContent=e.message;}finally{loading=false;picker.disabled=false;picker.value='';}};
-  const generate=()=>{if(!active())return;if(loading)throw Error('Espera a que terminen de cargar las fotos.');const next=lumiBuildPdf({text:body.value,title:title.value,images},window.jspdf&&window.jspdf.jsPDF),nextBlob=next.pdf.output('blob');const nextUrl=URL.createObjectURL(nextBlob);if(url){URL.revokeObjectURL(url);AS.pdfUrls=(AS.pdfUrls||[]).filter(u=>u!==url);}built=next;blob=nextBlob;url=nextUrl;AS.pdfUrls=AS.pdfUrls||[];AS.pdfUrls.push(url);preview.src=url;preview.hidden=false;dirty=false;AS.pdfSource={text:body.value,owner,at:Date.now()};label.textContent=built.name+' · '+built.pages+' pág.';status.textContent='PDF actualizado. Revisa la vista previa antes de compartir.';return built;};
+  const renderPhotos=()=>{photoList.textContent='';images.forEach((img,i)=>{const row=document.createElement('div');const caption=document.createElement('input');caption.value=img.caption;caption.maxLength=100;caption.setAttribute('aria-label','Descripción de la foto '+(i+1));caption.oninput=()=>{img.caption=caption.value;changed();};row.appendChild(caption);button('Quitar foto '+(i+1),()=>{if(loading||ocrBusy)throw Error('Espera a que termine la lectura.');images.splice(i,1);renderPhotos();changed();},row);if(i>0)button('Subir foto '+(i+1),()=>{if(loading||ocrBusy)throw Error('Espera a que termine la lectura.');[images[i-1],images[i]]=[images[i],images[i-1]];renderPhotos();changed();},row);const thumb=document.createElement('img');thumb.src=img.data;thumb.alt='Foto '+(i+1);thumb.style.cssText='display:block;max-width:100%;max-height:180px;object-fit:contain;margin:8px 0';row.appendChild(thumb);photoList.appendChild(row);});};
+  const addFiles=async(files)=>{if(!active()||loading||ocrBusy)return;picker.disabled=true;loading=true;changed();status.textContent='Cargando fotos…';try{if(images.length+files.length>12)throw Error('Máximo 12 fotos por documento.');if(images.reduce((sum,i)=>sum+i.data.length,0)+files.reduce((sum,f)=>sum+f.size*1.34,0)>32*1024*1024)throw Error('Las fotos superan 24 MB. Usa menos fotos o imágenes más pequeñas.');const added=[];for(const f of files){if(!['image/png','image/jpeg'].includes(f.type)||f.size>8*1024*1024)throw Error('Usa fotos PNG o JPEG de hasta 8 MB cada una.');let timer;const bytes=await Promise.race([f.arrayBuffer(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('La foto tardó demasiado. Vuelve a seleccionarla desde una carpeta local.')),15000);})]).finally(()=>clearTimeout(timer));if(!active())return;const u=new Uint8Array(bytes);let binary='';for(let i=0;i<u.length;i+=8192)binary+=String.fromCharCode(...u.subarray(i,i+8192));const data='data:'+f.type+';base64,'+btoa(binary);const prop=window.jspdf.jsPDF.API.getImageProperties(data);if(prop.width*prop.height>16000000)throw Error('La foto es demasiado grande. Reduce su tamaño a menos de 16 megapíxeles.');added.push({data,caption:f.name.slice(0,100)||'Foto'});}images.push(...added);renderPhotos();changed();}catch(e){if(active())status.textContent=e.message;}finally{loading=false;picker.disabled=false;picker.value='';}};
+  picker.onchange=()=>addFiles(Array.from(picker.files||[]));
+  card.tabIndex=0;card.onpaste=event=>{const files=Array.from(event.clipboardData?.files||[]);if(files.length){event.preventDefault();void addFiles(files);}};
+  const reviewed=document.createElement('label');const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Revisé el texto reconocido');reviewed.appendChild(check);const reviewText=document.createElement('span');reviewText.textContent=' Revisé nombres, números y texto reconocido';reviewed.appendChild(reviewText);reviewed.hidden=true;editor.appendChild(reviewed);
+  check.onchange=()=>{ocrReview=!check.checked;changed();};
+  const readPhotos=async()=>{if(loading||ocrBusy)throw Error('Espera a que terminen de cargar las fotos o la lectura.');ocrBusy=true;changed();const old=body.value;
+   try{const rows=await lumiPdfRecognize(images,{active,progress:t=>{if(active())status.textContent=t;},setCancel:fn=>{session.cancel=fn;}});if(!active())return;
+    const extracted=rows.map(r=>'## Foto '+r.index+'\n'+(r.text||'[No se pudo leer texto en esta foto]')).join('\n\n');
+    // Never overwrite dictated text or human edits made while OCR was running.
+    if(body.value!==old)throw Error('El texto cambió durante la lectura. No lo reemplacé; vuelve a leer las fotos cuando termines de editar.');
+    body.value=(old.trim()?old.trim()+'\n\n':'')+extracted;mode='text';ocrReview=true;check.checked=false;reviewed.hidden=false;changed();
+    status.textContent='Texto extraído. Revisa nombres y números antes de generar. '+(rows.some(r=>r.confidence<80)?'Hay partes poco legibles; compara con las fotos. ':'')+'Se reconstruye el texto, no el diseño exacto de la imagen.';
+   }finally{ocrBusy=false;}
+  };
+  button('Leer texto de las fotos',readPhotos,editor);
+  button('PDF solo con fotos',()=>{if(ocrBusy)throw Error('Primero cancela o termina la lectura.');mode='photosOnly';changed();status.textContent='El PDF conservará únicamente las fotos. El texto sigue aquí por si quieres editarlo.';},editor);
+  button('Cancelar lectura',()=>{session.cancel?.();},editor);
+  const generate=()=>{if(!active())return;if(loading||ocrBusy)throw Error('Espera a que terminen de cargar las fotos o la lectura.');if(ocrReview&&mode!=='photosOnly')throw Error('Revisa el texto reconocido y marca «Revisé el texto reconocido» antes de generar.');const next=lumiBuildPdf({text:mode==='photosOnly'?'':body.value,title:title.value,images:mode!=='text'?images:[]},window.jspdf&&window.jspdf.jsPDF),nextBlob=next.pdf.output('blob');const nextUrl=URL.createObjectURL(nextBlob);if(url){URL.revokeObjectURL(url);AS.pdfUrls=(AS.pdfUrls||[]).filter(u=>u!==url);}built=next;blob=nextBlob;url=nextUrl;AS.pdfUrls=AS.pdfUrls||[];AS.pdfUrls.push(url);preview.src=url;preview.hidden=false;dirty=false;AS.pdfSource={text:body.value,owner,at:Date.now()};label.textContent=built.name+' · '+built.pages+' pág.';status.textContent='PDF actualizado. Revisa la vista previa antes de compartir.';return built;};
   const ready=()=>{if(!built||dirty)throw Error('Primero pulsa Generar PDF para incluir los cambios más recientes.');};
   button('Generar PDF',generate);
   button('Ver PDF',()=>{ready();preview.hidden=!preview.hidden;});
   button('Descargar PDF',async()=>{ready();if(isNative()){await saveAndShareNative(blob,built.name,'');return;}const a=document.createElement('a');a.href=url;a.download=built.name;a.click();});
   button('Compartir PDF',async()=>{ready();if(isNative()){await saveAndShareNative(blob,built.name,'');return;}const f=new File([blob],built.name,{type:'application/pdf'});if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:built.name});}else{status.textContent='Descarga el archivo y adjúntalo en la aplicación que prefieras.';}});
   card.appendChild(preview);const log=document.getElementById('asConversacion');if(log){log.appendChild(card);asChatFollow(log,true);}
+  session.addFiles=addFiles;session.active=active;
+  session.apply=async change=>{
+   if(!active())throw Error('Abre un documento en esta sesión.');session.at=Date.now();
+   if(change.kind==='cancel'){session.cancel?.();AS.pdfEditor=null;return 'Dejé de editar el PDF. No envié nada.';}
+   if(change.kind==='sendBlocked')return 'El PDF está aquí para revisarlo. Usa Compartir PDF para elegir a quién enviarlo; esta orden no envió nada.';
+   if(change.kind==='ocr'){await readPhotos();return status.textContent;}
+   if(change.kind==='photos'){mode='photosOnly';changed();return 'Conservaré las fotos dentro del PDF.';}
+   if(change.kind==='generate'){const r=generate();return 'Listo, el PDF tiene '+r.pages+' página'+(r.pages===1?'':'s')+'. Lo puedes revisar y descargar aquí.';}
+   if(change.kind==='title')title.value=lumiPdfText(change.text).replace(/\n/g,' ').slice(0,100);
+   else body.value=lumiPdfEdit(body.value,change);
+   changed();if(!ocrReview&&(body.value.trim()||images.length)){generate();return 'Ya actualicé el PDF. Puedes revisar el cambio aquí.';}
+   return 'Actualicé el documento. Revisa el texto reconocido antes de generar el PDF.';
+  };
   const result=compose?null:generate();
-  const reply=compose?'Aquí tienes el editor del PDF. Puedes escribir el contenido, elegir una plantilla y añadir fotos; después pulsa Generar PDF para revisarlo.':'Listo, creé el PDF de '+result.pages+' página'+(result.pages===1?'':'s')+'. Puedes corregir el título y el contenido, añadir fotos y volver a generarlo aquí.';
+  const reply=compose?(order.kind==='photos'?'Añade las fotos aquí. Las conservaré dentro del PDF; después dime «genéralo».':order.kind==='ocr'?'Añade las fotos y dime «saca el texto». Te mostraré lo que pude leer para que lo revises.':'Dime qué debe decir el documento. Puedes hablarme por partes y pedirme cambios; lo iré armando aquí.'):'Listo, creé el PDF de '+result.pages+' página'+(result.pages===1?'':'s')+'. Puedes corregir el título y el contenido, añadir fotos y volver a generarlo aquí.';
   asMostrarRespuesta(reply);asHablar(reply,asSeguirOyendo);
  }catch(e){if(active()){const message=String(e.message||e);asMostrarRespuesta(message);asHablar(message,asSeguirOyendo);}}
  finally{AS.pdfBuilding=false;}
 }
+
+async function asPdfFollowup(text){
+ const d=AS.pdfEditor,owner=lumiPdfOwner();
+ if(!d||d.owner!==owner||!d.focused||Date.now()-d.at>30*60*1000||!d.apply)return false;
+ const change=lumiPdfFollow(text);if(!change){d.focused=false;return false;}
+ asPararOido();asCallar();asTranscribir(text);AS.pdfBuilding=true;AS.enviando=true;
+ try{const answer=await d.apply(change);if(AS.abierto&&owner===lumiPdfOwner()){asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);}}
+ catch(e){if(AS.abierto&&owner===lumiPdfOwner()){asMostrarRespuesta(e.message);asHablar(e.message,asSeguirOyendo);}}
+ finally{AS.pdfBuilding=false;AS.enviando=false;}return true;
+}
+
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('paste',event=>{if(event.defaultPrevented)return;const d=AS.pdfEditor;if(!d?.active?.()||!d.focused||!event.target.closest?.('#asPanel'))return;const files=Array.from(event.clipboardData?.files||[]);if(files.length){event.preventDefault();void d.addFiles(files);}});
+
+// END LUMI PDF STUDIO
 
 function lumiSimpleGreeting(text){
  const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[¿¡]/g,'');
@@ -72162,6 +72272,11 @@ function lumiIncompleteSpeechReply(text){
       texto=resolved.text;
     }
 
+    if(!dictando&&!AS.conf&&!AS.pregunta){
+      const pdf=lumiPdfOrder(texto);
+      if(pdf){if(typeof asLaborDocument==='function'&&(await asLaborDocument(texto))){if(AS.pdfEditor)AS.pdfEditor.focused=false;return;}await asCrearPdf(pdf,texto);return;}
+      if(await asPdfFollowup(texto))return;
+    }
     if(!dictando&&!AS.conf&&!AS.pregunta){const verify=lumiReplyVerificationOrder(texto);if(verify){asTranscribir(texto);await asEscritorioMac(verify);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){
       const explicit=/^(?:lee|leeme|léeme|revisa|read) (?:el chat |el grupo |the chat )?(?:de |con |with )?(.+?) (?:en|in|on) (whatsapp|mensajes normales|mensajes|messages)(?: y dime qu[eé] (?:contestaron|respondieron|dijeron)| and tell me what they said)?[.!?]*$/i.exec(texto);
@@ -72194,7 +72309,6 @@ function lumiIncompleteSpeechReply(text){
     }
     if(!dictando&&!AS.conf&&!AS.pregunta){const owner=SES.user_id+'|'+SES.company_id;const context=lumiCurrentMessageContext(owner);let compose=lumiComposeParse(texto,LUMI_MESSAGE_DRAFT?.owner===owner?LUMI_MESSAGE_DRAFT:null,context);if(compose?.query){if(!compose.app){await lumiLoadRoutes(owner);if(owner!==SES.user_id+'|'+SES.company_id)return;}compose=lumiResolveCompose(compose,lumiRouteRows(owner),owner);}if(compose){await asComposeMessage(compose,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const quote=lumiQuoteOrder(texto);if(quote){await asCommercialQuote(quote,texto);return;}}
-    if(!dictando&&!AS.conf&&!AS.pregunta){const pdf=lumiPdfOrder(texto);if(pdf){await asCrearPdf(pdf,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiDeviceAnswer(texto,asDeviceKind())||lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const follow=lumiReviewFollowup(texto,LUMI_REVIEW_DETAIL,SES.user_id+'|'+SES.company_id);if(follow){asTranscribir(texto);if(follow.action==='chat'){await asEscritorioMac({app:follow.app,action:'read_chat',query:follow.query});return;}asPararOido();asCallar();const answer=follow.action==='details'?LUMI_REVIEW_DETAIL.text:follow.text;asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const review=lumiReviewOrder(texto);if(review){await asRevisionCompleta(review,texto);return;}}
