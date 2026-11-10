@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R391';
+  const APP_BUILD = '2026-11-10-R392';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71582,9 +71582,13 @@ function spokenAmounts(text){
 function amount(text){
  const t=spokenAmounts(norm(text)).replace(/\b\d{4}-\d{2}-\d{2}\b/g,'').replace(/(?:cheque|check)\s*(?:numero|number|no\.?|#)\s*\d+/g,'');
  if(/(?:-\s*\$?\s*\d|menos \d|negative \d)/.test(t))return NaN;
- const re=/(?:\$\s*|\b(?:de|por|son|fueron|amount|for|paid|pague|di|gave|monto)\s+)(\d[\d,]*(?:\.\d{1,2})?)(?![\d.])/g;
- const values=[...t.matchAll(re)].filter(m=>!/^\s*(?:horas|hours|dias|days|minutos|minutes|personas|people|am|pm|de noviembre|november)\b/.test(t.slice(m.index+m[0].length))).map(m=>Number(m[1].replace(/,/g,'')));
- if(!values.length){const rest=t.replace(/\b\d{4}-\d{2}-\d{2}\b/g,'');const nums=[...rest.matchAll(/\b(\d[\d,]*(?:\.\d{1,2})?)\b/g)];if(nums.length===1&&!/^\s*(?:horas|hours|dias|days|minutos|minutes|am|pm)\b/.test(rest.slice(nums[0].index+nums[0][0].length)))values.push(Number(nums[0][1].replace(/,/g,'')));}
+ // Consume the entire money token before validation: regex backtracking must
+ // never turn 1,081.50. into 1, or an invalid decimal into a smaller payment.
+ const parseToken=x=>{const v=x.replace(/[.,]$/,'');return /^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/.test(v)?Number(v.replace(/,/g,'')):NaN;};
+ const re=/(?:\$\s*|\b(?:de|por|son|fueron|amount|for|paid|pague|di|gave|monto)\s+)(\d[\d,.]*)/g;
+ const units=/^\s*(?:horas|hours|dias|days|minutos|minutes|personas|people|am|pm|de noviembre|november)\b/;
+ const values=[...t.matchAll(re)].filter(m=>!units.test(t.slice(m.index+m[0].length))).map(m=>parseToken(m[1]));
+ if(!values.length){const nums=[...t.matchAll(/\b(\d[\d,.]*)/g)];if(nums.length===1&&!units.test(t.slice(nums[0].index+nums[0][0].length)))values.push(parseToken(nums[0][1]));}
  const unique=[...new Set(values)];return unique.length===1?unique[0]:unique.length>1?NaN:null;
 }
 function reference(text){const m=norm(text).match(/\b(?:cheque|check)\s*(?:numero|number|no\.?|#)\s*(\d{1,12})\b/);return m?m[1]:'';}
@@ -71820,9 +71824,18 @@ async function lumiPaySnapshot(person,order,owner=lumiPayOwner()){
  let balance,warning='';
  if(p.kind==='crew'){balance=await lumiBasicBalance({id:p.id},owner);warning=await lumiPayHourWarnings(p,owner);}
  else{
-  const result=await pagosConTemporal(p.id,async()=>{const b=casualBalanceOf(p.id);return {ok:true,...b};});
-  if(!result?.ok||result.unpriced||result.sinPrecio)throw Error('Faltan horas o tarifas verificadas. Abre Pagos para resolverlo.');
-  balance=result.balance;
+  // Scoped, paginated reads with deadlines. Do not load/change the Payments UI
+  // or let a failed hours request masquerade as an empty account.
+  const scope=q+'&casual_worker_id=eq.'+encodeURIComponent(p.id);
+  const [workers,hours,rates]=await Promise.all([
+   lumiBasicGet('/rest/v1/casual_workers?select=id,rate'+q+'&id=eq.'+encodeURIComponent(p.id),owner),
+   lumiBasicAll('/rest/v1/casual_hours?select=id,casual_worker_id,reported_hours,paid_at,paid_amount,work_kind'+scope,owner),
+   lumiBasicGet('/rest/v1/casual_kind_rates?select=rate&casual_worker_id=eq.'+encodeURIComponent(p.id)+'&work_kind=eq.mudanza',owner)]);
+  if(workers.length!==1||workers[0].id!==p.id||rates.length>1)throw Error('No pude verificar la tarifa de esa persona.');
+  const rate=workers[0].rate==null?null:Number(workers[0].rate),mg=rates[0]?.rate==null?null:Number(rates[0].rate);
+  if([rate,mg].some(x=>x!==null&&(!Number.isFinite(x)||x<0))||hours.some(x=>x.casual_worker_id!==p.id||x.reported_hours==null||!Number.isFinite(Number(x.reported_hours))||Number(x.reported_hours)<0||(x.paid_at&&(x.paid_amount==null||!Number.isFinite(Number(x.paid_amount)))))||ledger.some(x=>x.amount==null||!Number.isFinite(Number(x.amount))))throw Error('Faltan horas o importes verificables.');
+  const earned=payForCasual(hours,rate,mg);if(earned.sinPrecio)throw Error('Faltan horas o tarifas verificadas. Abre Pagos para resolverlo.');
+  balance=Math.round((earned.paid+earned.owed-ledger.reduce((sum,x)=>sum+Number(x.amount),0))*100)/100;
  }
  const hourWarning=warning.trim();
  const selection=lumiPayCore().request(messages.map(m=>({id:m.id,key:p.key,kind:m.peticion,amount:m.monto==null?null:Number(m.monto),state:m.estado||'pendiente',deleted:!!m.borrado_at})),p.key,order.kind||'pago');
@@ -71951,6 +71964,7 @@ async function asPaymentFollowup(texto){
  if(/\b(?:peticiones|solicitudes|quien|quienes|todos|todas|everyone|all workers|how many|requests)\b/i.test(P.norm(texto)))return false;
  if(order.action==='info'&&!order.contextual&&!pending&&!/\b(?:cheque|check|zelle|efectivo|cash)\b/.test(P.norm(texto))&&!/(?:\ba\b|\bto\b|\bde\b)\s+[\p{L}]/u.test(P.norm(texto)))return false;
  asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;
+ if(typeof asEstado==='function')asEstado('pensando','Revisando los datos del pago…');
  try{
   lumiPayGuard(owner);
   if(order.action==='clarify'){lumiPaySay('¿Me estás confirmando un pago que tú hiciste, o contando lo que dijo otra persona?');return true;}
