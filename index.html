@@ -19098,7 +19098,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R368';
+  const APP_BUILD = '2026-11-10-R369';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69795,7 +69795,10 @@ function resumeAdvice(request,remembered,active,owner,now=Date.now()){
  return rows.length===1?{route:rows[0]}:{choices:rows};
 }
 function intent(text){
- const t=normal(text);if(!t||t.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|he said|she said)/.test(t))return null;
+ const t=normal(text);if(!t||t.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|ella dijo|el dijo|he said|she said)/.test(t))return null;
+ // Reading followed by planning replies is still read-only, never bulk-send authority.
+ const plan=t.match(/^(.*?)\s+(?:y|and)\s+(?:vamos a responder(?:los|les)?|los respondemos|vemos que responder|sugiere que responder|dime que (?:les )?responder|(?:let['’]s|lets) reply|suggest (?:replies|responses)|tell me what to reply)$/);
+ if(plan){const reading=intent(plan[1]);if(reading?.action==='read')return reading;}
  // Naming the Messages app in an advice request does not request the inbox.
  if(adviceRequest(text))return null;
  // Message composition is not an inbox query, even when its body contains 'que' or 'what'.
@@ -69848,6 +69851,7 @@ function follow(text,s,owner,now=Date.now()){
  const advice=adviceRequest(text);if(advice&&!advice.query)return {action:'advice',index:s.index};
  let q=t.replace(/^(?:lee|leeme|abre|muestrame|read|open|show)\s+/,'').replace(/^(?:el|la|los|las|the)\s+/,'').replace(/^(?:de|from|one from)\s+/,'');
  if(q==='primero'||q==='first')return {action:'read',index:0};
+ if(q==='ultimo'||q==='last')return {action:'read',index:s.items.length-1};
  const ord={segundo:1,tercero:2,cuarto:3,second:1,third:2,fourth:3};if(q in ord)return {action:'read',index:ord[q]};
  if(/^\d+$/.test(q))return {action:'read',index:Number(q)-1};
  const chosen=sources(q),filtered=chosen.length===1?s.items.filter(r=>r.app===chosen[0]):s.items;
@@ -69881,6 +69885,9 @@ function messageSender(row,app){
 function basicAdvice(rows,en=false){
  const last=rows.at(-1);if(!last)return {draft:'',explanation:en?'I could not read the conversation.':'No pude leer el contenido de la conversación.'};
  if(last.outgoing)return {draft:'',explanation:en?'You already replied; I do not see a later message.':'Ya respondiste; no veo un mensaje posterior.'};
+ const deleted=String(last.text||'').replace(/^[\u200e\u200f]+/,'').replace(/^Message from [^,]+,\s*/i,'');
+ if(/^(?:This message was deleted|You deleted this message|Se elimin[oó] este mensaje|Este mensaje fue eliminado|Eliminaste este mensaje)(?:[.,!]|$)/i.test(deleted))return {draft:'',explanation:en?'The latest message was deleted. I cannot know what it said or whether it needs a reply.':'El último mensaje fue eliminado. No puedo saber qué decía ni si necesita respuesta.'};
+
  const tail=rows.slice(rows.map(r=>r.outgoing).lastIndexOf(true)+1);
  if(tail.some(r=>r.attachment||r.truncated))return {draft:'',explanation:en?'I need to review the attachment or the complete message in this exchange before suggesting a reply.':'Necesito revisar el adjunto o el mensaje completo de esta conversación antes de sugerir una respuesta.'};
  if(last.attachment||last.truncated||!last.text.trim()||/no disponible|can.t be displayed|open whatsapp/i.test(last.text))return {draft:'',explanation:en?'I need to see that attachment or the complete message first.':'Necesito ver ese adjunto o el mensaje completo antes de recomendar una respuesta.'};
@@ -69892,7 +69899,7 @@ function basicAdvice(rows,en=false){
   return {draft:'',explanation:statuses[state]?(en?'This request is recorded as ':'Esta solicitud figura como ')+statuses[state]+'.':en?'I need to verify the current request status before suggesting a reply.':'Necesito comprobar el estado actual de esa solicitud antes de sugerir una respuesta.'};
  }
  if(/reply stop|verification code|codigo de verificacion|automated notification/i.test(last.text))return {draft:'',explanation:en?'This is an automatic notification; it does not need a chat reply.':'Es un aviso automático; no necesita respuesta por chat.'};
- if(/^(?:gracias|muchas gracias|ok|okay|perfecto|entendido|thanks|thank you)[.! ]*$/i.test(last.text.trim())){
+ if(/^(?:gracias|muchas gracias|ok|okay|perfecto|entendido|confirmado|confirmada|de acuerdo|listo|alright|all right|confirmed|thanks|thank you)[.! ]*$/i.test(last.text.trim())){
   const from=rows.map(r=>r.outgoing).lastIndexOf(true)+1;
   const pending=rows.slice(from,-1).some(r=>!r.outgoing&&/[?¿]|necesito|puede|need|please|can you/i.test(r.text));
   if(!pending)return {draft:'',explanation:en?'It is an acknowledgement. There is no new question to answer.':'Es una confirmación; no veo una pregunta nueva que responder.'};
