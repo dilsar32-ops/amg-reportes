@@ -11365,7 +11365,7 @@ html body #asPanel #asSharedNotice{display:none!important;}
 <script src="lumi-communications.js?v=R246"></script>
 <script src="lumi-attachments.js?v=R250"></script>
 <script src="lumi-attachment-cloud.js?v=R251"></script>
-<script src="https://dilsar32-ops.github.io/amg-reportes/lumi-voice-diagnostics.js?v=R365"></script>
+<script src="https://dilsar32-ops.github.io/amg-reportes/lumi-voice-diagnostics.js?v=R366"></script>
 <script src="https://dilsar32-ops.github.io/amg-reportes/lumi-device-session.js?v=R365"></script>
 <script src="lumi-ear-health.js?v=R362"></script>
 <style id="lumi-home-r336">
@@ -19098,7 +19098,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R365';
+  const APP_BUILD = '2026-11-10-R366';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68638,7 +68638,7 @@ function createLumiVoice({call,session,play,fixedAudio=()=>null,preload=()=>{},o
    await playGate;if(!live())return 'cancelled';
    mark('audio_downloaded',{cached:true});mark('playback_requested',{cached:true});
    const handle=play(cached);playing.add(handle);releaseNext();
-   try{await handle.done;mark(live()?'completed':'cancelled');return live()?'played':'cancelled';}finally{playing.delete(handle);}
+   try{await handle.done;mark(live()?'completed':'cancelled');return live()?'played':'cancelled';}catch(error){mark('failed',{code:error.code});throw error;}finally{playing.delete(handle);}
   }
   const d=await device(s);mark('device',{ready:!!d,...deviceStatus});if(!live())return 'cancelled';if(!d)return 'unavailable';
   const useStream=typeof stream==='function'?await stream():stream;mark('capability',{stream:!!useStream});
@@ -68722,7 +68722,7 @@ function createLumiVoice({call,session,play,fixedAudio=()=>null,preload=()=>{},o
     await finished;current=null;prepared=next;
    }
    mark(live()?'completed':'cancelled');return live()?'played':'cancelled';
-  }catch(error){mark('failed');failed=true;if(active(s,e)){for(const handle of playing)handle.stop();playing.clear();}if(startedAudio)error.spoken=true;throw error;}
+  }catch(error){mark('failed',{code:error.code});failed=true;if(active(s,e)){for(const handle of playing)handle.stop();playing.clear();}if(startedAudio)error.spoken=true;throw error;}
  }
  let warmed=null,warming=null;
  async function warm(){
@@ -68821,6 +68821,9 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
   for(const h of old)h.finish();
  }
  return{supportsStreaming:capable,unlock(){capable();return nativeReady||active.size?Promise.resolve():fallback.unlock();},stop,play(data){
+  // Listening resets Swift's queue. A drained batch must never reuse its old sequence.
+  // Keep one sequence while any fragments remain queued, preserving continuous audio.
+  if(!active.size){token=uuid();sequence=0;}
   const mine=token,index=sequence++;let ended=false,deadline,resolve,reject;queuedSeconds+=data.seconds||0;
   const done=new Promise((yes,no)=>{resolve=yes;reject=no;});
   const handle={done,stop(){if(mine===token)stop();},finish(error){if(ended)return;ended=true;clear(deadline);active.delete(handle);queuedSeconds=Math.max(0,queuedSeconds-(data.seconds||0));if(error){error.lumiStage='playback';reject(error);}else resolve();}};

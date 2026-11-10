@@ -1,4 +1,4 @@
-/* Temporary bounded timing diagnostics. Never records text, audio, URLs or errors. */
+/* Temporary bounded timing diagnostics. Never records text, audio, URLs or arbitrary error messages. */
 function createLumiVoiceDiagnostics({session,device,native,version,send,now=Date.now}){
  if(!['mobile','desktop'].includes(device))return ()=>{};
  let currentTrace=null,owner=null,events=[],pending=null,running=false,started=0,queued=false;
@@ -20,6 +20,7 @@ function createLumiVoiceDiagnostics({session,device,native,version,send,now=Date
   if(typeof event.ready==='boolean')item.ready=event.ready;
   if(['ready','missing','owner','voice','worker','timestamp','clock','stale'].includes(event.reason))item.reason=event.reason;
   if(Number.isFinite(event.ageMs))item.ageMs=Math.max(-3600000,Math.min(3600000,Math.round(event.ageMs)));
+  if(event.stage==='failed'&&['INVALID_SEQUENCE','INVALID_AUDIO','PLAYBACK_FAILED','VOLUME_ZERO','CANCELLED','DECODE_FAILED'].includes(event.code))item.code=event.code;
   if(typeof event.stream==='boolean')item.stream=event.stream;
   if(Number.isFinite(event.engineMs))item.engineMs=Math.max(0,Math.min(300000,Math.round(event.engineMs)));
   if(event.stage==='queued'&&queued)return;
