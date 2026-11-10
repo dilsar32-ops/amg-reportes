@@ -19098,7 +19098,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R376';
+  const APP_BUILD = '2026-11-10-R377';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71205,7 +71205,7 @@ if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiPay
 
 // Manager-private follow-up. Existing signed assistant action writes the ledger;
 // this adapter reads it back and updates only the matching request, never sends money.
-let LUMI_PAY_CONTEXT=null,LUMI_PAY_PENDING=null;
+let LUMI_PAY_CONTEXT=null,LUMI_PAY_PENDING=null,LUMI_PAY_SELECTION=null;
 function lumiPayOwner(){return SES?.role==='manager'&&asAreaActual()===null&&!AS.sandbox?SES.user_id+'|'+SES.company_id:null;}
 function lumiPayGuard(owner){if(!owner||owner!==lumiPayOwner())throw Error('Abre Lumi desde Manager con la misma cuenta para revisar pagos.');}
 const lumiPayCore=()=>window.LumiPaymentFollowup;
@@ -71385,6 +71385,16 @@ async function lumiPayEditCard(texto){
 async function asPaymentFollowup(texto){
  const P=lumiPayCore();if(!P)return false;
  const owner=lumiPayOwner();let order=P.intent(texto),continuationContext=null;
+ const route=lumiCurrentMessageContext(owner),offered=route?.choices||[route].filter(Boolean);
+ const onlyNotices=offered.length>0&&offered.every(r=>r.source==='notice'&&!r.reviewedAt);
+ const selection=LUMI_PAY_SELECTION?.owner===owner&&Date.now()-LUMI_PAY_SELECTION.at<180000&&(onlyNotices||LUMI_PAY_SELECTION.routeStamp===lumiPayRouteStamp(route))?LUMI_PAY_SELECTION:null;
+ // Only a read-only request can be completed with a bare name. A payment
+ // registration must repeat its complete details and still needs owner approval.
+ if(!order&&selection&&/^(?:no[, ]+)?[\p{L}'’ -]{2,80}$/u.test(texto.trim())){
+  const chosen=P.resolve(texto,selection.people,null);
+  if(chosen.person)order={...selection.order,action:'info',contextual:true,text:String(texto)};
+ }
+ if(order)LUMI_PAY_SELECTION=null;
  if(!order&&owner&&/^(?:ya |i |lo |se lo |y |ahora |and |now |su |el nombre|el numero|nombre|numero|telefono|correo|saldo|full name|phone number|his |her |no ese|no era|no es|me referia|cuanto le toca|cuanto queda|how much)/.test(P.norm(texto))){continuationContext=await lumiPayContext(owner);order=P.continuation(texto,continuationContext)||P.queryContinuation(texto,continuationContext);}
  if(/^(?:revisa ese pago|verifica ese pago|comprueba ese pago|revisa si quedo registrado|verifica si quedo registrado|check that payment|verify that payment|did that payment go through)[.!? ]*$/.test(P.norm(texto))){asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;try{lumiPayGuard(owner);const text=await lumiPayReconcile(owner);lumiPayGuard(owner);lumiPaySay(text);}catch(e){if(owner===lumiPayOwner()||!owner)lumiPaySay(e.message);}finally{AS.enviando=false;}return true;}
  const pending=LUMI_PAY_PENDING?.owner===owner&&Date.now()-LUMI_PAY_PENDING.at<300000?LUMI_PAY_PENDING:null;
@@ -71400,7 +71410,10 @@ async function asPaymentFollowup(texto){
   if(order.action==='clarify'){lumiPaySay('¿Me estás confirmando un pago que tú hiciste, o contando lo que dijo otra persona?');return true;}
   if(order.action==='not_done'){LUMI_PAY_PENDING=null;lumiPaySay('Entendido: todavía no se pagó. El saldo y la petición siguen igual.');return true;}
   const people=await lumiPayPeople(owner),context=continuationContext||await lumiPayContext(owner);
-  const resolved=P.resolve(texto,people,pending?{key:pending.person.key}:context);if(resolved.error){lumiPaySay(resolved.error);return true;}
+  const resolved=P.resolve(texto,people,pending?{key:pending.person.key}:context);if(resolved.error){
+   if(['info','plan'].includes(order.action))LUMI_PAY_SELECTION={owner,order,people,at:Date.now(),routeStamp:lumiPayRouteStamp(lumiCurrentMessageContext(owner))};
+   lumiPaySay(resolved.error);return true;
+  }
   const person=resolved.person;
   if(!order.method&&context?.key===person.key)order.method=context.method||'';
   const snapshot=await lumiPaySnapshot(person,order,owner);
