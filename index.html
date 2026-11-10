@@ -19097,7 +19097,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R362';
+  const APP_BUILD = '2026-11-10-R363';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69717,7 +69717,15 @@ const APPS={whatsapp:'WhatsApp',messages:'Mensajes',workspace:'Workspace'};
 const HEALTH=['visible_only','local_messages','latest_800_received','accessible_recent'];
 const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¿?¡!.,]/g,' ').replace(/\s+/g,' ').trim();
 const clean=x=>String(x||'').replace(/[\u200e\u200f\u202a-\u202e]/g,'').replace(/,\s*(?:Unread|Read|Pinned|Calling|Callin|Delivered)(?:,|$)[\s\S]*$/i,'').trim();
-const normal=x=>norm(x).replace(/^(?:(?:hey|oye|lumi|bueno|pues|ok|por favor|please)\s+)+/,'').replace(/\s+(?:por favor|please)$/,'');
+function normal(x){
+ let t=norm(x);
+ for(let i=0;i<3;i++)t=t.replace(/^(?:(?:hey|hola|oye|oiga|lumi|bueno|pues|ok|por favor|please)\s+)+/,'')
+  .replace(/^(?:me ayudas a|me ayuda a|ayudame a|hazme el favor de|hagame el favor de|puedes|puede|podrias|podria|me puedes|me podrias|can you|could you|would you|i need you to|i want you to|quiero que|necesito que)\s+/,'');
+ t=t.replace(/^(?:revisar|revises|chequear|chequees|consultar|consultes)\b/,'revisa').replace(/^(?:leer|leas)\b/,'lee')
+  .replace(/^(?:echale un ojo a|dale una mirada a|haz una revision de|take a look at)\b/,'revisa')
+  .replace(/^see if anyone texted (?:me|us)$/,'has anyone texted us');
+ return t.replace(/\s+(?:por favor|please)$/,'');
+}
 function sources(text){const t=normal(text),out=[];if(/\b(?:whatsapp|wasap|guasap)\b/.test(t))out.push('whatsapp');if(/\b(?:workspace|field reports)\b/.test(t))out.push('workspace');if(/mensajes (?:normales|de apple)|apple messages|imessage|\bsms\b|\b(?:en|in|on) (?:mensajes|messages)$/.test(t))out.push('messages');return out.length?out:Object.keys(APPS);}
 function english(text){const t=normal(text);return /\b(?:any|anyone|have|read|messages|texts|who|what|reply|next|yes)\b/.test(t)&&! /\b(?:tenemos|hay|tengo|mensajes|leeme|leemelos|que|quien|dime|si)\b/.test(t);}
 // Explain the existing inbox workflow without loading private records or a model.
@@ -69736,6 +69744,9 @@ function channelReading(text){
 }
 function adviceRequest(text){
  let t=normal(text),query='',last=false;
+ t=t.replace(/^que podemos responderle$/,'que le podemos responder').replace(/^que le responderias$/,'que le respondo').replace(/^como le contestamos$/,'como le respondo')
+  .replace(/^(?:dame una idea para responderle|sugiere una respuesta)$/,'que sugieres')
+  .replace(/^(?:what would you say|suggest a reply|suggest a response)$/,'what do you suggest').replace(/^que le podemos reply$/,'que le podemos responder');
  const deictic=/\s+(?:al (?:ultimo )?mensaje(?: que (?:revisamos|leimos))?|a (?:eso|ese mensaje)|to (?:that|the last message)(?: we (?:read|reviewed))?)$/;
  if(deictic.test(t)){last=/ultimo|last|revisamos|reviewed|leimos/.test(t.match(deictic)[0]);t=t.replace(deictic,'');}
  else{const named=t.match(/\s+(?:a|para|to)\s+(.+)$/);if(named){query=named[1];t=t.slice(0,named.index);}}
@@ -69762,9 +69773,9 @@ function intent(text){
  if(/\b(?:envia\w*|manda\w*|send|borra|delete|paga|pay|dile|escribe\w*|respond\w*|reply to)\b/.test(t))return null;
  const channel=channelReading(text);if(channel?.explicit){const {explicit,...request}=channel;return request;}
  const noun=/\b(?:mensajes?|messages?|texts|inbox|novedades)\b/.test(t);
- const ask=/\b(?:hay|tenemos|tengo|llego|llegaron|entro|entraron|recibimos|recibido|nuevos|nuevas|revisa|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|leeme|leemelos|read|check|look|show|any|have|unread|new)\b/.test(t);
+ const ask=/\b(?:hay|tenemos|tengo|llego|llegaron|entro|entraron|recibimos|recibido|nuevos|nuevas|revisa|consulta|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|leeme|leemelos|read|check|look|show|any|have|unread|new|what)\b/.test(t);
  const personal=/^(?:(?:mira|revisa|checa|dime) si )?(?:(?:me|nos) ha(?:n)? escrito(?: alguien)?|alguien (?:me |nos )?escribio|(?:me|nos) escribio alguien|did anyone (?:message|text) (?:me|us)|has anyone (?:messaged|texted) (?:me|us))$/.test(t);
- const standalone=personal||/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron)|(?:me|nos) han escrito|any (?:news|updates)|anything new|what s new|do we have anything new)$/.test(t)||sources(t).length===1&&/^(?:revisa|checa|mira|check|que hay en|any news in)\b/.test(t);
+ const standalone=personal||(sources(t).length===1&&/^(?:tengo algo nuevo|llego algo) (?:en|a)\b/.test(t))||/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron)|(?:me|nos) han escrito|any (?:news|updates)|anything new|what s new|do we have anything new)$/.test(t)||sources(t).length===1&&/^(?:revisa|checa|mira|check|que hay en|any news in)\b/.test(t);
  if(!standalone&&!(noun&&ask))return null;
  // Named requests stay with the existing single-conversation reader.
  if(/(?:chat|grupo|conversation|group) (?:de |con |with )?[a-z]/.test(t)||/(?:mensajes (?:de|con)|messages from) (?!whatsapp\b|workspace\b|apple\b)[a-z]/.test(t))return null;
@@ -70597,11 +70608,18 @@ function lumiResolveCompose(command,rows,owner){
  return r?{...command,query:r.query,app:r.app,key:r.key||null}:command;
 }
 function lumiComposeInput(input){
- let t=String(input||'').trim();
- t=t.replace(/^(?:(?:lumi|oye|hey|por favor|please)[, ]+)+/i,'');
- t=t.replace(/^(?:(?:s[ií]|ok|okay|bueno)[, ]+)(?=(?:dile|resp[oó]ndele|cont[eé]stale|m[aá]ndale|env[ií]ale|tell|reply|send)\b)/i,'');
- t=t.replace(/^(?:(?:me )?(?:puedes|podr[ií]as)|can you|could you)\s+(?=(?:dile|resp[oó]ndele|cont[eé]stale|m[aá]ndale|env[ií]ale|mandar|enviar|responder|send|reply|tell)\b)/i,'');
- t=t.replace(/^(?:mandar|enviar) un mensaje\b/i,'envía un mensaje').replace(/^responder a\b/i,'respóndele a');
+ let t=String(input||'').trim().replace(/^[¿¡]\s*/,'');
+ for(let i=0;i<4;i++)t=t.replace(/^(?:(?:lumi|hola|oye|oiga|hey|por favor|please)[, ]+)+/i,'')
+  .replace(/^(?:(?:s[ií]|ok|okay|bueno)[, ]+)(?=(?:dile|resp[oó]ndele|cont[eé]stale|m[aá]ndale|m[aá]ndalo|env[ií]ale|env[ií]alo|tell|reply|send)\b)/i,'')
+  .replace(/^(?:(?:me )?(?:puedes|podr[ií]as)|can you|could you|would you|i need you to|i want you to|quiero que|necesito que|hazme el favor de|h[aá]game el favor de)\s+/i,'');
+ t=t.replace(/^(?:le (?:puedes|podr[ií]as) decir|le digas|decirle|avisarle|av[ií]sale)\b/i,'dile')
+  .replace(/^(?:le respondas|responderle)\b/i,'respóndele').replace(/^(?:le contestes|contestarle)\b/i,'contéstale')
+  .replace(/^escribirle\b/i,'escríbele').replace(/^mandarle\b/i,'mándale').replace(/^enviarle\b/i,'envíale')
+  .replace(/^enviarlo\b/i,'envíalo').replace(/^mandarlo\b/i,'mándalo')
+  .replace(/^(?:mandar|enviar) un mensaje\b/i,'envía un mensaje').replace(/^responder a\b/i,'respóndele a')
+  .replace(/^reply a\b/i,'reply to');
+ t=t.replace(/^let (.{1,120}?) know that\s+/i,'tell $1 that ')
+  .replace(/^send (.{1,120}?) a message (saying|that)\s+/i,'send a message to $1 $2 ');
  return t;
 }
 // A clear instruction authorizes one send; preparation and uncertainty never do.
@@ -70628,7 +70646,7 @@ function lumiComposePlan(state,command,owner){
  return result;
 }
 function lumiComposeParseIntent(input,draft,context){
- const raw=lumiComposeInput(input),norm=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+ const raw=lumiComposeInput(input),norm=x=>String(x).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[’]/g,"'").replace(/\s+/g,' ').trim();
  const n=norm(raw),unquote=x=>{x=x.trim();return /^(?:"[\s\S]*"|“[\s\S]*”)$/.test(x)?x.slice(1,-1):x;};
  // A broad inbox request names neither a recipient nor a message to send.
  // Resolve that ambiguity before an incomplete draft can consume it as text.
@@ -70638,9 +70656,9 @@ function lumiComposeParseIntent(input,draft,context){
  const target=(query,app='',text='')=>{const same=context&&(!query||norm(context.query)===norm(query)||norm(context.query).startsWith(norm(query)+' '));return {kind:'partial',query:same?context.query:query,app:app||(same?context.app:''),...(same&&(!app||app===context.app)&&context.key?{key:context.key}:{}),text:unquote(text)};};
  const implicit=text=>context?.query?target('',context.app,text):context?.choices?.length?{kind:'partial',query:'',app:'',text,choices:context.choices}:{kind:'clarify',text:'¿A quién quieres responder?'};
  if(draft&&/^(?:muestrame (?:lo que le enviaras|el mensaje)|que (?:le )?(?:vas a enviar|le enviaras)|me puedes decir que es lo que le vas a enviar(?: para ver)?|show me (?:the message|what you will send))[¿?.!]*$/.test(n))return {kind:'preview'};
- if(draft&&/^(?:cancela(?: el mensaje)?|cancel(?: the message)?|olvidalo|descarta el borrador)[.!]*$/.test(n))return {kind:'cancel'};
- if(draft&&/^(?:no (?:lo )?envies|todavia no|espera|don't send|do not send|not yet)[.!]*$/.test(n))return {kind:'hold'};
- if(/^(?:envialo|mandalo|envialo ahora|send it|send it now|si,? envialo)[.!]*$/.test(n))return {kind:'send'};
+ if(draft&&/^(?:cancela(?: el mensaje| ese mensaje)?|cancel(?: the message)?|olvidalo|descarta el borrador|mejor no)[.!]*$/.test(n))return {kind:'cancel'};
+ if(draft&&/^(?:(?:todavia |aun )?no (?:lo )?(?:envies|mandes)(?: todavia| aun)?|todavia no|espera(?: un momento)?|no[, ]+espera|(?:don't|do not) send(?: it)?(?: yet)?|not yet)[.!]*$/.test(n))return {kind:'hold'};
+ if(/^(?:envialo|mandalo|envialo ahora|send it|send it now|si,? envialo|(?:mandale|enviale|dile|contestale) (?:eso|esa respuesta|lo que sugeriste|lo que propusiste)|respondele (?:con )?(?:eso|esa respuesta|lo que sugeriste)|(?:envia|manda) (?:esa respuesta|el mensaje|ese mensaje)|send (?:that reply|the message|your suggestion|what you suggested)|go ahead and send it)[.!]*$/.test(n))return {kind:'send'};
  let m;
  if(draft&&(m=/^(?:cambia(?: el texto)?|corrige(?: el texto)?|replace(?: the text)?|change(?: the text)?)\s*(?::|por\s+|to\s+)([\s\S]+)$/i.exec(raw)))return {kind:'replace',text:unquote(m[1])};
  if(draft&&(m=/^(?:agrega|añade|anade|append|add)\s*:\s*([\s\S]+)$/i.exec(raw)))return {kind:'replace',text:draft.text+' '+unquote(m[1])};
