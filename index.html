@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-10-R396';
+  const APP_BUILD = '2026-11-12-R397';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70082,11 +70082,18 @@ function intent(text){
  const ask=/\b(?:hay|tenemos|tengo|llego|llegaron|entro|entraron|recibimos|recibido|nuevos|nuevas|revisa|consulta|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|leeme|leemelos|read|check|look|show|any|have|unread|new|what)\b/.test(t);
  const personal=/^(?:(?:mira|revisa|checa|dime) si )?(?:(?:me|nos) ha(?:n)? escrito(?: alguien)?|alguien (?:me |nos )?escribio|(?:me|nos) escribio alguien|did anyone (?:message|text) (?:me|us)|has anyone (?:messaged|texted) (?:me|us))$/.test(t);
  const standalone=personal||(sources(t).length===1&&/^(?:tengo algo nuevo|llego algo) (?:en|a)\b/.test(t))||/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron)|(?:me|nos) han escrito|any (?:news|updates)|anything new|what s new|do we have anything new)$/.test(t)||sources(t).length===1&&/^(?:revisa|checa|mira|check|que hay en|any news in)\b/.test(t);
- if(!standalone&&!(noun&&ask))return null;
+ // COMO LO DICE EL DUENO (12-nov-2026). Aqui se exigia la PALABRA "mensajes", y el habla
+ // corto: el 12-nov dijo "que leyera a todos" y no le leyo ni uno. Tenia 8 esperando en
+ // WhatsApp y Mensajes, y 0 en el buzon de la app; al no pegar la frase, la peticion se iba a
+ // Workspace -- vacio -- y ella contestaba la verdad del buzon equivocado.
+ // "Leemelos" ya trae el QUE adentro (los = los mensajes): no hace falta nombrarlos. Lo que
+ // no es un mensaje (reportes, cuentas, saldo, calendario, labor) ya se descarta mas abajo.
+ const cortoLeer=/^(?:me los lees|(?:lee|leeme|leelos|leemelos|leemelas|leeme los|lee los)(?:\s+(?:a\s+)?(?:todos|todas|todo|los|las|ya|uno por uno|de corrido))*)$/.test(t);
+ if(!standalone&&!cortoLeer&&!(noun&&ask))return null;
  // Named requests stay with the existing single-conversation reader.
  if(/(?:chat|grupo|conversation|group) (?:de |con |with )?[a-z]/.test(t)||/(?:mensajes (?:de|con)|messages from) (?!whatsapp\b|workspace\b|apple\b)[a-z]/.test(t))return null;
  if(/\b(?:cuentas|calendario|labor|reportes|payments|saldo)\b/.test(t))return null;
- return {action:/\b(?:lee|leeme|leemelos|read)\b|que (?:dicen|dijeron)|what.*(?:say|said)/.test(t)?'read':'overview',sources:sources(t),english:english(t)};
+ return {action:cortoLeer||/\b(?:lee|leeme|leemelos|leemelas|leelos|read)\b|que (?:dicen|dijeron)|what.*(?:say|said)/.test(t)?'read':'overview',sources:sources(t),english:english(t)};
 }
 function snapshot(data,owner,selected=Object.keys(APPS),now=Date.now()){
  if(!data||data.owner!==owner||!Number.isFinite(data.at)||now-data.at>120000||data.at>now+60000)throw Error('No pude actualizar los mensajes. No puedo confirmar cuántos hay.');
