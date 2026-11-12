@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R398';
+  const APP_BUILD = '2026-11-12-R399';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70069,6 +70069,32 @@ function resumeAdvice(request,remembered,active,owner,now=Date.now()){
 // en ingles, mexicano, guatemalteco, El Salvador, frases vagas"). Esto NO adivina: traduce
 // las formas de decirlo a las que el codigo de abajo ya entiende. Las frases de verdad estan
 // en tests/lumi_como_habla_test.cjs; si manana dice una que no esta, se agrega ALLA primero.
+// DE LO QUE VENIMOS HABLANDO (12-nov-2026, el dueno: "tambien debes saber de lo que venimos
+// hablando... si vengo hablando de mensajes y cambio a labor logs, tiene que saber que me
+// refiero a los labor logs").
+// "Leelos" no quiere decir lo mismo despues de hablar de labor logs que despues de hablar de
+// mensajes. Esto guarda de que se estaba hablando, y lo OLVIDA solo a los 15 minutos: un tema
+// viejo pegado seria peor que no tener ninguno, porque mandaria la orden al lado equivocado.
+// Quien manda sigue siendo la palabra: si el NOMBRA la cosa, el tema de antes no cuenta.
+const TEMA_VIDA=15*60000;
+let _tema=null;
+function marcarTema(t){if(t==='mensajes'||t==='labor')_tema={tema:t,at:Date.now()};}
+function temaAhora(now=Date.now()){return _tema&&now-_tema.at<TEMA_VIDA?_tema.tema:null;}
+function olvidarTema(){_tema=null;}
+
+// COMO SALE DEL DICTADO (12-nov-2026, el dueno: "a veces le dicto y no se escribe bien...
+// a veces se pone todo junto, a veces esta mal escrito"). El dictado parte y pega palabras y
+// oye mal: "laborlogs", "lavor logs", "leibor", "mensages", "ojas" sin hache. Nada de esto es
+// adivinar: son las formas en que el telefono escribe lo que el ya dijo.
+function dictado(t){
+ return String(t||'')
+  .replace(/\b(?:la[bv]o(?:u)?r?|lei?b[oe]r|label|laber|labo)\s*logg?s?\b/g,'labor logs')
+  .replace(/\blabor\s*logg?s?\b/g,'labor logs')
+  .replace(/\bm[eo]n?s?a?[gj]es?\b/g,'mensajes')
+  .replace(/\bojas?\b/g,'hojas')
+  .replace(/\s{2,}/g,' ').trim();
+}
+
 function modismos(t){
  return t
   // arranques que no dicen nada: "a ver que dicen", "vamos a ver los mensajes"
@@ -70090,7 +70116,13 @@ const PIDE_LEER=/^(?:me los lees|(?:lee|leeme|leelos|leemelos|leemelas|leeme los
 const QUE_DICEN=/^(?:que (?:me |nos )?(?:dicen|dijeron|escribieron|escribio|pusieron|mandaron|mandan|quieren|contestaron)|que dice la gente|que dicen los muchachos|what did (?:they|he|she) say)$/;
 
 function intent(text){
- const t=modismos(normal(text));if(!t||t.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|ella dijo|el dijo|he said|she said)/.test(t))return null;
+ // EL GUARDIA DE LO CITADO VA PRIMERO, SOBRE EL TEXTO SIN TOCAR (12-nov-2026).
+ // Al arreglar el dictado, "mensaje" se volvia "mensajes" y "el mensaje dice..." dejaba de
+ // pegar en este guardia: una instruccion que venia DENTRO de un mensaje de otra persona se
+ // habria ejecutado como si el la hubiera dicho. Lo cazaron sus propias pruebas.
+ const crudo=modismos(normal(text));
+ if(!crudo||crudo.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|ella dijo|el dijo|he said|she said)/.test(crudo))return null;
+ const t=dictado(crudo);
  // Reading followed by planning replies is still read-only, never bulk-send authority.
  const plan=t.match(/^(.*?)\s+(?:y|and)\s+(?:vamos a responder(?:los|les)?|los respondemos|vemos que responder|sugiere que responder|dime que (?:les )?responder|(?:let['’]s|lets) reply|suggest (?:replies|responses)|tell me what to reply)$/);
  if(plan){const reading=intent(plan[1]);if(reading?.action==='read')return reading;}
@@ -70116,8 +70148,15 @@ function intent(text){
  // Workspace -- vacio -- y ella contestaba la verdad del buzon equivocado.
  // "Leemelos" ya trae el QUE adentro (los = los mensajes): no hace falta nombrarlos. Lo que
  // no es un mensaje (reportes, cuentas, saldo, calendario, labor) ya se descarta mas abajo.
- const cortoLeer=PIDE_LEER.test(t);
- if(!standalone&&!cortoLeer&&!queDicen&&!(noun&&ask))return null;
+ // UNA PALABRA SUELTA YA ES UNA ORDEN (12-nov-2026, el dueno: "le puedo decir en frases mas
+ // vagas como mensajes, labor logs"). Decir "mensajes" a secas es pedirlos.
+ const soloLaPalabra=/^(?:los |mis |las |the |my )?mensajes$/.test(t);
+ // Lo VAGO ("leelos", "muestramelos") se decide por el tema de la platica. Si veniamos
+ // hablando de labor logs, esto NO es de mensajes: se deja pasar para que lo agarre el otro.
+ const vago=/^(?:leelos|leemelos|leelas|leemelas|muestramelos|muestramelas|ensenamelos|ensenamelas|dimelos|pasamelos|read them|show them)$/.test(t);
+ if(vago&&temaAhora()==='labor')return null;
+ const cortoLeer=PIDE_LEER.test(t)||soloLaPalabra&&false;
+ if(!standalone&&!cortoLeer&&!queDicen&&!soloLaPalabra&&!(noun&&ask))return null;
  // Named requests stay with the existing single-conversation reader.
  if(/(?:chat|grupo|conversation|group) (?:de |con |with )?[a-z]/.test(t)||/(?:mensajes (?:de|con)|messages from) (?!whatsapp\b|workspace\b|apple\b)[a-z]/.test(t))return null;
  if(/\b(?:cuentas|calendario|labor|reportes|payments|saldo)\b/.test(t))return null;
@@ -70239,7 +70278,7 @@ function reading(item,rows,advice,index,total,en=false){
 // decide afuera: borrar el chat de WhatsApp de otra persona no se puede desde aqui, y decirle
 // que si cuando no, seria peor que no entenderle. Esto solo dice QUE pidio y DE QUIEN.
 function deleteIntent(text){
- const t=modismos(normal(text));
+ const t=modismos(dictado(normal(text)));
  if(!/^(?:borra|borrame|borralo|borrala|borralos|quita|quitame|elimina|eliminame|bota|botame|tira|tirame|delete|remove)\b/.test(t))return null;
  const esChat=/\b(?:chat|chats|conversacion|conversaciones|platica|platicas|charla|charlas)\b/.test(t);
  const esMensaje=/\b(?:mensaje|mensajes|message|messages|texto|textos|text|texts)\b/.test(t)
@@ -70253,7 +70292,7 @@ function deleteIntent(text){
  who=who.replace(/^(?:el|la|los|las|the|mi|mis|my)\s+/,'').replace(/\s+(?:chat|conversacion|platica)$/,'').trim();
  return {action:'delete',what:esChat?'chat':'mensaje',who:who||null,english:english(text)};
 }
-const api={APPS,norm,clean,sources,english,helpAnswer,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading};
+const api={APPS,norm,clean,sources,english,helpAnswer,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,dictado,marcarTema,temaAhora,olvidarTema};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 // LUMI_INBOX_DIALOGUE_CORE_END
@@ -70295,7 +70334,7 @@ async function asInboxDialogue(texto){
  // algo pasara. Asi que lo reconoce, lo dice derecho, y nombra lo que SI puede hacer.
  const borrar=D.deleteIntent(texto);
  if(borrar){
-  asPararOido();asCallar();asTranscribir(texto);
+  asPararOido();asCallar();asTranscribir(texto);try{D.marcarTema('mensajes');}catch(e){}
   const de=borrar.who?(borrar.what==='chat'?' de '+borrar.who:' de '+borrar.who):'';
   lumiInboxPresent(borrar.english
    ? (borrar.what==='chat'?'I understood: delete the chat'+(borrar.who?' with '+borrar.who:'')+'. I cannot delete conversations from here — that is done on the phone. I can open it and read it to you.'
@@ -70315,6 +70354,10 @@ async function asInboxDialogue(texto){
  }
  if(AS_DESKTOP_BUSY)return false;
  if(AS.sandbox){asPararOido();asCallar();asTranscribir(texto);lumiInboxPresent('Modo de prueba: no abriré conversaciones reales.');return true;}
+ // DE LO QUE VENIMOS HABLANDO (12-nov-2026). A partir de aqui ya se sabe que esto era de
+ // mensajes: se anota, para que un "leelos" suelto mas adelante sepa a cual lado va. El otro
+ // lado (asLaborRead) anota 'labor' igual. Se olvida solo a los 15 minutos.
+ try{D.marcarTema('mensajes');}catch(e){}
  const epoch=AS.requestEpoch=(AS.requestEpoch||0)+1,active=()=>AS.abierto&&SES.role==='manager'&&owner===SES.user_id+'|'+SES.company_id&&AS.requestEpoch===epoch;
  asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;AS_DESKTOP_BUSY=true;asEstado('pensando','Revisando mensajes…');
  try{
@@ -72201,15 +72244,29 @@ async function asCommercialQuote(order,texto){
 // R349: read-only labor-log queries. No send, archive, payment or seen writes.
 // LUMI_LABOR_READ_BEGIN
 // LECTURA DE LABOR LOGS. Vivia suelto dentro de index.html, sin pruebas y sin casa.
-// Se saco aqui el 12-nov-2026 para poder probarlo: en el html queda entre los
-// marcadores LUMI_LABOR_READ_BEGIN / LUMI_LABOR_READ_END y se vuelve a meter tal cual.
+// Se saco aqui el 12-nov-2026 para poder probarlo: en el html queda entre sus dos marcadores
+// (los de este lector, BEGIN y END) y se vuelve a meter tal cual.
+// OJO: NO escribir los marcadores completos dentro de este archivo. Al armar la web se busca
+// la primera linea que los contenga, y un comentario que los nombre se vuelve el final del
+// bloque: casi publico un archivo partido por esto.
 const LUMI_LABOR_READ = (() => {
   const norm = x => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[¿¡?!,;:]/g, ' ').replace(/\s+/g, ' ').trim();
   const day = (d,n) => new Date(Date.parse(d+'T12:00:00Z')+n*86400000).toISOString().slice(0,10);
   const validDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d) && Number.isFinite(Date.parse(d+'T12:00:00Z')) && new Date(d+'T12:00:00Z').toISOString().slice(0,10)===d;
   const months = ['enero|january','febrero|february','marzo|march','abril|april','mayo|may','junio|june','julio|july','agosto|august','septiembre|september','octubre|october','noviembre|november','diciembre|december'];
-  function parse(text,today,area=null) {
-    let t=norm(text).replace(/^(?:hey |hola |oye )?lumi\s*/,'').replace(/^(?:oye|hola|hey)\s+/, '').replace(/^(?:por favor|please)\s+/, '').replace(/\.$/,'');
+  // COMO SALE DEL DICTADO (12-nov-2026, el dueno: "a veces se pone todo junto, a veces esta
+  // mal escrito"). El telefono escribe "laborlogs", "lavor logs", "leibor", y "ojas" sin
+  // hache. No es adivinar: es como queda escrito lo que el ya dijo.
+  const dictado = x => String(x||'')
+    .replace(/\b(?:la[bv]o(?:u)?r?|lei?b[oe]r|label|laber|labo)\s*logg?s?\b/g,'labor logs')
+    .replace(/\blabor\s*logg?s?\b/g,'labor logs')
+    .replace(/\bojas?\b/g,'hojas')
+    .replace(/\s{2,}/g,' ').trim();
+  // Lo VAGO: "leelos", "muestramelos". Solo cuenta si VENIAMOS hablando de labor logs; si no,
+  // son los mensajes, que es lo que el dijo que quiere decir por defecto.
+  const VAGO=/^(?:leelos|leemelos|leelas|leemelas|muestramelos|muestramelas|ensenamelos|ensenamelas|dimelos|pasamelos|mandamelos|read them|show them)$/;
+  function parse(text,today,area=null,tema=null) {
+    let t=dictado(norm(text)).replace(/^(?:hey |hola |oye )?lumi\s*/,'').replace(/^(?:oye|hola|hey)\s+/, '').replace(/^(?:por favor|please)\s+/, '').replace(/\.$/,'');
     // Conversational lead-in keeps the same read-only intent.
     t=t.replace(/^a ver\s+(?=(?:nos |hay |queda|tenemos|que |cuales |cuantos |revisa|muestra|los? |las? ))/,'');
     // COMO LES DICE SU GENTE (12-nov-2026, pedido del dueno). Medido antes de tocar nada:
@@ -72232,6 +72289,11 @@ const LUMI_LABOR_READ = (() => {
     // si dice "al grupo" o "a todos", esto no lo toca -- esa es otra orden.
     if(!/\b(?:al grupo|a todos|al chat|to the group|al equipo)\b/.test(t))
       t=t.replace(/^(?:mandame|enviame|pasame|echame|mandemelos|mandemelas)\s+/,'muestrame ');
+    // DE LO QUE VENIMOS HABLANDO. "Leelos" despues de hablar de labor logs son los labor
+    // logs; sin ese tema no son de aqui y se deja pasar para que lo agarren los mensajes.
+    if(VAGO.test(t)){ if(tema!=='labor')return null; t='muestrame los labor logs'; }
+    // UNA PALABRA SUELTA YA ES UNA ORDEN: decir "labor logs" o "hojas" a secas es pedirlos.
+    if(/^(?:los?|las?|mis|the|my)?\s*(?:labor logs?|hojas?)$/.test(t))t='muestrame los labor logs';
     if(/^(?:los?|las?)\s+(?:labor|labour|label|leibor|leiber)\s*logs?\b/.test(t))t='muestra '+t;
     if(!validDate(today)||t.length>1200||!/(?:\b(?:labor|labour|label|leibor|leiber)\s*logs?\b|\breportes? (?:de trabajo|de mudanza|de restauracion|recibidos)\b|\b(?:moving|restoration) reports?\b)/.test(t))return null;
     if(/^(?:no |don't |do not )/.test(t))return null;
@@ -72405,7 +72467,11 @@ async function asLaborRead(texto) {
   if(lumiLaborSendIntent(texto))return false;
   if(SES.role!=='manager')return false;
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  const query=LUMI_LABOR_READ.parse(texto,today,asAreaActual());if(!query)return false;
+  // DE LO QUE VENIMOS HABLANDO (12-nov-2026): se le pasa el tema para que un "leelos"
+  // suelto caiga aqui si veniamos hablando de labor logs, y se anota cuando le toca a el.
+  const _tema=(typeof LumiInboxDialogue!=='undefined'&&LumiInboxDialogue.temaAhora)?LumiInboxDialogue.temaAhora():null;
+  const query=LUMI_LABOR_READ.parse(texto,today,asAreaActual(),_tema);if(!query)return false;
+  try{LumiInboxDialogue.marcarTema('labor');}catch(e){}
   const owner=SES.user_id+'|'+SES.company_id,company=SES.company_id;
   const epoch=AS.requestEpoch=(AS.requestEpoch||0)+1;
   const active=()=>AS.abierto&&SES.role==='manager'&&owner===SES.user_id+'|'+SES.company_id&&epoch===AS.requestEpoch;
