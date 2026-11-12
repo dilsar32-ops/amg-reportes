@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R404';
+  const APP_BUILD = '2026-11-12-R405';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -73475,8 +73475,26 @@ function lumiIncompleteSpeechReply(text){
       b.onclick = function(){ try{ navigator.clipboard.writeText(texto).then(function(){ b.textContent = 'Copiado ✓ ' + texto; }, function(){}); }catch(e){} try{ if(P && P.copiar) P.copiar({ texto }).then(function(){ b.textContent = 'Copiado ✓ ' + texto; }); }catch(e){} }; }
     asBit('copiar: ' + (hecho ? 'listo' : 'con botón'));
   }
+  // CONFIRMAR NUNCA PUEDE SER UN BOTON QUE NO HACE NADA (12-nov-2026).
+  // Visto con la red grabando (R396): se armo la tarjeta "ENVIAR REPORTES AL GRUPO", el dueno
+  // toco Confirmar y NO SALIO NI UNA PETICION. El boton seguia ahi, habilitado, y el no vio
+  // ningun error -- le costo un envio. La causa es esta linea: si AS.conf ya se habia limpiado
+  // (cualquier turno que llega sin `confirmacion` la limpia) o si ella estaba ocupada, se
+  // devolvia EN SILENCIO. Un boton que no hace nada y no dice nada es lo peor de los dos
+  // mundos: el se queda esperando algo que nunca va a pasar.
+  // Esto NO arregla que la tarjeta se quede huerfana; arregla que se lo callen.
   async function asConfirmar(){
-    const c = AS.conf; if(!c || AS.enviando) return;
+    const c = AS.conf;
+    if(!c){
+      asQuitarTarjeta();
+      const aviso = asEn() ? 'That card expired before I could use it. Tell me again what to do.'
+                           : 'Esa tarjeta ya venció antes de que pudiera usarla. Dime otra vez qué hago.';
+      asMostrarRespuesta(aviso); asHablar(aviso, asSeguirOyendo); return;
+    }
+    if(AS.enviando){
+      const aviso = asEn() ? 'One second, I am finishing the last thing.' : 'Dame un segundo, estoy terminando lo anterior.';
+      asMostrarRespuesta(aviso); return;
+    }
     if(c.lumiPayment)return lumiPayConfirm(c);
     try{ asGalTarjeta(null); }catch(e){}
     let escrito;
