@@ -19586,7 +19586,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R409';
+  const APP_BUILD = '2026-11-12-R410';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -60941,6 +60941,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!A) return;                                   // version vieja del app, sin el plugin
     try{
       const e = await A.estado();
+      // (12-nov) Instalada desde la App Store o TestFlight: el aparato nuevo llega por la tienda, nunca por Safari (Apple lo rechaza).
+      window.APP_TIENDA = !!(e && e.tienda);
       // ¿Hay un APARATO (codigo nativo) mas nuevo publicado por enlace? Desde el
       // 11 oct 2026 el nativo ya no entra por cable: se instala desde Safari
       // (ios/distribucion/). nativo.txt del servidor dice cual es el ultimo.
@@ -60961,7 +60963,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // quitaba. Ahora: 1) el aparato nuevo va PRIMERO (la web bajada entra sola al
       // volver a abrir; el aparato no), y 2) tocar la de la web bajada la PONE YA.
       let texto = null, color = null, instalar = false, usarYa = null;
-      if(e && e.esperandoCable){
+      if(window.APP_TIENDA){
+        // de la tienda: sin barra de instalar (la web bajada entra sola al abrir otra vez)
+      }else if(e && e.esperandoCable){
         // Esta version web pide codigo nativo que el telefono no tiene: se
         // instala el aparato nuevo desde Safari (ya no hace falta cable).
         texto = 'Hay una version nueva (' + e.esperandoCable + ') que trae cambios de camara, escaner o traductor. ' +
@@ -81660,7 +81664,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
         : '<div class="radio-txt">' + (otro ? 'Está conectado a <b>' + esc(g.nombre || '') + '</b>. Al continuar, se cambiará a la radio de este grupo.' : 'Esta es la radio de este mismo grupo de mensajes. Sus miembros deben conectarse aquí para escucharse.') + '</div>'
           + '<button type="button" class="radio-unir" data-radio="unir">' + (otro ? 'Conectarme a este grupo' : 'Unirme a la radio') + '</button>'
           + '<div class="radio-pie">Cada participante debe unirse a esta misma radio. Botón de Acción: pulse para hablar y vuelva a pulsar para terminar.</div>')
-      + '<button type="button" class="radio-salir" data-radio="actualizar">Instalar actualización de Workspace en Safari</button>'
+      + (window.APP_TIENDA ? '' : '<button type="button" class="radio-salir" data-radio="actualizar">Instalar actualización de Workspace en Safari</button>')
       + '<div class="radio-msj" aria-live="polite"></div></div>';
     if(RADIO.error && Date.now()-(RADIO.errorAt || 0)<=6000)radioAviso('Último intento: '+RADIO.error);
   }
@@ -81672,7 +81676,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const b = e.target.closest('[data-radio]'); if(!b) return; const P = radioPlugin(); if(!P) return;
     const que = b.dataset.radio, key = RADIO.abierta;
     if(que === 'cerrar'){ radioCerrar(); return; }
-    if(que === 'actualizar'){ abrirEnSafari(NATIVO_PAGINA); radioAviso('En Safari, toque Actualizar Workspace y después Instalar. No borre la app.'); return; }
+    if(que === 'actualizar'){ if(window.APP_TIENDA) return; abrirEnSafari(NATIVO_PAGINA); radioAviso('En Safari, toque Actualizar Workspace y después Instalar. No borre la app.'); return; }
     if(que === 'participantes'){if(RADIO.hablando || RADIO.escucha){radioAviso('Espere a que termine la transmisión para revisar los participantes.');return;}radioCerrar();if(MSG.con!==key)await msgAbrir(key);msgMiembrosAbrir();return;}
     if(que === 'unir'){ RADIO.error=null;
       b.disabled = true; radioAviso('Uniéndote…');
