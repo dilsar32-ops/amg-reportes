@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R400';
+  const APP_BUILD = '2026-11-12-R401';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69669,19 +69669,22 @@ function lumiDesktopReadValid(r,order){
  return false;
 }
 // Only translate the accessibility wrapper; keep the sender's actual words intact.
+// El "Maybe " que ponen iOS y WhatsApp cuando el numero no esta en contactos no se dice en
+// voz alta (12-nov-2026, visto leyendole sus mensajes de verdad). El nombre no se pierde.
+const sinMaybeNombre=n=>String(n||'').replace(/^(?:maybe|posible(?:mente)?)\s+/i,'').trim();
 function lumiDesktopMessageText(raw,app,title=''){
  const s=String(raw||'').trim();if(app!=='whatsapp')return s;
  const reply=/^Replying to ([^\n]+)\.\s*\n([\s\S]*?)\.\s*\nQuoted message\.\s*\n([\s\S]*)$/i.exec(s);
  if(reply){const message=lumiDesktopMessageText(reply[2],app,title);return message+' — En respuesta a '+reply[1]+': «'+reply[3]+'»';}
  const cleaned=s.replace(/(?:,\s*(?:Disappearing message|Edited|Read|Red|Delivered|Sent))+$/gi,'');
  const today=/^Message from ([^,\n]+),\s*([\s\S]*),\s*(\d{1,2}:\d{2}\s*(?:AM|PM)),\s*Received in ([^,\n]+)$/i.exec(cleaned);
- if(today&&(!title||today[4].trim().toLowerCase()===title.trim().toLowerCase()))return today[1]+' dice: '+today[2]+' ('+today[3]+')';
+ if(today&&(!title||today[4].trim().toLowerCase()===title.trim().toLowerCase()))return sinMaybeNombre(today[1])+' dice: '+today[2]+' ('+today[3]+')';
 
  const direct=/,\s*((?:(?:January|February|March|April|May|June|July|August|September|October|November|December)\s*\d{1,2}(?:,?\s*20\d{2})?,\s*at\s*)?\d{1,2}:\d{2}\s*(?:AM|PM)),\s*(Received from|Sent to)\s+([^,\n]+)$/i.exec(cleaned);
  if(direct){
   let body=cleaned.slice(0,direct.index),forwarded=/^Forwarded\.\s*/i.test(body);body=body.replace(/^Forwarded\.\s*/i,'');
   const msg=/^(?:Your )?message,\s*([\s\S]*)$/i.exec(body);
-  if(msg){const who=direct[2].toLowerCase()==='sent to'?'Tú escribiste':direct[3]+' dice';return who+': '+(forwarded?'Mensaje reenviado: ':'')+msg[1]+' ('+direct[1]+')';}
+  if(msg){const who=direct[2].toLowerCase()==='sent to'?'Tú escribiste':sinMaybeNombre(direct[3])+' dice';return who+': '+(forwarded?'Mensaje reenviado: ':'')+msg[1]+' ('+direct[1]+')';}
  }
  const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
  const es=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -69693,7 +69696,7 @@ function lumiDesktopMessageText(raw,app,title=''){
  const from=/^(Message|Photo|Video|Voice message|Audio|Sticker|GIF|Document) from ([^,\n]+)(?:,\s*([\s\S]*))?$/i.exec(body);
  const own=/^Your (message|photo|video|voice message|audio|sticker|GIF|document),\s*([\s\S]*)$/i.exec(body);
  const media={photo:'una foto',video:'un video','voice message':'un mensaje de voz',audio:'un audio',sticker:'un sticker',gif:'un GIF',document:'un documento'};
- if(from){const kind=from[1].toLowerCase();content=kind==='message'?from[2]+' dice: '+(from[3]||'No hay texto disponible.'):from[2]+' envió '+media[kind]+'.'+(from[3]?' Texto adjunto: '+from[3]:'');}
+ if(from){const kind=from[1].toLowerCase();content=kind==='message'?sinMaybeNombre(from[2])+' dice: '+(from[3]||'No hay texto disponible.'):sinMaybeNombre(from[2])+' envió '+media[kind]+'.'+(from[3]?' Texto adjunto: '+from[3]:'');}
  else if(own){const kind=own[1].toLowerCase();content=kind==='message'?'Tú escribiste: '+own[2]:'Enviaste '+media[kind]+'.'+(own[2]?' Texto adjunto: '+own[2]:'');}
  else return s;
  const month=months.findIndex(m=>m.toLowerCase()===tail[1].toLowerCase());
@@ -70270,8 +70273,12 @@ function reading(item,rows,advice,index,total,en=false){
  const last=rows.at(-1),tail=last&&!last.outgoing?rows.slice(Math.max(0,rows.map(m=>m.outgoing).lastIndexOf(true)+1)).slice(-2):[];
  // El "Maybe " de iOS no se dice en voz alta: ni el de quien escribe ni el del chat.
  const body=tail.map(m=>{const de=sinMaybe(m.sender);return (de&&norm(de)!==norm(sinMaybe(item.query))?de+': ':'')+(m.text?.trim()?m.text.trim():en?'[Attachment]':'[Adjunto]');}).join(' / ').slice(0,650);
+ // Red de seguridad: el nombre tambien viene DENTRO del texto ("Maybe Gerson Mendez dice:
+ // ..."), porque asi lo arma la lectura de la pantalla. Se quita solo cuando va pegado a un
+ // nombre corto y un verbo de hablar, para no tocar un "maybe" de una frase de verdad.
+ const limpio=body.replace(/\b(?:maybe|posible(?:mente)?)\s+(?=[^,:]{1,40}\s+(?:dice|dijo|says|said|envio|envió|sent)\b)/gi,'');
  const lines=[(index+1)+'/'+total+' · '+sinMaybe(item.query)+' · '+APPS[item.app]];
- if(body)lines.push((en?'Says: “':'Dice: «')+body+(en?'”':'»'));
+ if(limpio)lines.push((en?'Says: “':'Dice: «')+limpio+(en?'”':'»'));
  if(advice.draft)lines.push((en?'You could reply: “':'Podríamos responder: «')+advice.draft+(en?'”':'»'));
  else lines.push(advice.explanation);
  if(index+1<total)lines.push(en?'Reply here, or shall we go to the next one?':'¿Le respondemos o seguimos con el siguiente?');
