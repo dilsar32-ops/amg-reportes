@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R401';
+  const APP_BUILD = '2026-11-12-R402';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70269,7 +70269,11 @@ function safeAdvice(answer,rows){
  if((financial&&/(?:\$|\d|dolares|dólares|dollars)/i.test(text))||/\b(?:ya (?:pague|pagué|transferi|transferí)|(?:te|le) (?:pago|pagaremos|pagaré) (?:hoy|mañana)|payment (?:is|was) confirmed|i (?:have paid|paid|will pay))\b/i.test(text))return {draft:'',explanation:'Hace falta comprobar y autorizar ese detalle de pago antes de responder.'};
  return {draft:text.slice(0,1200),explanation:String(answer.explanation||'').slice(0,350)};
 }
-function reading(item,rows,advice,index,total,en=false){
+// LEER DE CORRIDO (12-nov-2026, el dueno: "hasta que uno la detenga o le diga respondele a
+// tal persona"). Cuando va leyendo seguido NO se pregunta despues de cada uno: eso volvia 6
+// mensajes en 6 permisos, y el va manejando o con las manos ocupadas. La pregunta vuelve
+// cuando se para, que es donde si tiene sentido.
+function reading(item,rows,advice,index,total,en=false,seguido=false){
  const last=rows.at(-1),tail=last&&!last.outgoing?rows.slice(Math.max(0,rows.map(m=>m.outgoing).lastIndexOf(true)+1)).slice(-2):[];
  // El "Maybe " de iOS no se dice en voz alta: ni el de quien escribe ni el del chat.
  const body=tail.map(m=>{const de=sinMaybe(m.sender);return (de&&norm(de)!==norm(sinMaybe(item.query))?de+': ':'')+(m.text?.trim()?m.text.trim():en?'[Attachment]':'[Adjunto]');}).join(' / ').slice(0,650);
@@ -70281,7 +70285,8 @@ function reading(item,rows,advice,index,total,en=false){
  if(limpio)lines.push((en?'Says: “':'Dice: «')+limpio+(en?'”':'»'));
  if(advice.draft)lines.push((en?'You could reply: “':'Podríamos responder: «')+advice.draft+(en?'”':'»'));
  else lines.push(advice.explanation);
- if(index+1<total)lines.push(en?'Reply here, or shall we go to the next one?':'¿Le respondemos o seguimos con el siguiente?');
+ if(seguido&&index+1<total){}                       // de corrido: no se pregunta nada entre uno y otro
+ else if(index+1<total)lines.push(en?'Reply here, or shall we go to the next one?':'¿Le respondemos o seguimos con el siguiente?');
  else if(advice.draft)lines.push(en?'Shall I send that?':'¿Se lo envío?');
  else lines.push(en?'That is the last conversation on this list.':'Es la última conversación de esta lista.');
  return lines.join('\n');
@@ -70306,15 +70311,28 @@ function deleteIntent(text){
  who=who.replace(/^(?:el|la|los|las|the|mi|mis|my)\s+/,'').replace(/\s+(?:chat|conversacion|platica)$/,'').trim();
  return {action:'delete',what:esChat?'chat':'mensaje',who:who||null,english:english(text)};
 }
-const api={APPS,norm,clean,sources,english,helpAnswer,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,dictado,marcarTema,temaAhora,olvidarTema};
+// CON QUE LA PARA (12-nov-2026). Sus palabras, no las de un manual. "Ya" solo cuenta cuando
+// va leyendo de corrido; suelto quiere decir otra cosa.
+const PARAR=/^(?:para|parale|parese|parate|espera|esperate|esperese|alto|stop|ya|ya esta|ya basta|basta|callate|silencio|wait|hold on|that s enough|enough)$/;
+const RESPONDER_A_ESTE=/^(?:respondele|contestale|respondele a este|contestale a este|responde a este|contesta a este|respondele a ese|a este|a ese|reply to this|reply to that|answer this)$/;
+function paraLaLectura(texto){
+ const t=norm(texto);
+ if(PARAR.test(t))return {accion:'parar'};
+ if(RESPONDER_A_ESTE.test(t))return {accion:'responder'};
+ return null;
+}
+const api={APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,dictado,marcarTema,temaAhora,olvidarTema};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 // LUMI_INBOX_DIALOGUE_CORE_END
 // LUMI_INBOX_DIALOGUE_APP_BEGIN
 let LUMI_INBOX_SESSION=null;
-function lumiInboxPresent(text){
+// `luego` es lo que se hace CUANDO ACABA DE DECIRLO. Hace falta para leer de corrido: si se
+// arranca el siguiente sin esperar, asHablar corta a media frase el anterior y el solo oye el
+// ultimo. Sin `luego` se comporta igual que siempre.
+function lumiInboxPresent(text,luego){
  const last=document.getElementById('asConversacion')?.lastElementChild;if(last?.dataset.role==='assistant')last.dataset.keepPreview='1';
- asMostrarRespuesta(text);asRecordarAccionMac('Revisión de mensajes',text);asHablar(text,asSeguirOyendo);
+ asMostrarRespuesta(text);asRecordarAccionMac('Revisión de mensajes',text);asHablar(text,luego||asSeguirOyendo);
 }
 function lumiInboxClearProposal(all=false){
  if(all||LUMI_MESSAGE_DRAFT?.fromInbox===true){
@@ -70336,6 +70354,30 @@ async function lumiInboxRead(item,active){
  if(result.status==='chat_messages')result.messages=result.messages.map(m=>({...m,sender:LumiInboxDialogue.messageSender(m,item.app),text:LumiInboxDialogue.messageBody(m,lumiDesktopMessageText(m.description,item.app,result.title),item.app)}));
  return result;
 }
+// LEER DE CORRIDO, Y PODER PARARLA (12-nov-2026, el dueno: "hasta que uno la detenga o le
+// diga respondele a tal persona"). Preguntar despues de CADA uno volvia 6 mensajes en 6
+// permisos, y el va manejando o con las manos ocupadas.
+// Lo delicado no es leer seguido: es que la pueda PARAR. Mientras lee, AS_DESKTOP_BUSY esta
+// puesto y asInboxDialogue se sale de una, asi que un "para" dicho a media lectura no llegaba
+// a ningun lado. Por eso esta puerta se revisa ANTES, en la cadena del asistente (una linea),
+// y es lo unico que corre mientras ella va leyendo.
+let LUMI_LECTURA={corriendo:false,parar:null,en:false,chat:''};
+function lumiPararLectura(texto){
+ if(!LUMI_LECTURA.corriendo)return false;
+ // OJO: `D` es un alias de adentro de asInboxDialogue; aqui no existe. La primera version usaba
+ // D y la puerta tronaba con "D is not defined" en vez de pararla -- o sea, el decia "para" y
+ // ella seguia leyendo. Lo caza la prueba de "para a media lectura".
+ const orden=LumiInboxDialogue.paraLaLectura(texto);
+ if(!orden)return false;
+ LUMI_LECTURA.parar=orden.accion;
+ try{asPararOido();asCallar();asTranscribir(texto);}catch(e){}
+ const en=LUMI_LECTURA.en,donde=LUMI_LECTURA.chat;
+ lumiInboxPresent(orden.accion==='parar'
+  ? (en?'All right. I stopped at '+donde+'.':'Listo. Me quedé en '+donde+'.')
+  : (en?'All right. '+donde+'. Tell me what to say.':'Va. '+donde+'. Dime qué le digo.'));
+ return true;
+}
+
 async function asInboxDialogue(texto){
  if(SES.role!=='manager')return false;
  const D=LumiInboxDialogue,owner=SES.user_id+'|'+SES.company_id;
@@ -70398,11 +70440,30 @@ async function asInboxDialogue(texto){
   const index=action.index;
   if(index<0){lumiInboxPresent(s.english?'Which conversation shall I read?':'¿Cuál conversación quieres que lea?');return true;}
   if(index>=s.items.length){s.phase='done';lumiInboxClearProposal();lumiInboxPresent(s.english?'That is the last conversation on this list.':'Ya revisamos la última conversación de esta lista.');return true;}
-  const item=s.items[index];s.index=index;s.phase='reading';lumiInboxClearProposal();
+  // DE CORRIDO. Se leen hasta 6 seguidos y despues se pregunta: una tanda de 19 sin parar es
+  // un monologo de varios minutos. Mientras corre, la unica palabra que la para es la de
+  // lumiPararLectura; si el dice cualquier otra cosa, su turno cambia el epoch y active() se
+  // vuelve falso, que tambien la detiene.
+  // De corrido SOLO cuando el pidio que los lea ("leemelos", "lee los mensajes"). Si dice
+  // "siguiente" o "el que sigue", esta pidiendo UNO: ahi no se sigue solo. Y un "si" a
+  // "¿te los leo?" tambien es pedir que los lea, asi que ese si va de corrido.
+  const deCorrido=(!!request&&request.action==='read')||(!request&&action.action==='read'&&/^(?:si|sí|yes|claro|dale|ok|okay|sure|orale|va)$/i.test(D.norm(texto)));
+  LUMI_LECTURA={corriendo:deCorrido,parar:null,en:!!s.english,chat:''};
+  const TANDA=6;
+  let leidos=0,i=index;
+  for(;;i++){
+  if(i>=s.items.length){s.phase='done';break;}
+  const item=s.items[i];s.index=i;s.phase='reading';lumiInboxClearProposal();
+  LUMI_LECTURA.chat=item.query;
   const result=await lumiInboxRead(item,active);if(!active())return true;
   const rows=D.evidence(result,item);if(result.key)item.key=result.key;
   lumiSetMessageContext([{...item,at:Date.now(),reviewedAt:Date.now()}]);LUMI_REPLY_EVIDENCE={owner,at:Date.now(),result:{...result,messages:rows}};
-  let advice=D.basicAdvice(rows,s.english);
+  // ¿Es este el ultimo de la tanda? Solo en ese se prepara una respuesta. Armar una por cada
+  // mensaje mientras va leyendo de corrido se tarda un siglo (una llamada al modelo por cada
+  // uno) y el no la pidio: lo que quiere es OIRLOS. El que le interese, ahi lo para.
+  const quedanAhora=s.items.length-(i+1);
+  const seguira=deCorrido&&!LUMI_LECTURA.parar&&quedanAhora>0&&(leidos+1)<TANDA;
+  let advice=seguira?{draft:'',explanation:''}:D.basicAdvice(rows,s.english);
   if(!advice){
    asAccionVisible('Preparando una respuesta para '+item.query+'…','working');
    try{const answer=await lumiBrainRequest({thread:item.app+'|'+item.query,request:(s.english?'Suggest one short reply to this conversation.':'Sugiere una respuesta breve y concreta para esta conversación.')+' Trate de usted. Use solo lo que aparece en la conversación. No comparta montos de trabajadores ni prometa pagos, disponibilidad o acciones no verificadas. No envíe nada.',messages:rows});if(!active())return true;advice=D.safeAdvice(answer,rows);}
@@ -70414,7 +70475,28 @@ async function asInboxDialogue(texto){
    LUMI_MESSAGE_DRAFT={owner,app:item.app,query:item.query,key:item.key||null,text:advice.draft,intent:'preview',status:'draft',fromInbox:true};
    LUMI_BRAIN_PROPOSAL={owner,thread:item.app+'|'+item.query,at:Date.now(),draft:advice.draft,request:texto};
   }
-  s.phase='read';s.at=Date.now();lumiInboxPresent(D.reading(item,rows,advice,index,s.items.length,s.english));lumiReplyButtons([{...item,at:Date.now()}]);asAccionVisible('Conversación revisada','done');
+  s.phase='read';s.at=Date.now();
+  leidos++;
+  const quedan=quedanAhora;
+  const sigue=seguira&&!LUMI_LECTURA.parar;
+  const dicho=D.reading(item,rows,advice,i,s.items.length,s.english,sigue);
+  lumiReplyButtons([{...item,at:Date.now()}]);asAccionVisible('Conversación revisada','done');
+  if(!sigue){
+   lumiInboxPresent(dicho+(deCorrido&&!LUMI_LECTURA.parar&&quedan>0
+    ? (s.english?'\nThere are '+quedan+' left. Shall I keep going?':'\nQuedan '+quedan+'. ¿Sigo?')
+    : ''));
+   break;
+  }
+  // Se espera a que acabe de decirlo para arrancar el siguiente; si la voz no avisa (porque
+  // el la interrumpio), el tope de 45 s evita que se quede trabada con la Mac ocupada.
+  await new Promise(res=>{let hecho=false;const fin=()=>{if(!hecho){hecho=true;res();}};
+   try{lumiInboxPresent(dicho,fin);}catch(e){fin();}
+   // Tope por si la voz no avisa (el la interrumpio, o fallo): se calcula por lo largo del
+   // texto, no un numero fijo, para no dejar la Mac ocupada mas de lo necesario.
+   setTimeout(fin,Math.min(45000,2000+dicho.length*55));});
+  if(!active()||LUMI_LECTURA.parar)break;
+  }
+  LUMI_LECTURA.corriendo=false;
  }catch(e){if(active()){lumiInboxPresent(String(e.message||'No pude revisar los mensajes.'));asAccionVisible('Revisión pendiente','error');}}
  finally{if(owner===SES.user_id+'|'+SES.company_id){AS.enviando=false;AS_DESKTOP_BUSY=false;}}
  return true;
@@ -72524,6 +72606,11 @@ function lumiIncompleteSpeechReply(text){
     void asDeviceClaim(); // User input chooses the reply device; warming here delayed short replies.
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    // PARARLA A MEDIA LECTURA (12-nov-2026, el dueno: "hasta que uno la detenga"). Mientras
+    // lee de corrido, AS_DESKTOP_BUSY esta puesto y asInboxDialogue se sale de una, asi que un
+    // "para" dicho a media lectura no llegaba a ningun lado. Por eso esta puerta va ARRIBA de
+    // toda la cadena: solo contesta si ella VA LEYENDO y solo a las palabras de parar.
+    if(!dictando&&typeof lumiPararLectura==='function'&&lumiPararLectura(texto))return;
     if(!dictando&&!AS.conf&&!AS.pregunta){const incomplete=lumiIncompleteSpeechReply(texto);if(incomplete){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(incomplete);asHablar(incomplete,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta&&typeof lumiResolveLaborSpeech==='function'){
       if(AS.laborTermPending){const intended=AS.laborTermPending;AS.laborTermPending=null;
