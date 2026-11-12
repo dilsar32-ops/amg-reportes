@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R403';
+  const APP_BUILD = '2026-11-12-R404';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -68523,6 +68523,9 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
     if(AS.micMuted || !AS.abierto)return;
     const v = asRuTexto(texto, { dudosos: AS.dudosos, ru: AS.ru });
     if(!v.ok){ if(!String(texto || '').trim()){ asReposar(); return; } asRuPedirRepetir(v.motivo); return; }
+    // Un "para" DICHO tambien tiene que pasar mientras ella lee: es como el la va a parar de
+    // verdad, con las manos ocupadas. Sin esto, solo se podria parar escribiendo.
+    if(!AS.micMuted&&typeof lumiPararLectura==='function'&&lumiPararLectura(texto))return;
     if(AS.enviando||AS.earTurn&&AS.voiceSubmittedTurn===AS.earTurn)return;
     AS.voiceSubmittedTurn=AS.earTurn;AS.sinEntender = 0; return asEnviar(texto);
   }
@@ -72627,16 +72630,18 @@ function lumiIncompleteSpeechReply(text){
 
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
-    if(!texto || AS.enviando) return;
+    if(!texto) return;
+    // PARARLA A MEDIA LECTURA, ANTES DE NADA (12-nov-2026). Probado en vivo: la puerta estaba
+    // unas lineas mas abajo y nunca corria, porque `AS.enviando` esta puesto durante toda la
+    // lectura y el portero de arriba devuelve de una. El dueno escribia "para" y ella seguia
+    // leyendo -- ni siquiera aparecia lo que el escribio. Esto es lo UNICO que se atiende
+    // mientras ella trabaja, y solo si ella VA LEYENDO y solo a las palabras de parar.
+    if(!AS.dictado&&typeof lumiPararLectura==='function'&&lumiPararLectura(texto))return;
+    if(AS.enviando) return;
     AS.turnStartedAt=Date.now();
     void asDeviceClaim(); // User input chooses the reply device; warming here delayed short replies.
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
-    // PARARLA A MEDIA LECTURA (12-nov-2026, el dueno: "hasta que uno la detenga"). Mientras
-    // lee de corrido, AS_DESKTOP_BUSY esta puesto y asInboxDialogue se sale de una, asi que un
-    // "para" dicho a media lectura no llegaba a ningun lado. Por eso esta puerta va ARRIBA de
-    // toda la cadena: solo contesta si ella VA LEYENDO y solo a las palabras de parar.
-    if(!dictando&&typeof lumiPararLectura==='function'&&lumiPararLectura(texto))return;
     if(!dictando&&!AS.conf&&!AS.pregunta){const incomplete=lumiIncompleteSpeechReply(texto);if(incomplete){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(incomplete);asHablar(incomplete,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta&&typeof lumiResolveLaborSpeech==='function'){
       if(AS.laborTermPending){const intended=AS.laborTermPending;AS.laborTermPending=null;
