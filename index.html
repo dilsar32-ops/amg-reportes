@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R402';
+  const APP_BUILD = '2026-11-12-R403';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70455,8 +70455,34 @@ async function asInboxDialogue(texto){
   if(i>=s.items.length){s.phase='done';break;}
   const item=s.items[i];s.index=i;s.phase='reading';lumiInboxClearProposal();
   LUMI_LECTURA.chat=item.query;
-  const result=await lumiInboxRead(item,active);if(!active())return true;
-  const rows=D.evidence(result,item);if(result.key)item.key=result.key;
+  // SI UNO FALLA, SE SIGUE CON EL SIGUIENTE (12-nov-2026, visto en vivo). Probandolo, la
+  // segunda conversacion no se pudo comprobar ("No pude comprobar esa conversacion") y eso
+  // TUMBABA la lectura entera: el pidio que le leyeran todos y se quedo con uno. Un chat que
+  // no se deja leer se dice en una linea y se pasa al siguiente; la comprobacion se queda
+  // igual de estricta, que para eso esta.
+  let result,rows;
+  try{
+   result=await lumiInboxRead(item,active);if(!active())return true;
+   rows=D.evidence(result,item);
+  }catch(fallo){
+   if(!active())return true;
+   // Se dice el motivo DE VERDAD, no un "no pude" generico: cuando la comprobacion falla
+   // porque se abrio el chat de otro, ese aviso ("No usare el contenido de otra persona")
+   // es justo lo que el tiene que oir. Solo se le pone delante de que chat se trata.
+   const motivo=String((fallo&&fallo.message)||'').trim();
+   const linea=item.query+': '+(motivo||(s.english?'I could not read it.':'No pude leerla.'));
+   leidos++;
+   const faltan=s.items.length-(i+1);
+   if(deCorrido&&!LUMI_LECTURA.parar&&faltan>0&&leidos<TANDA){
+    await new Promise(res=>{let listo=false;const fin=()=>{if(!listo){listo=true;res();}};
+     try{lumiInboxPresent(linea,fin);}catch(e){fin();}
+     setTimeout(fin,Math.min(15000,1500+linea.length*55));});
+    if(!active()||LUMI_LECTURA.parar)break;
+    continue;
+   }
+   lumiInboxPresent(linea);break;
+  }
+  if(result.key)item.key=result.key;
   lumiSetMessageContext([{...item,at:Date.now(),reviewedAt:Date.now()}]);LUMI_REPLY_EVIDENCE={owner,at:Date.now(),result:{...result,messages:rows}};
   // ¿Es este el ultimo de la tanda? Solo en ese se prepara una respuesta. Armar una por cada
   // mensaje mientras va leyendo de corrido se tarda un siglo (una llamada al modelo por cada
