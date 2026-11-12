@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R399';
+  const APP_BUILD = '2026-11-12-R400';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70221,11 +70221,17 @@ function messageBody(row,rendered,app){
  }
  return String(rendered||'').replace(/^(?:Tú escribiste|[^\n:]{1,120} dice):\s*/,'').replace(/\s*\((?:(?:[A-Za-z]+\s*\d{1,2}(?:,?\s*20\d{2})?),?\s*at\s*)?\d{1,2}:\d{2}\s*[AP]M\)\s*$/,'').trim();
 }
+// El "Maybe " de iOS, que no se dice en voz alta (12-nov-2026). Cuando el numero no esta en
+// contactos, WhatsApp y Mensajes ponen "Maybe Gerson Mendez". Visto en vivo esa manana: Lumi
+// leyo "Maybe Gerson Mendez dice: Restauracion/miercoles..." y suena a que duda de quien es.
+// Ya se quitaba en la cola del puente, pero esta lectura abre el chat y lee de ahi: es OTRO
+// camino, y por ese seguia saliendo.
+const sinMaybe=n=>String(n||'').replace(/^(?:maybe|posible(?:mente)?)\s+/i,'').trim();
 function messageSender(row,app){
  if(row.outgoing)return '';
- if(typeof row.sender==='string'&&row.sender.trim())return row.sender.trim().slice(0,160);
+ if(typeof row.sender==='string'&&row.sender.trim())return sinMaybe(row.sender).slice(0,160);
  const raw=String(row.description||'');
- if(app==='messages')return raw.split(',')[0].trim().slice(0,160);
+ if(app==='messages')return sinMaybe(raw.split(',')[0]).slice(0,160);
  return '';
 }
 function basicAdvice(rows,en=false){
@@ -70262,8 +70268,9 @@ function safeAdvice(answer,rows){
 }
 function reading(item,rows,advice,index,total,en=false){
  const last=rows.at(-1),tail=last&&!last.outgoing?rows.slice(Math.max(0,rows.map(m=>m.outgoing).lastIndexOf(true)+1)).slice(-2):[];
- const body=tail.map(m=>(m.sender&&norm(m.sender)!==norm(item.query)?m.sender+': ':'')+(m.text?.trim()?m.text.trim():en?'[Attachment]':'[Adjunto]')).join(' / ').slice(0,650);
- const lines=[(index+1)+'/'+total+' · '+item.query+' · '+APPS[item.app]];
+ // El "Maybe " de iOS no se dice en voz alta: ni el de quien escribe ni el del chat.
+ const body=tail.map(m=>{const de=sinMaybe(m.sender);return (de&&norm(de)!==norm(sinMaybe(item.query))?de+': ':'')+(m.text?.trim()?m.text.trim():en?'[Attachment]':'[Adjunto]');}).join(' / ').slice(0,650);
+ const lines=[(index+1)+'/'+total+' · '+sinMaybe(item.query)+' · '+APPS[item.app]];
  if(body)lines.push((en?'Says: “':'Dice: «')+body+(en?'”':'»'));
  if(advice.draft)lines.push((en?'You could reply: “':'Podríamos responder: «')+advice.draft+(en?'”':'»'));
  else lines.push(advice.explanation);
