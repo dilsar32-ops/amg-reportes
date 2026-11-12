@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R405';
+  const APP_BUILD = '2026-11-12-R406';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -73475,6 +73475,23 @@ function lumiIncompleteSpeechReply(text){
       b.onclick = function(){ try{ navigator.clipboard.writeText(texto).then(function(){ b.textContent = 'Copiado ✓ ' + texto; }, function(){}); }catch(e){} try{ if(P && P.copiar) P.copiar({ texto }).then(function(){ b.textContent = 'Copiado ✓ ' + texto; }); }catch(e){} }; }
     asBit('copiar: ' + (hecho ? 'listo' : 'con botón'));
   }
+  // LA MAC TIENE QUE ESTAR VIVA PARA MANDAR AL GRUPO (12-nov-2026).
+  // El 11-nov el puente llevaba 15 HORAS caido y Lumi seguia diciendo "¿La mando al grupo?";
+  // el decia que si, la orden caia en una cola muerta y nadie le avisaba. Mandar al grupo lo
+  // hace la Mac, no el telefono, asi que preguntar si el TELEFONO sabe hacer grupos no dice
+  // nada de si se va a mandar. El latido ya existe (lumi_local_model_device) y la web ya lo
+  // mira para otras cosas; aqui se mira antes de quemar la confirmacion.
+  // Si NO se puede comprobar (sin internet, la consulta falla), se deja pasar: no se estorba
+  // por una duda, solo se para cuando se sabe de cierto que esta apagada.
+  async function lumiMacViva(){
+    try{
+      const r = await authFetch('/rest/v1/asistente_ajustes?select=valor&company_id=eq.' + encodeURIComponent(SES.company_id) + '&clave=eq.lumi_local_model_device', { headers: cloudHeaders(), signal: AbortSignal.timeout(8000) });
+      if(!r.ok) return null;
+      const d = (await r.json())[0]?.valor;
+      if(!d) return false;
+      return !!d.available && d.userId === SES.user_id && Date.now() - Date.parse(d.updatedAt) < 180000;
+    }catch(e){ return null; }
+  }
   // CONFIRMAR NUNCA PUEDE SER UN BOTON QUE NO HACE NADA (12-nov-2026).
   // Visto con la red grabando (R396): se armo la tarjeta "ENVIAR REPORTES AL GRUPO", el dueno
   // toco Confirmar y NO SALIO NI UNA PETICION. El boton seguia ahi, habilitado, y el no vio
@@ -73494,6 +73511,11 @@ function lumiIncompleteSpeechReply(text){
     if(AS.enviando){
       const aviso = asEn() ? 'One second, I am finishing the last thing.' : 'Dame un segundo, estoy terminando lo anterior.';
       asMostrarRespuesta(aviso); return;
+    }
+    if(c.tipo === 'grupo_lote_mac' && (await lumiMacViva()) === false){
+      const aviso = asEn() ? 'The Mac that sends to the group is off or offline. Turn it on and tell me again.'
+                           : 'La Mac que manda al grupo está apagada o sin internet, así que no saldría. Préndela y dime otra vez.';
+      asMostrarRespuesta(aviso); asHablar(aviso, asSeguirOyendo); return;
     }
     if(c.lumiPayment)return lumiPayConfirm(c);
     try{ asGalTarjeta(null); }catch(e){}
