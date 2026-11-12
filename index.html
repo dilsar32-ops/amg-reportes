@@ -10315,7 +10315,7 @@ body.rcf-candado{position:fixed; inset:0; overflow:hidden;}
     }
     if(!s || !s.access_token || !s.company_id || !s.user_id) return;   // (7-nov) LA PUERTA ES SOLO LA PRIMERA VEZ, TAMBIÉN PARA EL MANAGER
     var r = localStorage.getItem('empresaRecordada:v1:' + s.user_id);
-    if(r !== 'restauracion' && r !== 'mudanza' && !(r === 'manager' && s.role === 'manager')) return;
+    if(r !== 'restauracion' && r !== 'mudanza' && !(r === 'manager' && (s.rol_real || s.role) === 'manager')) return;
     document.documentElement.classList.add('entra-sola');
     setTimeout(function(){ document.documentElement.classList.remove('entra-sola'); }, 3000);
   }catch(e){}
@@ -17673,7 +17673,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // (fr-29) El manager de una sola empresa: el letrero de la puerta Manager dice cuál, el inicio de Manager abre en la suya, y
   // la otra (y Pagos, que no lleva empresa) no se le enseñan. body.mgr-solo-amg / body.mgr-solo-rd lo esconden por CSS.
   function mgrDePintar(){
-    let de = 'todo'; try{ de = (signedIn() && SES.role === 'manager') ? mgrDe() : 'todo'; }catch(e){}
+    let de = 'todo'; try{ de = (signedIn() && mgrRol() === 'manager') ? mgrDe() : 'todo'; }catch(e){}
     document.body.classList.toggle('mgr-solo-amg', de === 'mudanza');
     document.body.classList.toggle('mgr-solo-rd', de === 'restauracion');
     try{
@@ -17693,7 +17693,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   const MGR_SOLO_TODO = '#mgrGoPagos';
   document.addEventListener('click', ev => {
     try{
-      if(!signedIn() || SES.role !== 'manager' || mgrDe() === 'todo') return;
+      if(!signedIn() || mgrRol() !== 'manager' || mgrDe() === 'todo') return;
       const t = ev.target && ev.target.closest && ev.target.closest(MGR_SOLO_TODO + ',' + (mgrDe() === 'mudanza' ? MGR_SOLO_RD : MGR_SOLO_AMG)); if(!t) return;
       ev.stopImmediatePropagation(); ev.preventDefault();
     }catch(e){}
@@ -17701,7 +17701,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // Y si por cualquier camino (el botón Atrás, un aviso tocado) cae en la carpeta de la otra empresa o en Pagos, regresa a su inicio.
   function mgrDeVigilar(){
     try{
-      if(!signedIn() || SES.role !== 'manager' || mgrDe() === 'todo') return;
+      if(!signedIn() || mgrRol() !== 'manager' || mgrDe() === 'todo') return;
       const p = document.querySelector('main > .tab-panel.active'), t = p ? p.dataset.tab : '';
       // por la puerta de la otra empresa es un trabajador: ninguna pantalla de manager se le queda abierta
       if(SIDE !== 'manager'){ if(!isManager() && /^(manager|mgrrest|mgrplanos|mgrcontenidos|mgrcodes|gastosrecibidos|mgrmore|amgmoving)$/.test(t) && typeof goMenu === 'function') goMenu(); return; }
@@ -19586,7 +19586,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R410';
+  const APP_BUILD = '2026-11-12-R411';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -53008,9 +53008,21 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // por la puerta de la otra: ahí isManager() contesta que no, y toda la app lo trata como cuadrilla. La reja de verdad está en la
   // base (fr-29: my_role() le contesta 'crew' y solo se le abren las filas de su empresa); esto solo evita enseñarle pantallas vacías.
   const mgrDe = () => { const d = SES && SES.manager_de; return (d === 'mudanza' || d === 'restauracion') ? d : 'todo'; };
-  const isManagerDe = k => signedIn() && SES.role === 'manager' && (mgrDe() === 'todo' || mgrDe() === k);
-  const isManagerTotal = () => signedIn() && SES.role === 'manager' && mgrDe() === 'todo';
-  const isManager = () => signedIn() && SES.role === 'manager' && (mgrDe() === 'todo' || SIDE == null || SIDE === 'manager' || SIDE === mgrDe());
+  // (fr-29, Lumi, 12-nov) Para el manager de UNA sola empresa SES.role vale 'crew' -lo mismo que le contesta my_role() en la base-
+  // y su rol de verdad queda en SES.rol_real. Todo lo viejo que pregunta SES.role === 'manager' (Lumi entera: la voz y el modelo
+  // de la Mac, la platica compartida, leer la bandeja, cotizaciones) lo trata asi como cuadrilla, sin tocar ese codigo. Lo de
+  // manager por empresa pregunta SIEMPRE por mgrRol(), nunca por SES.role.
+  const mgrRol = () => (SES && (SES.rol_real || SES.role)) || '';
+  function mgrAjustarRol(){
+    if(!SES) return;
+    const real = SES.rol_real || SES.role;
+    if(real === 'manager' && mgrDe() !== 'todo'){ SES.rol_real = 'manager'; SES.role = 'crew'; }
+    else { SES.role = real; delete SES.rol_real; }
+  }
+  try{ mgrAjustarRol(); }catch(e){}   // la sesion guardada de antes (R409/R410) se acomoda al abrir, sin esperar a la red
+  const isManagerDe = k => signedIn() && mgrRol() === 'manager' && (mgrDe() === 'todo' || mgrDe() === k);
+  const isManagerTotal = () => signedIn() && mgrRol() === 'manager' && mgrDe() === 'todo';
+  const isManager = () => signedIn() && mgrRol() === 'manager' && (mgrDe() === 'todo' || SIDE == null || SIDE === 'manager' || SIDE === mgrDe());
 
   const cloudHeaders = () => ({
     'apikey': CLOUD.key,
@@ -53127,7 +53139,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // de eso (equipo_de_manager / temporales_de_manager). Aquí se desvían sus lecturas de esas dos tablas, para que las pantallas de
   // su empresa (calendario, horas, cierre) sigan armándose igual. Solo lecturas; su propio perfil (id=eq.) va directo como siempre.
   async function mgrDeDesvio(path, opts){
-    if(!signedIn() || SES.role !== 'manager' || mgrDe() === 'todo') return null;
+    if(!signedIn() || mgrRol() !== 'manager' || mgrDe() === 'todo') return null;
     if(opts && opts.method && String(opts.method).toUpperCase() !== 'GET') return null;
     const m = /^\/rest\/v1\/(profiles|casual_workers)\?(.*)$/.exec(String(path)); if(!m) return null;
     if(m[1] === 'profiles' && /(^|&)id=eq\./.test(m[2])) return null;
@@ -53264,7 +53276,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!res.ok) return null;
     const rows = await res.json();
     if(!rows.length) return null;
-    SES.company_id = rows[0].company_id; SES.role = rows[0].role; SES.full_name = rows[0].full_name;
+    SES.company_id = rows[0].company_id; SES.role = rows[0].role; delete SES.rol_real; SES.full_name = rows[0].full_name;
+    mgrAjustarRol();   // (fr-29) con el alcance que ya se sabia; abajo se vuelve a leer
     saveSes();
     // ¿Ya escribio el codigo de AMG alguna vez? Consulta aparte: si la columna
     // no existe todavia (400) se ignora, y la app vuelve a pedir el codigo -
@@ -53277,7 +53290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // como estaba (las dos). Solo se cambia con una respuesta buena: sin señal no se le quita ni se le da nada a nadie.
     try{
       const r3 = await authFetch('/rest/v1/profiles?select=manager_de&id=eq.' + encodeURIComponent(SES.user_id) + '&limit=1', { headers: cloudHeaders() });
-      if(r3.ok){ const rr = await r3.json(); if(rr[0]){ SES.manager_de = rr[0].manager_de || 'todo'; saveSes(); try{ mgrDePintar(); }catch(e){} } }
+      if(r3.ok){ const rr = await r3.json(); if(rr[0]){ SES.manager_de = rr[0].manager_de || 'todo'; mgrAjustarRol(); saveSes(); try{ mgrDePintar(); }catch(e){} } }
     }catch(e){}
     return rows[0];
   }
@@ -58539,7 +58552,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       }catch(e){ /* function not installed yet - let them through */ }
 
       const r = await authPost('/rest/v1/rpc/join_company', { p_code: code, p_name: name || null }, SES.access_token);
-      SES.company_id = r.company_id; SES.role = 'crew'; SES.full_name = name || null; saveSes();
+      SES.company_id = r.company_id; SES.role = 'crew'; delete SES.rol_real; delete SES.manager_de; SES.full_name = name || null; saveSes();
       if(!(await offerPersonalCode())) enterApp();
     }catch(e){
       authErr(String(e.message).includes('codigo_invalido') ? 'Ese código no existe.' : 'No se pudo entrar. Revise su internet.');
@@ -58658,7 +58671,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!name) return authErr('Escriba el nombre.');
     try{
       const r = await authPost('/rest/v1/rpc/create_company', { p_name: name }, SES.access_token);
-      SES.company_id = r.company_id; SES.role = 'manager'; SES.join_code = r.join_code; saveSes();
+      SES.company_id = r.company_id; SES.role = 'manager'; delete SES.rol_real; delete SES.manager_de; SES.join_code = r.join_code; saveSes();
       $('#authCodeShow').textContent = r.join_code;
       showStep('authCode2');
     }catch(e){ authErr('No se pudo crear. Revise su internet.'); }
