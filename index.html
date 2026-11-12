@@ -9357,6 +9357,28 @@ html body #dnoCard .dno-ic-llave, html body #dnoCard .dno-ic-mas{background:rgba
 #dnoCard .dno-otros{max-height:min(46vh, 340px); overflow:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain;}
 #dnoCard .dno-vacio{margin:0; padding:12px 8px; font:400 calc(13*var(--rdp, 1px))/1.3 "Avenir Next", var(--sf); color:#aeb6c4;}
 #dnoCard .dno-aviso{margin:6px 6px 4px; padding:8px 11px; border-radius:10px; border:1px solid rgba(16,110,250,.4); background:rgba(16,110,250,.1); color:#cfe2ff; font:500 calc(13*var(--rdp, 1px))/1.35 "Avenir Next", var(--sf);}
+/* (fr-29) manager por empresa: la empresa debajo del nombre, el lapiz y las cuatro opciones */
+#dnoCard .dno-nom.dno-nom2{flex-direction:column; align-items:flex-start; justify-content:center; gap:3px;}
+#dnoCard .dno-nom.dno-nom2 b{max-width:100%;}
+#dnoCard .dno-nom.dno-nom2 small.dno-alc{font:500 calc(12*var(--rdp, 1px))/1.1 "Avenir Next", var(--sf); color:#7db4ff;}
+#dnoCard .dno-bt.dno-edit{border-color:rgba(125,180,255,.45); background:rgba(16,110,250,.1);}
+#dnoCard .dno-bt.dno-edit svg{stroke:#7db4ff; stroke-width:1.9; stroke-linejoin:round;}
+#dnoCard .dno-fila.dno-elige{display:block; padding:11px 8px 11px;}
+#dnoCard .dno-elige .dno-pide-t{flex:none;}
+#dnoCard .dno-ops{display:grid; gap:8px; margin:10px 0 11px;}
+#dnoCard .dno-op{display:block; width:100%; min-height:54px; box-sizing:border-box; padding:9px 12px; border-radius:11px; border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.04); color:#fff; text-align:left; cursor:pointer; -webkit-tap-highlight-color:transparent;}
+#dnoCard .dno-op b{display:block; font:600 calc(14.5*var(--rdp, 1px))/1.25 "Avenir Next", var(--sf); color:#fff;}
+#dnoCard .dno-op small{display:block; margin-top:2px; font:400 calc(12*var(--rdp, 1px))/1.3 "Avenir Next", var(--sf); color:#aeb6c4;}
+#dnoCard .dno-op.on{border-color:#4a95ff; background:rgba(16,110,250,.16); box-shadow:inset 0 0 0 1px #4a95ff;}
+#dnoCard .dno-elige .dno-pide-bt{margin-left:0; justify-content:flex-end;}
+#dnoCard .dno-elige .dno-si, #dnoCard .dno-elige .dno-no{height:44px;}
+/* (fr-29) el manager de una sola empresa: en su inicio no salen la otra empresa ni Pagos */
+html body.mgr-solo-amg #rdmgHome [data-rdmg-ir="rd"], html body.mgr-solo-rd #rdmgHome [data-rdmg-ir="amg"],
+html body.mgr-solo-amg #rdmgHome [data-rdmg-ir="pagos"], html body.mgr-solo-rd #rdmgHome [data-rdmg-ir="pagos"]{display:none !important;}
+html body.mgr-solo-amg [data-rdms-acc="pagos"], html body.mgr-solo-rd [data-rdms-acc="pagos"],
+html body.mgr-solo-amg #ajPagosConfirmar, html body.mgr-solo-rd #ajPagosConfirmar,
+html body.mgr-solo-amg #ajGrupoLabor, html body.mgr-solo-amg #ajPegarCodigo, html body.mgr-solo-amg #ajNumeroCompras{display:none !important;}
 /* con la casilla de la contrasena abierta: espacio debajo para que la tarjeta pueda subir hasta el titulo y el teclado no la tape */
 html body.dno-tecla .rd-pf{padding-bottom:75vh !important;}
 html body.dno-tecla .rd-pf-salir{visibility:hidden;}   /* mientras escribe la contrasena, Cerrar sesion no se asoma */
@@ -17648,6 +17670,47 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     rdIr(t);                                                                // manual, perfil
   }
 
+  // (fr-29) El manager de una sola empresa: el letrero de la puerta Manager dice cuál, el inicio de Manager abre en la suya, y
+  // la otra (y Pagos, que no lleva empresa) no se le enseñan. body.mgr-solo-amg / body.mgr-solo-rd lo esconden por CSS.
+  function mgrDePintar(){
+    let de = 'todo'; try{ de = (signedIn() && SES.role === 'manager') ? mgrDe() : 'todo'; }catch(e){}
+    document.body.classList.toggle('mgr-solo-amg', de === 'mudanza');
+    document.body.classList.toggle('mgr-solo-rd', de === 'restauracion');
+    try{
+      const en = typeof rdEn === 'function' && rdEn();
+      const tx = de === 'mudanza' ? (en ? 'Manages AMG Moving' : 'Administra AMG Moving')
+               : de === 'restauracion' ? (en ? 'Manages Restoration Doctor' : 'Administra Restoration Doctor') : '';
+      document.querySelectorAll('#authPick [data-door="manager"] .door-sub').forEach(el => {
+        if(tx){ if(el.dataset.mgrDeAntes == null) el.dataset.mgrDeAntes = el.textContent; if(el.textContent !== tx) el.textContent = tx; }
+        else if(el.dataset.mgrDeAntes != null){ el.textContent = el.dataset.mgrDeAntes; delete el.dataset.mgrDeAntes; }
+      });
+    }catch(e){}
+    try{ if(de !== 'todo' && typeof RDMG !== 'undefined'){ const mia = de === 'mudanza' ? 'amg' : 'rd'; if(RDMG.emp !== mia && typeof rdmgEmpresa === 'function') rdmgEmpresa(mia); } }catch(e){}
+  }
+  // Lo que es SOLO de la otra empresa (o de las dos) no se abre: ni tocándolo, ni por un atajo, ni por Lumi.
+  const MGR_SOLO_RD = '#mgrGoRest,#mgrGoLogs,#mgrGoGastos,#mgrGoPlanos,#mgrGoContenidos,#mgrGoRates,#mgrGoCodes,.tab-panel[data-tab="mgrrest"] [data-go-tab="visitas"]';
+  const MGR_SOLO_AMG = '#mgrGoAmg';
+  const MGR_SOLO_TODO = '#mgrGoPagos';
+  document.addEventListener('click', ev => {
+    try{
+      if(!signedIn() || SES.role !== 'manager' || mgrDe() === 'todo') return;
+      const t = ev.target && ev.target.closest && ev.target.closest(MGR_SOLO_TODO + ',' + (mgrDe() === 'mudanza' ? MGR_SOLO_RD : MGR_SOLO_AMG)); if(!t) return;
+      ev.stopImmediatePropagation(); ev.preventDefault();
+    }catch(e){}
+  }, true);
+  // Y si por cualquier camino (el botón Atrás, un aviso tocado) cae en la carpeta de la otra empresa o en Pagos, regresa a su inicio.
+  function mgrDeVigilar(){
+    try{
+      if(!signedIn() || SES.role !== 'manager' || mgrDe() === 'todo') return;
+      const p = document.querySelector('main > .tab-panel.active'), t = p ? p.dataset.tab : '';
+      // por la puerta de la otra empresa es un trabajador: ninguna pantalla de manager se le queda abierta
+      if(SIDE !== 'manager'){ if(!isManager() && /^(manager|mgrrest|mgrplanos|mgrcontenidos|mgrcodes|gastosrecibidos|mgrmore|amgmoving)$/.test(t) && typeof goMenu === 'function') goMenu(); return; }
+      const ajena = mgrDe() === 'mudanza' ? /^(mgrrest|mgrplanos|mgrcontenidos|mgrcodes|gastosrecibidos|mgrmore)$/ : /^(amgmoving)$/;
+      if(ajena.test(t) || t === 'reloj' || (t === 'labor' && mgrDe() === 'mudanza' && typeof laborMode !== 'undefined' && laborMode === 'restauracion' && !laborFormOpen)) goManagerHome();
+    }catch(e){}
+  }
+  try{ document.querySelectorAll('main > .tab-panel').forEach(p => new MutationObserver(mgrDeVigilar).observe(p, { attributes: true, attributeFilter: ['class'] })); }catch(e){}
+
   // ---- PERFIL ----
   function rdPuertas(){
     const out = [];
@@ -19523,7 +19586,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R408';
+  const APP_BUILD = '2026-11-12-R409';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -23642,15 +23705,25 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         + '&company_id=eq.' + SES.company_id + '&order=full_name.asc', { headers: cloudHeaders() });
       if(!res.ok){ box.innerHTML = '<p class="clockhint">No se pudo revisar.</p>'; return; }
       const rows = await res.json();
-      const crew = rows.filter(r => r.role !== 'manager');
+      // (fr-29, el dueño: "yo soy el dueño, tengo que ver todo") El DUEÑO ve también el código de los managers. Los demás
+      // managers siguen viendo solo a la cuadrilla. Un manager sin código personal (entra con correo) no sale: no hay qué enseñar.
+      let soyDueno = false; try{ soyDueno = typeof dnoSoyDueno === 'function' && await dnoSoyDueno(); }catch(e){}
+      let alc = {};
+      if(soyDueno){ try{
+        const ra = await authFetch('/rest/v1/profiles?select=id,manager_de&role=eq.manager&company_id=eq.' + SES.company_id, { headers: cloudHeaders() });
+        if(ra.ok) (await ra.json()).forEach(x => { alc[x.id] = x.manager_de; });
+      }catch(e){} }
+      const crew = rows.filter(r => r.role !== 'manager' || (soyDueno && r.personal_code));
       // La MISMA fila que las tres de la empresa (filaCodigo): el la pidio
       // asi, "el mismo estilo", y ademas las cuatro cosas se usan igual --
       // copiar, mandar por mensaje, o cambiar el codigo ahi mismo.
       box.innerHTML = crew.length
         ? crew.map(r => {
             const status = r.status || 'active';
-            const sub = status === 'paused' ? 'Pausado'
+            const puesto = r.role !== 'manager' ? '' : alc[r.id] === 'mudanza' ? 'Manager · AMG Moving' : alc[r.id] === 'restauracion' ? 'Manager · Restoration Doctor' : 'Manager';
+            const estado = status === 'paused' ? 'Pausado'
                       : status === 'removed' ? 'Sacado del equipo' : '';
+            const sub = [puesto, estado].filter(Boolean).join(' · ');
             return filaCodigo(r.id, r.full_name || 'Sin nombre', r.personal_code || '', sub);
           }).join('')
         : '<p class="clockhint">Todavía no hay nadie en el equipo.</p>';
@@ -52930,7 +53003,14 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   let SES = (()=>{ try{ return JSON.parse(localStorage.getItem('ses')||'null'); }catch(e){ return null; } })();
   const saveSes = () => { try{ (typeof lsGuardarConSitio === 'function' ? lsGuardarConSitio : (k, v) => localStorage.setItem(k, v))('ses', JSON.stringify(SES)); }catch(e){} };   // (R103) teléfono lleno: los mensajes guardados se sueltan primero
   const signedIn = () => !!(SES && SES.access_token && SES.company_id);
-  const isManager = () => signedIn() && SES.role === 'manager';
+  // (fr-29, 12-nov-2026, el dueño) MANAGER POR EMPRESA. profiles.manager_de dice de qué empresa es manager: 'todo' (las dos, como
+  // siempre), 'mudanza' (solo AMG Moving) o 'restauracion' (solo Restoration Doctor). El de UNA sola empresa es un trabajador normal
+  // por la puerta de la otra: ahí isManager() contesta que no, y toda la app lo trata como cuadrilla. La reja de verdad está en la
+  // base (fr-29: my_role() le contesta 'crew' y solo se le abren las filas de su empresa); esto solo evita enseñarle pantallas vacías.
+  const mgrDe = () => { const d = SES && SES.manager_de; return (d === 'mudanza' || d === 'restauracion') ? d : 'todo'; };
+  const isManagerDe = k => signedIn() && SES.role === 'manager' && (mgrDe() === 'todo' || mgrDe() === k);
+  const isManagerTotal = () => signedIn() && SES.role === 'manager' && mgrDe() === 'todo';
+  const isManager = () => signedIn() && SES.role === 'manager' && (mgrDe() === 'todo' || SIDE == null || SIDE === 'manager' || SIDE === mgrDe());
 
   const cloudHeaders = () => ({
     'apikey': CLOUD.key,
@@ -53042,7 +53122,25 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     window.scrollTo(0,0);
   }
 
+  // (fr-29) EL MANAGER DE UNA SOLA EMPRESA NO LEE LAS TABLAS DE PERSONAS: profiles trae el código personal (la llave para entrar) y
+  // casual_workers la tarifa y el PIN, así que la base ya no se las abre. Los NOMBRES le llegan por dos funciones que no traen nada
+  // de eso (equipo_de_manager / temporales_de_manager). Aquí se desvían sus lecturas de esas dos tablas, para que las pantallas de
+  // su empresa (calendario, horas, cierre) sigan armándose igual. Solo lecturas; su propio perfil (id=eq.) va directo como siempre.
+  async function mgrDeDesvio(path, opts){
+    if(!signedIn() || SES.role !== 'manager' || mgrDe() === 'todo') return null;
+    if(opts && opts.method && String(opts.method).toUpperCase() !== 'GET') return null;
+    const m = /^\/rest\/v1\/(profiles|casual_workers)\?(.*)$/.exec(String(path)); if(!m) return null;
+    if(m[1] === 'profiles' && /(^|&)id=eq\./.test(m[2])) return null;
+    const r = await authFetch('/rest/v1/rpc/' + (m[1] === 'profiles' ? 'equipo_de_manager' : 'temporales_de_manager'),
+      { method: 'POST', signal: opts && opts.signal, headers: Object.assign({}, cloudHeaders(), { 'Content-Type': 'application/json' }), body: '{}' });
+    if(!r.ok) return r;
+    let filas = await r.json(); if(!Array.isArray(filas)) filas = [];
+    const st = /(^|&)status=eq\.([a-z]+)/.exec(m[2]); if(st) filas = filas.filter(f => (f.status || 'active') === st[2]);
+    const rl = /(^|&)role=eq\.([a-z]+)/.exec(m[2]); if(rl) filas = filas.filter(f => f.role === rl[2]);
+    return new Response(JSON.stringify(filas), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
   async function authFetch(path, opts){
+    try{ const alt = await mgrDeDesvio(path, opts); if(alt) return alt; }catch(e){}
     const res = await fetch(CLOUD.url + path, opts);
     if(res.status !== 401) return res;
     if(!(SES && SES.refresh_token)){ sessionExpired(); return res; }
@@ -53174,6 +53272,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     try{
       const r2 = await authFetch('/rest/v1/profiles?select=amg_unlocked_at&id=eq.' + encodeURIComponent(SES.user_id) + '&limit=1', { headers: cloudHeaders() });
       if(r2.ok){ const rr = await r2.json(); SES.amg_unlocked = !!(rr[0] && rr[0].amg_unlocked_at); saveSes(); }
+    }catch(e){}
+    // (fr-29) ¿De qué empresa es manager? Consulta aparte, igual que la de AMG: si la columna todavía no existe (400) se queda
+    // como estaba (las dos). Solo se cambia con una respuesta buena: sin señal no se le quita ni se le da nada a nadie.
+    try{
+      const r3 = await authFetch('/rest/v1/profiles?select=manager_de&id=eq.' + encodeURIComponent(SES.user_id) + '&limit=1', { headers: cloudHeaders() });
+      if(r3.ok){ const rr = await r3.json(); if(rr[0]){ SES.manager_de = rr[0].manager_de || 'todo'; saveSes(); try{ mgrDePintar(); }catch(e){} } }
     }catch(e){}
     return rows[0];
   }
@@ -58281,6 +58385,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // or a manager can come back to a screen with no Manager button.
   function applyRole(){
     const mgr = isManager();
+    try{ mgrDePintar(); }catch(e){}   // (fr-29) manager de una sola empresa
     document.body.classList.toggle('is-mgr', mgr);
     if(typeof asPintarEsfera === 'function') asPintarEsfera();   // el rol puede llegar despues del boot (20 oct 2026)
     paintSideMenu();                       // los tiles dependen del rol Y de la puerta; el rol puede llegar despues
@@ -78659,7 +78764,8 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       if(!(typeof isManager === 'function' && isManager()) || !cloudOn()) { WSA.labor = { rd: 0, amg: 0, at: Date.now() }; return; }
       if(Date.now() - WSA.labor.at < 60000) return;
       WSA.labor.at = Date.now();
-      const r = await authFetch('/rest/v1/labor_logs?select=id,work_kind,seen,sent_group_at&archived_at=is.null&or=(seen.eq.false,and(work_kind.eq.restauracion,sent_group_at.is.null,returned_at.is.null))&limit=500', { headers: cloudHeaders() });
+      const r = await authFetch('/rest/v1/labor_logs?select=id,work_kind,seen,sent_group_at&archived_at=is.null&or=(seen.eq.false,and(work_kind.eq.restauracion,sent_group_at.is.null,returned_at.is.null))&limit=500'
+        + (mgrDe() === 'todo' ? '' : '&work_kind=eq.' + mgrDe()), { headers: cloudHeaders() });   // (fr-29)
       if(!r.ok) return;
       const filas = await r.json(); let rd = 0, amg = 0;
       filas.forEach(f => { if(f.work_kind === 'mudanza') amg++; else rd++; });
@@ -78957,9 +79063,10 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     h.querySelectorAll('.rdmg-puntos i').forEach((p, k) => p.classList.toggle('on', k === n));
   }
   function rdmgEmpresa(k){
+    try{ if(!isManagerDe(k === 'amg' ? 'mudanza' : 'restauracion')) k = (k === 'amg' ? 'rd' : 'amg'); }catch(e){}   // (fr-29) solo su empresa
     RDMG.emp = k; const h = document.getElementById('rdmgHome'); if(!h) return;
     h.querySelectorAll('.rdmg-pag [data-rdmg-ir="rd"], .rdmg-pag [data-rdmg-ir="amg"]').forEach(b => b.classList.toggle('on', b.dataset.rdmgIr === k));
-    const ini = h.querySelector('[data-rdmg-ir="inicio"]'); if(ini) ini.classList.toggle('on', k === 'rd');
+    const ini = h.querySelector('[data-rdmg-ir="inicio"]'); if(ini){ let solo = false; try{ solo = !isManagerTotal(); }catch(e){} ini.classList.toggle('on', k === 'rd' || solo); }
     const av = h.querySelector('.rdmg-avisos'); if(av){ av.classList.remove('rdmg-cambia'); void av.offsetWidth; av.classList.add('rdmg-cambia'); }
     rdmgPintar();
   }
@@ -78986,6 +79093,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const si = rdmgEn();
     if(document.body.classList.contains('rdmg') !== si) document.body.classList.toggle('rdmg', si);
     if(!si){ rdmgVelo(false); return; }
+    try{ if(!isManagerDe(RDMG.emp === 'amg' ? 'mudanza' : 'restauracion')) RDMG.emp = RDMG.emp === 'amg' ? 'rd' : 'amg'; }catch(e){}   // (fr-29)
     rdmgArmar(); rdmgPintar(); rdmgContar();
   }
   try{ new MutationObserver(rdmgSync).observe(document.body, { attributes: true, attributeFilter: ['class'] });
@@ -80099,7 +80207,27 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   // fr-20). Se abre con SU contrasena de manager (la misma con la que entra; se comprueba con el servidor y no se guarda). Abierta:
   // los managers con su X para quitar, y "Agregar manager" con la cuadrilla. Todo en la misma tarjeta, sin ventanas nuevas.
   // El servidor es el que manda: aunque alguien viera la tarjeta, solo el dueno puede cambiar un rol de manager (guard de fr-20).
-  var DNO = { soy: {}, abierto: 0, gente: [], modo: '', pide: '', agregar: false, aviso: '', ocupado: false };
+  var DNO = { soy: {}, abierto: 0, gente: [], modo: '', pide: '', agregar: false, aviso: '', ocupado: false, conAlcance: false, elige: null };
+  // (fr-29) las cuatro opciones del dueño para cada persona
+  const DNO_OPS = [
+    { rol: 'manager', de: 'mudanza', es: 'Manager de AMG Moving', en: 'Manager of AMG Moving', des: 'Solo lo de mudanzas. Sin pagos ni tarifas de Restoration Doctor.', den: 'Moving only. No Restoration Doctor pay or rates.', corto: 'Solo AMG Moving', cortoEn: 'AMG Moving only' },
+    { rol: 'manager', de: 'restauracion', es: 'Manager de Restoration Doctor', en: 'Manager of Restoration Doctor', des: 'Solo lo de restauración. Sin lo de AMG Moving.', den: 'Restoration only. Nothing from AMG Moving.', corto: 'Solo Restoration Doctor', cortoEn: 'Restoration Doctor only' },
+    { rol: 'manager', de: 'todo', es: 'Manager de las dos', en: 'Manager of both', des: 'Ve y cambia todo, también el dinero.', den: 'Sees and changes everything, money too.', corto: 'Las dos empresas', cortoEn: 'Both companies' },
+    { rol: 'crew', de: '', es: 'Trabajador', en: 'Worker', des: 'Sin acceso de manager. Queda en la cuadrilla.', den: 'No manager access. Stays on the crew.', corto: '', cortoEn: '' }];
+  const DNO_LAPIZ = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 19.5h3.6L19 8.6 15.4 5 4.5 15.9z"/><path d="m13.4 7 3.6 3.6"/></svg>';
+  function dnoOpDe(p){ return p.role === 'manager' ? (p.manager_de === 'mudanza' || p.manager_de === 'restauracion' ? p.manager_de : 'todo') : ''; }
+  function dnoElige(p){
+    const n = p.full_name || dnoT('Sin nombre', 'No name'), act = dnoOpDe(p), el = DNO.elige;
+    const igual = !el || (el.rol === (p.role === 'manager' ? 'manager' : 'crew') && (el.de || '') === act);
+    const quita = el && el.rol === 'crew' && p.role === 'manager';
+    return '<div class="dno-fila dno-pide dno-elige"><div class="dno-pide-t"><b>' + dnoT('Acceso de ', 'Access for ') + '<span data-no-idioma>' + esc(n) + '</span></b>'
+      + '<small>' + dnoT('Escoge una opción y toca Guardar.', 'Pick one and tap Save.') + '</small></div><div class="dno-ops" role="radiogroup">'
+      + DNO_OPS.map(o => { const on = el ? (el.rol === o.rol && (el.de || '') === o.de) : (o.rol === (p.role === 'manager' ? 'manager' : 'crew') && o.de === act);
+          return '<button type="button" class="dno-op' + (on ? ' on' : '') + '" role="radio" aria-checked="' + on + '" data-dno="op" data-rol="' + o.rol + '" data-de="' + o.de + '"><b>' + dnoT(o.es, o.en) + '</b><small>' + dnoT(o.des, o.den) + '</small></button>'; }).join('')
+      + '</div><div class="dno-pide-bt"><button type="button" class="dno-si' + (quita ? ' rojo' : '') + '" data-dno="pon" data-id="' + esc(p.id) + '"' + ((DNO.ocupado || igual) ? ' disabled' : '') + '>'
+      + (DNO.ocupado ? dnoT('Guardando…', 'Saving…') : dnoT('Guardar', 'Save')) + '</button>'
+      + '<button type="button" class="dno-no" data-dno="no">' + dnoT('Cancelar', 'Cancel') + '</button></div></div>';
+  }
   function dnoT(es, en){ return rdEn() ? en : es; }
   function dnoCorreo(){
     try{ const p = SES.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(atob(p)).email || ''; }catch(e){ return ''; }
@@ -80151,6 +80279,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const otros = DNO.gente.filter(p => p.role !== 'manager' && p.status === 'active');
     const fila = (p, esMgr) => {
       const n = p.full_name || dnoT('Sin nombre', 'No name');
+      if(DNO.pide === p.id && DNO.conAlcance) return dnoElige(p);   // (fr-29) las cuatro opciones
       if(DNO.pide === p.id){
         const q = esMgr ? dnoT('¿Quitar el acceso de manager a ', 'Remove manager access from ') : dnoT('¿Hacer manager a ', 'Make manager: ');
         const nota = esMgr ? dnoT('Queda en la cuadrilla.', 'They stay on the crew.') : dnoT('Verá y cambiará todo, también el dinero.', 'They will see and change everything, money too.');
@@ -80160,6 +80289,12 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
           + '<button type="button" class="dno-no" data-dno="no">' + dnoT('No', 'No') + '</button></div></div>';
       }
       const soyYo = p.id === yo;
+      if(DNO.conAlcance && esMgr && !soyYo){   // (fr-29) el manager con su empresa debajo del nombre y el lápiz para cambiarla
+        const op = DNO_OPS.find(o => o.rol === 'manager' && o.de === dnoOpDe(p));
+        return '<div class="dno-fila"><span class="dno-ini" aria-hidden="true" data-no-idioma>' + dnoIni(n) + '</span>'
+          + '<span class="dno-nom dno-nom2"><b data-no-idioma>' + esc(n) + '</b><small class="dno-alc">' + dnoT(op.corto, op.cortoEn) + (p.status === 'paused' ? ' · ' + dnoT('En pausa', 'Paused') : '') + '</small></span>'
+          + '<button type="button" class="dno-bt dno-edit" data-dno="pide" data-id="' + esc(p.id) + '" aria-label="' + dnoT('Cambiar el acceso de ', 'Change access for ') + esc(n) + '">' + DNO_LAPIZ + '</button></div>';
+      }
       return '<div class="dno-fila"><span class="dno-ini" aria-hidden="true" data-no-idioma>' + dnoIni(n) + '</span>'
         + '<span class="dno-nom"><b data-no-idioma>' + esc(n) + '</b>' + (soyYo ? '<i class="dno-tag">' + dnoT('Dueño', 'Owner') + '</i>' : p.status === 'paused' ? '<small>' + dnoT('En pausa', 'Paused') + '</small>' : '') + '</span>'
         + (soyYo ? '' : '<button type="button" class="dno-bt ' + (esMgr ? 'dno-quitar' : 'dno-dar') + '" data-dno="pide" data-id="' + esc(p.id) + '" aria-label="'
@@ -80191,7 +80326,11 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   async function dnoCargar(){
     try{
-      const r = await rdConTiempo(authFetch('/rest/v1/profiles?select=id,full_name,role,status&company_id=eq.' + encodeURIComponent(SES.company_id) + '&order=full_name', { headers: cloudHeaders() }), 12000);
+      // (fr-29) con manager_de; si la columna todavía no existe (400), la tarjeta queda como antes (manager de todo o nada)
+      const dir = cols => '/rest/v1/profiles?select=' + cols + '&company_id=eq.' + encodeURIComponent(SES.company_id) + '&order=full_name';
+      let r = await rdConTiempo(authFetch(dir('id,full_name,role,status,manager_de'), { headers: cloudHeaders() }), 12000);
+      DNO.conAlcance = r.ok;
+      if(!r.ok && r.status === 400) r = await rdConTiempo(authFetch(dir('id,full_name,role,status'), { headers: cloudHeaders() }), 12000);
       if(!r.ok) throw new Error('HTTP ' + r.status);
       DNO.gente = await r.json();
     }catch(e){ DNO.aviso = dnoT('Sin señal. No se pudo leer la lista.', 'No signal. Could not load the list.'); }
@@ -80218,28 +80357,36 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(bien){ dnoTecla(false); try{ document.activeElement && document.activeElement.blur(); }catch(e){} DNO.abierto = Date.now(); DNO.modo = ''; DNO.aviso = ''; DNO.gente = []; dnoPintar(); dnoCargar(); }
     else dnoPintar();
   }
-  async function dnoCambiar(id, rol){
+  async function dnoCambiar(id, rol, de){
     const p = DNO.gente.find(x => x.id === id); if(!p || id === SES.user_id) return;
+    if(rol !== 'manager') de = '';
     if(!dnoAbiertoVale()){ DNO.abierto = 0; DNO.pide = ''; DNO.aviso = dnoT('Pasaron 5 minutos. Vuelve a poner tu contraseña.', '5 minutes passed. Enter your password again.'); dnoPintar(); return; }
     DNO.ocupado = true; dnoPintar();
     const n = p.full_name || dnoT('Sin nombre', 'No name');
     try{
       const r = await rdConTiempo(authFetch('/rest/v1/profiles?id=eq.' + encodeURIComponent(id), { method: 'PATCH',
-        headers: Object.assign(cloudHeaders(), { 'Prefer': 'return=representation' }), body: JSON.stringify({ role: rol }) }), 15000);
+        headers: Object.assign(cloudHeaders(), { 'Prefer': 'return=representation' }), body: JSON.stringify(de ? { role: rol, manager_de: de } : { role: rol }) }), 15000);
       const t = await r.text(); let filas = null; try{ filas = JSON.parse(t); }catch(e){}
-      if(!r.ok || !Array.isArray(filas) || filas.length !== 1 || filas[0].role !== rol) throw new Error(t || ('HTTP ' + r.status));
-      p.role = rol;
-      DNO.aviso = rol === 'manager' ? dnoT('Listo: ' + n + ' ya es manager.', 'Done: ' + n + ' is now a manager.')
-                                    : dnoT('Listo: ' + n + ' ya no es manager. Queda en la cuadrilla.', 'Done: ' + n + ' is no longer a manager.');
+      // lo que regresa la base es lo que vale: el rol Y la empresa tienen que haber quedado como se pidió
+      if(!r.ok || !Array.isArray(filas) || filas.length !== 1 || filas[0].role !== rol || (de && filas[0].manager_de !== de)) throw new Error(t || ('HTTP ' + r.status));
+      p.role = rol; if(DNO.conAlcance) p.manager_de = de || 'todo';
+      DNO.aviso = rol !== 'manager' ? dnoT('Listo: ' + n + ' ya no es manager. Queda en la cuadrilla.', 'Done: ' + n + ' is no longer a manager.')
+                : de === 'mudanza' ? dnoT('Listo: ' + n + ' es manager solo de AMG Moving.', 'Done: ' + n + ' is a manager of AMG Moving only.')
+                : de === 'restauracion' ? dnoT('Listo: ' + n + ' es manager solo de Restoration Doctor.', 'Done: ' + n + ' is a manager of Restoration Doctor only.')
+                : de === 'todo' ? dnoT('Listo: ' + n + ' es manager de las dos empresas.', 'Done: ' + n + ' is a manager of both companies.')
+                : dnoT('Listo: ' + n + ' ya es manager.', 'Done: ' + n + ' is now a manager.');
       if(rol === 'manager') DNO.agregar = false;
     }catch(e){
       DNO.aviso = /dueno/.test(String(e.message)) ? dnoT('El servidor no lo permitió.', 'The server did not allow it.') : dnoT('No se guardó. Revisa tu internet.', 'Not saved. Check your internet.');
     }
-    DNO.ocupado = false; DNO.pide = ''; dnoPintar();
+    DNO.ocupado = false; DNO.pide = ''; DNO.elige = null; dnoPintar();
   }
   document.addEventListener('click', ev => {
     const b = ev.target.closest && ev.target.closest('#dnoCard [data-dno]'); if(!b || DNO.ocupado) return;
     const a = b.dataset.dno; DNO.aviso = '';
+    if(a === 'op'){ DNO.elige = { rol: b.dataset.rol, de: b.dataset.de || '' }; dnoPintar(); return; }   // (fr-29) escoger no guarda: guarda el botón Guardar
+    if(a === 'pon'){ if(DNO.elige) dnoCambiar(b.dataset.id, DNO.elige.rol, DNO.elige.de); return; }
+    if(a === 'pide' || a === 'no' || a === 'cerrar' || a === 'agregar') DNO.elige = null;
     if(a === 'clave'){ DNO.modo = 'clave'; dnoPintar(); const i = document.getElementById('dnoClave'); if(i){ try{ i.focus({ preventScroll: true }); }catch(e){ i.focus(); } } dnoTecla(true); }
     else if(a === 'cerrar'){ dnoTecla(false); DNO.abierto = 0; DNO.modo = ''; DNO.pide = ''; DNO.agregar = false; DNO.gente = []; dnoPintar(); }
     else if(a === 'agregar'){ DNO.agregar = !DNO.agregar; DNO.pide = ''; dnoPintar(); }
