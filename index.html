@@ -19290,7 +19290,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R397';
+  const APP_BUILD = '2026-11-12-R398';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70065,8 +70065,32 @@ function resumeAdvice(request,remembered,active,owner,now=Date.now()){
  rows=[...new Map(rows.map(r=>[r.app+'|'+(r.key||norm(r.query)),r])).values()];
  return rows.length===1?{route:rows[0]}:{choices:rows};
 }
+// COMO HABLA SU GENTE (12-nov-2026, pedido del dueno: "ensenale mas maneras de entender...
+// en ingles, mexicano, guatemalteco, El Salvador, frases vagas"). Esto NO adivina: traduce
+// las formas de decirlo a las que el codigo de abajo ya entiende. Las frases de verdad estan
+// en tests/lumi_como_habla_test.cjs; si manana dice una que no esta, se agrega ALLA primero.
+function modismos(t){
+ return t
+  // arranques que no dicen nada: "a ver que dicen", "vamos a ver los mensajes"
+  .replace(/^(?:a ver|vamos a ver|vamos a|haber|aver)\s+/,'')
+  // mirar = revisar. GT/SV: "fijate", "fijese", "mire", "vea"
+  .replace(/^(?:fijate|fijese|mira|mire|vea|ve)\s+(?=que\b)/,'')
+  .replace(/^(?:fijate|fijese|fijate en|mira|mire|vea|ve|veme|ojea|ojeame)\s+/,'revisa ')
+  // el "-me" pegado al verbo: checame, chequeame, revisame, pasame
+  .replace(/^(?:checa|chequea|revisa|pasa|muestra|ensena)me\s+/,'revisa ')
+  .replace(/^(?:ponme al tanto de|ponme al dia con|ponme al dia de|catch me up on)\s+/,'dime ')
+  .replace(/^(?:ponme al tanto|ponme al dia|catch me up)$/,'dime los mensajes')
+  // MX: "que onda con los mensajes", "que rollo con"
+  .replace(/^que (?:onda|rollo|pedo|show) (?:con|de)\s+/,'que hay de ');
+}
+// Pedir que se los lea SIN nombrar los mensajes. "Leemelos" ya trae el que adentro.
+// Lo que NO es un mensaje (reportes, cuentas, saldo, calendario, labor) se descarta abajo.
+const PIDE_LEER=/^(?:me los lees|(?:lee|leeme|leelos|leemelos|leemelas|leeme los|lee los|leemelo)(?:\s+(?:a\s+)?(?:todos|todas|todo|los|las|ya|uno por uno|de corrido))*|read (?:them|it|those|all|everything)(?:\s+(?:all|to me|out|of them))*|read all of them)$/;
+// Preguntar que dicen, sin nombrar los mensajes. Asi habla la cuadrilla.
+const QUE_DICEN=/^(?:que (?:me |nos )?(?:dicen|dijeron|escribieron|escribio|pusieron|mandaron|mandan|quieren|contestaron)|que dice la gente|que dicen los muchachos|what did (?:they|he|she) say)$/;
+
 function intent(text){
- const t=normal(text);if(!t||t.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|ella dijo|el dijo|he said|she said)/.test(t))return null;
+ const t=modismos(normal(text));if(!t||t.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|ella dijo|el dijo|he said|she said)/.test(t))return null;
  // Reading followed by planning replies is still read-only, never bulk-send authority.
  const plan=t.match(/^(.*?)\s+(?:y|and)\s+(?:vamos a responder(?:los|les)?|los respondemos|vemos que responder|sugiere que responder|dime que (?:les )?responder|(?:let['’]s|lets) reply|suggest (?:replies|responses)|tell me what to reply)$/);
  if(plan){const reading=intent(plan[1]);if(reading?.action==='read')return reading;}
@@ -70076,24 +70100,29 @@ function intent(text){
  if(/^(?:prepara|redacta|draft|write|text|message|tell(?! me\b)|comenta(?:le)?)\b/.test(t))return null;
  // Explanations and quoted third-party instructions do not read the inbox.
  if(/^(?:(?:dime|explicame|tell me|explain)\s+)?(?:como|que (?:significa|son|es)|para que|how (?:do|does|can|to)|what (?:is|are|does))\b/.test(t)||/^(?:el|la) (?:cliente|persona|trabajador|trabajadora) (?:dice|dijo)\b/.test(t))return null;
- if(/\b(?:envia\w*|manda\w*|send|borra|delete|paga|pay|dile|escribe\w*|respond\w*|reply to)\b/.test(t))return null;
+ // "Que me mandaron" es PREGUNTAR, no mandar: el guardia de abajo se lo comia por el
+ // "manda\w*" y la frase se perdia (12-nov-2026).
+ const queDicen=QUE_DICEN.test(t);
+ // Borrar, quitar, botar: son otra orden, nunca lectura (12-nov-2026).
+ if(!queDicen&&/\b(?:envia\w*|manda\w*|send|borra\w*|borralo|borrala|delete|remove|elimina\w*|quita\w*|bota\w*|tira\w*|paga|pay|dile|escribe\w*|respond\w*|reply to)\b/.test(t))return null;
  const channel=channelReading(text);if(channel?.explicit){const {explicit,...request}=channel;return request;}
  const noun=/\b(?:mensajes?|messages?|texts|inbox|novedades)\b/.test(t);
  const ask=/\b(?:hay|tenemos|tengo|llego|llegaron|entro|entraron|recibimos|recibido|nuevos|nuevas|revisa|consulta|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|leeme|leemelos|read|check|look|show|any|have|unread|new|what)\b/.test(t);
  const personal=/^(?:(?:mira|revisa|checa|dime) si )?(?:(?:me|nos) ha(?:n)? escrito(?: alguien)?|alguien (?:me |nos )?escribio|(?:me|nos) escribio alguien|did anyone (?:message|text) (?:me|us)|has anyone (?:messaged|texted) (?:me|us))$/.test(t);
- const standalone=personal||(sources(t).length===1&&/^(?:tengo algo nuevo|llego algo) (?:en|a)\b/.test(t))||/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron)|(?:me|nos) han escrito|any (?:news|updates)|anything new|what s new|do we have anything new)$/.test(t)||sources(t).length===1&&/^(?:revisa|checa|mira|check|que hay en|any news in)\b/.test(t);
+ const standalone=personal||(sources(t).length===1&&/^(?:tengo algo nuevo|llego algo) (?:en|a)\b/.test(t))||/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron|ha escrito|han escrito|mando|mandaron)|who (?:texted|messaged|wrote|has written) (?:me|us)|(?:me|nos) han escrito|any (?:news|updates)|anything new|what s new|whats new|what is new|do we have anything new)$/.test(t)||sources(t).length===1&&/^(?:revisa|checa|mira|check|que hay en|any news in)\b/.test(t);
  // COMO LO DICE EL DUENO (12-nov-2026). Aqui se exigia la PALABRA "mensajes", y el habla
  // corto: el 12-nov dijo "que leyera a todos" y no le leyo ni uno. Tenia 8 esperando en
  // WhatsApp y Mensajes, y 0 en el buzon de la app; al no pegar la frase, la peticion se iba a
  // Workspace -- vacio -- y ella contestaba la verdad del buzon equivocado.
  // "Leemelos" ya trae el QUE adentro (los = los mensajes): no hace falta nombrarlos. Lo que
  // no es un mensaje (reportes, cuentas, saldo, calendario, labor) ya se descarta mas abajo.
- const cortoLeer=/^(?:me los lees|(?:lee|leeme|leelos|leemelos|leemelas|leeme los|lee los)(?:\s+(?:a\s+)?(?:todos|todas|todo|los|las|ya|uno por uno|de corrido))*)$/.test(t);
- if(!standalone&&!cortoLeer&&!(noun&&ask))return null;
+ const cortoLeer=PIDE_LEER.test(t);
+ if(!standalone&&!cortoLeer&&!queDicen&&!(noun&&ask))return null;
  // Named requests stay with the existing single-conversation reader.
  if(/(?:chat|grupo|conversation|group) (?:de |con |with )?[a-z]/.test(t)||/(?:mensajes (?:de|con)|messages from) (?!whatsapp\b|workspace\b|apple\b)[a-z]/.test(t))return null;
  if(/\b(?:cuentas|calendario|labor|reportes|payments|saldo)\b/.test(t))return null;
- return {action:cortoLeer||/\b(?:lee|leeme|leemelos|leemelas|leelos|read)\b|que (?:dicen|dijeron)|what.*(?:say|said)/.test(t)?'read':'overview',sources:sources(t),english:english(t)};
+ const pideQueLea=cortoLeer||queDicen||/\b(?:lee|leeme|leemelos|leemelas|leelos|leemelo|read)\b/.test(t)||/que (?:me |nos )?(?:dicen|dijeron|escribieron)/.test(t)||/what.*(?:say|said)/.test(t);
+ return {action:pideQueLea?'read':'overview',sources:sources(t),english:english(t)};
 }
 function snapshot(data,owner,selected=Object.keys(APPS),now=Date.now()){
  if(!data||data.owner!==owner||!Number.isFinite(data.at)||now-data.at>120000||data.at>now+60000)throw Error('No pude actualizar los mensajes. No puedo confirmar cuántos hay.');
@@ -70204,7 +70233,27 @@ function reading(item,rows,advice,index,total,en=false){
  else lines.push(en?'That is the last conversation on this list.':'Es la última conversación de esta lista.');
  return lines.join('\n');
 }
-const api={APPS,norm,clean,sources,english,helpAnswer,adviceRequest,resumeAdvice,intent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading};
+// BORRAR UN MENSAJE O UN CHAT (12-nov-2026, el dueno: "incluso si le digo borra un mensaje o
+// un chat de alguien, tiene que saber hacerlo y entenderme").
+// Lo primero es ENTENDERLO, que es lo que hace esto. Lo que ella pueda borrar DE VERDAD se
+// decide afuera: borrar el chat de WhatsApp de otra persona no se puede desde aqui, y decirle
+// que si cuando no, seria peor que no entenderle. Esto solo dice QUE pidio y DE QUIEN.
+function deleteIntent(text){
+ const t=modismos(normal(text));
+ if(!/^(?:borra|borrame|borralo|borrala|borralos|quita|quitame|elimina|eliminame|bota|botame|tira|tirame|delete|remove)\b/.test(t))return null;
+ const esChat=/\b(?:chat|chats|conversacion|conversaciones|platica|platicas|charla|charlas)\b/.test(t);
+ const esMensaje=/\b(?:mensaje|mensajes|message|messages|texto|textos|text|texts)\b/.test(t)
+   ||/^(?:borralo|borrala|borralos|delete it|remove it)$/.test(t);
+ // "borra la foto", "borra el reporte", "borra la lectura" NO son esto: que no se las lleve.
+ if(!esChat&&!esMensaje)return null;
+ let who='';
+ const con=t.match(/\b(?:de|con|with|a)\s+(.+)$/);
+ if(con)who=con[1].trim();
+ else{const ing=t.match(/^(?:delete|remove)\s+(?:the\s+)?(.+?)\s+(?:chat|conversation|messages?)$/);if(ing)who=ing[1].trim();}
+ who=who.replace(/^(?:el|la|los|las|the|mi|mis|my)\s+/,'').replace(/\s+(?:chat|conversacion|platica)$/,'').trim();
+ return {action:'delete',what:esChat?'chat':'mensaje',who:who||null,english:english(text)};
+}
+const api={APPS,norm,clean,sources,english,helpAnswer,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 // LUMI_INBOX_DIALOGUE_CORE_END
@@ -70239,6 +70288,22 @@ async function asInboxDialogue(texto){
  const D=LumiInboxDialogue,owner=SES.user_id+'|'+SES.company_id;
  const help=D.helpAnswer(texto);
  if(help){asPararOido();asCallar();asTranscribir(texto);lumiInboxPresent(help);return true;}
+ // BORRAR (12-nov-2026, el dueno: "incluso si le digo borra un mensaje o un chat de alguien,
+ // tiene que saber hacerlo y entenderme"). Entenderlo ya lo hace D.deleteIntent. HACERLO no:
+ // borrar una conversacion de WhatsApp o de Mensajes se hace en el telefono, no desde aqui, y
+ // decirle que si cuando no puede seria peor que no entenderle -- se quedaria esperando a que
+ // algo pasara. Asi que lo reconoce, lo dice derecho, y nombra lo que SI puede hacer.
+ const borrar=D.deleteIntent(texto);
+ if(borrar){
+  asPararOido();asCallar();asTranscribir(texto);
+  const de=borrar.who?(borrar.what==='chat'?' de '+borrar.who:' de '+borrar.who):'';
+  lumiInboxPresent(borrar.english
+   ? (borrar.what==='chat'?'I understood: delete the chat'+(borrar.who?' with '+borrar.who:'')+'. I cannot delete conversations from here — that is done on the phone. I can open it and read it to you.'
+                          :'I understood: delete that message. I cannot delete messages from here — that is done on the phone. I can open the conversation and read it to you.')
+   : (borrar.what==='chat'?'Entendí: borrar el chat'+de+'. No puedo borrar conversaciones desde aquí, eso se hace en el teléfono. Lo que sí puedo es abrírselo y leérselo.'
+                          :'Entendí: borrar ese mensaje. No puedo borrar mensajes desde aquí, eso se hace en el teléfono. Lo que sí puedo es abrir la conversación y leérsela.'));
+  return true;
+ }
  const fresh=LUMI_INBOX_SESSION?.owner===owner&&Date.now()-LUMI_INBOX_SESSION.at<900000;
  let request=D.intent(texto);const adviceRequest=D.adviceRequest(texto);let follow=fresh?D.follow(texto,LUMI_INBOX_SESSION,owner):null;
  if(!request&&follow?.action==='scope')request={action:'read',sources:follow.sources,english:D.english(texto)};
@@ -72134,6 +72199,10 @@ async function asCommercialQuote(order,texto){
 }
 
 // R349: read-only labor-log queries. No send, archive, payment or seen writes.
+// LUMI_LABOR_READ_BEGIN
+// LECTURA DE LABOR LOGS. Vivia suelto dentro de index.html, sin pruebas y sin casa.
+// Se saco aqui el 12-nov-2026 para poder probarlo: en el html queda entre los
+// marcadores LUMI_LABOR_READ_BEGIN / LUMI_LABOR_READ_END y se vuelve a meter tal cual.
 const LUMI_LABOR_READ = (() => {
   const norm = x => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[¿¡?!,;:]/g, ' ').replace(/\s+/g, ' ').trim();
   const day = (d,n) => new Date(Date.parse(d+'T12:00:00Z')+n*86400000).toISOString().slice(0,10);
@@ -72143,12 +72212,32 @@ const LUMI_LABOR_READ = (() => {
     let t=norm(text).replace(/^(?:hey |hola |oye )?lumi\s*/,'').replace(/^(?:oye|hola|hey)\s+/, '').replace(/^(?:por favor|please)\s+/, '').replace(/\.$/,'');
     // Conversational lead-in keeps the same read-only intent.
     t=t.replace(/^a ver\s+(?=(?:nos |hay |queda|tenemos|que |cuales |cuantos |revisa|muestra|los? |las? ))/,'');
+    // COMO LES DICE SU GENTE (12-nov-2026, pedido del dueno). Medido antes de tocar nada:
+    // "labor log" lo entendia hasta mal escrito (leibor, leiber, label), pero HOJAS y HORAS
+    // -- las dos palabras que de verdad se usan en la obra -- no pegaban en nada:
+    // "las hojas de hoy", "quien mando hoja", "que horas mando Aroldo": todo caia en nada.
+    // Aqui se traducen a "labor logs", que es lo que el resto del lector ya entiende.
+    // La hora del reloj NO entra: "a que hora", "que hora es" se quedan afuera a proposito.
+    const RELOJ=/\b(?:a que hora|que hora es|que hora tienes|la hora de|a la hora)\b/;
+    if(!RELOJ.test(t)){
+      t=t.replace(/\bhojas?\b/g,'labor logs')
+       // "horas" solo cuando habla de las horas de la gente, nunca de la hora del reloj
+       .replace(/\bhoras\b(?=\s+de\s+(?:hoy|ayer|anoche|la semana|esta semana|el lunes|el martes|el miercoles|el jueves|el viernes|el sabado|el domingo))/g,'labor logs')
+       .replace(/\bhoras\b(?=\s+(?:mando|mandaron|mandó|puso|pusieron|reporto|reportaron|trabajo|trabajaron))/g,'labor logs')
+       .replace(/\bsus\s+horas\b/g,'sus labor logs')
+       .replace(/\btheir\s+hours\b/g,'labor logs').replace(/\bhours\b(?=\s*$|\s+(?:today|yesterday))/g,'labor logs')
+       .replace(/\s{2,}/g,' ').trim();
+    }
+    // "Mandame las hojas" es ENSENARMELAS, no mandarlas al grupo. Solo cuando es PARA EL:
+    // si dice "al grupo" o "a todos", esto no lo toca -- esa es otra orden.
+    if(!/\b(?:al grupo|a todos|al chat|to the group|al equipo)\b/.test(t))
+      t=t.replace(/^(?:mandame|enviame|pasame|echame|mandemelos|mandemelas)\s+/,'muestrame ');
     if(/^(?:los?|las?)\s+(?:labor|labour|label|leibor|leiber)\s*logs?\b/.test(t))t='muestra '+t;
     if(!validDate(today)||t.length>1200||!/(?:\b(?:labor|labour|label|leibor|leiber)\s*logs?\b|\breportes? (?:de trabajo|de mudanza|de restauracion|recibidos)\b|\b(?:moving|restoration) reports?\b)/.test(t))return null;
     if(/^(?:no |don't |do not )/.test(t))return null;
     if(/^(?:(?:dime|digame|explicame|cuentame|tell me|explain)\s+)?(?:que (?:significa|es|son|quiere decir|puedes|podrias|puedo|debo|debe|deberia)|cual es (?:el|la)|para que|what (?:does|is|are|can|could|should)|how (?:do|does|can|could|should|to)|como|por que|why)\b/.test(t))return null;
     // A query can mention sending as a status, but cannot execute a send.
-    if(!/^(?:hay|queda|quedan|quedaron|nos quedan?|aun hay|todavia hay|tenemos|tengo|que |cuales |cuantos |revisa|revisame|dime|muestra|muestrame|ensena|ensename|busca|buscame|quiero ver|puedes (?:ver|revisar|mostrar|buscar)|me puedes (?:mostrar|decir|ensenar)|do we have|do i have|have we got|are there|is there|are any|any|what |which |how many |show |check |find |can you (?:show|check|find))\b/.test(t))return null;
+    if(!/^(?:hay|queda|quedan|quedaron|nos quedan?|aun hay|todavia hay|tenemos|tengo|que |cuales |cuantos |cuantas |quien |quienes |revisa|revisame|dime|muestra|muestrame|ensena|ensename|busca|buscame|quiero ver|puedes (?:ver|revisar|mostrar|buscar)|me puedes (?:mostrar|decir|ensenar)|do we have|do i have|have we got|are there|is there|are any|any|what |which |who |how many |show |check |find |can you (?:show|check|find))\b/.test(t))return null;
     if(/\b(?:y|and|luego|then)\s+(?:me )?(?:envia|envialo|envialos|manda|mandalo|mandalos|send|share|archiva(?:lo|los|la|las)?|archive|borra(?:lo|los|la|las)?|delete)\b/.test(t))return null;
     const en=/^(?:do we have|do i have|have we got|are there|is there|are any|any|what |which |how many |show |check |find |can you )/.test(t);
     let kind=/\b(?:mudanzas?|moving|amg)\b/.test(t)?'mudanza':/\b(?:restauracion|restoration|doctor)\b/.test(t)?'restauracion':area==='moving'?'mudanza':area==='restoration'?'restauracion':null;
@@ -72253,6 +72342,8 @@ const LUMI_LABOR_READ = (() => {
   }
   return {parse,select,summarize,state,readAll};
 })();
+if(typeof module==='object'&&module.exports)module.exports=LUMI_LABOR_READ;
+// LUMI_LABOR_READ_END
 
 // R359: explicit send language stays out of the read-only handler.
 // Recognize explicit report-send requests. This prepares the existing signed flow;
