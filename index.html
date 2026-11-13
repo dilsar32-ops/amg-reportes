@@ -19597,7 +19597,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R413';
+  const APP_BUILD = '2026-11-12-R414';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -21060,7 +21060,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(qs === null) return;
     const us = prompt('Precio unitario ($):', l.u);
     if(us === null) return;
-    const q = parseFloat(qs), u = parseFloat(us);
+    const q = parseFloat(String(qs).replace(/,/g, '')), u = parseFloat(String(us).replace(/[,$]/g, ''));
     if(!Number.isFinite(q) || q <= 0 || !Number.isFinite(u)){
       $('#invMsg').textContent = 'Cantidad y precio tienen que ser números, y la cantidad mayor que 0.'; return;
     }
@@ -25169,6 +25169,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const el=$('#'+id); if(!el) return;
     el.addEventListener('change', async ()=>{
       const c=payCfg();
+      // (12-nov, revision) una casilla de precio vacia o en cero NO se guarda: antes quedaba $0 para todos los telefonos
+      if((id === 'mgrRateDay' || id === 'mgrRateNight') && !(parseFloat(el.value) > 0)){
+        el.value = (id === 'mgrRateDay' ? c.rateDay : c.rateNight) || '';
+        const st0 = $('#mgrState'); if(st0) st0.textContent = 'No se guardó: escriba el precio';
+        return;
+      }
       c.rateDay = parseFloat($('#mgrRateDay').value)||0;
       c.rateNight = parseFloat($('#mgrRateNight').value)||0;
       c.cutoff = $('#mgrCutoff').value || '17:00';
@@ -53166,19 +53172,43 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   async function authFetch(path, opts){
     try{ const alt = await mgrDeDesvio(path, opts); if(alt) return alt; }catch(e){}
-    const res = await fetch(CLOUD.url + path, opts);
+    const res = await fetchConLimite(path, opts);
     if(res.status !== 401) return res;
     if(!(SES && SES.refresh_token)){ sessionExpired(); return res; }
-    const r = await fetch(CLOUD.url + '/auth/v1/token?grant_type=refresh_token', {
-      method:'POST', signal: opts && opts.signal, headers:{'apikey':CLOUD.key,'Content-Type':'application/json'},
-      body: JSON.stringify({ refresh_token: SES.refresh_token })
-    });
-    if(!r.ok){ sessionExpired(); return res; }
-    const d = await r.json();
-    SES.access_token = d.access_token; SES.refresh_token = d.refresh_token; saveSes();
+    // (12-nov, revision) Se saca a la persona SOLO si el servidor dice que su llave ya no sirve (400/401/403). Con servidor ocupado
+    // o caido (429, 5xx) o sin senal se queda donde esta: antes cualquier tropiezo la mandaba a la puerta a media jornada.
+    let st = 0; try{ st = await renovarSesion(); }catch(e){ st = 0; }
+    if(st === 400 || st === 401 || st === 403){ sessionExpired(); return res; }
+    if(st !== 200 || !SES) return res;
     opts = opts || {};
     opts.headers = Object.assign({}, opts.headers, {'Authorization':'Bearer '+SES.access_token});
-    return fetch(CLOUD.url + path, opts);
+    return fetchConLimite(path, opts);
+  }
+  // UNA sola renovacion a la vez: al abrir salen muchas llamadas juntas y cada una pedia la suya con la misma llave (la segunda ya
+  // llegaba con una llave gastada y el servidor podia anular la sesion). Todas esperan la misma.
+  let RENOVANDO = null;
+  function renovarSesion(){
+    if(RENOVANDO) return RENOVANDO;
+    RENOVANDO = (async () => {
+      const llave = SES && SES.refresh_token; if(!llave) return 401;
+      const r = await fetchConLimite('/auth/v1/token?grant_type=refresh_token', { method:'POST',
+        headers:{'apikey':CLOUD.key,'Content-Type':'application/json'}, body: JSON.stringify({ refresh_token: llave }) });
+      if(!r.ok) return r.status;
+      const d = await r.json();
+      if(!SES || !d || !d.access_token) return 0;
+      SES.access_token = d.access_token; SES.refresh_token = d.refresh_token; saveSes();
+      return 200;
+    })().finally(() => { RENOVANDO = null; });
+    return RENOVANDO;
+  }
+  // TIEMPO LIMITE (regla 4): una llamada a la base que no trae el suyo se corta a los 30 s, para que ningun boton se quede en
+  // "Guardando…" para siempre con mala senal. No toca las subidas de archivos, ni las funciones (PDF, CompanyCam), ni a quien ya trae su limite.
+  function fetchConLimite(path, opts){
+    const cuerpo = opts && opts.body;
+    if((opts && opts.signal) || typeof AbortController === 'undefined' || (cuerpo && typeof cuerpo !== 'string') || /^\/(functions|storage)\//.test(String(path)))
+      return fetch(CLOUD.url + path, opts);
+    const corte = new AbortController(), reloj = setTimeout(() => { try{ corte.abort(); }catch(e){} }, 30000);
+    return fetch(CLOUD.url + path, Object.assign({}, opts, { signal: corte.signal })).finally(() => clearTimeout(reloj));
   }
 
   async function authPost(path, body, token){
@@ -54467,7 +54497,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           person_name:(SES.full_name||null), work_date:day, clock_in:from, clock_out:to,
           work_kind: ctx.kind })
       });
-      if(!res.ok) throw new Error('HTTP '+res.status);
+      if(!res.ok && res.status !== 409) throw new Error('HTTP '+res.status);   // (12-nov) 409 = ese turno ya estaba guardado (se perdio la respuesta del primer intento)
       $(ctx.from).value=''; $(ctx.to).value='';
       if(ctx.after) ctx.after();   // Mis horas: vuelve sola a restauracion
       await loadMyEntries();
@@ -55783,11 +55813,13 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // Solo si el rechazado es de ESTA persona (pudo cambiar de ficha a medio camino).
     const corrige = (!chat && ppCorrigeId && personPayments.some(pp => String(pp.id) === String(ppCorrigeId) && pp.accepted === false))
       ? ppCorrigeId : null;
+    const ppClave = 'pp:' + key, ppId = finIdPara(ppClave, [amount, kind, note, hoursVal, metodo || '', isNaN(createdAt) ? '' : createdAt.toISOString().slice(0, 10), corrige || ''].join('|'));
     try{
       const mandar = conCorrige => authFetch('/rest/v1/crew_payments', {
         method:'POST',
         headers: Object.assign(cloudHeaders(), {'Prefer':'return=representation'}),
         body: JSON.stringify({
+          id: ppId,
           user_id: key, company_id: SES.company_id,
           hours: hoursVal >= 0 ? hoursVal : null,
           amount, kind, note: note || null,
@@ -55801,10 +55833,18 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // Sin la columna (supabase-pago-corrige.sql sin correr) se manda igual:
       // la ficha la reconoce como el gemelo del rechazado.
       if(!res.ok && res.status === 400 && corrige && CORRIGE_READY){ CORRIGE_READY = false; res = await mandar(false); }
-      if(!res.ok) throw new Error('HTTP '+res.status);
+      // (12-nov) 409 = ese numero YA estaba: el primer intento si llego y solo se perdio la respuesta. Se lee y cuenta como guardado.
+      let yaEstaba = null;
+      if(res.status === 409){
+        const ya = await authFetch('/rest/v1/crew_payments?select=*&id=eq.' + encodeURIComponent(ppId), { headers: cloudHeaders() });
+        if(ya.ok){ const f = await ya.json(); if(Array.isArray(f) && f.length) yaEstaba = f; }
+      }
+      if(!res.ok && !yaEstaba) throw new Error('HTTP '+res.status);
       if(!chat) ppCorrigeId = null;
-      const saved = await res.json();
+      const saved = yaEstaba || await res.json();
       if(!Array.isArray(saved) || !saved.length) throw new Error('no se guardo');
+      finIdListo(ppClave);
+      if(yaEstaba) personPayments = personPayments.filter(pp => String(pp.id) !== String(ppId));
       // Si mientras se guardaba toco a otra persona, el renglon es de la
       // primera: no se mete en la ficha que esta abierta ahora.
       if(key !== personKey){ nudgeTeamGiven(key, teamGivenOf(saved[0])); }
@@ -55822,7 +55862,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(chat) return { ok: true, fila: saved[0] };
     }catch(e){
       if(chat) return { ok: false };
-      alert('No se pudo registrar el pago. Esta parte todavía no está instalada en el servidor: falta correr supabase-crew-payments.sql. Mándele este mensaje a quien le ayuda con la app.');
+      alert('No se pudo registrar el pago. Revise su internet y toque Guardar otra vez: no se anota dos veces.');
     }
     btn.disabled = false; btn.textContent = old;
   }
@@ -56284,6 +56324,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   async function markPaid(op){
     const lumi = !!(op && op.desdeLumi), lumiMonto = lumi ? Math.round((+op.monto || 0) * 100) / 100 : null;   // (1-nov) la tarjeta de Lumi ya se confirmó
+    // (12-nov, revision) Sin la lista de adelantos de ESTA persona el total sale completo y se le pagaria otra vez lo ya adelantado.
+    if(!lumi && cloudOn() && personPaymentsFor !== personKey){ alert('No pude leer los adelantos de esta persona. No se marcó nada: revise su internet y abra su ficha otra vez.'); return; }
     const allOpen = personRows().filter(r => !r.paid_at);
     const gastosP = (personPaidView || typeof gastosDe !== 'function') ? [] : gastosDe(personKey).slice(), G = gastosP.length ? gastosSuma(personKey) : 0;
     if(!allOpen.length){ if(G) await pagarSoloGastos(gastosP, G, lumi && Math.abs(G - lumiMonto) < 0.01); return; }
@@ -59311,6 +59353,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     }
     return fallaron;
   }
+  // (12-nov, revision) UN NUMERO POR INTENTO. Si la senal se cae cuando el servidor ya guardo, la pantalla dice "no se pudo" y la
+  // persona toca Guardar otra vez: con un numero nuevo quedaba anotado DOS veces. Ahora el mismo formulario con los mismos datos
+  // lleva el mismo numero hasta que sale bien (el servidor contesta "ya estaba" y cuenta como guardado).
+  const FIN_ID_PEND = {};
+  function finIdPara(clave, firma){ const p = FIN_ID_PEND[clave]; if(p && p.firma === firma) return p.id; const id = finUuid(); FIN_ID_PEND[clave] = { firma: firma, id: id }; return id; }
+  function finIdListo(clave){ delete FIN_ID_PEND[clave]; }
   const finPhoto = { g:null, p:null };
   function wirePhoto(prefix){
     const grid = $('#' + prefix + '-photoGrid'), add = $('#' + prefix + '-photoAdd'), input = $('#' + prefix + '-photoInput');
@@ -59421,7 +59469,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       return;
     }
     const notaLibre = ($('#g-note').value || '').trim();
-    const id = finUuid();
+    const id = finIdPara('g', [amount, queFue, otroTxt, notaLibre, $('#g-date').value, who.kind, who.id, who.name, $('#g-client') && $('#g-client').value].join('|'));
     const row = { id, company_id: SES.company_id, work_kind:'mudanza', spent_on: $('#g-date').value || localToday(), amount,
       what: queFue,
       note: (queFue === 'otro' ? [otroTxt, notaLibre].filter(Boolean).join(' — ') : notaLibre) || null,
@@ -59441,7 +59489,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       }
       msg.textContent = 'Gasto guardado: ' + finMoney(amount) + ' de ' + (FIN_WHAT[row.what] || row.what).toLowerCase() + ' — lo puso ' + whoLabel(who.kind, who.name) + '.' + photoNote;
       msg.style.color = photoNote ? 'var(--danger)' : 'var(--green)';
-      $('#g-amount').value = ''; $('#g-note').value = ''; finPhoto.g = null; paintPhoto('g');
+      finIdListo('g'); $('#g-amount').value = ''; $('#g-note').value = ''; finPhoto.g = null; paintPhoto('g');
       loadFinMine();
       // Si lo anoto el manager desde su propia pantalla, su lista de gastos se refresca ahi mismo.
       if($('#finGastoCard') && $('#finMGastoSlot') && $('#finGastoCard').parentNode === $('#finMGastoSlot') && typeof loadFinAll === 'function') loadFinAll();
@@ -59689,7 +59737,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const note = ($('#p-note').value || '').trim();
     if(kind === 'ajuste' && !note){ msg.textContent = 'Un ajuste lleva nota: diga por qué.'; msg.style.color = 'var(--danger)'; return; }
     if(!cloudOn() || !signedIn()){ msg.textContent = 'Sin internet no se puede guardar. Intente cuando haya señal.'; msg.style.color = 'var(--danger)'; return; }
-    const id = finUuid();
+    const id = finIdPara('p', [client, amount, kind, note, $('#p-date').value, $('#p-method').value, who.kind, who.id, who.name].join('|'));
     const row = { id, company_id: SES.company_id, work_kind:'mudanza', client, paid_on: $('#p-date').value || localToday(), amount, kind,
       method: $('#p-method').value || 'efectivo', received_by_kind: who.kind, received_by_id: who.id, received_by_name: who.name,
       note: note || null, created_by: SES.user_id,
@@ -59756,7 +59804,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // nadie la vuelva a escoger (18 sep 2026).
       const selInv = $('#p-invoice');
       if(selInv){ selInv.value = ''; delete selInv.dataset.pendiente; }
-      $('#p-amount').value = ''; $('#p-note').value = ''; finPhoto.p = null; paintPhoto('p');
+      finIdListo('p'); $('#p-amount').value = ''; $('#p-note').value = ''; finPhoto.p = null; paintPhoto('p');
       loadFinMine();
       if($('#finPagoCard') && $('#finMPagoSlot') && $('#finPagoCard').parentNode === $('#finMPagoSlot') && typeof loadFinAll === 'function') loadFinAll();
     }catch(e){ msg.textContent = 'No se pudo guardar. ' + ((e && e.message) || 'Revise su internet.'); msg.style.color = 'var(--danger)'; }
@@ -59967,6 +60015,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   if($('#finMGastos')) $('#finMGastos').addEventListener('click', (e) => onFinListClick(e, loadFinAll));
   if($('#finMPagos'))  $('#finMPagos').addEventListener('click',  (e) => onFinListClick(e, loadFinAll));
 
+  let finLeido = null;   // null = todavia no se ha leido; false = alguna lectura fallo; true = llego todo
   async function loadFinAll(){
     if(!isManager() || !cloudOn()){ renderFinGastos(); renderFinPagos(); return; }
     try{
@@ -59980,13 +60029,14 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         authFetch('/rest/v1/time_entries?select=user_id,work_date,clock_in,clock_out&work_kind=eq.mudanza&work_date=gte.' + since + '&limit=5000', { headers: cloudHeaders() }),
         authFetch('/rest/v1/casual_hours?select=casual_worker_id,work_date,reported_hours&work_kind=eq.mudanza&work_date=gte.' + since + '&limit=5000', { headers: cloudHeaders() })
       ]);
+      finLeido = a.ok && b.ok && c.ok && d1.ok && d2.ok;   // (12-nov) el Cierre no calcula con lecturas fallidas
       const todosG = a.ok ? await a.json() : [];
       finPorAprobar = todosG.filter(gastoPorAprobar); finExpenses = todosG.filter(gastoCuenta);   // (R45) lo pendiente no cuenta en totales ni en el Cierre
       finPayments = b.ok ? await b.json() : []; finLogs = c.ok ? await c.json() : [];
       const te = d1.ok ? await d1.json() : [], ch = d2.ok ? await d2.json() : [];
       finClock = te.map(r => { const mins = hoursBetween(r.clock_in, r.clock_out); return { key:'c:' + r.user_id, date:String(r.work_date).slice(0, 10), h: mins === null ? 0 : mins/60 }; })
         .concat(ch.map(r => ({ key:'t:' + r.casual_worker_id, date:String(r.work_date).slice(0, 10), h: +r.reported_hours || 0 })));
-    }catch(e){ finExpenses = []; finPayments = []; finLogs = []; finClock = []; }
+    }catch(e){ finExpenses = []; finPayments = []; finLogs = []; finClock = []; finLeido = false; }
     renderFinGastos(); renderFinPagos();
     if($('#finMCierre') && !$('#finMCierre').hidden) paintCierreSelects();   // la gente y los clientes ya llegaron: repintar los selects del cierre
   }
@@ -60430,6 +60480,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   async function runCierre(){
     const out = $('#finCOut');
+    if(finLeido === false){   // (12-nov, revision) antes una lectura fallida contaba como $0 y la mitad de cada socio salia inflada
+      try{ await loadFinAll(); }catch(e){}
+      if(finLeido === false){ if(out) out.innerHTML = '<p class="clockhint" style="color:var(--danger);">No se pudieron leer todos los datos (gastos, pagos u horas). No se calculó el cierre: revise su internet e intente otra vez.</p>'; return; }
+    }
     // ---- POR INVOICE (8 oct 2026) ----
     // Un invoice sabe EXACTAMENTE de que reportes salio (log_ids). Asi que el
     // periodo no se escoge: se deduce de esos reportes, y lo que entra al
