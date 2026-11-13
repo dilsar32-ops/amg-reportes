@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R460';
+  const APP_BUILD = '2026-11-13-R461';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -74574,6 +74574,734 @@ async function asCommercialQuote(order,texto){
 }
 
 // R349: read-only labor-log queries. No send, archive, payment or seen writes.
+// LUMI_COINCIDENCIAS_BEGIN  (motor: tools/lumi_mac/coincidencias.js, examen a ciegas 40 de 40)
+// coincidencias.js — 13-nov-2026
+// Motor de Lumi para cotejar, al dia siguiente, los LABOR LOGS contra las HORAS.
+//
+// Es calculo puro: no lee la red, no toca la base, no escribe nada, no usa el reloj.
+// Mismo archivo para el navegador (<script>, deja la global LumiCoincidencias)
+// y para Node (module.exports). Sin imports.
+//
+// REGLAS DEL DUENO (decididas el 13-nov-2026):
+//  1. "horas_sin_labor_log"    : apunto horas ese dia y no sale en NINGUN labor log
+//                                de ese dia y esa empresa.
+//  2. "en_labor_log_sin_horas" : sale en un labor log y no apunto horas ese dia.
+//  3. "falta_turno_en_medio"   : sale en un turno de antes y en uno de despues del
+//                                mismo labor log, falta en uno de en medio, y el
+//                                encargado no lo explico.
+//  4. "apunto_de_mas"          : sus horas pasan lo que le da el labor log por MAS
+//                                de la tolerancia (15 min: 15 no avisa, 16 si).
+//  -  Si apunto de MENOS no se avisa (el dueno lo decidio asi).
+//  -  Solo se compara dentro de la misma fecha Y la misma empresa.
+//  -  Labor log devuelto no cuenta. Dos del mismo encargado, misma fecha y
+//     empresa: cuenta solo el mas nuevo.
+//  -  Nombre que no es de nadie, o que puede ser de dos: "nombre_dudoso".
+//     No se adivina. Va solo al resumen del dueno, nunca a un encargado.
+//  -  El mensaje al encargado da hechos (fecha en palabras, nombres, horas del
+//     reloj) y NUNCA dinero.
+//
+// DECISIONES DE ESTE ARCHIVO donde la regla no alcanzaba (13-nov-2026):
+//  a. A quien se le reclama "horas_sin_labor_log": si ese dia y empresa hay labor
+//     log de UN solo encargado, a ese. Si no hay ninguno, o hay de varios
+//     encargados (no se sabe con cual trabajo), va solo al dueno.
+//  b. "apunto_de_mas" con la persona en labor logs de VARIOS encargados: un solo
+//     hallazgo, solo para el dueno (no se sabe a cual reclamarle).
+//  c. Lo que "le da el labor log" es la UNION de sus turnos de ese dia y empresa
+//     (si dos encargados lo ponen a la misma hora, esa hora cuenta una vez).
+//     Sus horas apuntadas se SUMAN fila por fila, como hace la app.
+//  d. Si la persona puede ser la de un nombre dudoso de ese dia (candidata), sus
+//     hallazgos no se le mandan al encargado: van al dueno con la marca
+//     detalle.posible_nombre_dudoso. Igual un hueco cuyo turno trae un nombre
+//     dudoso (detalle.turno_con_nombre_dudoso).
+//  e. Una sola palabra escrita ("Ana") se busca junta como nombre completo,
+//     apodo y nombre de pila; si le queda a dos personas, es dudoso.
+//  f. detalle.faltan_turnos son lugares desde 0 (el lugar en el arreglo turnos);
+//     detalle.faltan_turnos_numero son los mismos desde 1 ("turno 2").
+//  g. Una fila de horas sin entrada o sin salida cuenta como "si apunto" (no sale
+//     en_labor_log_sin_horas) pero suma 0 minutos.
+//  h. Extra al contrato: una fila de horas puede traer "minutos" (numero) cuando
+//     no hay entrada/salida (temporales con solo el total de horas).
+
+const LumiCoincidencias = (function () {
+  'use strict';
+
+  var TOLERANCIA_DEFECTO = 15;
+  var ORDEN_TIPOS = ['apunto_de_mas', 'en_labor_log_sin_horas', 'falta_turno_en_medio', 'horas_sin_labor_log', 'nombre_dudoso'];
+  var DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  var MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+  // ---------- texto ----------
+
+  // Minusculas, sin acentos, sin signos, un solo espacio. Lo de entre parentesis se quita.
+  function norm(s) {
+    return String(s == null ? '' : s)
+      .replace(/\([^)]*\)/g, ' ')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
+  // Quita la H muda para que "Aroldo" y "Haroldo" sean lo mismo. La "ch" se respeta.
+  function sinH(s) {
+    return s.split(' ').map(function (w) { return w.replace(/(^|[^c])h/g, '$1'); }).filter(Boolean).join(' ');
+  }
+
+  // Parte el texto libre de un turno en nombres escritos.
+  // Separadores: coma, punto y coma, salto, /, &, +, " y ", " e ", " and ".
+  function partirNombres(texto) {
+    var vistos = {}, out = [];
+    String(texto == null ? '' : texto)
+      .split(/[,;\n\r\/&+|]|\s+y\s+|\s+e\s+|\s+and\s+/i)
+      .forEach(function (trozo) {
+        var limpio = trozo.replace(/\s+/g, ' ').replace(/^[\s.\-:]+|[\s.\-:]+$/g, '');
+        var k = norm(limpio);
+        if (!k || k === 'y' || k === 'e' || k === 'and' || vistos[k]) return;
+        vistos[k] = true;
+        out.push({ escrito: limpio, clave: k });
+      });
+    return out;
+  }
+
+  // ---------- horas del reloj ----------
+
+  // "08:00", "8:00", "08:00:00" o una fecha con T ("2026-11-12T08:00:00") -> minutos del dia.
+  function minutos(hhmm) {
+    var s = String(hhmm == null ? '' : hhmm);
+    var t = s.indexOf('T');
+    if (t >= 0) s = s.slice(t + 1);
+    var m = /^\s*(\d{1,2}):(\d{2})/.exec(s);
+    if (!m || +m[1] > 23 || +m[2] > 59) return null;
+    return +m[1] * 60 + +m[2];
+  }
+  function dos(n) { return (n < 10 ? '0' : '') + n; }
+  function reloj(min) { var x = ((min % 1440) + 1440) % 1440; return dos(Math.floor(x / 60)) + ':' + dos(x % 60); }
+  function hora(v) { var m = minutos(v); return m === null ? null : reloj(m); }
+
+  function union(tramos) {
+    var out = [];
+    tramos.slice().sort(function (a, b) { return a.ini - b.ini || a.fin - b.fin; }).forEach(function (t) {
+      var p = out[out.length - 1];
+      if (p && t.ini <= p.fin) p.fin = Math.max(p.fin, t.fin); else out.push({ ini: t.ini, fin: t.fin });
+    });
+    return out;
+  }
+  function suma(tramos) { return tramos.reduce(function (n, t) { return n + (t.fin - t.ini); }, 0); }
+
+  // ---------- frases ----------
+
+  function duracion(min) {
+    var m = Math.round(min), h = Math.floor(m / 60), r = m % 60;
+    if (h && r) return h + ' h ' + r + ' min';
+    if (h) return h + ' h';
+    return r + ' min';
+  }
+  function lista(arr) {
+    if (arr.length <= 1) return arr.join('');
+    return arr.slice(0, -1).join(', ') + ' y ' + arr[arr.length - 1];
+  }
+  function rangos(arr) { // [{de,a}] -> "de 08:00 a 12:00 y de 13:00 a 17:00"
+    return lista(arr.map(function (t) { return 'de ' + t.de + ' a ' + t.a; }));
+  }
+  function fechaEnPalabras(fecha) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(fecha || ''));
+    if (!m) return String(fecha || '');
+    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return DIAS[d.getUTCDay()] + ' ' + (+m[3]) + ' de ' + MESES[+m[2] - 1];
+  }
+  function empresaDe(v) { return norm(v) === 'mudanza' ? 'mudanza' : 'restauracion'; }
+  // En mudanza la app nunca dice "labor log": dice "reporte de mudanza".
+  function nombreReporte(empresa) { return empresa === 'mudanza' ? 'reporte de mudanza' : 'labor log'; }
+  function nombreEmpresa(empresa) { return empresa === 'mudanza' ? 'Mudanza' : 'Restauración'; }
+
+  // ---------- buscador de nombres (uno solo) ----------
+
+  function armarEquipo(equipo) {
+    return (equipo || []).filter(function (p) { return p && p.id != null; }).map(function (p) {
+      var n = norm(p.nombre), a = norm(p.alias);
+      return {
+        id: String(p.id), nombre: String(p.nombre || p.id), tipo: p.tipo || 'cuenta',
+        n: n, a: a, pal: n ? n.split(' ') : [],
+        nH: sinH(n), aH: sinH(a), palH: n ? sinH(n).split(' ').filter(Boolean) : []
+      };
+    });
+  }
+
+  function subsecuencia(corta, larga) { // misma primera palabra y las demas en orden
+    if (!corta.length || corta[0] !== larga[0]) return false;
+    var j = 1;
+    for (var i = 1; i < corta.length; i++) {
+      while (j < larga.length && larga[j] !== corta[i]) j++;
+      if (j >= larga.length) return false;
+      j++;
+    }
+    return true;
+  }
+
+  // (13-nov-2026, examen a ciegas K16) "Jose L." con dos Jose en el equipo: la INICIAL del apellido basta
+  // para saber cual, si solo uno la tiene. Primera palabra igual; cada palabra de UNA letra debe ser la
+  // inicial de alguna palabra posterior del nombre, en orden; las demas, iguales.
+  function conIniciales(corta, larga) {
+    if (corta.length < 2 || corta[0] !== larga[0]) return false;
+    if (!corta.slice(1).some(function (w) { return w.length === 1; })) return false;
+    var j = 1;
+    for (var i = 1; i < corta.length; i++) {
+      var w = corta[i];
+      while (j < larga.length && !(w.length === 1 ? larga[j].charAt(0) === w : larga[j] === w)) j++;
+      if (j >= larga.length) return false;
+      j++;
+    }
+    return true;
+  }
+
+  // Busca UNA clave ya normalizada, sin intentar partirla.
+  // Devuelve {ok:true, persona} | {ok:false, motivo:'nadie'|'varios', candidatos}
+  function buscarEntero(clave, eq) {
+    var pasadas = [false, true]; // primero tal cual; despues perdonando la H
+    for (var k = 0; k < pasadas.length; k++) {
+      var conH = pasadas[k];
+      var w = conH ? sinH(clave) : clave;
+      if (!w) continue;
+      var palabras = w.split(' ');
+      var niveles;
+      if (palabras.length === 1) {
+        // una palabra: nombre completo, apodo o nombre de pila, todo junto
+        niveles = [eq.filter(function (p) {
+          return (conH ? p.nH : p.n) === w || ((conH ? p.aH : p.a) && (conH ? p.aH : p.a) === w) || (conH ? p.palH : p.pal)[0] === w;
+        })];
+      } else {
+        niveles = [
+          eq.filter(function (p) { return (conH ? p.nH : p.n) === w || (conH ? p.aH : p.a) === w; }),
+          eq.filter(function (p) { return subsecuencia(palabras, conH ? p.palH : p.pal); }),
+          eq.filter(function (p) { return conIniciales(palabras, conH ? p.palH : p.pal); })
+        ];
+      }
+      for (var i = 0; i < niveles.length; i++) {
+        if (niveles[i].length === 1) return { ok: true, persona: niveles[i][0] };
+        if (niveles[i].length > 1) return { ok: false, motivo: 'varios', candidatos: niveles[i] };
+      }
+    }
+    return { ok: false, motivo: 'nadie', candidatos: [] };
+  }
+
+  // Si un trozo no es nadie pero trae varias palabras ("Lalo Beto" sin coma),
+  // se prueba partirlo. Solo vale si TODOS los pedazos son alguien y hay una sola forma.
+  function buscarPartido(clave, eq) {
+    var pal = clave.split(' ');
+    if (pal.length < 2 || pal.length > 8) return null;
+    var soluciones = [];
+    (function ir(desde, acum) {
+      if (soluciones.length > 1) return;
+      if (desde === pal.length) { soluciones.push(acum); return; }
+      for (var fin = desde + 1; fin <= pal.length; fin++) {
+        if (desde === 0 && fin === pal.length) continue; // el trozo entero ya se probo
+        var r = buscarEntero(pal.slice(desde, fin).join(' '), eq);
+        if (r.ok && acum.indexOf(r.persona) < 0) ir(fin, acum.concat([r.persona]));
+      }
+    })(0, []);
+    return soluciones.length === 1 ? soluciones[0] : null;
+  }
+
+  // Resuelve un nombre escrito. Devuelve {personas:[...]} o {dudoso:{motivo,candidatos}}.
+  function resolver(clave, eq, memo) {
+    if (memo[clave]) return memo[clave];
+    var r = buscarEntero(clave, eq), out;
+    if (r.ok) out = { personas: [r.persona] };
+    else {
+      var partes = r.motivo === 'nadie' ? buscarPartido(clave, eq) : null;
+      out = partes ? { personas: partes } : { dudoso: { motivo: r.motivo, candidatos: r.candidatos } };
+    }
+    memo[clave] = out;
+    return out;
+  }
+
+  // ---------- el analisis ----------
+
+  function analizar(contrato) {
+    contrato = contrato || {};
+    var tolerancia = Number(contrato.tolerancia_min);
+    if (!isFinite(tolerancia) || tolerancia < 0) tolerancia = TOLERANCIA_DEFECTO;
+    var soloFecha = contrato.fecha ? String(contrato.fecha).slice(0, 10) : null;
+
+    var eq = armarEquipo(contrato.equipo);
+    var porId = {};
+    eq.forEach(function (p) { porId[p.id] = p; });
+    var memo = {};
+
+    // -- labor logs que cuentan: de la fecha, no devueltos, el mas nuevo por encargado --
+    var elegidos = {}; // fecha|empresa|encargado -> log
+    (contrato.labor_logs || []).forEach(function (l, orden) {
+      if (!l || l.devuelto) return;
+      var fecha = String(l.fecha || soloFecha || '').slice(0, 10);
+      if (!fecha || (soloFecha && fecha !== soloFecha)) return;
+      var empresa = empresaDe(l.empresa);
+      var encId = l.encargado_id == null || l.encargado_id === '' ? null : String(l.encargado_id);
+      var encClave = encId !== null ? 'id:' + encId : 'n:' + norm(l.encargado);
+      var t = Date.parse(l.creado);
+      var log = {
+        id: l.id == null ? null : l.id, fecha: fecha, empresa: empresa, orden: orden,
+        encargado_id: encId, encargado: l.encargado ? String(l.encargado).trim() : (encId && porId[encId] ? porId[encId].nombre : null),
+        encClave: encClave, creado: isFinite(t) ? t : null, crudo: l
+      };
+      var k = fecha + '|' + empresa + '|' + encClave, previo = elegidos[k];
+      var gana = !previo || (log.creado !== null && previo.creado !== null && log.creado !== previo.creado
+        ? log.creado > previo.creado : log.orden > previo.orden);
+      if (gana) elegidos[k] = log;
+    });
+
+    // -- grupos por fecha + empresa --
+    var grupos = {};
+    function grupo(fecha, empresa) {
+      var k = fecha + '|' + empresa;
+      return grupos[k] || (grupos[k] = { fecha: fecha, empresa: empresa, logs: [], horas: {} });
+    }
+
+    Object.keys(elegidos).forEach(function (k) {
+      var log = elegidos[k], g = grupo(log.fecha, log.empresa);
+      log.turnos = []; log.dudosos = {}; log.personas = {};
+      (Array.isArray(log.crudo.turnos) ? log.crudo.turnos : []).forEach(function (t, i) {
+        t = t || {};
+        var ini = minutos(t.de), fin = minutos(t.a);
+        if (ini !== null && fin !== null && fin < ini) fin += 1440; // fuera de alcance; no se rompe
+        var valido = ini !== null && fin !== null && fin > ini;
+        var turno = { indice: i, de: hora(t.de), a: hora(t.a), ini: ini, fin: fin, valido: valido, ids: {}, dudoso: false };
+        partirNombres(t.nombres).forEach(function (nm) {
+          var r = resolver(nm.clave, eq, memo);
+          if (r.personas) {
+            r.personas.forEach(function (p) {
+              turno.ids[p.id] = true;
+              (log.personas[p.id] || (log.personas[p.id] = [])).push(turno);
+            });
+          } else {
+            turno.dudoso = true;
+            var d = log.dudosos[nm.clave] || (log.dudosos[nm.clave] = { escrito: nm.escrito, motivo: r.dudoso.motivo, candidatos: r.dudoso.candidatos, turnos: [] });
+            d.turnos.push(turno);
+          }
+        });
+        log.turnos.push(turno);
+      });
+      // a quien ya explico el encargado
+      log.explicados = {};
+      (Array.isArray(log.crudo.explicados) ? log.crudo.explicados : []).forEach(function (txt) {
+        partirNombres(txt).forEach(function (nm) {
+          var r = resolver(nm.clave, eq, memo);
+          if (r.personas) r.personas.forEach(function (p) { log.explicados[p.id] = true; });
+        });
+      });
+      g.logs.push(log);
+    });
+
+    // -- horas --
+    (contrato.horas || []).forEach(function (h) {
+      if (!h || h.persona_id == null) return;
+      var fecha = String(h.fecha || soloFecha || '').slice(0, 10);
+      if (!fecha || (soloFecha && fecha !== soloFecha)) return;
+      var g = grupo(fecha, empresaDe(h.empresa)), pid = String(h.persona_id);
+      var reg = g.horas[pid] || (g.horas[pid] = { min: 0, filas: [], incompletas: false, nombre: h.persona || null });
+      var ini = minutos(h.entrada), fin = minutos(h.salida);
+      if (ini !== null && fin !== null) {
+        if (fin < ini) fin += 1440;
+        reg.min += fin - ini;
+        reg.filas.push({ entrada: reloj(ini), salida: reloj(fin), ini: ini });
+      } else if (isFinite(Number(h.minutos)) && Number(h.minutos) > 0) {
+        reg.min += Math.round(Number(h.minutos)); // decision h
+        reg.sinReloj = true;
+      } else {
+        reg.incompletas = true; // decision g
+      }
+    });
+
+    // horas de la persona en la OTRA empresa ese dia (solo como dato para el dueno)
+    function otraEmpresaMin(fecha, empresa, pid) {
+      var o = grupos[fecha + '|' + (empresa === 'mudanza' ? 'restauracion' : 'mudanza')];
+      return o && o.horas[pid] ? o.horas[pid].min : 0;
+    }
+    function nombreDe(pid, reg) { return porId[pid] ? porId[pid].nombre : (reg && reg.nombre) || pid; }
+    function filasDe(reg) {
+      return reg.filas.slice().sort(function (a, b) { return a.ini - b.ini; }).map(function (f) { return { entrada: f.entrada, salida: f.salida }; });
+    }
+    function turnosDe(lista2, log) {
+      return lista2.slice().sort(function (a, b) { return (a.ini || 0) - (b.ini || 0); })
+        .map(function (t) { return { log_id: log.id, indice: t.indice, de: t.de, a: t.a }; });
+    }
+
+    var hallazgos = [];
+    function agregar(tipo, g, pid, persona, log, paraEncargado, detalle) {
+      hallazgos.push({
+        tipo: tipo, fecha: g.fecha, empresa: g.empresa,
+        persona_id: pid, persona: persona,
+        encargado_id: log ? log.encargado_id : null,
+        encargado: log ? log.encargado : null,
+        log_id: log ? log.id : null,
+        para: log && paraEncargado ? 'encargado' : 'dueno',
+        detalle: detalle
+      });
+      return hallazgos[hallazgos.length - 1];
+    }
+
+    Object.keys(grupos).sort().forEach(function (gk) {
+      var g = grupos[gk];
+      g.logs.sort(function (a, b) { return a.orden - b.orden; });
+
+      // candidatos de nombres dudosos de este dia y empresa (decision d)
+      var candidato = {};
+      g.logs.forEach(function (log) {
+        Object.keys(log.dudosos).forEach(function (k) {
+          var d = log.dudosos[k];
+          d.candidatos.forEach(function (p) { candidato[p.id] = true; });
+          agregar('nombre_dudoso', g, null, d.escrito, log, false, {
+            nombre_escrito: d.escrito,
+            motivo: d.motivo, // 'nadie' = no es de nadie; 'varios' = puede ser de dos o mas
+            candidatos: d.candidatos.map(function (p) { return { persona_id: p.id, persona: p.nombre }; }),
+            turnos: turnosDe(d.turnos, log)
+          });
+        });
+      });
+
+      // en que labor logs sale cada persona
+      var enLogs = {}; // pid -> [log]
+      g.logs.forEach(function (log) {
+        Object.keys(log.personas).forEach(function (pid) { (enLogs[pid] || (enLogs[pid] = [])).push(log); });
+      });
+
+      // (1) horas sin labor log  y  (4) apunto de mas
+      Object.keys(g.horas).forEach(function (pid) {
+        var reg = g.horas[pid], logs = enLogs[pid] || [], persona = nombreDe(pid, reg);
+        if (!logs.length) {
+          var unico = g.logs.length === 1 ? g.logs[0] : null; // decision a
+          var h = agregar('horas_sin_labor_log', g, pid, persona, unico, !candidato[pid], {
+            horas_apuntadas_min: reg.min, horas_labor_log_min: 0,
+            horas: filasDe(reg), turnos: [],
+            hay_labor_log: g.logs.length > 0, labor_logs_del_dia: g.logs.length
+          });
+          if (candidato[pid]) h.detalle.posible_nombre_dudoso = true;
+          if (reg.incompletas) h.detalle.horas_incompletas = true;
+          return;
+        }
+        var tramos = [], turnos = [];
+        logs.forEach(function (log) {
+          log.personas[pid].forEach(function (t) { if (t.valido) tramos.push({ ini: t.ini, fin: t.fin }); });
+          turnos = turnos.concat(turnosDe(log.personas[pid], log));
+        });
+        var delLog = suma(union(tramos)); // decision c
+        if (reg.min - delLog > tolerancia) {
+          var uno = logs.length === 1 ? logs[0] : null; // decision b
+          var m = agregar('apunto_de_mas', g, pid, persona, uno, !candidato[pid], {
+            horas_apuntadas_min: reg.min, horas_labor_log_min: delLog, diferencia_min: reg.min - delLog,
+            tolerancia_min: tolerancia, horas: filasDe(reg), turnos: turnos,
+            log_ids: logs.map(function (l) { return l.id; })
+          });
+          if (candidato[pid]) m.detalle.posible_nombre_dudoso = true;
+        }
+      });
+
+      g.logs.forEach(function (log) {
+        Object.keys(log.personas).forEach(function (pid) {
+          var mios = log.personas[pid], persona = nombreDe(pid);
+
+          // (2) en labor log sin horas
+          if (!g.horas[pid]) {
+            var tr = mios.filter(function (t) { return t.valido; }).map(function (t) { return { ini: t.ini, fin: t.fin }; });
+            var det = { horas_apuntadas_min: 0, horas_labor_log_min: suma(union(tr)), horas: [], turnos: turnosDe(mios, log) };
+            var otra = otraEmpresaMin(g.fecha, g.empresa, pid);
+            if (otra) det.horas_en_otra_empresa_min = otra;
+            agregar('en_labor_log_sin_horas', g, pid, persona, log, true, det);
+          }
+
+          // (3) falta un turno de en medio
+          if (log.explicados[pid]) return;
+          var trabajados = union(mios.filter(function (t) { return t.valido; }).map(function (t) { return { ini: t.ini, fin: t.fin }; }));
+          var faltan = [], conDudoso = false;
+          for (var i = 1; i < trabajados.length; i++) {
+            var ini = trabajados[i - 1].fin, fin = trabajados[i].ini;
+            if (fin <= ini) continue;
+            log.turnos.forEach(function (t) {
+              if (!t.valido || t.ids[pid] || !(t.ini < fin && t.fin > ini)) return;
+              if (faltan.indexOf(t) < 0) faltan.push(t);
+              if (t.dudoso) conDudoso = true;
+            });
+          }
+          if (!faltan.length) return; // un rato sin turno de nadie (la comida) no es falta
+          faltan.sort(function (a, b) { return a.ini - b.ini || a.indice - b.indice; });
+          var reg = g.horas[pid];
+          var f = agregar('falta_turno_en_medio', g, pid, persona, log, !conDudoso && !candidato[pid], {
+            horas_apuntadas_min: reg ? reg.min : 0,
+            horas_labor_log_min: suma(trabajados),
+            horas: reg ? filasDe(reg) : [],
+            turnos: turnosDe(mios, log),
+            faltan_turnos: faltan.map(function (t) { return t.indice; }),
+            faltan_turnos_numero: faltan.map(function (t) { return t.indice + 1; }),
+            faltan: faltan.map(function (t) { return { indice: t.indice, de: t.de, a: t.a }; })
+          });
+          if (conDudoso) f.detalle.turno_con_nombre_dudoso = true;
+          if (candidato[pid]) f.detalle.posible_nombre_dudoso = true;
+        });
+      });
+    });
+
+    hallazgos.sort(function (a, b) {
+      return (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0)
+        || (a.empresa < b.empresa ? 1 : a.empresa > b.empresa ? -1 : 0) // restauracion primero
+        || ORDEN_TIPOS.indexOf(a.tipo) - ORDEN_TIPOS.indexOf(b.tipo)
+        || String(a.persona).localeCompare(String(b.persona), 'es');
+    });
+
+    // -- un mensaje por encargado + fecha + empresa --
+    var bolsas = {}, ordenBolsas = [];
+    hallazgos.forEach(function (h) {
+      if (h.para !== 'encargado' || h.tipo === 'nombre_dudoso') return;
+      var k = h.fecha + '|' + h.empresa + '|' + (h.encargado_id !== null ? 'id:' + h.encargado_id : 'n:' + norm(h.encargado));
+      if (!bolsas[k]) { bolsas[k] = []; ordenBolsas.push(k); }
+      bolsas[k].push(h);
+    });
+    var mensajes = ordenBolsas.map(function (k) {
+      var items = bolsas[k], h0 = items[0];
+      return {
+        encargado_id: h0.encargado_id, encargado: h0.encargado, fecha: h0.fecha, empresa: h0.empresa,
+        log_id: h0.log_id, texto: textoEncargado(items)
+      };
+    });
+
+    return { hallazgos: hallazgos, mensajes: mensajes, resumen: textoResumen(hallazgos, mensajes, soloFecha) };
+  }
+
+  // ---------- los textos ----------
+
+  function horasTexto(d) {
+    if (d.horas && d.horas.length) return rangos(d.horas.map(function (f) { return { de: f.entrada, a: f.salida }; }));
+    return '';
+  }
+  function turnosTexto(d) {
+    var t = (d.turnos || []).filter(function (x) { return x.de && x.a; });
+    return t.length ? rangos(t) : '';
+  }
+
+  // Un renglon por hallazgo. "tu" = va dirigido al encargado; si no, habla del encargado en tercera persona.
+  function renglon(h, tu) {
+    var d = h.detalle, rep = nombreReporte(h.empresa), ht = horasTexto(d), tt = turnosTexto(d);
+    var elReporte = tu ? 'tu ' + rep : (h.encargado ? 'el ' + rep + ' de ' + h.encargado : 'el ' + rep);
+    if (h.tipo === 'apunto_de_mas') {
+      return h.persona + ' apuntó ' + duracion(d.horas_apuntadas_min) + (ht ? ' (' + ht + ')' : '') +
+        ' y ' + (h.encargado || tu ? elReporte : (h.empresa === 'mudanza' ? 'los reportes de mudanza' : 'los labor logs')) + ' le da ' + duracion(d.horas_labor_log_min) + (tt ? ' (' + tt + ')' : '') +
+        '. Son ' + duracion(d.diferencia_min) + ' de más.';
+    }
+    if (h.tipo === 'en_labor_log_sin_horas') {
+      return h.persona + ' está en ' + elReporte + (tt ? ' (' + tt + ')' : '') + ' y no apuntó horas ese día.';
+    }
+    if (h.tipo === 'falta_turno_en_medio') {
+      var f = d.faltan || [];
+      return h.persona + ' aparece en ' + elReporte + ' ' + tt + ', pero no en ' +
+        (f.length === 1 ? 'el turno ' : 'los turnos ') + rangos(f) + ', y no hay explicación.';
+    }
+    if (h.tipo === 'horas_sin_labor_log') {
+      var que = ht ? 'apuntó horas ' + ht : 'apuntó ' + duracion(d.horas_apuntadas_min);
+      if (tu) return h.persona + ' ' + que + ' y no aparece en tu ' + rep + '. Si trabajó contigo, agrégalo.';
+      if (!d.hay_labor_log) return h.persona + ' ' + que + ' y ese día no hay ningún ' + rep + '.';
+      return h.persona + ' ' + que + ' y no aparece en ningún ' + rep + ' de ese día.';
+    }
+    if (h.tipo === 'nombre_dudoso') {
+      var c = (d.candidatos || []).map(function (x) { return x.persona; });
+      return 'En ' + elReporte + ' dice "' + d.nombre_escrito + '"' + (tt ? ' (' + tt + ')' : '') +
+        (d.motivo === 'varios' ? ' y puede ser ' + c.join(' o ') + '.' : ' y no es nadie del equipo.');
+    }
+    return '';
+  }
+
+  function textoEncargado(items) {
+    var h0 = items[0], rep = nombreReporte(h0.empresa);
+    var pila = String(h0.encargado || '').trim().split(/\s+/)[0];
+    var n = items.length;
+    var out = ['Hola' + (pila ? ', ' + pila : '') + '. Revisé tu ' + rep + ' del ' + fechaEnPalabras(h0.fecha) +
+      ' contra las horas que apuntó la gente y ' + (n === 1 ? 'hay 1 cosa que no coincide:' : 'hay ' + n + ' cosas que no coinciden:')];
+    items.forEach(function (h) { out.push('• ' + renglon(h, true)); });
+    out.push('Corrige el ' + rep + ' o dime qué pasó, por favor.');
+    return out.join('\n');
+  }
+
+  function textoResumen(hallazgos, mensajes, soloFecha) {
+    if (!hallazgos.length) return 'No encontré nada';
+    var n = hallazgos.length, out = [];
+    var fechas = {};
+    hallazgos.forEach(function (h) { fechas[h.fecha] = true; });
+    var variasFechas = Object.keys(fechas).length > 1;
+    out.push('Revisé ' + (variasFechas ? 'los labor logs' : 'el ' + fechaEnPalabras(soloFecha || hallazgos[0].fecha)) +
+      ' y encontré ' + (n === 1 ? '1 cosa' : n + ' cosas') + ' que no ' + (n === 1 ? 'coincide.' : 'coinciden.'));
+    var ultimo = '';
+    hallazgos.forEach(function (h) {
+      var cab = (variasFechas ? fechaEnPalabras(h.fecha) + ' · ' : '') + nombreEmpresa(h.empresa);
+      if (cab !== ultimo) { out.push(cab + ':'); ultimo = cab; }
+      var extra = '';
+      if (h.detalle.horas_en_otra_empresa_min) extra += ' (Ese día sí apuntó ' + duracion(h.detalle.horas_en_otra_empresa_min) + ' en la otra empresa.)';
+      if (h.detalle.posible_nombre_dudoso || h.detalle.turno_con_nombre_dudoso) extra += ' (Puede ser por un nombre dudoso.)';
+      out.push('• ' + renglon(h, false) + extra);
+    });
+    var avisados = [];
+    mensajes.forEach(function (m) { var e = m.encargado || 'encargado sin nombre'; if (avisados.indexOf(e) < 0) avisados.push(e); });
+    var soloYo = hallazgos.filter(function (h) { return h.para !== 'encargado'; }).length;
+    if (avisados.length) out.push('Mensaje listo para: ' + lista(avisados) + '.');
+    if (soloYo) out.push(soloYo === 1 ? '1 cosa queda solo para usted (sin encargado a quien reclamarle).' : soloYo + ' cosas quedan solo para usted (sin encargado a quien reclamarle).');
+    return out.join('\n');
+  }
+
+  // ---------- de las filas REALES de la base al contrato neutro ----------
+  //
+  // SUPOSICIONES (13-nov-2026), segun notas/ESTUDIO_COINCIDENCIAS_2026-11-13.md y el
+  // SQL del repo. Nada de esto se comprobo contra la base en vivo.
+  //
+  // perfiles      = filas de profiles: { id, full_name, labor_alias }.
+  //                 Un solo apodo por persona. Todos entran como tipo "cuenta".
+  // temporales    = filas de casual_workers: { id, name }. Tipo "temporal".
+  //                 Los id son uuid en las dos tablas, asi que no chocan. La misma
+  //                 persona dada de alta como cuenta Y como temporal con el mismo
+  //                 nombre sale como "nombre_dudoso" (no se adivina cual es).
+  // labor_logs    = filas de labor_logs: { id, crew_leader, created_by, log_date,
+  //                 work_kind, payload, returned_at, edited_at, created_at }.
+  //                 - turnos = payload.s; cada uno { f: desde, o: hasta, n: nombres }.
+  //                 - empresa = work_kind; si viene vacio es "restauracion" (asi lo
+  //                   trata la app).
+  //                 - devuelto = returned_at lleno. Cuando el encargado lo corrige,
+  //                   fix_my_labor_log vuelve a dejar returned_at vacio, asi que el
+  //                   corregido cuenta otra vez.
+  //                 - Los archivados (archived_at) SI cuentan: archivar es guardar.
+  //                 - creado = edited_at si lo hay, si no created_at. NO se confirmo
+  //                   que labor_logs tenga created_at; si no viene, gana el que venga
+  //                   despues en la lista.
+  //                 - encargado (texto) = crew_leader, o payload.l, o el nombre de la
+  //                   cuenta de created_by.
+  //                 - encargado_id = created_by. PERO si payload.lr es 'manager' (lo
+  //                   lleno el manager por el lider) created_by es el manager: ahi se
+  //                   busca el texto del lider entre los perfiles y, si no queda uno
+  //                   solo, encargado_id va null.
+  //                 - explicados = payload.continuity_review.decisions. La llave de
+  //                   cada decision es JSON.stringify([nombre_normalizado, ini, fin])
+  //                   (labor-continuity-core.js); vale si reason es 'break' u
+  //                   'other_team'. No se revisa la huella (fingerprint) ni si
+  //                   'other_team' quedo 'pending': el encargado SI lo explico.
+  // time_entries  = { user_id, person_name, work_date, clock_in, clock_out, work_kind }.
+  //                 clock_in/clock_out se leen como hora del dia "HH:MM[:SS]" (asi
+  //                 los lee la app). El SQL viejo los crea como timestamptz: si
+  //                 llegan con fecha ("...T08:00:00") se toma la hora tal cual, SIN
+  //                 cambiar de zona horaria. Esto no se confirmo en vivo.
+  //                 Fila sin clock_out (turno abierto) cuenta como "si apunto", 0 min.
+  // casual_hours  = { casual_worker_id, work_date, reported_hours, clock_in,
+  //                 clock_out, work_kind }. Si trae reloj se usa el reloj; si solo
+  //                 trae reported_hours va como "minutos". Una fila sin reloj y sin
+  //                 reported_hours (la que la app crea sola con labor_load_hours) NO
+  //                 cuenta como horas apuntadas.
+  //                 En las dos tablas de horas se cuentan pagadas y sin pagar,
+  //                 confirmadas y sin confirmar.
+  function desdeFilas(filas) {
+    filas = filas || {};
+    var equipo = [];
+    (filas.perfiles || []).forEach(function (p) {
+      if (!p || p.id == null) return;
+      var o = { id: String(p.id), nombre: String(p.full_name || p.name || '').trim(), tipo: 'cuenta' };
+      if (p.labor_alias && String(p.labor_alias).trim()) o.alias = String(p.labor_alias).trim();
+      equipo.push(o);
+    });
+    (filas.temporales || []).forEach(function (t) {
+      if (!t || t.id == null) return;
+      equipo.push({ id: String(t.id), nombre: String(t.name || t.full_name || '').trim(), tipo: 'temporal' });
+    });
+    var eq = armarEquipo(equipo.filter(function (p) { return p.tipo === 'cuenta'; }));
+    var porId = {};
+    equipo.forEach(function (p) { porId[p.id] = p; });
+
+    var labor_logs = (filas.labor_logs || []).filter(Boolean).map(function (r) {
+      var p = r.payload;
+      if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { p = null; } }
+      p = p || {};
+      var creador = r.created_by == null ? null : String(r.created_by);
+      var encargado = String(r.crew_leader || p.l || (creador && porId[creador] ? porId[creador].nombre : '') || '').trim();
+      var encId = creador;
+      if (p.lr === 'manager') {
+        var b = encargado ? buscarEntero(norm(encargado), eq) : { ok: false };
+        encId = b.ok ? b.persona.id : null;
+      }
+      var explicados = [], dec = p.continuity_review && p.continuity_review.decisions;
+      if (dec && typeof dec === 'object') {
+        Object.keys(dec).forEach(function (k) {
+          var d = dec[k];
+          if (!d || (d.reason !== 'break' && d.reason !== 'other_team')) return;
+          try {
+            var nombre = JSON.parse(k)[0];
+            if (nombre && explicados.indexOf(nombre) < 0) explicados.push(String(nombre));
+          } catch (e) { /* llave rara: no se toma como explicacion */ }
+        });
+      }
+      var log = {
+        id: r.id == null ? null : r.id,
+        encargado: encargado, encargado_id: encId,
+        empresa: empresaDe(r.work_kind),
+        fecha: String(r.log_date || p.d || '').slice(0, 10),
+        devuelto: !!r.returned_at,
+        turnos: (Array.isArray(p.s) ? p.s : []).map(function (s) {
+          s = s || {};
+          return { de: hora(s.f) || '', a: hora(s.o) || '', nombres: String(s.n || '') };
+        }),
+        explicados: explicados
+      };
+      var creado = r.edited_at || r.created_at || r.sent_at || null;
+      if (creado) log.creado = creado;
+      return log;
+    });
+
+    var horas = [];
+    (filas.time_entries || []).forEach(function (r) {
+      if (!r || r.user_id == null || !r.work_date) return;
+      horas.push({
+        persona_id: String(r.user_id), persona: r.person_name || undefined,
+        fecha: String(r.work_date).slice(0, 10), empresa: empresaDe(r.work_kind),
+        entrada: hora(r.clock_in), salida: hora(r.clock_out)
+      });
+    });
+    (filas.casual_hours || []).forEach(function (r) {
+      if (!r || r.casual_worker_id == null || !r.work_date) return;
+      var e = hora(r.clock_in), s = hora(r.clock_out), rep = Number(r.reported_hours);
+      var fila = { persona_id: String(r.casual_worker_id), fecha: String(r.work_date).slice(0, 10), empresa: empresaDe(r.work_kind), entrada: null, salida: null };
+      if (e && s) { fila.entrada = e; fila.salida = s; }
+      else if (r.reported_hours != null && isFinite(rep) && rep > 0) fila.minutos = Math.round(rep * 60);
+      else return;
+      horas.push(fila);
+    });
+
+    return {
+      fecha: filas.fecha || null,
+      tolerancia_min: filas.tolerancia_min == null ? TOLERANCIA_DEFECTO : filas.tolerancia_min,
+      equipo: equipo, labor_logs: labor_logs, horas: horas
+    };
+  }
+
+  return {
+    analizar: analizar, desdeFilas: desdeFilas,
+    // piezas sueltas, para pruebas
+    _norm: norm, _sinH: sinH, _partirNombres: partirNombres, _fechaEnPalabras: fechaEnPalabras, _duracion: duracion
+  };
+})();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = LumiCoincidencias;
+
+// (13-nov-2026) "revisa si coinciden los labor logs de ayer", "¿qué no coincide?", "haz la revisión de hoy".
+// Solo dice de qué día; la revisión la hace el motor de arriba con los datos de la app.
+function lumiRevisionRapida(texto, hoy) {
+  const l = String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/^(?:(?:oye|hey|ey|lumi|porfa|por favor|please)\s+)+/, '').replace(/\s+(?:porfa|por favor|please|lumi)$/, '');
+  if(!l) return null;
+  const LOGS = '(?:labor ?logs?|leibor logs?|hojas|reportes|reportes de mudanza)', HORAS = '(?:horas|las horas|sus horas)';
+  const es = new RegExp('^(?:revisa|revisame|checa|checame|verifica|verificame|comprueba|mira|fijate|check|verify)\\b.*\\b(?:coincid\\w+|cuadr\\w+|concuerd\\w+|match\\w*)\\b').test(l)
+    || new RegExp('^(?:revisa|revisame|checa|verifica|compara|check|compare)\\b.*\\b' + LOGS + '\\b.*\\b(?:contra|con|vs|against)\\b.*\\b' + HORAS).test(l)
+    || new RegExp('^(?:revisa|revisame|checa|verifica|compara|check|compare)\\b.*\\b' + HORAS + '\\b.*\\b(?:contra|con|vs|against)\\b.*\\b' + LOGS).test(l)
+    || /^(?:que|cuales|quien|quienes) (?:no )?(?:coincid\w+|cuadr\w+)/.test(l)
+    || new RegExp('^(?:coincid\\w+|cuadr\\w+) (?:los |las )?(?:' + LOGS + '|' + HORAS + ')').test(l)
+    || /^(?:haz|hazme|corre|dame|quiero) (?:la |una )?(?:revision|auditoria)(?: de (?:los )?(?:labor ?logs?|horas|coincidencias))?(?: de (?:ayer|hoy|antier))?(?: diaria)?$/.test(l)
+    || /^(?:hay|hubo) (?:algo|alguien|labor logs?|horas) que no (?:coincid\w+|cuadr\w+)/.test(l);
+  if(!es) return null;
+  const d = hoy ? new Date(hoy) : new Date(), cuantos = /\b(?:antier|anteayer|day before yesterday)\b/.test(l) ? 2 : /\b(?:hoy|today)\b/.test(l) ? 0 : 1;
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() - cuantos);
+  return { fecha: x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0') };
+}
+if(typeof module === 'object' && module.exports) module.exports.lumiRevisionRapida = lumiRevisionRapida;
+// LUMI_COINCIDENCIAS_END
 // LUMI_NAV_BEGIN  (13-nov-2026) ABRIR Y CERRAR PANTALLAS DEL MANAGER, AL INSTANTE.
 // Probado en vivo: "abre la página de pagos" -> 25 s y "No encontré una página para pagos. Di que no
 // la encontré"; "ciérrala" -> "No encontré esa ventana" (lo tomaba por una ventana de la Mac). La lista
@@ -75279,6 +76007,29 @@ function lumiIncompleteSpeechReply(text){
         const command=lumiComposeParse(texto,d,lumiCurrentMessageContext(owner));
         if(command){await asComposeMessage(command,texto);return;}
       }
+    }
+    // (13-nov-2026, su pedido) LUMI REVISA QUE LABOR LOGS Y HORAS COINCIDAN. Por ahora SOLO LEE y le cuenta: no manda
+    // nada a nadie. Los mensajes para los encargados quedan preparados (window.__lumiRevision) para el paso siguiente.
+    if(!dictando&&!AS.conf&&!AS.pregunta&&SES.role==='manager'&&isManager()&&!AS.sandbox){
+      const rev=lumiRevisionRapida(texto);
+      if(rev){asPararOido();asCallar();asTranscribir(texto);asEstado('pensando','Revisando labor logs y horas…');
+        let dichoRev='';
+        try{
+          const owner=lumiBasicOwner(),co='&company_id=eq.'+encodeURIComponent(SES.company_id),f=encodeURIComponent(rev.fecha);
+          const [perfiles,temporales,logs,horas,horasT]=await Promise.all([
+            lumiBasicAll('/rest/v1/profiles?select=id,full_name,labor_alias,status,role'+co,owner),
+            lumiBasicAll('/rest/v1/casual_workers?select=id,name,status'+co,owner),
+            lumiBasicAll('/rest/v1/labor_logs?select=*'+co+'&log_date=eq.'+f,owner),
+            lumiBasicAll('/rest/v1/time_entries?select=id,user_id,work_date,clock_in,clock_out,work_kind'+co+'&work_date=eq.'+f,owner),
+            lumiBasicAll('/rest/v1/casual_hours?select=*'+co+'&work_date=eq.'+f,owner)]);
+          const r=LumiCoincidencias.analizar(LumiCoincidencias.desdeFilas({fecha:rev.fecha,tolerancia_min:15,
+            perfiles:perfiles.filter(p=>p.status!=='removed'),temporales:temporales.filter(p=>p.status!=='removed'),labor_logs:logs,time_entries:horas,casual_hours:horasT}));
+          window.__lumiRevision={at:Date.now(),fecha:rev.fecha,resultado:r};
+          const n=r.hallazgos.length,m=r.mensajes.length;
+          asMostrarRespuesta(r.resumen+(m?'\n\nTodavía no le mando nada a nadie.':'')+'\n('+logs.length+' labor logs y '+(horas.length+horasT.length)+' registros de horas revisados.)');
+          dichoRev=n?'Encontré '+n+(n===1?' cosa que no coincide':' cosas que no coinciden')+'. '+(m?'Tengo '+m+(m===1?' mensaje listo para el encargado':' mensajes listos para los encargados')+'; todavía no mando nada.':'Son para que usted las vea; no hay encargado a quien avisar.'):'Todo coincide ese día: no encontré nada.';
+        }catch(e){dichoRev='No pude hacer la revisión: '+String(e&&e.message||e).slice(0,120);asMostrarRespuesta(dichoRev);}
+        asRecordarAccionMac(texto,dichoRev);asHablar(dichoRev,asSeguirOyendo);return;}
     }
     // (13-nov-2026) ENTENDER AUNQUE SE DIGA DE OTRA FORMA (solo en la app Lumi de la Mac). Si ninguna regla agarra la
     // frase y huele a estas habilidades, el cerebro de la Mac dice qué se pidió y se convierte en la frase de libro
