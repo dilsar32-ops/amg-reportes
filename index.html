@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R469';
+  const APP_BUILD = '2026-11-13-R470';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -33260,12 +33260,25 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       _scanId: data._scanId || '',
       _vigenteDesde: +data._vigenteDesde || 0,      // (20-oct, C) "Usar esta versión" de Versiones anteriores
       _studPairs: fpStudWallPairs(data),
-      rooms: (data.rooms || []).map(r => ({
-        roomName: r.roomName || '',
-        level: r.level || 1,
-        deleted: !!r.deleted,
-        summary: fpPisoPorRevisar(r) ? { floorAreaSqFt: 0, porRevisar: true } : { floorAreaSqFt: fpRoomDisplayAreaSqFt(r) || 0 }   // (12-nov-2026, Molde-2) "needs review": sin número, como en el plano
-      }))
+      rooms: (data.rooms || []).map(r => {
+        const o = {
+          roomName: r.roomName || '',
+          level: r.level || 1,
+          deleted: !!r.deleted,
+          summary: fpPisoPorRevisar(r) ? { floorAreaSqFt: 0, porRevisar: true } : { floorAreaSqFt: fpRoomDisplayAreaSqFt(r) || 0 }   // (12-nov-2026, Molde-2) "needs review": sin número, como en el plano
+        };
+        // (13-nov-2026, Regla) EL CLÓSET APARTE VA EN EL RESUMEN. Su piso se le resta al cuarto (floorAreaSqFt es lo que imprime el
+        // cuarto) y sale con su renglón; sin esto el total del resumen salía corto por el clóset (Bedroom 120 + Closet 10 + Living
+        // 150: el plano 280 y el resumen 270) y Medidas no tenía el Closet con el plano en el disco. Va el piso entero del cuarto
+        // (grossAreaSqFt, lo que suma el total: fpRoomGrossAreaSqFt) y cada clóset con su nombre y medida (fpClosetsAparte).
+        // (typeof: el arnés del disco, tests/_disco_dom.js, copia esta función con una lista corta de vecinas)
+        const cs = o.summary.porRevisar || typeof fpClosetsAparte !== 'function' ? [] : fpClosetsAparte(r);
+        if(cs.length){
+          o.summary.grossAreaSqFt = fpRoomGrossAreaSqFt(r);
+          o._subAreas = cs.map(sa => ({ name: sa.name, cx: sa.cx, cy: sa.cy, w: sa.w, d: sa.d, _frente: true, _aparte: true }));
+        }
+        return o;
+      })
     };
   }
   // El archivo lleva la ENTRADA entera (id, fecha, trabajo, plano), no solo el
@@ -34290,7 +34303,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // sq ft que los del plano guardado (Kitchen 206.3 al editar, 175.3 al volver a abrir). Corre aquí, antes de guardar (y de
     // pintar: quien guarda pinta después), el mismo arreglo con las mismas rejas: lo guardado ya trae sus marcas y volver a
     // abrirlo no cambia nada. Si no hay encime entre los contornos crudos sale enseguida.
-    if(floorplanData._handEdited){ try{ fpResolverParedesAjenasEditado(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } }
+    if(floorplanData._handEdited){ try{ fpResolverEditadoQuieto(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } }
     if(!floorplanId) floorplanId = 'fp' + Date.now() + Math.floor(Math.random()*1000);
     // La fecha se renueva cada vez que lo toca: los 3 dias cuentan desde la
     // ULTIMA vez que trabajo en el, no desde que lo escaneo.
@@ -34562,7 +34575,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       fpSellarGeo(d);
     } else {
       // (20-oct) editado a mano: el mismo arreglo de paredes ajenas, con las rejas de fpResolverParedesAjenasEditado.
-      try{ fpResolverParedesAjenasEditado(d); }catch(e){ w('paredes ajenas', e); }
+      try{ fpResolverEditadoQuieto(d); }catch(e){ w('paredes ajenas', e); }
     }
     return true;
   }
@@ -41807,7 +41820,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     }
     if(t.kind === 'wall'){
       const dd = FP_QUANT(t.d);
-      if(Math.abs(dd) < 1/24){ fpClearUndoSnapshot(); renderFloorplanSvg(floorplanData); fpRenderEditHandles(); return; }
+      // (13-nov-2026, Dedo) lo que no se movió deja Deshacer y Rehacer exactos como antes de agarrar (fpPushUndo vació Rehacer)
+      if(Math.abs(dd) < 1/24){ fpClearUndoSnapshot(); fpDevolverAntes(t.antes); renderFloorplanSvg(floorplanData); fpRenderEditHandles(); return; }
       const dx = t.n.x*dd, dy = t.n.y*dd;
       const movedWalls = new Set();
       const encAntes = floorplanData.merged !== false ? fpEncimePorPareja() : null;   // (12-nov, revision) ver abajo
@@ -41877,7 +41891,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
             `No se movió la pared. ${A} y ${B2} contarían los dos ${n} sq ft del mismo piso y el total lo contaría dos veces. Muévala menos, o arregle primero el contorno de uno de los dos.`,
             `Wall not moved. ${A} and ${B2} would both count ${n} sq ft of the same floor, and the total would count it twice. Move it less, or fix the outline of one of them first.`);
           fpRestoreSnapshot(fpUndoStack.pop());
-          fpUpdateUndoBtn();
+          fpDevolverAntes(t.antes);   // (13-nov-2026, Dedo) la movida regresada no borra Rehacer (fpPushUndo lo vació al agarrar)
           alert(aviso);
         }
       }
@@ -41894,6 +41908,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(collapses){
         alert('That would collapse a wall - move it less, or remove the wall instead.');
         fpClearUndoSnapshot();
+        fpDevolverAntes(t.antes);   // (13-nov-2026, Dedo) Rehacer queda como estaba
         renderFloorplanSvg(floorplanData);
         fpRenderEditHandles();
         return;
@@ -41925,7 +41940,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
             `No se movió la esquina. ${A} y ${B2} contarían los dos ${n} sq ft del mismo piso y el total lo contaría dos veces. Muévala menos, o arregle primero el contorno de uno de los dos.`,
             `Corner not moved. ${A} and ${B2} would both count ${n} sq ft of the same floor, and the total would count it twice. Move it less, or fix the outline of one of them first.`);
           fpRestoreSnapshot(fpUndoStack.pop());
-          fpUpdateUndoBtn();
+          fpDevolverAntes(t.antes);   // (13-nov-2026, Dedo) la movida regresada no borra Rehacer (fpPushUndo lo vació al agarrar)
           alert(aviso);
         }
       }
@@ -47309,7 +47324,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   // El contorno de un cuarto con sus paredes; `ajenos` = el piso cerrado de los demás que los puentes no pueden pisar ([] = sin mirar a nadie).
   function fpContornoDeCuarto(room, gapInfo, ajenos, reparar){
-    const cadena = (room, gapInfo) => {
+    let sinJuntas = false;   // ver elegir: el contorno crudo cruzado se cose como siempre
+    const cadena = (room, gapInfo, dosPuntas) => {
       // Una pared de solo studs DIBUJADA Y NO PARTIDA (sin pareja) no es borde:
       // si entrara, el encadenado la cosería al anillo y la hoja imprimiría un
       // cuarto en ocho con piso y pared falsos - sin que nadie partiera nada.
@@ -47319,6 +47335,16 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // dos cuartos, solo el tramo que es de este. Ver fpResolverParedesAjenas.
       let walls = (room.walls||[]).map(w => fpRecorteVigente(w) ? Object.assign({}, w, { start: w._recorte.start, end: w._recorte.end }) : w).filter(w => w.start && w.end && !w._ajena && !(w._studWall && !w._studPairId)
         && Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) > 0.05);
+      // (13-nov-2026, Hueco) PARED REPETIDA. La misma pared dos veces en la lista del cuarto (un re-escaneo o un "Completar"
+      // que la vuelve a traer, corrida unos centésimos): el encadenado sube por una y baja por la otra, el contorno se dobla
+      // sobre sí mismo y las demás paredes quedan fuera. En los inventados con una pared repetida: Bathroom 126.3 -> 0 sq ft,
+      // Living Room 181 -> 0 y Kitchen 91.6 -> 10.7, sin "needs review". Para el contorno, una pared con las dos puntas a
+      // 0.05 ft o menos de las de otra (en cualquier sentido) es la misma: cuenta la primera. No se borra del dibujo.
+      // No más de 0.05: a 0.11 ft (el taller#1 editado: la pared de arriba del Shop y la que vio por la puerta del vecino) son
+      // dos paredes, y el resolvedor de paredes ajenas necesita las dos para recortarle al Shop su tramo; con 0.15 se tiraba
+      // una y el Shop salía "needs review" (total 1325.9 -> 314.0).
+      { const cerca = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) <= 0.05;
+        walls = walls.filter((w, k) => !walls.some((o, j) => j < k && ((cerca(o.start, w.start) && cerca(o.end, w.end)) || (cerca(o.start, w.end) && cerca(o.end, w.start))))); }
       // (31 oct) una pared ESCANEADA suelta por una punta, con esa punta por DENTRO del piso cerrado de otro cuarto (más de 1 ft), no
       // es borde de este cuarto (su borde no puede estar adentro del piso del vecino): se deja fuera y se reporta. Las que el
       // técnico dibujó (_added) mandan siempre. Es el "triángulo del baño" del 17-oct, resuelto en el motor y no solo en el editor.
@@ -47344,6 +47370,27 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(walls.length < 3 && !(walls.length === 2 && (room._sinAjenas || (room.walls||[]).some(w => w && w._ajena))))
         return walls.map(w => w.start);
       const tol = 1.0;
+      // (13-nov-2026, Hueco) ESQUINA QUE NO LLEGÓ. Dos paredes que se juntan a menos de `tol` se cosían por la punta de la
+      // que ya estaba en el contorno y la punta de la nueva se tiraba: si las dos van a escuadra, el contorno cortaba la
+      // esquina en diagonal desde la otra punta de la pared nueva. Un Shop de 30 x 20 con la pared de abajo empezando 0.9 ft
+      // antes de la esquina imprimía 591 en vez de 600 (con 1.2 ft, como ya es puente, sí daba 600), sin aviso. Ahora, si las
+      // dos van en ángulo (45°-135°) y el hueco pasa de 0.05 ft, la junta es donde se cruzan sus rectas (lo que hace la regla
+      // C de las esquinas con los huecos de 1 a 1.5 ft), solo si ese punto queda a 1.5 ft o menos de las dos puntas. Casi
+      // en línea, o con el cruce lejos, se cose como siempre.
+      // No se usa con `sinJuntas` (el contorno crudo que sale cruzado: ver elegir).
+      const esquinaJunta = (a0, a1, b0, b1, d) => {
+        if(sinJuntas || !(d > 0.05)) return null;
+        const la = Math.hypot(a1.x - a0.x, a1.y - a0.y), lb = Math.hypot(b1.x - b0.x, b1.y - b0.y);
+        if(la < 1 || lb < 1) return null;
+        const u = { x: (a1.x - a0.x) / la, y: (a1.y - a0.y) / la }, v = { x: (b1.x - b0.x) / lb, y: (b1.y - b0.y) / lb };
+        const den = u.x * v.y - u.y * v.x;
+        if(Math.abs(den) < Math.SQRT1_2) return null;
+        const t = ((b0.x - a1.x) * v.y - (b0.y - a1.y) * v.x) / den;
+        const X = { x: a1.x + u.x * t, y: a1.y + u.y * t };
+        const s = (X.x - b0.x) * v.x + (X.y - b0.y) * v.y;
+        if(Math.abs(t) > 1.5 || Math.abs(s) > 1.5 || t < -0.5 * la || s > 0.5 * lb) return null;
+        return X;
+      };
       const used = new Array(walls.length).fill(false);
       const chains = [];
       for(let s=0; s<walls.length; s++){
@@ -47367,6 +47414,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           }
           if(best && best.d <= tol){
             used[best.i] = true;
+            const near = best.far === walls[best.i].end ? walls[best.i].start : walls[best.i].end;
+            const X = best.atTail ? esquinaJunta(chain[chain.length-2], chain[chain.length-1], near, best.far, best.d)
+                                  : esquinaJunta(chain[1], chain[0], near, best.far, best.d);
+            if(X){ if(best.atTail) chain[chain.length-1] = X; else chain[0] = X; }
             if(best.atTail) chain.push({x:best.far.x,y:best.far.y});
             else chain.unshift({x:best.far.x,y:best.far.y});
             extended = true;
@@ -47397,6 +47448,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           if(gapInfo) gapInfo.leftovers = rest.map(c => c.map(pt => ({x:pt.x, y:pt.y})));
           break;
         }
+        // (13-nov-2026, Hueco) `dosPuntas`: la cadena que sigue se pega por la punta del contorno que le quede más cerca, la
+        // de adelante o la de atrás (ver `elegir`). Por la de atrás = darle la vuelta al contorno y pegar por la de adelante.
+        if(dosPuntas){
+          const h = poly[0], t = poly[poly.length-1], cerca = q => Math.min(...rest.map(c => Math.min(Math.hypot(c[0].x-q.x, c[0].y-q.y), Math.hypot(c[c.length-1].x-q.x, c[c.length-1].y-q.y))));
+          if(cerca(h) < cerca(t) - 1e-9) poly.reverse();
+        }
         const tail = poly[poly.length-1];
         let bi=-1, bflip=false, bd=Infinity;
         rest.forEach((c,i) => {
@@ -47422,6 +47479,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           if(rodeo && rodeo.cruza) gapInfo.cruzaPiso = true;
         }
         if(rodeo) rodeo.por.forEach(p => poly.push({x:p.x,y:p.y}));
+        if(bd <= tol && poly.length >= 2 && seg.length >= 2){ const X = esquinaJunta(poly[poly.length-2], tail, seg[0], seg[1], bd); if(X) poly[poly.length-1] = X; }
         seg.forEach((p,i) => { if(i===0 && bd<=tol) return; poly.push({x:p.x,y:p.y}); });
       }
       const closeDist = Math.hypot(poly[0].x-poly[poly.length-1].x, poly[0].y-poly[poly.length-1].y);
@@ -47433,7 +47491,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(rodeoCierre && rodeoCierre.cruza) gapInfo.cruzaPiso = true;
       }
       if(rodeoCierre) rodeoCierre.por.forEach(p => poly.push({x:p.x,y:p.y}));
-      if(poly.length>3 && closeDist <= tol) poly.pop();
+      if(poly.length>3 && closeDist <= tol){ const X = esquinaJunta(poly[poly.length-2], poly[poly.length-1], poly[0], poly[1], closeDist); if(X) poly[0] = X; poly.pop(); }
       if(poly.length>=3) return fpPruneOutlineSpikes(fpQuitarBucles(poly, reparar));
       return walls.map(w=>w.start);
     };
@@ -47479,11 +47537,52 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     //     3.5 ft o menos), con 0.6 o menos de los pies de puente de antes y sin tapar piso ajeno (la medida del resolvedor:
     //     3 sq ft o el 5 % del menor). Así el clóset queda dentro del anillo y su número lo saca la regla de clósets. Una pared
     //     dibujada a mano (_added) nunca se quita.
-    const elegir = (room) => {
-      const gi = {};
-      const p0 = fpPruneOutlineSpikes(cadena(room, gi), 0.05);
+    // (13-nov-2026, Hueco) EL CLÓSET DE PARED QUE SE QUEDA AFUERA SEGÚN EL ORDEN DE LAS PAREDES. El frente de un clóset de pared
+    // va en la MISMA recta que la pared del cuarto (la pared sigue de largo y el clóset es un bolsillo detrás). En la T de cada
+    // punta del frente se juntan tres paredes y el encadenado se va por la primera de la lista: si es el frente, el anillo cierra
+    // derecho y el bolsillo (lado, fondo, lado) queda AFUERA del cuarto: su piso no lo cuenta nadie (recámara de 12 x 12 con
+    // clóset de 5.5 x 2: 144 en vez de 144 + 11 del clóset; con las paredes en otro orden sí salían los dos). Si el anillo pasa
+    // por una pared del cuarto con puerta o abertura (el frente) y de sus DOS puntas sale otra pared del cuarto hacia afuera del
+    // anillo (los lados del clóset), se saca el contorno sin ese frente: se queda si no se cruza, crece entre 2 sq ft y la mitad
+    // del cuarto y no tapa más piso ajeno (3 sq ft o el 5 % del menor, como la regla del frente-cuerda). El frente sigue en el dibujo (la regla de clósets lo aparta como siempre). Vale para
+    // el contorno sano de primera y para el que sale de componer uno repetido (el frente y el bolsillo cosidos en un "8"
+    // que la regla de abajo compone quitando un lado corto del clóset: también dejaba el clóset afuera).
+    const alcobaAfuera = (room, p0) => {
+      if(!reparar || !room || !Array.isArray(room.walls) || !p0 || p0.length < 3) return null;
+      const D = (p, q) => Math.hypot(p.x - q.x, p.y - q.y), a0 = fpContornoArea(p0);
+      const alSeg = (q, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy, t = L2 ? Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / L2)) : 0; return Math.hypot(q.x - a.x - t * dx, q.y - a.y - t * dy); };
+      const alBorde = (q, P) => P.reduce((m, a, k) => Math.min(m, alSeg(q, a, P[(k + 1) % P.length])), Infinity);
+      const enAnillo = q => alBorde(q, p0) <= 0.3, afuera = q => !fpPointInPolygon(q, p0) && alBorde(q, p0) > 0.5;
+      const vivas = room.walls.filter(w => w && w.start && w.end && !w._ajena);
+      const hueco = [].concat(room.doors || [], room.openings || []).filter(o => o && o.position && !o._removed);
+      const sale = (q, w) => vivas.some(o => o !== w && ((D(o.start, q) <= 0.3 && afuera(o.end)) || (D(o.end, q) <= 0.3 && afuera(o.start))));
+      for(const w of vivas){
+        if(w._added || D(w.start, w.end) < 1.5 || !enAnillo(w.start) || !enAnillo(w.end) || !enAnillo({ x: (w.start.x + w.end.x) / 2, y: (w.start.y + w.end.y) / 2 })) continue;
+        if(!hueco.some(o => String(o.wallId) === String(w.id) || alSeg(o.position, w.start, w.end) <= 0.5)) continue;
+        if(!sale(w.start, w) || !sale(w.end, w)) continue;
+        const g2 = {}, p2 = cadena(Object.assign({}, room, { walls: room.walls.filter(x => x !== w) }), g2);
+        if(!p2 || p2.length < 3 || fpContornoRoto(p2) || g2.cruzaPiso) continue;
+        const a2 = fpContornoArea(p2);
+        if(!(a2 >= a0 + 2 && a2 <= 1.5 * a0)) continue;
+        if((ajenos || []).some(A => fpEncimeSqFt(p2, A) - fpEncimeSqFt(p0, A) > Math.max(3, 0.05 * Math.min(a2, fpContornoArea(A))))) continue;   // la medida del cuerda
+        // el frente queda como pared de adentro (sobra), igual que cuando el encadenado lo deja solo: así floorplanDetectSubAreas
+        // lo encuentra y aparta el clóset
+        g2.leftovers = (g2.leftovers || []).concat([[{ x: w.start.x, y: w.start.y }, { x: w.end.x, y: w.end.y }]]);
+        return { p: p2, g: g2 };
+      }
+      return null;
+    };
+    const elegir0 = (room) => {
+      let gi = {};
+      let p0 = fpPruneOutlineSpikes(cadena(room, gi), 0.05);
+      // (13-nov-2026, Hueco) El contorno CRUDO (sin `reparar`: el de fpContornoPlano, con el que los resolvedores de paredes
+      // miden cuánto se enciman los cuartos) que sale cruzado se cose como siempre, sin la junta de ESQUINA QUE NO LLEGÓ: en
+      // un contorno roto esa junta corre los encimes que el resolvedor lee para hallar la pared vista por la puerta. En el
+      // taller#1 editado, Kitchen/Shop bajaba de 5.8 a 3.7 sq ft (umbral 4.5) y Office/Shop de 4.6 a 1.5 (umbral 3.3): nada se
+      // marcaba y el Shop imprimía 1647.3 en vez de 1025 (total 1961.3). El contorno crudo sano y el que se enseña la usan.
+      if(!reparar && fpContornoRoto(p0)){ sinJuntas = true; gi = {}; p0 = fpPruneOutlineSpikes(cadena(room, gi), 0.05); }
       const repetido = fpContornoRepetido(p0), cruzado = !repetido && (fpContornoRoto(p0) || !!gi.cruzaPiso);
-      if(!(repetido || cruzado) || !room || !Array.isArray(room.walls)) return { p: p0, g: gi };
+      if(!(repetido || cruzado) || !room || !Array.isArray(room.walls)) return alcobaAfuera(room, p0) || { p: p0, g: gi };
       const tramoDe = w => fpRecorteVigente(w) ? w._recorte : w;
       const vivas = room.walls.filter(x => x && x.start && x.end && !x._ajena).map(x => ({ w: x, t: tramoDe(x) }));
       const extremos = (q, w, r) => vivas.reduce((n, o) => n + (o.w !== w && (Math.hypot(o.t.start.x - q.x, o.t.start.y - q.y) <= r || Math.hypot(o.t.end.x - q.x, o.t.end.y - q.y) <= r) ? 1 : 0), 0);
@@ -47502,7 +47601,19 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(mejor) break;
       }
       const pu0 = (gi.bridges || []).reduce((t, b) => t + b, 0), n0 = (gi.bridges || []).length, a0 = fpContornoArea(p0);
-      const viaRepetido = !!mejor;
+      // (13-nov-2026, Hueco) CUARTO ABIERTO QUE SE CRUZA POR EL ORDEN DE SUS PAREDES. El encadenado pega cada cadena suelta
+      // SOLO por la punta de adelante del contorno. En un cuarto abierto de un lado (la cocina abierta a la sala: tres paredes
+      // con huecos en las esquinas), si empieza por la pared de un lado, salta en diagonal a la de enfrente (9 ft por el piso)
+      // y regresa cruzándose: el contorno sale en moño, 34.7 sq ft de una cocina de 91.8, y el cuarto se va a "needs review"
+      // y fuera del total. La misma cocina con sus paredes en otro orden cierra bien. Si el contorno sale cruzado, se prueba
+      // pegando cada cadena por la punta (de adelante o de atrás) que le quede más cerca, con las MISMAS paredes; se queda si
+      // no se cruza, no pisa piso ajeno y usa menos pies de puente. Solo cuando el cruce ya mandaba el cuarto a "needs review"
+      // (fpContornoDudaSqFt >= 4, la regla de fpPisoPorRevisar): un cruce chico se sigue imprimiendo como antes.
+      if(!mejor && reparar && cruzado && (typeof fpContornoDudaSqFt !== 'function' || fpContornoDudaSqFt(p0) >= 4)){
+        const g2 = {}, p2 = cadena(room, g2, true), pu2 = (g2.bridges || []).reduce((t, b) => t + b, 0);
+        if(!fpContornoRoto(p2) && !g2.cruzaPiso && pu2 < pu0 - 0.05) mejor = { p: p2, g: g2, a: fpContornoArea(p2), pu: pu2 };
+      }
+      const viaRepetido = !!mejor;   // (con dosPuntas tampoco es conjetura: son las mismas paredes)
       if(!mejor && reparar) room.walls.forEach(w => {
         if(!w || !w.start || !w.end) return;
         const c = sin(w);
@@ -47523,8 +47634,58 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(!(c.g.bridges || []).every(b => b <= FP_PISO_PUENTE_MAX) || !(pu <= 0.6 * pu0) || (ajenos || []).some(A => fpEncimeSqFt(c.p, A) > Math.max(3, 0.05 * Math.min(a, fpContornoArea(A))))) return;
         if(!mejor || pu < mejor.pu - 0.05 || (Math.abs(pu - mejor.pu) <= 0.05 && a > mejor.a)) mejor = { p: c.p, g: c.g, a, pu };
       });
-      return mejor ? { p: mejor.p, g: mejor.g } : { p: p0, g: gi };
+      return mejor ? (alcobaAfuera(room, mejor.p) || { p: mejor.p, g: mejor.g }) : { p: p0, g: gi };
     };
+    // (13-nov-2026, Regla) FRENTE DE CLÓSET QUE CIERRA UN ANILLO SANO. El frente del clóset (cuerda: una T en cada punta) también
+    // sale en un contorno SANO: el encadenado toma la pared que llega primero en la lista; si llega el frente antes que el lado
+    // del clóset, el anillo cierra derecho por el frente (o la regla del contorno repetido quita un lado corto del clóset) y el
+    // clóset (lados y fondo) queda de sobra. Su piso no lo contaba nadie: ni el cuarto ni el renglón del clóset. Bedroom 12 x 10
+    // con clóset de 4 x 2.5 y su frente: con el frente al final de la lista, Bedroom 120 + Closet 10 (total 130); con el frente
+    // primero, Bedroom 120 y el total 10 sq ft corto. Mismas paredes, otro orden, otro total.
+    // Se prueba el anillo sin cada frente que va por el anillo, y se queda solo si el rincón que gana es del tamaño de un clóset
+    // (5 a 32 sq ft y no más del 30 % del cuarto: los topes de floorplanDetectSubAreas), el anillo nuevo contiene al de antes y
+    // al frente, no lleva más pies de puente ni un puente de más de una puerta, y no tapa piso ajeno. El frente se reporta como
+    // sobra (leftovers), igual que cuando el encadenado lo deja solo, y la regla de clósets hace lo de siempre. Una pared
+    // dibujada a mano (_added) nunca se quita.
+    const frenteDeCloset = (room, r0) => {
+      if(!r0 || !r0.p || r0.p.length < 3 || !room || !Array.isArray(room.walls) || fpContornoRoto(r0.p) || (r0.g && (r0.g.cruzaPiso || r0.g.disputa))) return r0;
+      const tramoDe = w => fpRecorteVigente(w) ? w._recorte : w;
+      const vivas = room.walls.filter(x => x && x.start && x.end && !x._ajena).map(x => ({ w: x, t: tramoDe(x) }));
+      const extremos = (q, w) => vivas.reduce((n, o) => n + (o.w !== w && (Math.hypot(o.t.start.x - q.x, o.t.start.y - q.y) <= 0.3 || Math.hypot(o.t.end.x - q.x, o.t.end.y - q.y) <= 0.3) ? 1 : 0), 0);
+      const frentes = room.walls.filter(w => { if(!w || !w.start || !w.end || w._ajena || w._added || (w._studWall && !w._studPairId)) return false;
+        const t = tramoDe(w); return Math.hypot(t.end.x - t.start.x, t.end.y - t.start.y) >= 1.8 && extremos(t.start, w) >= 2 && extremos(t.end, w) >= 2; });
+      if(!frentes.length) return r0;
+      let actual = { p: r0.p, g: r0.g || {}, walls: room.walls, sobras: [] };
+      for(let vuelta = 0; vuelta < 4; vuelta++){
+        const a0 = fpContornoArea(actual.p), pu0 = ((actual.g && actual.g.bridges) || []).reduce((t, b) => t + b, 0);
+        let mejorF = null;
+        frentes.forEach(w => {
+          if(actual.walls.indexOf(w) < 0) return;
+          const t = tramoDe(w), m = { x: (t.start.x + t.end.x) / 2, y: (t.start.y + t.end.y) / 2 };
+          if(fpDistToPolygon(m, actual.p) > 0.05) return;                                   // el frente va por el anillo de ahora
+          const L = Math.hypot(t.end.x - t.start.x, t.end.y - t.start.y), nx = -(t.end.y - t.start.y) / L * 0.25, ny = (t.end.x - t.start.x) / L * 0.25;
+          const q1 = { x: m.x + nx, y: m.y + ny }, q2 = { x: m.x - nx, y: m.y - ny };
+          const fuera = fpPointInPolygon(q1, actual.p) ? (fpPointInPolygon(q2, actual.p) ? null : q2) : (fpPointInPolygon(q2, actual.p) ? q1 : null);
+          if(!fuera) return;                                                                   // del otro lado del frente: el rincón
+          const g2 = {}, ws = actual.walls.filter(x => x !== w);
+          const p = fpPruneOutlineSpikes(cadena(Object.assign({}, room, { walls: ws }), g2), 0.05);
+          if(!p || p.length < 3 || fpContornoRoto(p) || g2.cruzaPiso) return;
+          const a = fpContornoArea(p), gana = a - a0, pu = (g2.bridges || []).reduce((s, b) => s + b, 0);
+          if(!(gana >= 5 && gana <= 32 && gana <= 0.3 * a) || pu > pu0 + 0.05 || !(g2.bridges || []).every(b => b <= FP_PISO_PUENTE_MAX)) return;
+          if(!fpPointInPolygon(fuera, p) || !actual.p.every(q => fpPointInPolygon(q, p) || fpDistToPolygon(q, p) <= 0.05)) return;
+          if((ajenos || []).some(A => fpEncimeSqFt(p, A) > Math.max(3, 0.05 * Math.min(a, fpContornoArea(A))))) return;
+          if(!mejorF || gana > mejorF.gana) mejorF = { p, g: g2, walls: ws, gana, t };
+        });
+        if(!mejorF) break;
+        actual = { p: mejorF.p, g: mejorF.g, walls: mejorF.walls, sobras: actual.sobras.concat([[{ x: mejorF.t.start.x, y: mejorF.t.start.y }, { x: mejorF.t.end.x, y: mejorF.t.end.y }]]) };
+      }
+      if(!actual.sobras.length) return r0;
+      const g = Object.assign({}, actual.g);
+      if(r0.g && r0.g.apartadas) g.apartadas = r0.g.apartadas;
+      g.leftovers = (g.leftovers || []).concat(actual.sobras);
+      return { p: actual.p, g };
+    };
+    const elegir = (room) => frenteDeCloset(room, elegir0(room));
     let r = elegir(room);
     // (1 nov, R102) PARED DEL VECINO QUE LE METE SU PISO. Si el contorno, ya con los rodeos, sigue tapando la mitad o más del
     // piso cerrado de otro cuarto, es porque una pared ESCANEADA de este cuarto es del otro: corre por el borde de ese piso y
@@ -48190,6 +48351,23 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!quedan.length || !(encime() < e0 - 1) || vivos.some(r => area(r) > a0.get(r) + 0.5)){ vivos.forEach(volver); return []; }
     return quedan;
   }
+  // (13-nov-2026, Dedo) UNA vuelta del arreglo de editados no siempre basta: deja unas marcas, y con ellas la vuelta siguiente
+  // encuentra otras (un plano de taller: al mover la pared del Hallway el editor enseñaba el Shop "needs review" y total 277;
+  // guardar y volver a abrir corría otra vuelta y salía Shop 230.1, Office 59.1 -> 58.4, total 506.4; y la siguiente edición,
+  // hasta un paso (Passage) en otro cuarto, cambiaba los sq ft). Se corre hasta que las marcas ya no cambian (4 vueltas como
+  // mucho): lo que se ve al editar es lo que sale al volver a abrir, y una edición solo cambia lo que tocó. Corre TODAS las
+  // vueltas, la primera incluida (13-nov, al juntar: antes quien llamaba corría la primera aparte y esta siempre otra más, y un
+  // plano grande editado tardaba el doble en abrir). Si la primera no cambia ninguna marca, es una sola vuelta, como antes.
+  function fpResolverEditadoQuieto(data){
+    const marcas = () => ((data && data.rooms) || []).map(r => ((r && r.walls) || []).map(w => w ? (w._ajena ? 'a' : '') + (w._recorte ? JSON.stringify(w._recorte) : '') : '').join(',')).join('|');
+    let hechas = [];
+    for(let vuelta = 0; vuelta < 4; vuelta++){
+      const antes = marcas(), h = fpResolverParedesAjenasEditado(data) || [];
+      hechas = hechas.concat(h);
+      if(!h.length || marcas() === antes) break;
+    }
+    return hechas;
+  }
   function fpPruneOutlineSpikes(poly, cero){
     if(!poly || poly.length < 3) return poly;
     let pts = poly.slice(), changed = true, guard = 0;
@@ -48272,7 +48450,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   function fpRoomGrossAreaSqFt(room){
     const area = fpPolygonAreaSqFt(fpOrderedRoomPolygon(room));
     if(area > 1) return Math.round(area*10)/10;
-    return ((room.summary && room.summary.floorAreaSqFt) || 0);
+    // (13-nov-2026, Regla) el cuarto del resumen con clóset aparte trae su piso entero aparte (fpResumenDe)
+    return ((room.summary && (room.summary.grossAreaSqFt || room.summary.floorAreaSqFt)) || 0);
   }
   // (sin llamar a las de arriba: varias pruebas copian esta función sola)
   function fpRoomDisplayAreaSqFt(room){
@@ -48320,7 +48499,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   function fpPisoPorRevisar(room){
     if(!room || room.deleted) return false;
     // (12-nov-2026, Molde-2) el cuarto del resumen (plano en el disco) no trae paredes: lo dice su resumen (fpResumenDe)
-    if(!(room.walls||[]).length) return !!(room.summary && room.summary.porRevisar);
+    // (13-nov-2026, Regla) Solo el del RESUMEN (sin lista de paredes). Un cuarto del plano entero al que le quitaron todas las
+    // paredes (walls: []) no tiene contorno, igual que con 1 o 2: "needs review". Antes caía a su summary.floorAreaSqFt (el área
+    // del teléfono) y volvía a entrar al total sin dibujarse ni salir en la hoja ni en la tabla (Bedroom de 10 x 10 sin paredes:
+    // total 241.3 con la tabla en 144; con 2 paredes el total era 144).
+    if(!(room.walls||[]).length) return Array.isArray(room.walls) ? true : !!(room.summary && room.summary.porRevisar);
     const gi = {}, poly = fpOrderedRoomPolygon(room, gi);
     if(!(poly && poly.length >= 3)) return true;
     if(!gi.roto) return false;
