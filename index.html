@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R430';
+  const APP_BUILD = '2026-11-12-R431';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71406,7 +71406,32 @@ function ordenHojasAlGrupo(texto){
  const t=sinTildes(oidoDeObra(texto)).replace(/^(?:(?:oye|lumi|porfa|por favor|please)\s+)+/,'');
  return /^(?:manda|mandale|mandales|mandalos|mandalas|envia|enviale|envialos|envialas|pasa|pasale|pasalos|reenvia|send|share|forward)\b.{0,50}\b(?:labor logs?|hojas?|reportes? de (?:trabajo|hoy|ayer))\b.{0,50}\b(?:al grupo|a todos|al chat|en el grupo|al equipo|to the group|to everyone)\b/.test(t);
 }
-const api={oidoDeObra,ordenHojasAlGrupo,vetada,candidata,frasePara,nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
+// UN NOMBRE POR COMO SUENA (12-nov-2026). Visto en vivo: "anota q le adelante a mainor 300 por cel"
+// -> "No identifique a esa persona". El microfono escribe los nombres como los oye: Minor sale
+// "mainor" o "menor", Anibal "anival", Gerson "jerson". Se compara por sonido (h muda, b/v, s/c/z,
+// y/ll/i, k/c/qu, letras dobles) y se acepta la MISMA huella o una sola letra de diferencia.
+// Devuelve los nombres que suenan asi; el que llama decide: uno solo -> ese (y lo ensena en la
+// tarjeta, que es la que se confirma); dos o mas -> preguntar. Nunca escoge entre dos.
+function huellaDeSonido(x){
+ return sinTildes(x).replace(/[^a-z ]/g,'').replace(/h/g,'').replace(/ll/g,'i').replace(/y/g,'i').replace(/v/g,'b')
+  .replace(/qu|k|c(?=[aou])|c$/g,'k').replace(/z|c(?=[ei])|x/g,'s').replace(/g(?=[ei])|j/g,'j').replace(/ai/g,'i').replace(/(.)\1+/g,'$1');
+}
+function unaLetraDeDiferencia(a,b){
+ if(a===b)return true;if(Math.abs(a.length-b.length)>1)return false;
+ let i=0,j=0,dif=0;
+ while(i<a.length&&j<b.length){if(a[i]===b[j]){i++;j++;continue;}if(++dif>1)return false;if(a.length>b.length)i++;else if(b.length>a.length)j++;else{i++;j++;}}
+ return dif+(a.length-i)+(b.length-j)<=1;
+}
+function suenaComo(palabra,nombres){
+ const h=huellaDeSonido(palabra);if(h.length<3)return [];
+ const iguales=[],cerca=[];
+ for(const n of nombres||[]){
+  const primero=String(n||'').trim().split(/\s+/)[0],hn=huellaDeSonido(primero);if(hn.length<3)continue;
+  if(hn===h)iguales.push(n);else if(h.length>=4&&hn.length>=4&&unaLetraDeDiferencia(h,hn))cerca.push(n);
+ }
+ return iguales.length?iguales:cerca;
+}
+const api={huellaDeSonido,suenaComo,oidoDeObra,ordenHojasAlGrupo,vetada,candidata,frasePara,nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 // LUMI_INBOX_DIALOGUE_CORE_END
@@ -72976,6 +73001,18 @@ function resolve(text,people,context){
  found=[...new Map(found.map(p=>[p.key,p])).values()];
  if(found.length===1)return {person:found[0]};
  if(found.length>1)return {error:'¿De cuál persona hablamos? '+found.map(p=>p.name).join(', ')+'.'};
+ // (12-nov-2026) EL NOMBRE POR COMO SUENA: "le adelante a mainor 300" es Minor. Solo la palabra que va
+ // despues de "a/para/de", contra los nombres de la gente activa. Uno solo -> ese, y sale en la
+ // tarjeta que el confirma; dos o mas -> se pregunta cual. Con dinero nunca se escoge entre dos.
+ try{
+  const oido=/\b(?:a|to|para|for|de|of)\s+(?!hacer|pagar|escribir|dejar|entregar|el|la|su|un|mi|ese|this|the|him|her|it|pay|write|leave|zelle|zell|cheque|cheke|check|cash|efectivo)([a-z]{3,})\b/.exec(original);
+  if(oido&&typeof LumiInboxDialogue!=='undefined'&&LumiInboxDialogue.suenaComo){
+   const nombres=LumiInboxDialogue.suenaComo(oido[1],candidates.map(p=>p.name));
+   const suenan=candidates.filter(p=>nombres.includes(p.name));
+   if(suenan.length===1)return {person:suenan[0],porSonido:oido[1]};
+   if(suenan.length>1)return {error:'¿De cuál persona hablamos? '+suenan.map(p=>p.name).join(', ')+'.'};
+  }
+ }catch(e){}
  // Explicit unknown names, including short corrections, cannot inherit a prior worker.
  if(/\b(?:a|to|para|for|de|of|about|meant)\s+(?!hacer|pagar|escribir|dejar|entregar|el|la|su|un|mi|ese|this|the|him|her|it|pay|write|leave|zelle|zell|cheque|cheke|check|cash|efectivo)([a-z]+)\b/.test(original)||/^(?:no ese no|no era|no es) [a-z]+/.test(original))return {error:'No identifiqué a esa persona. Dime su nombre completo.'};
  const prior=context&&candidates.find(p=>p.key===context.key);
