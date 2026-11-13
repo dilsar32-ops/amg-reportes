@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R461';
+  const APP_BUILD = '2026-11-13-R462';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -75082,7 +75082,7 @@ const LumiCoincidencias = (function () {
     var elReporte = tu ? 'tu ' + rep : (h.encargado ? 'el ' + rep + ' de ' + h.encargado : 'el ' + rep);
     if (h.tipo === 'apunto_de_mas') {
       return h.persona + ' apuntó ' + duracion(d.horas_apuntadas_min) + (ht ? ' (' + ht + ')' : '') +
-        ' y ' + (h.encargado || tu ? elReporte : (h.empresa === 'mudanza' ? 'los reportes de mudanza' : 'los labor logs')) + ' le da ' + duracion(d.horas_labor_log_min) + (tt ? ' (' + tt + ')' : '') +
+        ' y ' + (h.encargado || tu ? elReporte + ' le da ' : (h.empresa === 'mudanza' ? 'los reportes de mudanza' : 'los labor logs') + ' le dan ') + duracion(d.horas_labor_log_min) + (tt ? ' (' + tt + ')' : '') +
         '. Son ' + duracion(d.diferencia_min) + ' de más.';
     }
     if (h.tipo === 'en_labor_log_sin_horas') {
@@ -76011,6 +76011,28 @@ function lumiIncompleteSpeechReply(text){
     // (13-nov-2026, su pedido) LUMI REVISA QUE LABOR LOGS Y HORAS COINCIDAN. Por ahora SOLO LEE y le cuenta: no manda
     // nada a nadie. Los mensajes para los encargados quedan preparados (window.__lumiRevision) para el paso siguiente.
     if(!dictando&&!AS.conf&&!AS.pregunta&&SES.role==='manager'&&isManager()&&!AS.sandbox){
+      // EL SÍ PARA MANDAR LOS AVISOS (decisión del dueño: "me los enseña y con un sí salen todos"). Solo vale dentro de los
+      // 5 minutos después de que ella preguntó; cualquier otra cosa que diga cancela la pregunta y sigue su camino normal.
+      {const RV=window.__lumiRevision,lw=String(texto||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[¡!¿?.,;:]/g,' ').replace(/\s+/g,' ').trim();
+       const pideMandar=/^(?:si )?(?:mandalos|mandaselos|mandalo|mandaselo|envialos|envialo|manda (?:los|el) avisos?|manda (?:los|el) mensajes? de la revision|send them|send it)(?: todos| ya| pues| porfa| por favor)*$/.test(lw);
+       if(RV&&RV.pide&&Date.now()-RV.pide<300000&&RV.porMandar&&RV.porMandar.length&&(asEsSi(lw)||pideMandar)){
+         RV.pide=0;asPararOido();asCallar();asTranscribir(texto);asEstado('pensando','Mandando los avisos…');
+         const owner=lumiBasicOwner(),ok=[],mal=[];
+         for(const x of RV.porMandar){try{
+           const res=await authFetch('/rest/v1/mensajes',{method:'POST',headers:Object.assign(cloudHeaders(),{Prefer:'return=representation'}),signal:AbortSignal.timeout(15000),
+             body:JSON.stringify({company_id:SES.company_id,de_user_id:SES.user_id,de_nombre:String(SES.full_name||SES.name||'Oficina'),para_user_id:x.para_user_id,para_casual_id:x.para_casual_id,para_grupo_id:null,para_todos:false,para_nombre:x.para_nombre,casa:null,texto:x.texto+'\n— Lumi, asistente de la oficina'})});
+           const filas=res.ok?await res.json():null;                       // se cuenta como mandado SOLO si la nube devolvió la fila guardada
+           if(Array.isArray(filas)&&filas[0]&&filas[0].id)ok.push(x);else mal.push(x);
+         }catch(e){mal.push(x);}}
+         if(ok.length){try{const prev=((await lumiPaySetting(owner,'lumi_revision_avisada_'+SES.user_id))||{}).claves||[];await lumiPaySetting(owner,'lumi_revision_avisada_'+SES.user_id,{claves:prev.concat(ok.map(x=>x.clave)).slice(-400)});}catch(e){}}
+         RV.porMandar=mal;
+         const d=(ok.length?'Listo. Mandé '+ok.length+(ok.length===1?' aviso':' avisos')+' por Mensajes de la app: a '+[...new Set(ok.map(x=>x.para_nombre))].join(', ')+'.':'')+(mal.length?(ok.length?' ':'')+'No pude mandar '+mal.length+': '+[...new Set(mal.map(x=>x.para_nombre))].join(', ')+'. Dígame "mándalos" para intentar otra vez.':'');
+         if(mal.length)RV.pide=Date.now();
+         asRecordarAccionMac(texto,d);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);return;}
+       if(RV&&RV.pide&&Date.now()-RV.pide<300000&&asEsNo(lw)){RV.pide=0;const d='Va, no mando nada. Los avisos se quedan sin mandar.';asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,d);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);return;}
+       if(RV&&RV.pide&&!pideMandar)RV.pide=0;
+       if(RV&&pideMandar&&RV.porMandar&&RV.porMandar.length&&Date.now()-RV.at<1800000){RV.pide=Date.now();const k=RV.porMandar.length,d='Tengo '+k+(k===1?' aviso':' avisos')+' de la revisión: para '+[...new Set(RV.porMandar.map(x=>x.para_nombre))].join(', ')+'. ¿Se '+(k===1?'lo':'los')+' mando?';asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);return;}
+      }
       const rev=lumiRevisionRapida(texto);
       if(rev){asPararOido();asCallar();asTranscribir(texto);asEstado('pensando','Revisando labor logs y horas…');
         let dichoRev='';
@@ -76026,8 +76048,21 @@ function lumiIncompleteSpeechReply(text){
             perfiles:perfiles.filter(p=>p.status!=='removed'),temporales:temporales.filter(p=>p.status!=='removed'),labor_logs:logs,time_entries:horas,casual_hours:horasT}));
           window.__lumiRevision={at:Date.now(),fecha:rev.fecha,resultado:r};
           const n=r.hallazgos.length,m=r.mensajes.length;
-          asMostrarRespuesta(r.resumen+(m?'\n\nTodavía no le mando nada a nadie.':'')+'\n('+logs.length+' labor logs y '+(horas.length+horasT.length)+' registros de horas revisados.)');
-          dichoRev=n?'Encontré '+n+(n===1?' cosa que no coincide':' cosas que no coinciden')+'. '+(m?'Tengo '+m+(m===1?' mensaje listo para el encargado':' mensajes listos para los encargados')+'; todavía no mando nada.':'Son para que usted las vea; no hay encargado a quien avisar.'):'Todo coincide ese día: no encontré nada.';
+          // A QUIÉN SÍ SE LE PUEDE MANDAR: encargados con cuenta (o temporales), que no sea el propio dueño, y que no se les
+          // haya avisado ya esto mismo. Lo demás se queda solo en su resumen.
+          const idsC=new Set(perfiles.map(p=>String(p.id))),idsT=new Set(temporales.map(p=>String(p.id)));
+          let yaAvisados=[];try{yaAvisados=((await lumiPaySetting(owner,'lumi_revision_avisada_'+SES.user_id))||{}).claves||[];}catch(e){}
+          const claveDe=x=>[x.fecha,x.empresa,x.log_id||'',x.encargado_id||''].join('|');
+          const porMandar=r.mensajes.filter(x=>x.encargado_id&&String(x.encargado_id)!==String(SES.user_id)&&(idsC.has(String(x.encargado_id))||idsT.has(String(x.encargado_id)))&&!yaAvisados.includes(claveDe(x)))
+            .map(x=>({clave:claveDe(x),para_user_id:idsC.has(String(x.encargado_id))?String(x.encargado_id):null,para_casual_id:idsC.has(String(x.encargado_id))?null:String(x.encargado_id),para_nombre:String(x.encargado||'').slice(0,80),texto:String(x.texto||'').slice(0,1900)}));
+          const repetidos=r.mensajes.filter(x=>yaAvisados.includes(claveDe(x))).length,sinCuenta=r.mensajes.length-porMandar.length-repetidos;
+          window.__lumiRevision.porMandar=porMandar;window.__lumiRevision.pide=porMandar.length?Date.now():0;
+          const k=porMandar.length;
+          asMostrarRespuesta(r.resumen+'\n('+logs.length+' labor logs y '+(horas.length+horasT.length)+' registros de horas revisados.)'
+            +(k?'\n\nMENSAJES QUE MANDARÍA POR LA APP (todavía no mando nada):\n'+porMandar.map(x=>'— Para '+x.para_nombre+':\n'+x.texto).join('\n\n'):'')
+            +(repetidos?'\n\n'+repetidos+(repetidos===1?' aviso ya se había mandado antes.':' avisos ya se habían mandado antes.'):'')
+            +(sinCuenta>0?'\n\n'+sinCuenta+(sinCuenta===1?' es para un encargado al que no le puedo escribir por la app (sin cuenta, o es usted).':' son para encargados a los que no les puedo escribir por la app (sin cuenta, o es usted).'):''));
+          dichoRev=n?'Encontré '+n+(n===1?' cosa que no coincide':' cosas que no coinciden')+'. '+(k?'Tengo '+k+(k===1?' mensaje listo para el encargado':' mensajes listos para los encargados')+'; ahí los puede leer. ¿Se '+(k===1?'lo':'los')+' mando?':(repetidos?'Eso ya se lo había avisado a los encargados.':'Son para que usted las vea; no hay encargado a quien avisar.')):'Todo coincide ese día: no encontré nada.';
         }catch(e){dichoRev='No pude hacer la revisión: '+String(e&&e.message||e).slice(0,120);asMostrarRespuesta(dichoRev);}
         asRecordarAccionMac(texto,dichoRev);asHablar(dichoRev,asSeguirOyendo);return;}
     }
