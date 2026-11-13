@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R465';
+  const APP_BUILD = '2026-11-13-R466';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -74933,7 +74933,11 @@ const LumiCoincidencias = (function () {
         encargado_id: log ? log.encargado_id : null,
         encargado: log ? log.encargado : null,
         log_id: log ? log.id : null,
-        para: log && paraEncargado ? 'encargado' : 'dueno',
+        // (13-nov-2026, tarde, corrección del dueño tras el primer envío real) "A veces hay personas que no tienen
+        // la aplicación; solo trabajan unos días". Un TEMPORAL no puede apuntar horas él mismo (las apunta la
+        // oficina): que esté en el labor log sin horas NO se le reclama al encargado; queda para el dueño.
+        persona_tipo: pid && porId[pid] ? porId[pid].tipo : null,
+        para: log && paraEncargado && !(tipo === 'en_labor_log_sin_horas' && pid && porId[pid] && porId[pid].tipo === 'temporal') ? 'encargado' : 'dueno',
         detalle: detalle
       });
       return hallazgos[hallazgos.length - 1];
@@ -74949,7 +74953,7 @@ const LumiCoincidencias = (function () {
         Object.keys(log.dudosos).forEach(function (k) {
           var d = log.dudosos[k];
           d.candidatos.forEach(function (p) { candidato[p.id] = true; });
-          agregar('nombre_dudoso', g, null, d.escrito, log, false, {
+          agregar('nombre_dudoso', g, null, d.escrito, log, true, {
             nombre_escrito: d.escrito,
             motivo: d.motivo, // 'nadie' = no es de nadie; 'varios' = puede ser de dos o mas
             candidatos: d.candidatos.map(function (p) { return { persona_id: p.id, persona: p.nombre }; }),
@@ -75049,7 +75053,7 @@ const LumiCoincidencias = (function () {
     // -- un mensaje por encargado + fecha + empresa --
     var bolsas = {}, ordenBolsas = [];
     hallazgos.forEach(function (h) {
-      if (h.para !== 'encargado' || h.tipo === 'nombre_dudoso') return;
+      if (h.para !== 'encargado') return;   // un nombre que no se reconoce ahora SÍ se le pregunta al encargado
       var k = h.fecha + '|' + h.empresa + '|' + (h.encargado_id !== null ? 'id:' + h.encargado_id : 'n:' + norm(h.encargado));
       if (!bolsas[k]) { bolsas[k] = []; ordenBolsas.push(k); }
       bolsas[k].push(h);
@@ -75086,6 +75090,7 @@ const LumiCoincidencias = (function () {
         '. Son ' + duracion(d.diferencia_min) + ' de más.';
     }
     if (h.tipo === 'en_labor_log_sin_horas') {
+      if (h.persona_tipo === 'temporal') return h.persona + ' (temporal, sin la app) está en ' + elReporte + (tt ? ' (' + tt + ')' : '') + ' y todavía no tiene horas apuntadas ese día; las apunta la oficina.';
       return h.persona + ' está en ' + elReporte + (tt ? ' (' + tt + ')' : '') + ' y no apuntó horas ese día.';
     }
     if (h.tipo === 'falta_turno_en_medio') {
@@ -75143,6 +75148,16 @@ const LumiCoincidencias = (function () {
       return ['✗ ' + quien + ': apuntó horas' + (horas ? ' ' + horas : '') + ' y no aparece en ningún turno de tu ' + rep + '.',
               '   → Si trabajó contigo, agrégalo y mándalo otra vez. Si no trabajó contigo, contéstame aquí con quién estuvo.'];
     }
+    if (h.tipo === 'nombre_dudoso') {
+      var c = (d.candidatos || []).map(function (x) { return x.persona; });
+      var donde = enTurnos ? ' (' + enTurnos + ')' : '';
+      if (d.motivo === 'varios') {
+        return ['? «' + d.nombre_escrito + '»' + donde + ': hay más de una persona con ese nombre (' + c.join(' o ') + ').',
+                '   → Contéstame aquí cuál de los dos es.'];
+      }
+      return ['? «' + d.nombre_escrito + '»' + donde + ': a esa persona no la tengo en la app.',
+              '   → ¿Es alguien de fuera del grupo principal (que solo vino unos días)? Contéstame aquí con su nombre completo.'];
+    }
     return ['✗ ' + renglon(h, true)];
   }
   function textoEncargado(items, log) {
@@ -75150,7 +75165,9 @@ const LumiCoincidencias = (function () {
     var pila = String(h0.encargado || '').trim().split(/\s+/)[0];
     var n = items.length;
     var out = ['Hola' + (pila ? ', ' + pila : '') + '. Revisé tu ' + rep + ' del ' + fechaEnPalabras(h0.fecha) +
-      ' contra las horas que apuntó la gente y ' + (n === 1 ? 'hay 1 cosa que no coincide.' : 'hay ' + n + ' cosas que no coinciden.')];
+      ' contra las horas que apuntó la gente y ' + (items.some(function (x) { return x.tipo === 'nombre_dudoso'; })
+        ? (n === 1 ? 'hay 1 cosa que necesito que me aclares.' : 'hay ' + n + ' cosas que revisar.')
+        : (n === 1 ? 'hay 1 cosa que no coincide.' : 'hay ' + n + ' cosas que no coinciden.'))];
     var turnos = log && log.crudo && Array.isArray(log.crudo.turnos) ? log.crudo.turnos : [];
     if (turnos.length) {
       out.push('');
@@ -75161,7 +75178,7 @@ const LumiCoincidencias = (function () {
       if (turnos.length > 12) out.push('(y ' + (turnos.length - 12) + ' turnos más)');
     }
     out.push('');
-    out.push(n === 1 ? 'LO QUE NO COINCIDE:' : 'LO QUE NO COINCIDE:');
+    out.push(items.every(function (x) { return x.tipo === 'nombre_dudoso'; }) ? 'LO QUE NECESITO SABER:' : 'LO QUE NO COINCIDE:');
     items.forEach(function (h) { problema(h, rep).forEach(function (l) { out.push(l); }); });
     out.push('');
     out.push('Contéstame aquí cuando lo corrijas, o si algo de esto no es así.');
@@ -76068,13 +76085,19 @@ function lumiIncompleteSpeechReply(text){
        if(RV&&RV.pide&&Date.now()-RV.pide<300000&&RV.porMandar&&RV.porMandar.length&&(asEsSi(lw)||pideMandar)){
          RV.pide=0;asPararOido();asCallar();asTranscribir(texto);asEstado('pensando','Mandando los avisos…');
          const owner=lumiBasicOwner(),ok=[],mal=[];
+         // (13-nov-2026, tarde) NO MANDAR DOS VECES. Pasó de verdad: el mismo aviso salió dos veces porque dos aparatos tenían
+         // la misma lista preparada y cada uno la mandó. Ahora, JUSTO antes de mandar, se vuelve a leer lo ya avisado y se
+         // salta lo repetido; y cada aviso se anota en cuanto sale, no hasta el final.
+         let yaSalieron=[];try{yaSalieron=((await lumiPaySetting(owner,'lumi_revision_avisada_'+SES.user_id))||{}).claves||[];}catch(e){}
+         const repetidosAhora=RV.porMandar.filter(x=>yaSalieron.includes(x.clave)).length;
+         RV.porMandar=RV.porMandar.filter(x=>!yaSalieron.includes(x.clave));
+         if(!RV.porMandar.length){const d='Esos avisos ya se habían mandado desde otro aparato. No mandé nada otra vez.';asRecordarAccionMac(texto,d);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);return;}
          for(const x of RV.porMandar){try{
            const res=await authFetch('/rest/v1/mensajes',{method:'POST',headers:Object.assign(cloudHeaders(),{Prefer:'return=representation'}),signal:AbortSignal.timeout(15000),
              body:JSON.stringify({company_id:SES.company_id,de_user_id:SES.user_id,de_nombre:String(SES.full_name||SES.name||'Oficina'),para_user_id:x.para_user_id,para_casual_id:x.para_casual_id,para_grupo_id:null,para_todos:false,para_nombre:x.para_nombre,casa:null,texto:x.texto+'\n— Lumi, asistente de la oficina'})});
            const filas=res.ok?await res.json():null;                       // se cuenta como mandado SOLO si la nube devolvió la fila guardada
-           if(Array.isArray(filas)&&filas[0]&&filas[0].id)ok.push(x);else mal.push(x);
+           if(Array.isArray(filas)&&filas[0]&&filas[0].id){ok.push(x);yaSalieron=yaSalieron.concat([x.clave]).slice(-400);try{await lumiPaySetting(owner,'lumi_revision_avisada_'+SES.user_id,{claves:yaSalieron});}catch(e){}}else mal.push(x);
          }catch(e){mal.push(x);}}
-         if(ok.length){try{const prev=((await lumiPaySetting(owner,'lumi_revision_avisada_'+SES.user_id))||{}).claves||[];await lumiPaySetting(owner,'lumi_revision_avisada_'+SES.user_id,{claves:prev.concat(ok.map(x=>x.clave)).slice(-400)});}catch(e){}}
          RV.porMandar=mal;
          const d=(ok.length?'Listo. Mandé '+ok.length+(ok.length===1?' aviso':' avisos')+' por Mensajes de la app: a '+[...new Set(ok.map(x=>x.para_nombre))].join(', ')+'.':'')+(mal.length?(ok.length?' ':'')+'No pude mandar '+mal.length+': '+[...new Set(mal.map(x=>x.para_nombre))].join(', ')+'. Dígame "mándalos" para intentar otra vez.':'');
          if(mal.length)RV.pide=Date.now();
