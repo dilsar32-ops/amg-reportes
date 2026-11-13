@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R463';
+  const APP_BUILD = '2026-11-13-R464';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -78599,7 +78599,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   async function lumiRevisionDiaria(){
     try{
-      if(typeof SES === 'undefined' || !SES || SES.role !== 'manager' || !isManager() || AS.sandbox || document.hidden || !cloudOn()) return;
+      if(typeof SES === 'undefined' || !SES || SES.role !== 'manager' || !isManager() || AS.sandbox || (document.hidden && !window.__lumiMacChat) || !cloudOn()) return;   // en la app de la Mac corre aunque esté encogida: esa compu siempre está prendida
       const ahora = new Date(); if(ahora.getHours() < 12) return;
       if(window.__lumiRevDiariaOcupada) return; window.__lumiRevDiariaOcupada = true;
       const owner = lumiBasicOwner(), iso = function(d){ return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
@@ -82904,7 +82904,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     });
   }
   // horas que no coinciden: para todos los que se deben, con UNA sola consulta de labor logs (las mismas reglas de la ficha: teMatchStatus)
-  const RDMS_CMP = { firma: '', por: {}, va: false, err: '' };
+  const RDMS_CMP = { firma: '', por: {}, va: false, err: '', equipo: null, equipoAt: 0 };
   window.__rdmsCmp = RDMS_CMP;
   async function rdmsPagosCoincide(){
     if(RDMS_CMP.va || !document.body.classList.contains('rdms-pagos') || !rdmsOn('mgrHoursSegCrew') || !rdmsOn('teamSegUnpaid')) return;
@@ -82912,24 +82912,40 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const firma = rows.map(r => r.id + (r.clock_in || '') + (r.clock_out || '')).join('|'); if(firma === RDMS_CMP.firma) return;
     RDMS_CMP.va = true; RDMS_CMP.firma = firma;   // (12-nov) anotada ANTES de pedir: si la lectura truena no se repite cada 200 ms
     try{
+      // (13-nov-2026, punto 3) LOS LETREROS DICEN LO MISMO QUE EL REVISOR DE LUMI (LumiCoincidencias). Antes: no usaban el
+      // apodo, contaban RENGLONES en vez de días ("43 sin labor log"), comparaban cada renglón contra todo el día, y un
+      // labor log devuelto o repetido doblaba las horas. Ahora es por persona y por DÍA, con 15 minutos de tolerancia.
       const fechas = [...new Set(rows.map(r => r.work_date).filter(Boolean))];
-      const porDia = fechas.length ? await loadPersonLaborLogs(fechas) : {};
-      if(!porDia){ setTimeout(() => { if(RDMS_CMP.firma === firma) RDMS_CMP.firma = ''; }, 15000); return; }   // (12-nov) no se pudo leer: sin etiquetas falsas; reintenta en 15 s
       const por = {};
-      rows.forEach(r => {
-        const kind = kindOf(r), logs = (porDia[r.work_date] || []).filter(l => (l.work_kind || 'restauracion') === kind);
-        if(kind === 'mudanza' && !logs.length) return;
-        const nombres = [String(r.person_name || '').toLowerCase()].filter(Boolean);
-        const m = findShiftMatchesAny(logs, nombres), lab = m.length ? m.reduce((t, x) => t + (hoursBetween(x.sh.f, x.sh.o) || 0), 0) : null;
-        const st = teMatchStatus(hoursBetween(r.clock_in, r.clock_out), lab, kind), q = por[r.user_id] || (por[r.user_id] = { mal: 0, sin: 0 });
-        if(st.cls === 'mismatch') q.mal++; else if(st.cls === 'partial' && /labor log|reporte/i.test(st.text)) q.sin++;
-      });
+      if(fechas.length){
+        const minD = fechas.reduce((a, b) => a < b ? a : b), maxD = fechas.reduce((a, b) => a > b ? a : b), co = '&company_id=eq.' + encodeURIComponent(SES.company_id);
+        if(!RDMS_CMP.equipo || Date.now() - RDMS_CMP.equipoAt > 300000){
+          const [rp, rt] = await Promise.all([authFetch('/rest/v1/profiles?select=id,full_name,labor_alias,status' + co, { headers: cloudHeaders() }), authFetch('/rest/v1/casual_workers?select=id,name,status' + co, { headers: cloudHeaders() })]);
+          if(!rp.ok || !rt.ok){ setTimeout(() => { if(RDMS_CMP.firma === firma) RDMS_CMP.firma = ''; }, 15000); return; }
+          RDMS_CMP.equipo = { perfiles: (await rp.json()).filter(p => p.status !== 'removed'), temporales: (await rt.json()).filter(p => p.status !== 'removed') }; RDMS_CMP.equipoAt = Date.now();
+        }
+        const rl = await authFetch('/rest/v1/labor_logs?select=*' + co + '&log_date=gte.' + minD + '&log_date=lte.' + maxD, { headers: cloudHeaders() });
+        if(!rl.ok){ setTimeout(() => { if(RDMS_CMP.firma === firma) RDMS_CMP.firma = ''; }, 15000); return; }   // no se pudo leer: sin etiquetas falsas; reintenta en 15 s
+        const logs = await rl.json(), enFechas = new Set(fechas);
+        // TODAS las horas de esos días (pagadas o no), para que el revisor vea el día completo de cada quien
+        const todas = (teamRows || []).filter(r => r.user_id && enFechas.has(r.work_date)).map(r => ({ id: r.id, user_id: r.user_id, work_date: r.work_date, clock_in: r.clock_in, clock_out: r.clock_out, work_kind: kindOf(r) }));
+        const res = LumiCoincidencias.analizar(LumiCoincidencias.desdeFilas({ tolerancia_min: 15, perfiles: RDMS_CMP.equipo.perfiles, temporales: RDMS_CMP.equipo.temporales, labor_logs: logs, time_entries: todas, casual_hours: [] }));
+        const debe = new Set(rows.map(r => r.user_id + '|' + r.work_date));          // solo cuentan los días que todavía se deben
+        const dias = {};
+        res.hallazgos.forEach(x => {
+          if(!x.persona_id || !debe.has(x.persona_id + '|' + x.fecha)) return;
+          if(x.tipo === 'horas_sin_labor_log' && x.empresa === 'mudanza' && !(x.detalle && x.detalle.hay_labor_log)) return;   // mudanza sin reporte: se queda callado, como antes
+          const q = dias[x.persona_id] || (dias[x.persona_id] = { mal: new Set(), sin: new Set() });
+          if(x.tipo === 'apunto_de_mas' || x.tipo === 'falta_turno_en_medio') q.mal.add(x.fecha); else if(x.tipo === 'horas_sin_labor_log') q.sin.add(x.fecha);
+        });
+        Object.keys(dias).forEach(k => { por[k] = { mal: dias[k].mal.size, sin: dias[k].sin.size }; });
+      }
       RDMS_CMP.por = por; RDMS_CMP.firma = firma;
       document.querySelectorAll('#teamEntries .entryrow.rdms-et').forEach(f => { if(por[f.dataset.person] && (por[f.dataset.person].mal || por[f.dataset.person].sin) && !f.querySelector('.rdms-chip.mal, .rdms-chip.cmp')){
         const c = f.querySelector('.rdms-chips') || (() => { const x = document.createElement('span'); x.className = 'rdms-chips'; f.firstElementChild.appendChild(x); return x; })();
         const q = por[f.dataset.person];
         if(q.mal){ const x = document.createElement('i'); x.classList.add('rdms-chip', 'mal', 'cmp'); x.textContent = q.mal + (q.mal === 1 ? ' día no coincide' : ' días no coinciden'); c.appendChild(x); }
-        if(q.sin){ const x = document.createElement('i'); x.classList.add('rdms-chip', 'ojo', 'cmp'); x.textContent = q.sin + ' sin labor log'; c.appendChild(x); } } });
+        if(q.sin){ const x = document.createElement('i'); x.classList.add('rdms-chip', 'ojo', 'cmp'); x.textContent = q.sin + (q.sin === 1 ? ' día sin labor log' : ' días sin labor log'); c.appendChild(x); } } });
     }catch(e){ RDMS_CMP.err = String(e && e.message || e); } finally{ RDMS_CMP.va = false; }
   }
   setInterval(() => { try{ rdmsPagosEtiquetas(); rdmsPagosCoincide(); }catch(e){} }, 200);
