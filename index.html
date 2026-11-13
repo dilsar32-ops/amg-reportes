@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R449';
+  const APP_BUILD = '2026-11-13-R450';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -74406,6 +74406,17 @@ function lumiIncompleteSpeechReply(text){
         gastos:toca('#mgrGoGastos'),precios:toca('#mgrGoRates'),mensajes:toca('#mgrGoMensajes'),perfil:toca('[data-rd-tab="perfil"]'),
         peticiones:()=>{alHub();window.__msgPend={abrir:'mensajes',pestana:'peticiones'};if(typeof msgAbrirPendiente==='function')msgAbrirPendiente();}};
       let dicho=null,luego=null;
+      // En la app Lumi de la Mac: se hace en la ventana de trabajo y la plática se queda abierta.
+      const ORD={pagos:{nav:{pantalla:'pagos_crew'}},labor_logs:{nav:{pantalla:'labor_logs'}},mudanzas:{nav:{pantalla:'mudanzas_recibidas'}},planos:{nav:{pantalla:'planos'}},
+        calendario:{nav:{pantalla:'calendario_amg'}},finanzas:{nav:{pantalla:'finanzas_amg'}},invoices:{nav:{pantalla:'invoices_amg'}},codigos:{clic:'#mgrGoCodes'},gastos:{clic:'#mgrGoGastos'},
+        precios:{clic:'#mgrGoRates'},mensajes:{clic:'#mgrGoMensajes'},perfil:{clic:'[data-rd-tab="perfil"]'},peticiones:{peticiones:true}};
+      if(window.__lumiMacChat&&nav){
+        let d=null;
+        if(nav.tipo==='abrir'&&ORD[nav.destino]&&lumiMacEnviar(ORD[nav.destino],'Abrí '+nav.nombre+' en mi ventana'))d='Va. Te abro '+nav.nombre+' en mi ventana.';
+        else if(nav.tipo==='inicio'&&lumiMacEnviar({inicio:true},'Volví al inicio'))d='Va, al inicio.';
+        else if(nav.tipo==='cerrar'&&lumiMacEnviar({atras:true},'Cerré esa pantalla'))d='Listo, la cerré.';
+        if(d){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,d);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);return;}
+      }
       if(nav&&nav.tipo==='abrir'&&IR[nav.destino]){dicho='Va. Te abro '+nav.nombre+'.';luego=IR[nav.destino];}
       else if(nav&&nav.tipo==='inicio'){dicho=enInicio()?'Ya estás en el inicio.':'Va, al inicio.';luego=enInicio()?null:()=>{alHub();try{goManagerHome();}catch(e){}};}
       else if(nav&&nav.tipo==='cerrar'&&!enInicio()){dicho='Listo, la cerré.';luego=()=>{asCerrar();goBack();};}   // en el inicio no hay pantalla que cerrar: sigue como antes (ventanas de la Mac)
@@ -76784,7 +76795,41 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       return true;
     }catch(e){ console.warn('labor voz abrir', e); return false; }
   }
+  // ---- (13-nov-2026, paso 2 del plan) LA VENTANA DE TRABAJO DE LUMI EN LA MAC ----
+  // En la app Lumi de la Mac hay dos ventanas: la plática y la de trabajo. Lo que antes abría una pantalla ENCIMA
+  // de la plática ahora se manda a la otra ventana, y aquí se anota cada paso. Fuera de esa app nada cambia.
+  function lumiMacEnviar(orden, paso){
+    try{ if(!window.__lumiMacChat) return false; window.webkit.messageHandlers.lumiTrabajo.postMessage(JSON.stringify({ orden: orden, paso: paso || '' })); return true; }catch(e){ return false; }
+  }
+  // Un paso hecho (o que no se pudo): un renglón chico en la plática.
+  window.__lumiPaso = function(texto, ok){
+    try{
+      const c = document.getElementById('asConversacion'); if(!c || !texto) return;
+      const d = document.createElement('div'); d.className = 'as-paso';
+      d.style.cssText = 'align-self:flex-start;font:500 12px/1.4 system-ui,sans-serif;padding:2px 10px;margin:-2px 0 2px;color:' + (ok === false ? '#ff8b8b' : '#7fe0b0');
+      d.textContent = (ok === false ? '✕ ' : '✓ ') + String(texto).slice(0, 120);
+      c.appendChild(d); c.scrollTop = c.scrollHeight;
+    }catch(e){}
+  };
+  // Corre en la ventana de TRABAJO: hace ahí lo que la plática pidió. Devuelve 'ok' o por qué no.
+  window.__lumiTrabajo = async function(orden){
+    try{
+      for(let i = 0; i < 60 && !(typeof SES !== 'undefined' && SES && SES.user_id); i++) await new Promise(function(r){ setTimeout(r, 250); });
+      if(!(SES && SES.user_id)) return 'sin-sesion';
+      if(!isManager()) return 'no-manager';
+      if(doorOverlay){ try{ sessionStorage.setItem('sideOnce', 'manager'); sessionStorage.setItem('lumiMacPendiente', JSON.stringify(orden)); }catch(e){} location.reload(); return 'recargando'; }
+      const alHub = function(){ SIDE = 'manager'; applySide(); enterApp(); try{ goManagerHome(); }catch(e){} };
+      if(orden.nav){ SIDE = asPuertaPara(orden.nav); applySide(); enterApp(); await asIrA(orden.nav); return 'ok'; }
+      if(orden.clic){ alHub(); const b = document.querySelector(String(orden.clic)); if(!b) return 'no-encontre'; b.click(); return 'ok'; }
+      if(orden.peticiones){ alHub(); window.__msgPend = { abrir: 'mensajes', pestana: 'peticiones' }; if(typeof msgAbrirPendiente === 'function') msgAbrirPendiente(); return 'ok'; }
+      if(orden.atras){ if(document.querySelector('.tab-panel[data-tab="manager"].active') && !navStack.length) return 'ya-en-inicio'; goBack(); return 'ok'; }
+      if(orden.inicio){ alHub(); return 'ok'; }
+      return 'no-se';
+    }catch(e){ return 'error'; }
+  };
+  try{ const pend = sessionStorage.getItem('lumiMacPendiente'); if(pend){ sessionStorage.removeItem('lumiMacPendiente'); setTimeout(function(){ window.__lumiTrabajo(JSON.parse(pend)); }, 1500); } }catch(e){}
   async function asNavegar(nav){
+    if(window.__lumiMacChat && lumiMacEnviar({ nav: nav }, 'Abrí ' + (typeof asCmdNombrePantalla === 'function' && nav && nav.pantalla === 'pantalla' ? asCmdNombrePantalla(nav.destino) : 'la pantalla') + ' en mi ventana')) return;
     if(doorOverlay){
       // La puerta vino como re-pregunta: igual que doorTap, se recarga con la empresa de un solo uso.
       try{ sessionStorage.setItem('sideOnce', asPuertaPara(nav)); sessionStorage.setItem('asNavPendiente', JSON.stringify(nav)); }catch(e){}
