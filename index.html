@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R450';
+  const APP_BUILD = '2026-11-13-R451';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -73874,6 +73874,35 @@ function lumiNavRapida(texto) {
   return null;
 }
 if(typeof module === 'object' && module.exports) module.exports.lumiNavRapida = lumiNavRapida;
+// (13-nov-2026, paso 3) BUSCAR A UNA PERSONA Y ABRIR SU FICHA / ABRIR Y BUSCAR PÁGINAS DE AFUERA.
+// Solo dicen QUÉ se pidió; quién es la persona se comprueba después contra la lista del equipo (una sola, o nada).
+function lumiFichaRapida(texto) {
+  const l = String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/^(?:(?:oye|hey|ey|lumi|porfa|por favor|please)\s+)+/, '').replace(/\s+(?:porfa|por favor|please|lumi)$/, '');
+  let m = /^(?:abre|abreme|abrime|ensename|muestrame|busca|buscame|ve a|llevame a|open|show me|pull up)\s+(?:la |el |las |los |the )?(?:ficha|horas|pagos|cuenta|tarjeta|hours|payments|card)(?: de horas)?\s+(?:de|del|of|for)\s+(?:la |el |don |dona )?([a-zñ]+(?: [a-zñ]+){0,2})$/.exec(l)
+       || /^(?:busca|buscame|encuentra|find)\s+(?:a |al )?([a-zñ]+(?: [a-zñ]+){0,1}?)\s+(?:en pagos|en el equipo|en horas|en la lista)$/.exec(l)
+       || /^(?:busca|buscame|buscate|encuentra|encuentrame|find)\s+(?:a|al)\s+(?:la |el |don |dona )?([a-zñ]+(?: [a-zñ]+){0,2})$/.exec(l);
+  if(!m) return null;
+  const quien = m[1].trim();
+  if(/^(?:hoy|ayer|todos|todas|esta semana|la semana|el equipo|la cuadrilla|grupo|cliente|clientes|mensaje|mensajes|labor|labor log|labor logs|google|internet)$/.test(quien)) return null;
+  return { quien };
+}
+function lumiWebRapida(texto) {
+  const l = String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¡!¿?,;:]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/^(?:(?:oye|hey|ey|lumi|porfa|por favor|please)\s+)+/, '').replace(/\s+(?:porfa|por favor|please|lumi)$/, '');
+  const limpio = q => q.replace(/[^a-z0-9ñ .'"$%&+#/-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+  let m = /^(?:busca|buscame|buscate|investiga|search|look up)\s+(?:en|on|in)\s+(?:google|internet|la web|el internet|linea|the web|online)\s+(.{2,})$/.exec(l)
+       || /^(?:busca|buscame|buscate|investiga|search(?: for)?|look up)\s+(.{2,}?)\s+(?:en|on|in)\s+(?:google|internet|la web|el internet|linea|the web)$/.exec(l)
+       || /^(?:googlea|googleame|google)\s+(.{2,})$/.exec(l);
+  if(m){ const q = limpio(m[1].replace(/\.$/, '')); return q ? { url: 'https://www.google.com/search?q=' + encodeURIComponent(q), paso: 'Busqué "' + q + '" en Google', dicho: 'Va. Lo busco en Google.' } : null; }
+  m = /^(?:abre|abreme|abrime|ve a|vete a|llevame a|open|go to)\s+(?:la |el |the )?(?:pagina|sitio|web|website|page)?\s*(?:web )?(?:de |del |of )?((?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|gov|io|us|co|app|edu)(?:\/[a-z0-9._~\/-]*)?)$/.exec(l);
+  if(m){ const u = m[1].replace(/^www\./, ''); return { url: 'https://' + u, paso: 'Abrí ' + u.split('/')[0] + ' en mi ventana', dicho: 'Va. Te abro ' + u.split('/')[0] + '.' }; }
+  const SITIOS = { 'youtube': 'youtube.com', 'google': 'google.com', 'amazon': 'amazon.com', 'home depot': 'homedepot.com', 'homedepot': 'homedepot.com', 'lowes': 'lowes.com', 'companycam': 'app.companycam.com', 'company cam': 'app.companycam.com' };
+  m = /^(?:abre|abreme|abrime|ve a|llevame a|open|go to)\s+(?:la |el |the )?(?:(?:pagina|sitio|web|website|page)\s+(?:web )?(?:de |del |of )?)?([a-z ]{3,20})$/.exec(l);
+  if(m && SITIOS[m[1].trim()]){ const u = SITIOS[m[1].trim()]; return { url: 'https://' + u, paso: 'Abrí ' + u + ' en mi ventana', dicho: 'Va. Te abro ' + m[1].trim().replace(/(^|\s)\S/g, c => c.toUpperCase()) + '.' }; }
+  return null;
+}
+if(typeof module === 'object' && module.exports){ module.exports.lumiFichaRapida = lumiFichaRapida; module.exports.lumiWebRapida = lumiWebRapida; }
 // LUMI_NAV_END
 // LUMI_HORA_BEGIN  (13-nov-2026) "¿Qué hora es?" lo mandaba a la nube, tardaba ~55 s y contestaba "el reloj
 // del teléfono no llegó". La hora y la fecha las sabe el aparato: se contestan aquí, al instante.
@@ -74421,6 +74450,24 @@ function lumiIncompleteSpeechReply(text){
       else if(nav&&nav.tipo==='inicio'){dicho=enInicio()?'Ya estás en el inicio.':'Va, al inicio.';luego=enInicio()?null:()=>{alHub();try{goManagerHome();}catch(e){}};}
       else if(nav&&nav.tipo==='cerrar'&&!enInicio()){dicho='Listo, la cerré.';luego=()=>{asCerrar();goBack();};}   // en el inicio no hay pantalla que cerrar: sigue como antes (ventanas de la Mac)
       if(dicho){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,dicho);asMostrarRespuesta(dicho);asHablar(dicho,luego||asSeguirOyendo);return;}
+    }
+    // (13-nov-2026, paso 3) FICHA DE UNA PERSONA: la busca en el equipo y, si es UNA sola, abre su ficha.
+    if(!dictando&&!AS.conf&&!AS.pregunta&&SES.role==='manager'&&isManager()&&!AS.sandbox){
+      const fic=lumiFichaRapida(texto);
+      if(fic){try{
+        const nn=x=>String(x||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim(),q=nn(fic.quien);
+        const gente=(await lumiPayPeople(lumiBasicOwner())).filter(p=>p.active);
+        const cand=gente.filter(p=>{const n=nn(p.name),f=nn(p.fullName);return n===q||f===q||n.split(' ')[0]===q||n.startsWith(q+' ')||f.startsWith(q+' ')||(p.alias&&nn(p.alias)===q);});
+        if(cand.length===1){const p=cand[0],primer=String(p.name||'').trim().split(/\s+/)[0]||'esa persona',d='Va. Te abro la ficha de '+primer+'.';
+          const navp={pantalla:'horas_de_persona',tipo:p.kind==='crew'?'crew':'casual',persona_id:p.id};
+          asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,d);asMostrarRespuesta(d);
+          if(window.__lumiMacChat){window.__lumiPaso('Busqué a '+primer+' en el equipo',true);lumiMacEnviar({nav:navp},'Abrí la ficha de '+primer+' en mi ventana');asHablar(d,asSeguirOyendo);}
+          else asHablar(d,()=>asNavegar(navp));
+          return;}
+      }catch(e){}}
+      // PÁGINAS DE AFUERA (solo en la app Lumi de la Mac): las abre o las busca en su ventana de trabajo.
+      const sitio=window.__lumiMacChat?lumiWebRapida(texto):null;
+      if(sitio&&lumiMacEnviar({url:sitio.url},sitio.paso)){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,sitio.dicho);asMostrarRespuesta(sitio.dicho);asHablar(sitio.dicho,asSeguirOyendo);return;}
     }
     // (13-nov-2026) LA HORA VA PRIMERO. Estaba al final: antes pasaba por la Mac ("¿que quiso decir?",
     // hasta 5 s medidos) y hasta despues contestaba algo que el aparato ya sabe.
