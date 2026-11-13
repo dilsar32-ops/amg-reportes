@@ -11588,7 +11588,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     <div id="asActionStatus" role="status" aria-live="polite" hidden></div>
     <div class="as-esfera-wrap"><div id="asEsfera" class="as-red" role="button" tabindex="0" aria-label="Asistente: tocar para hablar"><canvas id="asRed" aria-hidden="true"></canvas></div></div>
     <div class="as-charla">
-      <div id="asConversacion" role="log" aria-label="Conversación con Lumi" aria-live="polite"></div>
+      <div id="asConversacion" data-no-idioma role="log" aria-label="Conversación con Lumi" aria-live="polite"></div>
       <p class="as-tu" id="asTu"></p>
       <p class="as-resp" id="asRespuesta"></p>
       <div class="as-vista" id="asVista" hidden></div>
@@ -19601,7 +19601,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R419';
+  const APP_BUILD = '2026-11-12-R420';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -55843,12 +55843,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const res = await authFetch('/rest/v1/labor_logs?select=crew_leader,payload,log_date,work_kind'
         + '&company_id=eq.' + SES.company_id + '&log_date=gte.' + minD + '&log_date=lte.' + maxD,
         { headers: cloudHeaders() });
-      if(!res.ok) return {};
+      if(!res.ok) return null;   // (12-nov, revision) null = NO SE PUDO LEER (antes regresaba vacio y parecia "no hay labor logs")
       const rows = await res.json();
       const byDate = {};
       rows.forEach(r => { (byDate[r.log_date] = byDate[r.log_date] || []).push(r); });
       return byDate;
-    }catch(e){ return {}; }
+    }catch(e){ return null; }
   }
 
   // A crew member can be written into shifts under a name that isn't their
@@ -55884,7 +55884,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
 
     const key = personKey;
     const [laborByDate, alias] = await Promise.all([
-      loadPersonLaborLogs(rows.map(r => r.work_date).filter(Boolean)),
+      loadPersonLaborLogs(rows.map(r => r.work_date).filter(Boolean)).then(x => x || {}),
       loadPersonAlias(key)
     ]);
     if(key !== personKey) return;   // they tapped into someone else while this was loading
@@ -79536,7 +79536,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     cancelAnimationFrame(RDMG_MUEVE.raf);
     const paso = ahora => {
       const e = document.querySelector('#rdmgHome .rdmg-esf');
-      if(!e || !rdmgEn() || document.hidden){ RDMG_MUEVE.raf = 0; return; }
+      if(!e || !e.offsetParent || !rdmgEn() || document.hidden){ RDMG_MUEVE.raf = 0; return; }   // (12-nov) escondido no se mueve
       const M = RDMG_MUEVE, t = (ahora - M.t0) / 1000;
       // mecerse: una figura de ocho, lenta
       const wx = Math.sin(t * 0.7) * 9, wy = Math.sin(t * 1.4) * 5;
@@ -79771,7 +79771,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     cancelAnimationFrame(LZ.raf);
     const paso = ahora => {
       const cv = document.querySelector('#rdmgHome .e-lienzo');
-      if(!cv || !rdmgEn() || document.hidden){ LZ.raf = 0; return; }
+      if(!cv || !cv.offsetParent || !rdmgEn() || document.hidden){ LZ.raf = 0; return; }   // (12-nov) escondido no se dibuja
       try{ lzDibujar(cv, ahora); }catch(e){}
       LZ.raf = requestAnimationFrame(paso);
     };
@@ -80177,6 +80177,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     try{
       const fechas = [...new Set(rows.map(r => r.work_date).filter(Boolean))];
       const porDia = fechas.length ? await loadPersonLaborLogs(fechas) : {};
+      if(!porDia){ setTimeout(() => { if(RDMS_CMP.firma === firma) RDMS_CMP.firma = ''; }, 15000); return; }   // (12-nov) no se pudo leer: sin etiquetas falsas; reintenta en 15 s
       const por = {};
       rows.forEach(r => {
         const kind = kindOf(r), logs = (porDia[r.work_date] || []).filter(l => (l.work_kind || 'restauracion') === kind);
@@ -83222,7 +83223,7 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
       + fotos + msgDocumentosHtml(adj) + msgVideosHtml(adj) + stkBurbuja(adj)
       + (voz ? msgVozHtml(m, voz, mio) : '')
       + (m.casa ? (cp => '<span class="msg-casa">' + MSG_ICO.casaChica + '<span>' + esc(cp.n) + '</span></span>' + (cp.d ? '<span class="msg-casa-dir">' + esc(cp.d) + '</span>' : ''))(msgCasaPartes(m.casa)) : '')
-      + (m.texto ? '<span class="msg-txt">' + (m.tipo === 'peticion' ? esc(msgPetSinTipo(m)) : msgLinkify(esc(m.texto))) + '</span>' : '')
+      + (m.texto ? '<span class="msg-txt" data-no-idioma>' + (m.tipo === 'peticion' ? esc(msgPetSinTipo(m)) : msgLinkify(esc(m.texto))) + '</span>' : '')
       + (m.tipo === 'peticion' && m.estado_nota ? '<span class="msg-pet-nota">' + esc(m.estado_nota) + '</span>' : '')
       + meta
       + (m.tipo === 'peticion' && !mio && msgSoyOficina() && (msgPetCiclo() && msgPetDinero(m) ? msgPetEsperaOficina(m) : (m.estado || 'pendiente') === 'pendiente') ? msgPetBotones(m) : '')
