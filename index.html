@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R455';
+  const APP_BUILD = '2026-11-13-R456';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -73899,7 +73899,10 @@ function lumiWebRapida(texto) {
   // comprobado en su cuenta. "busca a Johnson en companycam", "abre el proyecto de la Lafayette en companycam".
   m = /^(?:busca|buscame|buscate|abre|abreme|ensename|muestrame|find|open|show me)\s+(?:a |al |el |la |los |las |the )?(?:(?:proyecto|trabajo|project|job|fotos|photos)\s+(?:de |del |de la |de los |of |for )?)?(.{2,60}?)\s+(?:en|in|on)\s+(?:la |el )?(?:company ?cam|compani ?cam|compa(?:ñ|n)i ?cam|la camara de la compania)$/.exec(l)
    || /^(?:company ?cam|compani ?cam)\s+(?:de |del |de la |for |of )?(.{2,60})$/.exec(l);
-  if(m){ const q = limpio(m[1].replace(/^(?:a |al |el |la |los |las |de |del )/, '')); if(q && !/^(?:todo|todos|algo|eso)$/.test(q)) return { url: 'https://app.companycam.com/projects?q=' + encodeURIComponent(q), paso: 'Busqué "' + q + '" en CompanyCam', dicho: 'Va. Lo busco en CompanyCam.' }; }
+  if(m){ const q = limpio(m[1].replace(/^(?:a |al |el |la |los |las |de |del )/, ''));
+    // "busca un cliente en companycam", "busca algo en companycam": falta decir a quién -> se pregunta
+    if(/^(?:un|una|a un|a una|algun|alguna)?\s*(?:cliente|clienta|proyecto|trabajo|casa|direccion|alguien|algo|eso|todo|todos)$/.test(q)) return { ccPregunta: true };
+    if(q) return { cc: q, url: 'https://app.companycam.com/projects?q=' + encodeURIComponent(q), paso: 'Busqué "' + q + '" en CompanyCam', dicho: 'Va. Lo busco en CompanyCam.' }; }
   m = /^(?:abre|abreme|abrime|ve a|vete a|llevame a|open|go to)\s+(?:la |el |the )?(?:pagina|sitio|web|website|page)?\s*(?:web )?(?:de |del |of )?((?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|gov|io|us|co|app|edu)(?:\/[a-z0-9._~\/-]*)?)$/.exec(l);
   if(m){ const u = m[1].replace(/^www\./, ''); return { url: 'https://' + u, paso: 'Abrí ' + u.split('/')[0] + ' en mi ventana', dicho: 'Va. Te abro ' + u.split('/')[0] + '.' }; }
   const SITIOS = { 'youtube': 'youtube.com', 'google': 'google.com', 'amazon': 'amazon.com', 'home depot': 'homedepot.com', 'homedepot': 'homedepot.com', 'lowes': 'lowes.com', 'companycam': 'app.companycam.com', 'company cam': 'app.companycam.com' };
@@ -73908,6 +73911,42 @@ function lumiWebRapida(texto) {
   return null;
 }
 if(typeof module === 'object' && module.exports){ module.exports.lumiFichaRapida = lumiFichaRapida; module.exports.lumiWebRapida = lumiWebRapida; }
+// (13-nov-2026) LEER UNA PÁGINA Y DECIRLO CORTO. Solo dice qué se preguntó; la página la lee la app de la Mac.
+//   "qué dice la página", "resúmeme la página"                  -> resumen
+//   "en la página, cuánto cuesta el de 20 pulgadas"             -> esa pregunta sobre la página abierta
+//   "busca en google X y dime Y" / "... y dime qué sale"        -> busca y contesta
+function lumiPaginaRapida(texto) {
+  const crudo = String(texto || '').replace(/\s+/g, ' ').trim();
+  const l = crudo.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¡!¿?,;:]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/^(?:(?:oye|hey|ey|lumi|porfa|por favor|please)\s+)+/, '').replace(/\s+(?:porfa|por favor|please|lumi)$/, '');
+  if(!l) return null;
+  const PAG = '(?:la|esa|esta|the|this|that) (?:pagina|page|pestana|tab)';
+  if(new RegExp('^(?:que dice|que hay en|que sale en|de que (?:trata|habla)|leeme|lee|leer|resume|resumeme|resumen de|dime que dice|what does|read|summarize|sum up) ' + PAG + '(?: say| para mi| for me)?$').test(l)
+    || /^(?:que dice ahi|leeme eso|resumeme eso|que salio|que encontraste|what did you find)$/.test(l)) return { pregunta: 'Resume en dos frases lo más importante de esta página.' };
+  let m = new RegExp('^(?:en|segun|de|on|in|from) ' + PAG + ' (.{4,160})$').exec(l) || new RegExp('^(.{4,160}?) (?:en|segun|on|in) ' + PAG + '$').exec(l);
+  if(m) return { pregunta: m[1].trim() };
+  m = /^(?:busca|buscame|investiga|search(?: for)?|look up|googlea)\s+(?:en (?:google|internet|la web)\s+)?(.{2,100}?)\s+(?:en (?:google|internet|la web)\s+)?(?:y|and)\s+(?:dime|me dices|cuentame|leeme|resumeme|tell me|read me)\s*(.{0,120})$/.exec(l);
+  if(m){ const q = m[1].replace(/[^a-z0-9ñ .'"$%&+#/-]/g, ' ').replace(/\s+/g, ' ').trim(); const y = m[2].trim();
+    if(q) return { url: 'https://www.google.com/search?q=' + encodeURIComponent(q), busca: q, pregunta: (!y || /^(?:que (?:sale|dice|encontraste|hay)|lo que (?:sale|dice|encuentres)|what (?:it says|you find))$/.test(y)) ? 'Según estos resultados, contesta en dos frases: ' + q : y + ' (sobre: ' + q + ')' }; }
+  return null;
+}
+// (13-nov-2026, su pedido) "Si le pego la dirección en el chat, que sepa que estamos en CompanyCam".
+// Devuelve lo que hay que buscar, o null. `esperando` = ella acaba de preguntar "¿qué cliente o dirección busco?".
+function lumiDireccionSuelta(texto, esperando) {
+  const crudo = String(texto || '').replace(/\s+/g, ' ').trim();
+  const l = crudo.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¡!¿?;:]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/^(?:(?:la direccion es|su direccion es|the address is|la casa de|es en|es la|es el|buscame|busca|cliente|esta|este|esa|ese|del|its|it s|es|la|el|en|al|de|a)\s+)+/, '').trim();
+  if(!l || l.length > 90) return null;
+  // una dirección: número de casa + calle (con o sin ciudad, estado y código)
+  if(/^\d{1,6}[a-z]?\s+[a-z0-9 .,'#-]{3,80}$/.test(l) && /[a-z]{3,}/.test(l)) return l.split(',')[0].replace(/\s+(?:apt|unit|suite|ste|#)\s*\S+$/, '').trim();
+  if(!esperando) return null;
+  // contestando a su pregunta: un nombre o un pedazo de dirección, corto, que no sea otra orden
+  if(l.split(' ').length > 6) return null;
+  if(/^(?:abre|abreme|cierra|lee|leeme|manda|mandale|paga|pagale|borra|que|cuanto|cuantos|como|donde|regresa|para|parale|no|nada|cancela|olvidalo|dejalo|espera|si|ok|gracias|hola|open|close|read|send|stop|cancel|never mind)\b/.test(l)) return null;
+  return l;
+}
+if(typeof module === 'object' && module.exports){ module.exports.lumiPaginaRapida = lumiPaginaRapida; module.exports.lumiDireccionSuelta = lumiDireccionSuelta; }
+
 // LUMI_NAV_END
 // LUMI_HORA_BEGIN  (13-nov-2026) "¿Qué hora es?" lo mandaba a la nube, tardaba ~55 s y contestaba "el reloj
 // del teléfono no llegó". La hora y la fecha las sabe el aparato: se contestan aquí, al instante.
@@ -74470,9 +74509,34 @@ function lumiIncompleteSpeechReply(text){
           else asHablar(d,()=>asNavegar(navp));
           return;}
       }catch(e){}}
+      // LEER UNA PÁGINA (solo en la app Lumi de la Mac): la lee la app y contesta el cerebro de la Mac.
+      const pag=window.__lumiMacChat?lumiPaginaRapida(texto):null;
+      if(pag){const dp=pag.busca?'Va. Lo busco y te digo.':'Va. La leo.';
+        if(pag.url)lumiMacEnviar({url:pag.url},'Busqué "'+pag.busca+'" en Google');
+        if(lumiMacEnviar({leer:{pregunta:pag.pregunta,url:pag.url||''}},'')){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,dp);asMostrarRespuesta(dp);asHablar(dp,asSeguirOyendo);return;}}
       // PÁGINAS DE AFUERA (solo en la app Lumi de la Mac): las abre o las busca en su ventana de trabajo.
-      const sitio=window.__lumiMacChat?lumiWebRapida(texto):null;
-      if(sitio&&lumiMacEnviar({url:sitio.url},sitio.paso)){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,sitio.dicho);asMostrarRespuesta(sitio.dicho);asHablar(sitio.dicho,asSeguirOyendo);return;}
+      let sitio=window.__lumiMacChat?lumiWebRapida(texto):null;
+      // COMPANYCAM CON MEMORIA (su pedido): 15 minutos después de hablar de CompanyCam, una dirección pegada en el
+      // chat se busca ahí; y si ella preguntó "¿qué cliente o dirección?", lo siguiente que diga es la búsqueda.
+      if(window.__lumiMacChat){
+        const cc=window.__lumiCC&&Date.now()-window.__lumiCC.at<900000?window.__lumiCC:null;
+        if(!sitio&&cc){const suelta=lumiDireccionSuelta(texto,!!cc.espera&&Date.now()-cc.at<120000);if(suelta)sitio={cc:suelta};}
+        const di=d=>{asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,d);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);};
+        if(sitio&&sitio.ccPregunta){window.__lumiCC={at:Date.now(),espera:true};di('¿Qué cliente o qué dirección busco en CompanyCam?');return;}
+        if(sitio&&sitio.cc){
+          // Si es un cliente que la app conoce, se dice su dirección y se busca por la calle (CompanyCam encuentra mejor así).
+          let hits=[];try{hits=asCmdBuscarClientes(sitio.cc).filter(c=>c.direccion);}catch(e){}
+          const calle=d=>String(d||'').split(',')[0].trim();
+          if(hits.length>1&&new Set(hits.map(c=>calle(c.direccion).toLowerCase())).size>1){window.__lumiCC={at:Date.now(),espera:true};
+            di('Tengo '+hits.length+' parecidos: '+hits.map(c=>c.cliente+', en '+calle(c.direccion)).join('; ')+'. ¿Cuál busco?');return;}
+          const uno=hits.length?hits[0]:null,q=uno?calle(uno.direccion):sitio.cc;
+          window.__lumiCC={at:Date.now(),espera:false};
+          if(lumiMacEnviar({url:'https://app.companycam.com/projects?q='+encodeURIComponent(q)},'Busqué "'+q+'" en CompanyCam')){
+            di(uno?'Es '+uno.cliente+', en '+uno.direccion+'. Lo busco en CompanyCam.':'Va. Busco "'+sitio.cc+'" en CompanyCam.');return;}
+        }
+        if(sitio&&/companycam/.test(sitio.url||''))window.__lumiCC={at:Date.now(),espera:false};
+      }
+      if(sitio&&sitio.url&&lumiMacEnviar({url:sitio.url},sitio.paso)){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,sitio.dicho);asMostrarRespuesta(sitio.dicho);asHablar(sitio.dicho,asSeguirOyendo);return;}
     }
     // (13-nov-2026) LA HORA VA PRIMERO. Estaba al final: antes pasaba por la Mac ("¿que quiso decir?",
     // hasta 5 s medidos) y hasta despues contestaba algo que el aparato ya sabe.
@@ -76873,6 +76937,10 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       caja.appendChild(d);
       while(caja.children.length > 4) caja.removeChild(caja.firstChild);
     }catch(e){}
+  };
+  // Lo que la app de la Mac averiguó (leyó una página): se enseña y se dice, como cualquier respuesta.
+  window.__lumiDecir = function(t){
+    try{ t = String(t || '').replace(/\s+/g, ' ').trim().slice(0, 600); if(!t || !AS.abierto) return; asCallar(); asMostrarRespuesta(t); asHablar(t, asSeguirOyendo); }catch(e){}
   };
   // Corre en la ventana de TRABAJO: hace ahí lo que la plática pidió. Devuelve 'ok' o por qué no.
   window.__lumiTrabajo = async function(orden){
