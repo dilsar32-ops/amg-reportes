@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R464';
+  const APP_BUILD = '2026-11-13-R465';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -75058,7 +75058,7 @@ const LumiCoincidencias = (function () {
       var items = bolsas[k], h0 = items[0];
       return {
         encargado_id: h0.encargado_id, encargado: h0.encargado, fecha: h0.fecha, empresa: h0.empresa,
-        log_id: h0.log_id, texto: textoEncargado(items)
+        log_id: h0.log_id, texto: textoEncargado(items, elegidos[k] || null)
       };
     });
 
@@ -75107,14 +75107,64 @@ const LumiCoincidencias = (function () {
     return '';
   }
 
-  function textoEncargado(items) {
+  // (13-nov-2026, pedido del dueño: "el mensaje no se explica bien; debería mandar el labor log señalando
+  // lo que él mandó y lo que dice el error, para que entiendan bien"). El mensaje ahora trae:
+  //   1) el labor log TAL COMO lo mandó, turno por turno, con su número;
+  //   2) cada cosa que no coincide, diciendo en qué turno y contra qué horas;
+  //   3) qué hacer en cada caso. Horas en formato de reloj de 12 (9:00 AM). Nunca dinero.
+  function h12(v) {
+    var m = minutos(v); if (m === null) return String(v || '');
+    var H = Math.floor(m / 60) % 24, mm = m % 60, ap = H >= 12 ? 'PM' : 'AM', h = H % 12 || 12;
+    return h + ':' + dos(mm) + ' ' + ap;
+  }
+  function numerosDeTurno(arr) { // [{indice}] -> "el turno 2" | "los turnos 1, 2 y 4"
+    var ns = (arr || []).map(function (t) { return (t.indice | 0) + 1; }).filter(function (n, i, a) { return a.indexOf(n) === i; }).sort(function (a, b) { return a - b; });
+    if (!ns.length) return '';
+    return (ns.length === 1 ? 'el turno ' : 'los turnos ') + lista(ns.map(String));
+  }
+  function rangos12(arr) { return lista((arr || []).map(function (t) { return 'de ' + h12(t.de || t.entrada) + ' a ' + h12(t.a || t.salida); })); }
+  function problema(h, rep) {
+    var d = h.detalle || {}, quien = h.persona, enTurnos = numerosDeTurno(d.turnos), horas = rangos12(d.horas);
+    if (h.tipo === 'en_labor_log_sin_horas') {
+      return ['✗ ' + quien + ': lo pusiste en ' + (enTurnos || 'tu ' + rep) + (d.turnos && d.turnos.length ? ' (' + rangos12(d.turnos) + ')' : '') + ', pero no apuntó horas ese día.',
+              '   → Si sí trabajó, dile que apunte sus horas. Si no trabajó, quítalo del ' + rep + ' y mándalo otra vez.'];
+    }
+    if (h.tipo === 'apunto_de_mas') {
+      return ['✗ ' + quien + ': apuntó ' + duracion(d.horas_apuntadas_min) + (horas ? ' (' + horas + ')' : '') + ', pero tu ' + rep + ' solo le da ' + duracion(d.horas_labor_log_min) +
+                (enTurnos ? ' (' + enTurnos + ')' : '') + '. Son ' + duracion(d.diferencia_min) + ' de más.',
+              '   → Si sí trabajó ese tiempo, agrégalo al turno que le falta y mándalo otra vez. Si no, dile que corrija sus horas.'];
+    }
+    if (h.tipo === 'falta_turno_en_medio') {
+      var f = d.faltan || [];
+      return ['✗ ' + quien + ': está en ' + enTurnos + ', pero no en ' + numerosDeTurno(f) + ' (' + rangos12(f) + ').',
+              '   → Si trabajó ese turno, agrégalo y mándalo otra vez. Si descansó o estuvo con otro equipo, contéstame aquí y lo anoto.'];
+    }
+    if (h.tipo === 'horas_sin_labor_log') {
+      return ['✗ ' + quien + ': apuntó horas' + (horas ? ' ' + horas : '') + ' y no aparece en ningún turno de tu ' + rep + '.',
+              '   → Si trabajó contigo, agrégalo y mándalo otra vez. Si no trabajó contigo, contéstame aquí con quién estuvo.'];
+    }
+    return ['✗ ' + renglon(h, true)];
+  }
+  function textoEncargado(items, log) {
     var h0 = items[0], rep = nombreReporte(h0.empresa);
     var pila = String(h0.encargado || '').trim().split(/\s+/)[0];
     var n = items.length;
     var out = ['Hola' + (pila ? ', ' + pila : '') + '. Revisé tu ' + rep + ' del ' + fechaEnPalabras(h0.fecha) +
-      ' contra las horas que apuntó la gente y ' + (n === 1 ? 'hay 1 cosa que no coincide:' : 'hay ' + n + ' cosas que no coinciden:')];
-    items.forEach(function (h) { out.push('• ' + renglon(h, true)); });
-    out.push('Corrige el ' + rep + ' o dime qué pasó, por favor.');
+      ' contra las horas que apuntó la gente y ' + (n === 1 ? 'hay 1 cosa que no coincide.' : 'hay ' + n + ' cosas que no coinciden.')];
+    var turnos = log && log.crudo && Array.isArray(log.crudo.turnos) ? log.crudo.turnos : [];
+    if (turnos.length) {
+      out.push('');
+      out.push('ESTO FUE LO QUE MANDASTE:');
+      turnos.slice(0, 12).forEach(function (t, i) {
+        out.push('Turno ' + (i + 1) + ' · ' + h12(t.de) + ' a ' + h12(t.a) + ' · ' + String(t.nombres || '(sin nombres)').replace(/\s+/g, ' ').trim().slice(0, 120));
+      });
+      if (turnos.length > 12) out.push('(y ' + (turnos.length - 12) + ' turnos más)');
+    }
+    out.push('');
+    out.push(n === 1 ? 'LO QUE NO COINCIDE:' : 'LO QUE NO COINCIDE:');
+    items.forEach(function (h) { problema(h, rep).forEach(function (l) { out.push(l); }); });
+    out.push('');
+    out.push('Contéstame aquí cuando lo corrijas, o si algo de esto no es así.');
     return out.join('\n');
   }
 
