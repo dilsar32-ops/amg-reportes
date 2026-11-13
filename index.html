@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R445';
+  const APP_BUILD = '2026-11-13-R446';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70049,10 +70049,13 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
   }
   function asDeviceSession(){return AS_DEVICE_SESSION||(AS_DEVICE_SESSION=createLumiDeviceSession({
     session:()=>({...SES,sandbox:AS.sandbox}),call:asDeviceCall,device:asDeviceKind(),now:asServerNow,
-    onHandoff:()=>{if(!AS.abierto)return;AS.micMuted=true;asMicPintar();asCallar();void asPararOido();if(window.Cara)Cara.hablando(false);asEstado('reposo','Toca el micrófono o escribe para continuar aquí.');}
+    onHandoff:()=>{AS.ownsOkAt=0;if(!AS.abierto)return;AS.micMuted=true;asMicPintar();asCallar();void asPararOido();if(window.Cara)Cara.hablando(false);asEstado('reposo','Toca el micrófono o escribe para continuar aquí.');}
   }));}
   function asDeviceClaim(){if(SES.role!=='manager'||AS.sandbox)return Promise.resolve(true);return asDeviceSession().activate();}
-  const asDeviceOwns=()=>SES.role!=='manager'||AS.sandbox?Promise.resolve(true):asDeviceSession().owns();
+  // (13-nov-2026) Se anota cuando se comprobo por ultima vez que la voz es de ESTE aparato. Antes de
+  // cada frase se volvia a preguntar a la nube (~0.5 s medidos) aunque se acabara de comprobar: la
+  // revision de cada 5 s ya lo mantiene al dia. Si otro aparato toma la voz, onHandoff lo borra.
+  const asDeviceOwns=()=>SES.role!=='manager'||AS.sandbox?Promise.resolve(true):asDeviceSession().owns().then(v=>{AS.ownsOkAt=v?Date.now():0;return v;});
   // (12-nov-2026) LA VOZ SE VA AL APARATO QUE EL TOCA. El dueno usa a Lumi en el telefono y en la
   // compu, la misma platica en los dos. El turno de voz ya existia, pero solo se tomaba al abrir
   // a Lumi, al escribirle o al tocar el microfono: si ya estaba abierta en los dos lados, el
@@ -70065,7 +70068,7 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
     ['pointerdown','keydown'].forEach(ev=>document.addEventListener(ev,aqui,{capture:true,passive:true}));
     document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible')aqui(); });
   })();
-  setInterval(()=>{if(AS.abierto&&AS_DEVICE_SESSION&&!document.hidden)void AS_DEVICE_SESSION.owns(true);},5000);
+  setInterval(()=>{if(AS.abierto&&AS_DEVICE_SESSION&&!document.hidden)void AS_DEVICE_SESSION.owns(true).then(v=>{AS.ownsOkAt=v?Date.now():0;}).catch(()=>{AS.ownsOkAt=0;});},5000);
 
   function asVozLocal(){
     if(AS_VOZ_LOCAL)return AS_VOZ_LOCAL;
@@ -70101,7 +70104,7 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
     const n=$('#asVozAviso');if(n&&n.parentNode)n.parentNode.insertBefore(b,n.nextSibling);return b;
   }
   async function asDecir(t, encolar, expectedEpoch=AS.hablaEpoch){
-    const owns=await asDeviceOwns();
+    const owns=Date.now()-(AS.ownsOkAt||0)<7000?true:await asDeviceOwns();
     if(expectedEpoch!==AS.hablaEpoch)return 0;
     if(!owns){if(AS.abierto)asEstado('reposo','Toca el micrófono o escribe para continuar aquí.');return 0;}
     t = asParaVoz(asTrVoz(t), asEn() ? 'en' : (AS.idiomaResp || 'es')); if(!t) return 0;
