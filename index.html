@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R438';
+  const APP_BUILD = '2026-11-13-R439';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71187,15 +71187,23 @@ function snapshot(data,owner,selected=Object.keys(APPS),now=Date.now()){
  }
  return {owner,at:now,items,health,selected,index:-1,phase:'offer',english:false};
 }
+// DOS FRASES, CON EL DATO CLAVE (decision del dueno, 13-nov-2026: "mas corto, mas profesional").
+// Antes eran hasta seis renglones: el total, uno por cada app, "parte de la revision se limita a
+// las listas visibles" y la pregunta. Ahora: cuantos y de quien (los tres primeros nombres y "N
+// mas"), y la pregunta. Lo unico que se agrega es lo que SI cambia lo que el hace: una app que no
+// se pudo revisar. De que app es cada chat ya lo dice al leerlo.
 function overview(s){
- const en=s.english,lines=[],total=s.items.length,exact=total>0&&s.items.every(r=>r.unreadCount!==null);
- if(total)lines.push(exact?(en?'You have ':'Tienes ')+s.items.reduce((a,r)=>a+r.unreadCount,0)+(en?' unread messages.':' mensajes sin leer.'):(en?'You have unread messages in ':'Tienes mensajes sin leer en ')+total+(en?' conversations.':' conversaciones.'));
- for(const app of s.selected){const rows=s.items.filter(r=>r.app===app);if(!HEALTH.includes(s.health[app])){lines.push(APPS[app]+(en?': I could not refresh it.':': no pude actualizar.'));continue;}
-  if(rows.length)lines.push(APPS[app]+': '+rows.length+(en?(rows.length===1?' conversation':' conversations'):(rows.length===1?' conversación':' conversaciones'))+' — '+rows.slice(0,3).map(r=>sinMaybe(r.query,en)).join(', ')+(rows.length>3?(en?' and ':' y ')+(rows.length-3)+(en?' more':' más'):'')+'.');
-  else lines.push(APPS[app]+(en?': no unread messages in what I checked.':': no vi mensajes sin leer en lo revisado.'));
- }
- if(s.selected.some(a=>s.health[a]==='visible_only'))lines.push(en?'Some lists are only partially visible.':'Parte de la revisión se limita a las listas visibles.');
- if(total)lines.push(en?'Shall I read them?':'¿Te los leo?');return lines.join('\n');
+ const en=s.english,total=s.items.length,exact=total>0&&s.items.every(r=>r.unreadCount!==null);
+ const sinRevisar=s.selected.filter(a=>!HEALTH.includes(s.health[a])).map(a=>APPS[a]);
+ const fallo=sinRevisar.length?(en?' I could not check '+sinRevisar.join(' or ')+'.':' No pude revisar '+sinRevisar.join(' ni ')+'.'):'';
+ if(!total)return (en?'You have no unread messages.':'No tienes mensajes sin leer.')+fallo;
+ const nombres=[...new Set(s.items.map(r=>sinMaybe(r.query,en)))];
+ const lista=nombres.slice(0,3).join(', ')+(nombres.length>3?(en?' and '+(nombres.length-3)+' more':' y '+(nombres.length-3)+' más'):'');
+ const cuantos=exact?s.items.reduce((a,r)=>a+r.unreadCount,0):total;
+ const primera=en
+  ?(exact?'You have '+cuantos+' unread message'+(cuantos===1?'':'s')+' from ':'You have unread messages in '+cuantos+' conversation'+(cuantos===1?'':'s')+': ')+lista+'.'
+  :(exact?'Tienes '+cuantos+' mensaje'+(cuantos===1?'':'s')+' sin leer, de ':'Tienes mensajes sin leer en '+cuantos+' conversaci'+(cuantos===1?'ón':'ones')+': ')+lista+'.';
+ return primera+fallo+(en?' Do you want me to read them?':' ¿Quieres que te los lea?');
 }
 function follow(text,s,owner,now=Date.now()){
  if(!s||s.owner!==owner||now<s.at||now-s.at>900000)return null;
