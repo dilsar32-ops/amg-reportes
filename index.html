@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R443';
+  const APP_BUILD = '2026-11-13-R444';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69162,8 +69162,8 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
     asChatFollow(log,nearEnd);
     if(!AS_CHAT_RESTORING)asChatStore().save(Array.from(log.children).filter(r=>['user','assistant'].includes(r.dataset.role)&&r.dataset.transient!=='1').map(r=>({role:r.dataset.role,content:r.lastElementChild?.textContent||''})));
   }
-  function asTranscribir(t,partial=false){ if(!t){document.querySelector('#asConversacion [data-transient="1"]')?.remove();}asConversacion('user', t,partial); const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; if(t) asMapa(null); }   // (4-nov) otra pregunta: el botón del GPS de antes se quita
-  function asMostrarRespuesta(t){ asPdfRecordar(t); asConversacion('assistant', t); const e = $('#asRespuesta'); if(e) e.textContent = t || ''; asPuertaPintar(); }
+  function asTranscribir(t,partial=false){ if(t&&!partial)window.__lumiUltimoTurno=Date.now(); if(!t){document.querySelector('#asConversacion [data-transient="1"]')?.remove();}asConversacion('user', t,partial); const e = $('#asTu'); if(e) e.textContent = t ? 'Tú: ' + t : ''; if(t) asMapa(null); }   // (4-nov) otra pregunta: el botón del GPS de antes se quita
+  function asMostrarRespuesta(t){ if(t)window.__lumiUltimoTurno=Date.now(); asPdfRecordar(t); asConversacion('assistant', t); const e = $('#asRespuesta'); if(e) e.textContent = t || ''; asPuertaPintar(); }
   // ===== (R88, 1-nov-2026, su pedido desde el iPhone) LUMI EN LA PUERTA =====
   // Tocar la esfera NO cambia de pantalla: Lumi oye y contesta ahí mismo. La esfera se pone verde oyendo, azul hablando y roja
   // con error; el rótulo "Lumi" dice "Escuchando…", la respuesta (hasta 3 renglones) o el error. Mismo oído, misma voz, misma
@@ -71835,15 +71835,21 @@ function lumiNoticeBatch(data,seen=[],pending=[],now=Date.now()){
  return {ids:unique.map(e=>e.id),events:unique,text:'Amílcar, '+(total?'tienes mensajes nuevos en '+total+' '+(total===1?'conversación':'conversaciones')+'. ':'hay reportes nuevos. ')+lines.join(' ')+(total?' ¿Te los leo?':''),at:now};
 }
 function lumiNoticeSay(text,routes=[],meta={}){
- const blocked=(SES.role==='manager'&&!asDeviceSession().active())||!AS.abierto||AS.enviando||AS_DESKTOP_BUSY||lumiReplyInProgress()||AS.estado==='hablando'||AS.estado==='pensando'||AS.estado==='escuchando'&&AS.texto?.trim();
+ const blocked=(SES.role==='manager'&&!asDeviceSession().active())||!AS.abierto||AS.enviando||AS_DESKTOP_BUSY||lumiReplyInProgress()||AS.estado==='hablando'||AS.estado==='pensando'||AS.estado==='escuchando'&&AS.texto?.trim()
+  // (13-nov-2026) NO SE METE EN MEDIO. Visto en vivo: el aviso de "tienes mensajes nuevos" caia
+  // encima de la respuesta que ella acababa de dar y la tapaba. Si hace menos de 25 s que el
+  // hablo o que ella contesto, el aviso espera su turno en la cola.
+  ||Date.now()-(window.__lumiUltimoTurno||0)<25000;
  if(blocked){if(!meta.ids||!LUMI_NOTICE_SPOKEN.some(n=>n.ids?.some(id=>meta.ids.includes(id))))LUMI_NOTICE_SPOKEN.push({text,routes,...meta});return false;}
  // (12-nov-2026) EL MISMO AVISO NO SE REPITE. Visto en vivo: "tienes mensajes nuevos en 2
  // conversaciones..." salio tres veces seguidas, palabra por palabra. Cada vez que la vigilancia
  // de la Mac se reinicia vuelve a marcar esos chats como recien llegados, con otro numero de
  // aviso, y aqui se decia de nuevo. Si el texto es el mismo de hace menos de 20 minutos, se da
  // por dicho y no se repite.
+ // (13-nov-2026) Se guarda en el aparato: al recargar la pagina se olvidaba y lo repetia.
+ if(!window.__lumiAvisoDicho){try{window.__lumiAvisoDicho=JSON.parse(localStorage.getItem('lumi_aviso_dicho')||'null');}catch{}}
  if(window.__lumiAvisoDicho&&window.__lumiAvisoDicho.text===text&&Date.now()-window.__lumiAvisoDicho.at<1200000){if(meta.ids)lumiNoticeSeen(meta.ids,meta.owner);return true;}
- window.__lumiAvisoDicho={text,at:Date.now()};
+ window.__lumiAvisoDicho={text,at:Date.now()};try{localStorage.setItem('lumi_aviso_dicho',JSON.stringify(window.__lumiAvisoDicho));}catch{}
  if(routes.length){if(!LUMI_MESSAGE_DRAFT||!['incomplete','draft','prepared','uncertain','sending'].includes(LUMI_MESSAGE_DRAFT.status))lumiSetMessageContext(routes);LUMI_INBOX_SESSION={owner:SES.user_id+'|'+SES.company_id,at:Date.now(),items:routes.map(r=>({...r,unreadCount:null})),index:-1,phase:'offer',english:false,selected:[...new Set(routes.map(r=>r.app))],health:{}};}
  const last=document.getElementById('asConversacion')?.lastElementChild;if(last?.dataset.role==='assistant')last.dataset.keepPreview='1';
  asMostrarRespuesta(text);const current=document.getElementById('asConversacion')?.lastElementChild;if(current)current.dataset.keepPreview='1';
@@ -72961,7 +72967,7 @@ async function lumiBasicBalance(person,owner){
   if(sinConfirmar)motivos.push(sinConfirmar===1?'tiene 1 turno sin confirmar':'tiene '+sinConfirmar+' turnos sin confirmar');
   if(rates.length>1||kind.length>1)motivos.push('tiene más de una tarifa guardada');
   if(!payments)motivos.push('no pude leer sus pagos');
-  if(motivos.length)throw Error('Todavía no puedo sacar el saldo de esa persona: '+motivos.join(' y ')+'. Arréglalo en Horas del equipo y te lo anoto enseguida.');}
+  if(motivos.length)throw Error('Todavía no puedo sacar el saldo de '+(String(person.full_name||person.name||'').trim().split(/\s+/)[0]||'esa persona')+': '+motivos.join(' y ')+'. Arréglalo en Horas del equipo y te doy el saldo.');}
  const rate=rates[0]?.rate==null?null:Number(rates[0].rate),mg=kind[0]?.rate==null?null:Number(kind[0].rate);
  if((rate!==null&&!Number.isFinite(rate))||(mg!==null&&!Number.isFinite(mg))||gastos.some(g=>!Number.isFinite(Number(g.amount))))throw Error('Importes incompletos.');
  const pay=payFor(rows,rate,mg);if(pay.sinPrecio||!Number.isFinite(pay.amount))throw Error('Falta una tarifa.');
@@ -73347,8 +73353,8 @@ async function lumiPaySnapshot(person,order,owner=lumiPayOwner()){
  if(p.kind==='crew'){
   // Solo para ADELANTOS: si lo unico que impide sacar el saldo es que faltan horas por confirmar,
   // se sigue sin saldo (null) y se dice por que. Para un pago normal el error sube como siempre.
-  try{balance=await lumiBasicBalance({id:p.id},owner);}
-  catch(e){const m=/^Todavía no puedo sacar el saldo de esa persona: (.+?)\. Arréglalo/.exec(String(e&&e.message||''));
+  try{balance=await lumiBasicBalance({id:p.id,full_name:p.full_name||p.name||p.label||''},owner);}
+  catch(e){const m=/^Todavía no puedo sacar el saldo de [^:]+: (.+?)\. Arréglalo/.exec(String(e&&e.message||''));
    if(order?.kind==='adelanto'&&m&&!/más de una tarifa|no pude leer sus pagos/.test(m[1])){balance=null;saldoPendiente=m[1];}else throw e;}
   try{warning=await lumiPayHourWarnings(p,owner);}catch(e){if(saldoPendiente)warning='';else throw e;}
  }
