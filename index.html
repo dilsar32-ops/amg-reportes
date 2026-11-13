@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R434';
+  const APP_BUILD = '2026-11-12-R435';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71287,6 +71287,25 @@ function safeAdvice(answer,rows){
 // tal persona"). Cuando va leyendo seguido NO se pregunta despues de cada uno: eso volvia 6
 // mensajes en 6 permisos, y el va manejando o con las manos ocupadas. La pregunta vuelve
 // cuando se para, que es donde si tiene sentido.
+// EL CHAT RESUMIDO (12-nov-2026, pedido del dueno): "en vez de decirme el mensaje me da como un
+// resumen: Amilcar, Raul quiere esto; en el grupo estan diciendo tal cosa... Si estan hablando
+// entre ellos, simplemente deja en visto el chat". El resumen lo hace el modelo de la Mac; aqui
+// solo se arma lo que se dice. Abrir el chat ya lo deja en visto: cuando no es con el, se dice
+// eso y NO se propone respuesta. El texto completo sigue a la mano ("leemelo completo").
+function readingResumen(item,resumen,advice,index,total,en=false){
+ const lines=[(index+1)+'/'+total+' · '+sinMaybe(item.query,en)+' · '+APPS[item.app]];
+ lines.push(String(resumen.resumen||'').trim());
+ if(resumen.alerta)lines.push(resumen.alerta);
+ if(resumen.para_el==='no'&&!resumen.alerta)lines.push(en?'They are talking among themselves, not to you. I left it as seen.':'Están hablando entre ellos, no es contigo. Lo dejé en visto.');
+ else if(resumen.para_el==='duda')lines.push(en?'I am not sure it is for you.':'No sé si es contigo.');
+ else if(advice&&advice.draft)lines.push((en?'You could reply: “':'Podríamos responder: «')+advice.draft+(en?'”':'»'));
+ else if(resumen.para_el==='si'&&resumen.pide)lines.push((en?'They expect: ':'Esperan de ti: ')+resumen.pide+'.');
+ return lines.filter(Boolean).join('\n');
+}
+// "leemelo completo", "que dice exactamente", "tal cual": quiere oir el texto, no el resumen.
+function quiereTextual(texto){
+ return /^(?:(?:lee|leeme|leelo|leemelo|dime|dimelo) (?:lo )?(?:completo|todo|entero|textual|tal cual|palabra por palabra|exacto|exactamente)|que dice (?:exactamente|tal cual|textual)|(?:read|tell me) (?:it )?(?:all|fully|word for word|exactly)|el mensaje completo|completo)$/.test(normal(texto));
+}
 function reading(item,rows,advice,index,total,en=false,seguido=false){
  const last=rows.at(-1),tail=last&&!last.outgoing?rows.slice(Math.max(0,rows.map(m=>m.outgoing).lastIndexOf(true)+1)).slice(-2):[];
  // El "Maybe " de iOS no se dice en voz alta: ni el de quien escribe ni el del chat.
@@ -71431,7 +71450,7 @@ function suenaComo(palabra,nombres){
  }
  return iguales.length?iguales:cerca;
 }
-const api={huellaDeSonido,suenaComo,oidoDeObra,ordenHojasAlGrupo,vetada,candidata,frasePara,nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
+const api={readingResumen,quiereTextual,huellaDeSonido,suenaComo,oidoDeObra,ordenHojasAlGrupo,vetada,candidata,frasePara,nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 // LUMI_INBOX_DIALOGUE_CORE_END
@@ -71488,6 +71507,27 @@ function lumiPararLectura(texto){
  return true;
 }
 
+// EL RESUMEN LO HACE LA MAC (12-nov-2026). Se le mandan los ultimos mensajes del chat que se acaba
+// de abrir y devuelve una o dos frases y si es con el dueno. Si la Mac no esta, tarda mas de 9 s o
+// lo que devuelve no sirve, se lee como antes: palabra por palabra.
+let LUMI_TEXTUAL=null;   // lo ultimo que se resumio, por si pide oirlo completo
+async function lumiResumenMac(item,rows){
+ try{
+  if(SES.role!=='manager'||AS.sandbox||!Array.isArray(rows)||!rows.length)return null;
+  const user=SES.user_id,company=SES.company_id,headers=cloudHeaders(),owner=user+'|'+company;
+  const call=async(url,init={},ms=3000)=>{const r=await authFetch(url,{...init,headers:{...headers,...init.headers},signal:AbortSignal.timeout(ms)});if(!r.ok)throw Error('sin Mac');const t=await r.text();return t?JSON.parse(t):null;};
+  const rowsDev=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(company)+'&clave=eq.lumi_local_model_device');const d=rowsDev?.[0]?.valor;
+  if(!d||!d.available||d.userId!==user||Date.now()-Date.parse(d.updatedAt)>180000)return null;
+  const mensajes=rows.slice(-12).map(m=>{const x={text:String(m.text||'').slice(0,600),outgoing:m.outgoing===true};const de=LumiInboxDialogue.messageSender?LumiInboxDialogue.messageSender(m):m.sender;if(!x.outgoing&&typeof de==='string'&&de.trim())x.sender=de.trim().slice(0,80);else if(!x.outgoing)x.sender=String(item.query).slice(0,80);if(m.attachment)x.attachment=true;return x;});
+  const id=crypto.randomUUID(),route='/rest/v1/lumi_model_jobs?id=eq.'+id;
+  await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:user,company_id:company,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_resumen',titulo:String(item.query).slice(0,120),app:item.app,mensajes}})});
+  let res=null;
+  try{const hasta=Date.now()+9000;while(Date.now()<hasta){await new Promise(r=>setTimeout(r,250));const j=(await call(route+'&select=state,result'))?.[0];if(j?.state==='failed')break;if(j?.state==='done'){const r=j.result?.data;if(r&&r.sent===false&&r.resumen&&typeof r.resumen.resumen==='string')res=r.resumen;break;}}}
+  finally{call(route,{method:'DELETE'}).catch(()=>{});}
+  if(owner!==SES.user_id+'|'+SES.company_id)return null;
+  return res;
+ }catch(e){return null;}
+}
 async function asInboxDialogue(texto){
  if(SES.role!=='manager')return false;
  const D=LumiInboxDialogue,owner=SES.user_id+'|'+SES.company_id;
@@ -71498,6 +71538,10 @@ async function asInboxDialogue(texto){
  // borrar una conversacion de WhatsApp o de Mensajes se hace en el telefono, no desde aqui, y
  // decirle que si cuando no puede seria peor que no entenderle -- se quedaria esperando a que
  // algo pasara. Asi que lo reconoce, lo dice derecho, y nombra lo que SI puede hacer.
+ // "leemelo completo": despues de un resumen, quiere oir el texto tal cual.
+ if(D.quiereTextual&&D.quiereTextual(texto)&&LUMI_TEXTUAL&&LUMI_TEXTUAL.owner===owner&&Date.now()-LUMI_TEXTUAL.at<600000){
+  asPararOido();asCallar();asTranscribir(texto);lumiInboxPresent(LUMI_TEXTUAL.texto);return true;
+ }
  const borrar=D.deleteIntent(texto);
  if(borrar){
   asPararOido();asCallar();asTranscribir(texto);try{D.marcarTema('mensajes');}catch(e){}
@@ -71624,7 +71668,32 @@ async function asInboxDialogue(texto){
   leidos++;
   const quedan=quedanAhora;
   const sigue=seguira&&!LUMI_LECTURA.parar;
-  const dicho=D.reading(item,rows,advice,i,s.items.length,s.english,sigue);
+  const textual=D.reading(item,rows,advice,i,s.items.length,s.english,sigue);
+  // RESUMEN EN VEZ DE RECITAR: si la Mac lo da, se dice el resumen; el texto queda guardado por si
+  // pide "leemelo completo". Si no es con el, no se propone respuesta: se deja en visto.
+  let dicho=textual;
+  try{const resumen=await lumiResumenMac(item,rows);if(!active())return true;
+   if(resumen&&D.readingResumen){
+    // EL RESUMEN DEL MODELO SOLO DONDE UN ERROR CUESTA POCO (dos examenes a ciegas, 12-nov-2026:
+    // 16 de 36 y 20 de 40 bien). El modelo chico de la Mac voltea quien pregunta a quien y pierde
+    // el pedido enterrado en un mensaje largo. Asi que:
+    //   - no es con el          -> una linea de resumen y "lo deje en visto".
+    //   - es con el y es corto  -> se le LEE lo que le escribieron, tal cual (como siempre).
+    //   - es con el y es largo  -> resumen, diciendo que es largo y que puede pedirlo completo.
+    //   - duda                  -> resumen y "no se si es contigo".
+    // El aviso de engano y el "tu fuiste el ultimo" son reglas fijas y salen siempre.
+    const cuerpo=(/(?:Dice: «|Says: “)([\s\S]*?)(?:»|”)(?:\n|$)/.exec(textual)||[])[1]||'';
+    const corto=cuerpo.length>0&&cuerpo.length<=240;
+    if(resumen.para_el==='no'&&!resumen.alerta){LUMI_MESSAGE_DRAFT=null;LUMI_BRAIN_PROPOSAL=null;}
+    if(resumen.para_el==='si'&&corto&&!resumen.ultimoSuyo){
+     dicho=textual+(resumen.alerta?'\n'+resumen.alerta:'');
+    }else{
+     dicho=D.readingResumen(item,resumen,resumen.para_el==='no'&&!resumen.alerta?null:advice,i,s.items.length,s.english);
+     if(resumen.para_el!=='no'&&!resumen.ultimoSuyo&&cuerpo.length>240)dicho+=(s.english?'\nIt is long: say “read it all” if you want it word for word.':'\nEs largo: di «léemelo completo» si lo quieres palabra por palabra.');
+     LUMI_TEXTUAL={owner,at:Date.now(),texto:textual};
+    }
+   }
+  }catch(e){}
   lumiReplyButtons([{...item,at:Date.now()}]);asAccionVisible('Conversación revisada','done');
   if(!sigue){
    lumiInboxPresent(dicho+(deCorrido&&!LUMI_LECTURA.parar&&quedan>0
