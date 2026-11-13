@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R467';
+  const APP_BUILD = '2026-11-13-R468';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -73163,7 +73163,7 @@ async function lumiLaborDocRender(model){
   node.innerHTML=rdlHojaHtml({fecha:p.d,lider:p.l,equipo:names(p.t),turnos:p.s.map(s=>({de:h(s.f),a:h(s.o),nombres:names(s.n),tarea:s.k,dir:s.a,extras:[],total:null,gasto:''}))});
   const footer=document.createElement('div');footer.style.cssText='margin-top:18px;padding:16px;border:2px solid #b52531;border-radius:10px;background:#fff5f4;color:#242424;font:16px/1.45 Arial';
   const title=document.createElement('strong');title.textContent='REVISIÓN DEL LABOR LOG';footer.appendChild(title);
-  const note=document.createElement('p');note.textContent=model.note;note.style.margin='8px 0 0';footer.appendChild(note);node.appendChild(footer);
+  const note=document.createElement('p');note.textContent=model.note;note.style.margin='8px 0 0';note.style.whiteSpace='pre-line';footer.appendChild(note);node.appendChild(footer);
   document.body.appendChild(node);
   try{
     await Promise.race([document.fonts?.ready||Promise.resolve(),new Promise(r=>setTimeout(r,2000))]);
@@ -75069,6 +75069,8 @@ const LumiCoincidencias = (function () {
           var m = {};
           items.forEach(function (h) {
             var d = h.detalle || {};
+            // "Apuntó de más" es un problema del TOTAL del día, no de un turno: no se marca ninguno (marcarlos todos no decía nada).
+            if (h.tipo === 'apunto_de_mas') return;
             ((h.tipo === 'falta_turno_en_medio' ? d.faltan : d.turnos) || []).forEach(function (t) { if (t && t.indice != null) m[t.indice | 0] = true; });
           });
           return Object.keys(m).map(Number).sort(function (a, b) { return a - b; });
@@ -78687,13 +78689,14 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(x.hoja !== undefined) return x.hoja;
     x.hoja = null;
     try{
-      if(!x.log_id || x.empresa !== 'restauracion' || !x.marcas || !x.marcas.length) return null;
+      if(!x.log_id || x.empresa !== 'restauracion') return null;   // sin turno que marcar ("apuntó de más") la hoja va igual, con la explicación abajo
       const row = await lumiLaborDocRow({ id: x.log_id }, lumiLaborDocOwner()), p = row.payload;
       if(!p || !Array.isArray(p.s) || !p.s.length) return null;
       const safe = { d: p.d || row.log_date, l: String(p.l || row.crew_leader || ''), t: String(p.t || ''), s: p.s.map(function(s){ return { f: s.f, o: s.o, n: String(s.n || ''), k: String(s.k || ''), a: String(s.a || '') }; }) };   // lista cerrada: nunca tarifas ni pagos
       const corte = String(x.texto || '').split(/LO QUE NO COINCIDE:|LO QUE NECESITO SABER:/)[1] || '';
-      const nota = corte.split('\n\nContéstame')[0].replace(/\n\s*→/g, ' →').replace(/\n+/g, ' ').trim().slice(0, 900);
-      const r = await lumiLaborDocRender({ payload: safe, findings: [{ indices: x.marcas.filter(function(i){ return i >= 0 && i < safe.s.length; }) }], note: nota, kind: 'restauracion', leader: safe.l, date: row.log_date });
+      // abajo de la hoja: un renglón por problema (sin el "qué hacer", que ya va en el mensaje), sin cortar a media frase
+      const nota = corte.split('\n\nContéstame')[0].split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return /^[✗?]/.test(l); }).slice(0, 8).join('\n').slice(0, 1400);
+      const r = await lumiLaborDocRender({ payload: safe, findings: [{ indices: (x.marcas || []).filter(function(i){ return i >= 0 && i < safe.s.length; }) }], note: nota, kind: 'restauracion', leader: safe.l, date: row.log_date });
       if(r && r.image && r.image.size <= 8 * 1024 * 1024) x.hoja = { image: r.image, width: r.width, height: r.height };
     }catch(e){ x.hoja = null; }
     return x.hoja;
