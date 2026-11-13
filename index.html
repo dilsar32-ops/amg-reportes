@@ -19597,7 +19597,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R417';
+  const APP_BUILD = '2026-11-12-R418';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -58633,6 +58633,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const name = ($('#authCrewName').value||'').trim();
     if(!code) return authErr('Escriba el código.');
     if(!name) return authErr('Escriba su nombre.');   // the manager has to know whose hours these are
+    // (12-nov, revision) con mala senal tocaban Entrar dos veces y quedaban DOS personas con el mismo nombre (horas partidas en nomina)
+    const btnJ = $('#authJoin'); if(btnJ.dataset.ocupado === '1') return;
+    btnJ.dataset.ocupado = '1'; const txtJ = btnJ.textContent; btnJ.disabled = true; btnJ.textContent = 'Entrando…';
+    const soltarJ = () => { btnJ.dataset.ocupado = ''; btnJ.disabled = false; btnJ.textContent = txtJ; };
     try{
       if(!SES || !SES.access_token) await anonSession();
 
@@ -58646,6 +58650,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           + 'Si usted ya entró antes en otro teléfono, NO siga: sus horas se van a '
           + 'partir en dos. Hable con su manager.\n\n'
           + '¿Es usted una persona diferente con el mismo nombre?')){
+          soltarJ();
           return authErr('Hable con su manager antes de entrar.');
         }
       }catch(e){ /* function not installed yet - let them through */ }
@@ -58656,6 +58661,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     }catch(e){
       authErr(String(e.message).includes('codigo_invalido') ? 'Ese código no existe.' : 'No se pudo entrar. Revise su internet.');
     }
+    soltarJ();
   });
 
   async function managerAuth(create){
@@ -58794,7 +58800,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       else if(prof.role !== 'manager' && prof.status && prof.status !== 'active') showPausedGate(prof.status);
       else enterApp();
     }catch(e){
-      authErr('Código incorrecto.');
+      // (12-nov, revision) sin senal o con el servidor ocupado NO es "codigo incorrecto": la gente creia que lo habia perdido
+      const m = String((e && e.message) || '');
+      authErr(/invalid|credentials|incorrect|sin token|HTTP 40[01]/i.test(m) ? 'Código incorrecto.' : 'Sin señal. Intente otra vez cuando tenga internet.');
     }
     btn.disabled = false; btn.textContent = old;
   });
@@ -82193,7 +82201,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   if($('#grdMandar')) $('#grdMandar').addEventListener('click', grdMandar);
   document.addEventListener('click', e => { const r = e.target.closest && e.target.closest('[data-grd-recibo]'); if(r){ openReceipt(r.getAttribute('data-grd-recibo')); return; }
     const a = e.target.closest && e.target.closest('[data-grm-aprobar]'); if(a){ grmAprobar([a.getAttribute('data-grm-aprobar')]); return; }
-    const d = e.target.closest && e.target.closest('[data-grm-devuelto]'); if(d){ grmDevuelto(d.getAttribute('data-grm-devuelto')); return; }
+    const d = e.target.closest && e.target.closest('[data-grm-devuelto]'); if(d){ if(confirm('¿Ya se le devolvió ese dinero? Se marca como devuelto.')) grmDevuelto(d.getAttribute('data-grm-devuelto')); return; }
     const gg = e.target.closest && e.target.closest('[data-grm-grupo]'); if(gg){ grmMandarGrupo([gg.getAttribute('data-grm-grupo')]); } });
   if($('#mgrGoGastos')) $('#mgrGoGastos').addEventListener('click', () => { GRD.filtro = 'pend'; ['grmSegPend', 'grmSegOk', 'grmSegDev'].forEach((id, i) => { const b = $('#' + id); if(b) b.classList.toggle('on', i === 0); }); showTab('gastosrecibidos'); pushBack('mgrrest'); grdLeerNumero(); grmCargar(); });
   [['grmSegPend', 'pend'], ['grmSegOk', 'ok'], ['grmSegDev', 'dev']].forEach(([id, f]) => { const b = $('#' + id); if(b) b.addEventListener('click', () => { GRD.filtro = f; ['grmSegPend', 'grmSegOk', 'grmSegDev'].forEach(k => { const x = $('#' + k); if(x) x.classList.toggle('on', k === id); }); grmPintar(); }); });
