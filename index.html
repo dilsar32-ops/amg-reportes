@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R431';
+  const APP_BUILD = '2026-11-12-R432';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -72841,7 +72841,17 @@ async function lumiBasicBalance(person,owner){
  lumiBasicGet('/rest/v1/crew_kind_rates?select=rate&user_id=eq.'+uid+'&work_kind=eq.mudanza',owner),
  lumiBasicAll('/rest/v1/expenses?select=id,amount&company_id=eq.'+company+'&created_by=eq.'+uid+'&work_kind=eq.restauracion&approved_at=not.is.null&reimbursed_at=is.null',owner),
  crewPaymentsFor(scope)]);
- if(lumiBasicOwner()!==owner||!payments||rates.length>1||kind.length>1||rows.some(r=>!r.confirmed||!r.clock_out))throw Error('Faltan datos confirmados para responder.');
+ // (12-nov-2026) QUE DIGA QUE FALTA. El dueno dijo "le adelante a Minor 300" y Lumi contesto "Faltan
+ // datos confirmados para responder", sin decir cuales; el: "tiene que saber". La regla no cambia
+ // (sin horas confirmadas no hay saldo de fiar y no se anota dinero a ciegas): cambia que ahora
+ // dice el motivo exacto y donde se arregla.
+ if(lumiBasicOwner()!==owner)throw Error('La sesión cambió. Vuelve a pedírmelo.');
+ {const abiertos=rows.filter(r=>!r.clock_out).length,sinConfirmar=rows.filter(r=>r.clock_out&&!r.confirmed).length,motivos=[];
+  if(abiertos)motivos.push(abiertos===1?'tiene un turno abierto (no ha marcado la salida)':'tiene '+abiertos+' turnos abiertos (sin marcar la salida)');
+  if(sinConfirmar)motivos.push(sinConfirmar===1?'tiene 1 turno sin confirmar':'tiene '+sinConfirmar+' turnos sin confirmar');
+  if(rates.length>1||kind.length>1)motivos.push('tiene más de una tarifa guardada');
+  if(!payments)motivos.push('no pude leer sus pagos');
+  if(motivos.length)throw Error('Todavía no puedo sacar el saldo de esa persona: '+motivos.join(' y ')+'. Arréglalo en Horas del equipo y te lo anoto enseguida.');}
  const rate=rates[0]?.rate==null?null:Number(rates[0].rate),mg=kind[0]?.rate==null?null:Number(kind[0].rate);
  if((rate!==null&&!Number.isFinite(rate))||(mg!==null&&!Number.isFinite(mg))||gastos.some(g=>!Number.isFinite(Number(g.amount))))throw Error('Importes incompletos.');
  const pay=payFor(rows,rate,mg);if(pay.sinPrecio||!Number.isFinite(pay.amount))throw Error('Falta una tarifa.');
