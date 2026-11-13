@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R468';
+  const APP_BUILD = '2026-11-13-R469';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -75063,6 +75063,17 @@ const LumiCoincidencias = (function () {
       return {
         encargado_id: h0.encargado_id, encargado: h0.encargado, fecha: h0.fecha, empresa: h0.empresa,
         log_id: h0.log_id, texto: textoEncargado(items, elegidos[k] || null),
+        // (13-nov-2026) Lo que se le reclamó, en corto, para cuando el encargado CONTESTE (respuestas-coincidencias.mjs):
+        // { tipo, persona, persona_id, turnos: "1, 2 y 3", horas: "de 9:00 AM a 5:00 PM" }
+        hallazgos: items.map(function (h) {
+          var d = h.detalle || {}, o = { tipo: h.tipo, persona: h.persona, persona_id: h.persona_id || null };
+          var nt = numerosDeTurno(h.tipo === 'falta_turno_en_medio' ? d.faltan : d.turnos).replace(/^(?:el turno|los turnos) /, '');
+          if (nt) o.turnos = nt;
+          var hr = rangos12(h.tipo === 'en_labor_log_sin_horas' || h.tipo === 'nombre_dudoso' ? d.turnos : d.horas);
+          if (hr) o.horas = hr;
+          if (h.tipo === 'nombre_dudoso') o.persona = d.nombre_escrito || h.persona;
+          return o;
+        }),
         // (13-nov-2026) Para dibujar la hoja con el error marcado: en qué turnos (posición en el labor log, desde 0)
         // está cada problema. En "falta en un turno" se marca el turno que falta; en lo demás, donde aparece la persona.
         marcas: (function () {
@@ -76119,7 +76130,11 @@ function lumiIncompleteSpeechReply(text){
              if(up.ok){fila.id=idm;fila.adjuntos=[{tipo:'imagen',path:ruta,ancho:hoja.width,alto:hoja.height}];}}}catch(e){}
            const res=await authFetch('/rest/v1/mensajes',{method:'POST',headers:Object.assign(cloudHeaders(),{Prefer:'return=representation'}),signal:AbortSignal.timeout(15000),body:JSON.stringify(fila)});
            const filas=res.ok?await res.json():null;                       // se cuenta como mandado SOLO si la nube devolvió la fila guardada
-           if(Array.isArray(filas)&&filas[0]&&filas[0].id){ok.push(x);yaSalieron=yaSalieron.concat([x.clave]).slice(-400);try{await lumiPaySetting(owner,'lumi_revision_avisada_'+SES.user_id,{claves:yaSalieron});}catch(e){}}else mal.push(x);
+           if(Array.isArray(filas)&&filas[0]&&filas[0].id){ok.push(x);
+             // EXPEDIENTE DEL AVISO (13-nov-2026): qué se reclamó, a quién y cuándo. Lo lee el puente de la Mac para entender
+             // lo que el encargado CONTESTE. Sin horas de pago ni dinero: solo nombres, turnos y horas del labor log.
+             try{const ll='lumi_revision_avisos_'+SES.user_id,prevA=((await lumiPaySetting(owner,ll))||{}).avisos||[];
+               await lumiPaySetting(owner,ll,{avisos:prevA.concat([{clave:x.clave,mensaje_id:filas[0].id,para_user_id:x.para_user_id,para_casual_id:x.para_casual_id,encargado:x.para_nombre,fecha:x.fecha,empresa:x.empresa,log_id:x.log_id,hallazgos:(x.hallazgos||[]).slice(0,12),enviado:new Date().toISOString(),estado:'abierto'}]).slice(-60)});}catch(e){}yaSalieron=yaSalieron.concat([x.clave]).slice(-400);try{await lumiPaySetting(owner,'lumi_revision_avisada_'+SES.user_id,{claves:yaSalieron});}catch(e){}}else mal.push(x);
          }catch(e){mal.push(x);}}
          RV.porMandar=mal;
          const d=(ok.length?'Listo. Mandé '+ok.length+(ok.length===1?' aviso':' avisos')+' por Mensajes de la app: a '+[...new Set(ok.map(x=>x.para_nombre))].join(', ')+'.':'')+(mal.length?(ok.length?' ':'')+'No pude mandar '+mal.length+': '+[...new Set(mal.map(x=>x.para_nombre))].join(', ')+'. Dígame "mándalos" para intentar otra vez.':'');
@@ -76151,7 +76166,7 @@ function lumiIncompleteSpeechReply(text){
           let yaAvisados=[];try{yaAvisados=((await lumiPaySetting(owner,'lumi_revision_avisada_'+SES.user_id))||{}).claves||[];}catch(e){}
           const claveDe=x=>[x.fecha,x.empresa,x.log_id||'',x.encargado_id||''].join('|');
           const porMandar=r.mensajes.filter(x=>x.encargado_id&&String(x.encargado_id)!==String(SES.user_id)&&(idsC.has(String(x.encargado_id))||idsT.has(String(x.encargado_id)))&&!yaAvisados.includes(claveDe(x)))
-            .map(x=>({clave:claveDe(x),log_id:x.log_id||null,empresa:x.empresa,fecha:x.fecha,marcas:x.marcas||[],para_user_id:idsC.has(String(x.encargado_id))?String(x.encargado_id):null,para_casual_id:idsC.has(String(x.encargado_id))?null:String(x.encargado_id),para_nombre:String(x.encargado||'').slice(0,80),texto:String(x.texto||'').slice(0,1900)}));
+            .map(x=>({clave:claveDe(x),log_id:x.log_id||null,empresa:x.empresa,fecha:x.fecha,marcas:x.marcas||[],hallazgos:x.hallazgos||[],para_user_id:idsC.has(String(x.encargado_id))?String(x.encargado_id):null,para_casual_id:idsC.has(String(x.encargado_id))?null:String(x.encargado_id),para_nombre:String(x.encargado||'').slice(0,80),texto:String(x.texto||'').slice(0,1900)}));
           const repetidos=r.mensajes.filter(x=>yaAvisados.includes(claveDe(x))).length,sinCuenta=r.mensajes.length-porMandar.length-repetidos;
           window.__lumiRevision.porMandar=porMandar;window.__lumiRevision.pide=porMandar.length?Date.now():0;
           void lumiRevisionPrevia(porMandar);   // las hojas marcadas, para que las vea antes de decir sí
@@ -78758,7 +78773,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
         if(d.r.hallazgos.length) partes.push(d.r.resumen);
         d.r.mensajes.forEach(function(x){
           const id = String(x.encargado_id || ''); if(!id || id === String(SES.user_id) || !(d.idsC.has(id) || d.idsT.has(id)) || yaAvisados.includes(d.claveDe(x))) return;
-          porMandar.push({ clave: d.claveDe(x), log_id: x.log_id || null, empresa: x.empresa, fecha: x.fecha, marcas: x.marcas || [], para_user_id: d.idsC.has(id) ? id : null, para_casual_id: d.idsC.has(id) ? null : id, para_nombre: String(x.encargado || '').slice(0, 80), texto: String(x.texto || '').slice(0, 1900) });
+          porMandar.push({ clave: d.claveDe(x), log_id: x.log_id || null, empresa: x.empresa, fecha: x.fecha, marcas: x.marcas || [], hallazgos: x.hallazgos || [], para_user_id: d.idsC.has(id) ? id : null, para_casual_id: d.idsC.has(id) ? null : id, para_nombre: String(x.encargado || '').slice(0, 80), texto: String(x.texto || '').slice(0, 1900) });
         });
       }
       const k = porMandar.length;
@@ -78782,6 +78797,22 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       if(window.__lumiRevision && window.__lumiRevision.porMandar) void lumiRevisionPrevia(window.__lumiRevision.porMandar);
     }catch(e){}
   }
+  // NOVEDADES DE LAS CONTESTACIONES (13-nov-2026). El puente de la Mac lee lo que el encargado contesta, responde lo
+  // sencillo y deja aquí un renglón para el dueño ("Vero dice que Gerson sí trabajó; ya le escribí a Gerson").
+  // Cada novedad se le dice UNA vez por aparato (se recuerda en este aparato cuáles ya se dijeron).
+  async function lumiRevisionNovedades(){
+    try{
+      if(typeof SES === 'undefined' || !SES || SES.role !== 'manager' || !isManager() || AS.sandbox || !cloudOn() || window.__lumiRevisionAviso) return;
+      const v = (await lumiPaySetting(lumiBasicOwner(), 'lumi_revision_novedades_' + SES.user_id)) || {}, lista = Array.isArray(v.novedades) ? v.novedades : [];
+      let dichas = []; try{ dichas = JSON.parse(localStorage.getItem('lumi_rev_novedades_dichas') || '[]'); }catch(e){}
+      const nuevas = lista.filter(function(n){ return n && n.id && n.texto && !dichas.includes(n.id) && Date.now() - Date.parse(n.at || 0) < 3 * 86400000; }).slice(-5);
+      if(!nuevas.length) return;
+      try{ localStorage.setItem('lumi_rev_novedades_dichas', JSON.stringify(dichas.concat(nuevas.map(function(n){ return n.id; })).slice(-200))); }catch(e){}
+      const texto = nuevas.map(function(n){ return '• ' + String(n.texto).slice(0, 400); }).join('\n');
+      window.__lumiRevisionAviso = { dicho: 'Amílcar, ' + (nuevas.length === 1 ? 'hay una novedad de los avisos de labor log. ' + String(nuevas[0].texto).slice(0, 300) : 'hay ' + nuevas.length + ' novedades de los avisos de labor log. Ahí se las dejo escritas.'), texto: 'NOVEDADES DE LOS AVISOS DE LABOR LOG:\n' + texto };
+    }catch(e){}
+  }
+  setInterval(lumiRevisionNovedades, 60000); setTimeout(lumiRevisionNovedades, 30000);
   setTimeout(lumiRevisionDiaria, 60000); setInterval(lumiRevisionDiaria, 5 * 60000); setInterval(lumiRevisionAvisar, 10000);
   async function asNavegar(nav){
     if(window.__lumiMacChat && lumiMacEnviar({ nav: nav }, 'Abrí ' + (typeof asCmdNombrePantalla === 'function' && nav && nav.pantalla === 'pantalla' ? asCmdNombrePantalla(nav.destino) : 'la pantalla') + ' en mi ventana')) return;
