@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R439';
+  const APP_BUILD = '2026-11-13-R440';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -73856,7 +73856,19 @@ const LUMI_LABOR_READ = (() => {
     const list=select(rows,q),en=q.en,lines=[];
     const range=q.from?(en?' for ':' del ')+q.from+(q.to!==q.from?' — '+q.to:''):'';
     if(!list.length){
-      lines.push(en?'No matching reports'+range+'.':'No encontré reportes que coincidan'+range+'.');
+      // DICHO COMO PERSONA (13-nov-2026): antes "No encontré reportes que coincidan del 2026-11-13."
+      // -- una fecha de maquina leida en voz alta. Ahora: "Hoy todavía no ha llegado ningún labor log."
+      const hoyD=new Date(),hoy=hoyD.getFullYear()+'-'+String(hoyD.getMonth()+1).padStart(2,'0')+'-'+String(hoyD.getDate()).padStart(2,'0');
+      const ayerD=new Date(hoyD.getFullYear(),hoyD.getMonth(),hoyD.getDate()-1),ayer=ayerD.getFullYear()+'-'+String(ayerD.getMonth()+1).padStart(2,'0')+'-'+String(ayerD.getDate()).padStart(2,'0');
+      const MES=en?['January','February','March','April','May','June','July','August','September','October','November','December']:['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      const dia=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));return m?(en?MES[+m[2]-1]+' '+(+m[3]):(+m[3])+' de '+MES[+m[2]-1]):String(iso);};
+      const cosa=en?(q.sent?'sent ':q.pending?'pending ':'')+'labor log':'labor log'+(q.sent?' enviado':q.pending?' pendiente':'');
+      const quien=q.leader?String(q.leader).replace(/(^|\s)\S/g,c=>c.toUpperCase()):'';const de=quien?(en?' from '+quien:' de '+quien):'';
+      if(!q.from)lines.push(en?'No '+cosa+'s'+de+' right now.':'No hay ningún '+cosa+de+' ahorita.');
+      else if(q.from===q.to&&q.from===hoy)lines.push(en?'No '+cosa+de+' has come in yet today.':'Hoy todavía no ha llegado ningún '+cosa+de+'.');
+      else if(q.from===q.to&&q.from===ayer)lines.push(en?'There was no '+cosa+de+' yesterday.':'Ayer no hubo ningún '+cosa+de+'.');
+      else if(q.from===q.to)lines.push(en?'There is no '+cosa+de+' for '+dia(q.from)+'.':'No hay ningún '+cosa+de+' del '+dia(q.from)+'.');
+      else lines.push(en?'There is no '+cosa+de+' from '+dia(q.from)+' to '+dia(q.to)+'.':'No hay ningún '+cosa+de+' del '+dia(q.from)+' al '+dia(q.to)+'.');
       if(q.pending&&!q.archived){
         const sent=select(rows,{...q,pending:false,unread:false,sent:true}).slice(0,2);
         if(sent.length)lines.push((en?'Already sent: ':'Ya enviados: ')+sent.map(r=>r.crew_leader+' ('+r.log_date+')').join(', ')+'.');
