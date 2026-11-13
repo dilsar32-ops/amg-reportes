@@ -19601,7 +19601,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R428';
+  const APP_BUILD = '2026-11-12-R429';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71374,7 +71374,25 @@ function frasePara(etiqueta,quien,frase){
  if(etiqueta==='labor')return de?'muestrame los labor logs de '+de:'muestrame los labor logs';
  return null;
 }
-const api={vetada,candidata,frasePara,nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
+// LO QUE EL MICROFONO DEJA ESCRITO, ANTES DE QUE NADIE LO INTERPRETE (12-nov-2026).
+// Visto en vivo: "mandale los leibols al grupo porfa" -> "¿Por donde le escribo a los leibols al
+// grupo porfa?". Creyo que "los leibols" era una persona. Las reglas de leer ya conocian
+// "leibor" y "label", pero quien manda mensajes ve el texto crudo. Esto corre sobre lo que el dijo,
+// al entrar, para que TODOS (los de la app y el cerebro grande) vean "labor logs" y "Zelle".
+function oidoDeObra(texto){
+ return String(texto||'')
+  .replace(/\b(?:la[bv]ou?r|lei?b[oe]r|laibor|laber)\s*(?:logg?s?|lo[xk]s?|locks?|lods?|los)\b/gi,'labor logs')
+  .replace(/\b(?:leibols?|lebols?|leibels?|laibols?|labels?|laborlogs?|lavorlogs?|leiborlogs?)\b/gi,'labor logs')
+  // "le adelante 300 por cel": hablando de dinero, "por cel/sel/zel" es Zelle, no el celular.
+  .replace(/\b(adelant\w+|pagu\w+|pag[oó]|deposit\w+|transfer\w+|mand[eé]|di|dimos)\b([^.]{0,60}?)\bpor (?:cel|sel|zel|sell|cell|celle|selle|zeli|seli|zele|sele|zelly|selly|sely|zely)\b/gi,'$1$2por Zelle');
+}
+// Mandar las hojas AL GRUPO es una orden con su propio camino (y su propia confirmacion). No es
+// escribirle un mensaje a un contacto: el que redacta mensajes la tiene que dejar pasar.
+function ordenHojasAlGrupo(texto){
+ const t=sinTildes(oidoDeObra(texto)).replace(/^(?:(?:oye|lumi|porfa|por favor|please)\s+)+/,'');
+ return /^(?:manda|mandale|mandales|mandalos|mandalas|envia|enviale|envialos|envialas|pasa|pasale|pasalos|reenvia|send|share|forward)\b.{0,50}\b(?:labor logs?|hojas?|reportes? de (?:trabajo|hoy|ayer))\b.{0,50}\b(?:al grupo|a todos|al chat|en el grupo|al equipo|to the group|to everyone)\b/.test(t);
+}
+const api={oidoDeObra,ordenHojasAlGrupo,vetada,candidata,frasePara,nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 // LUMI_INBOX_DIALOGUE_CORE_END
@@ -72608,6 +72626,8 @@ function lumiPaymentNoticeWording(text){
  return m?m[1][0].toUpperCase()+m[1].slice(1)+'. Por favor confirme cuando lo reciba.':null;
 }
 function lumiComposeParse(input,draft,context){
+ // Mandar las hojas al grupo no es escribirle a un contacto: se deja pasar a su propio camino.
+ try{if(typeof LumiInboxDialogue!=='undefined'&&LumiInboxDialogue.ordenHojasAlGrupo&&LumiInboxDialogue.ordenHojasAlGrupo(input))return null;}catch(e){}
  input=lumiComposeInput(input);const command=lumiComposeParseIntent(input,draft,context);if(!command)return null;
  if(command.text&&['partial','draft','replace'].includes(command.kind)&&!/["“][\s\S]*["”]/.test(input)){
   const formatted=lumiDictatedEmail(command.text);
@@ -73824,6 +73844,9 @@ function lumiIncompleteSpeechReply(text){
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
     if(!dictando&&!AS.conf&&!AS.pregunta){const incomplete=lumiIncompleteSpeechReply(texto);if(incomplete){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(incomplete);asHablar(incomplete,asSeguirOyendo);return;}}
+    // (12-nov-2026) EL OIDO DE OBRA: "leibols", "labels", "lavor logs" -> labor logs; "por cel" -> por
+    // Zelle. Va aqui, al entrar, para que lo vean todos los que siguen y tambien el cerebro grande.
+    if(!dictando){try{if(typeof LumiInboxDialogue!=='undefined'&&LumiInboxDialogue.oidoDeObra)texto=LumiInboxDialogue.oidoDeObra(texto);}catch(e){}}
     if(!dictando&&!AS.conf&&!AS.pregunta&&typeof lumiResolveLaborSpeech==='function'){
       if(AS.laborTermPending){const intended=AS.laborTermPending;AS.laborTermPending=null;
         if(/^(?:si|sí|yes|correcto|exacto)[.! ]*$/i.test(texto.trim()))texto=intended;
