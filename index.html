@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R470';
+  const APP_BUILD = '2026-11-13-R471';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -58511,7 +58511,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const list = $('#inboxList'); if(!list) return;
     // The badge always reflects the active queue, even while looking at
     // Archivados - archived reports don't need attention anymore.
-    const unread = inboxRows.filter(r => !r.archived_at && inboxKindOf(r) === laborMode && (!r.seen || (laborMode === 'restauracion' && !r.sent_group_at && !r.returned_at))).length;
+    const unread = inboxRows.filter(r => !r.archived_at && inboxKindOf(r) === laborMode && (laborMode === 'mudanza' || (!r.sent_group_at && (!r.seen || !r.returned_at)))).length;   // (13-nov, el dueno) mudanza: pendiente hasta archivarla; restauracion: lo enviado al grupo ya no cuenta
     const badge = $('#mgrBadge');
     if(badge){ badge.textContent = unread || ''; badge.hidden = !unread; }
     const rows = currentInboxRows();
@@ -82409,11 +82409,11 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       if(!(typeof isManager === 'function' && isManager()) || !cloudOn()) { WSA.labor = { rd: 0, amg: 0, at: Date.now() }; return; }
       if(Date.now() - WSA.labor.at < 60000) return;
       WSA.labor.at = Date.now();
-      const r = await authFetch('/rest/v1/labor_logs?select=id,work_kind,seen,sent_group_at&archived_at=is.null&or=(seen.eq.false,and(work_kind.eq.restauracion,sent_group_at.is.null,returned_at.is.null))&limit=500'
+      const r = await authFetch('/rest/v1/labor_logs?select=id,work_kind,seen,sent_group_at&archived_at=is.null&or=(seen.eq.false,work_kind.eq.mudanza,and(work_kind.eq.restauracion,sent_group_at.is.null,returned_at.is.null))&limit=500'
         + (mgrDe() === 'todo' ? '' : '&work_kind=eq.' + mgrDe()), { headers: cloudHeaders() });   // (fr-29)
       if(!r.ok) return;
       const filas = await r.json(); let rd = 0, amg = 0;
-      filas.forEach(f => { if(f.work_kind === 'mudanza') amg++; else rd++; });
+      filas.forEach(f => { if(f.work_kind === 'mudanza') amg++; else if(!f.sent_group_at) rd++; });   // (13-nov) lo ya enviado al grupo no es pendiente; la mudanza cuenta hasta archivarla
       WSA.labor = { rd, amg, at: Date.now() };
     }catch(e){}
   }
@@ -82539,7 +82539,8 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       else if(id === 'rdmgLumi'){ if(typeof asPuertaAbrirPanel === 'function') asPuertaAbrirPanel(); else if(typeof asAbrir === 'function') asAbrir(); }   // como en la puerta: oye y contesta aquí mismo (el cubo se ve)
       else if(id.indexOf('amgSeg') === 0){ const a = document.getElementById('mgrGoAmg'); if(a) a.click(); setTimeout(() => { const b = document.getElementById(id); if(b) b.click(); }, 60); }
       else { const b = document.getElementById(id); if(b) b.click(); }
-      setTimeout(() => { try{ for(let k = 0; k < navStack.length; k++){ if(navStack[k] === 'mgrrest') navStack[k] = 'manager'; } updateNavButtons(); }catch(e){} }, 120);   // regresar vuelve aquí
+      const aqui = () => { try{ for(let k = navStack.length - 1; k >= 0; k--){ if(navStack[k] === 'mgrrest') navStack[k] = 'manager'; else if(navStack[k] === 'amgmoving' && id.indexOf('amgSeg') === 0) navStack.splice(k, 1); } updateNavButtons(); }catch(e){} };
+      setTimeout(aqui, 120); setTimeout(aqui, 700);   // regresar vuelve aquí (13-nov: lo de AMG ya no regresa a la carpeta vieja de AMG Moving)
     }catch(e){}
   }
   // ---- las cuentas ----
@@ -82548,9 +82549,9 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(Date.now() - RDMG.at < 30000) return; RDMG.at = Date.now();
     try{
       const [l, g] = await Promise.all([
-        authFetch('/rest/v1/labor_logs?select=id,work_kind,seen,sent_group_at&archived_at=is.null&or=(seen.eq.false,and(work_kind.eq.restauracion,sent_group_at.is.null,returned_at.is.null))&limit=500', { headers: cloudHeaders() }),
+        authFetch('/rest/v1/labor_logs?select=id,work_kind,seen,sent_group_at&archived_at=is.null&or=(seen.eq.false,work_kind.eq.mudanza,and(work_kind.eq.restauracion,sent_group_at.is.null,returned_at.is.null))&limit=500', { headers: cloudHeaders() }),
         authFetch('/rest/v1/expenses?select=id,work_kind&approved_at=is.null&reimbursed_at=is.null&limit=500', { headers: cloudHeaders() })]);
-      if(l.ok){ const f = await l.json(); RDMG.cuentas.rdLogs = f.filter(x => x.work_kind !== 'mudanza').length; RDMG.cuentas.amgLogs = f.filter(x => x.work_kind === 'mudanza').length; }
+      if(l.ok){ const f = await l.json(); RDMG.cuentas.rdLogs = f.filter(x => x.work_kind !== 'mudanza' && !x.sent_group_at).length; RDMG.cuentas.amgLogs = f.filter(x => x.work_kind === 'mudanza').length; }
       if(g.ok){ const f = await g.json(); RDMG.cuentas.rdGastos = f.filter(x => x.work_kind === 'restauracion').length; RDMG.cuentas.amgGastos = f.filter(x => x.work_kind === 'mudanza').length; }
     }catch(e){}
     rdmgPintar();
