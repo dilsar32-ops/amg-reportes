@@ -19601,7 +19601,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R421';
+  const APP_BUILD = '2026-11-12-R422';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71327,7 +71327,7 @@ function paraLaLectura(texto){
  if(conQue&&(conQue[1]||/^(?:reply|answer)/.test(t)))return {accion:'responder',que:conQue[1]||null};
  return null;
 }
-const api={APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
+const api={nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 // LUMI_INBOX_DIALOGUE_CORE_END
@@ -71616,7 +71616,7 @@ function lumiNoticeBatch(data,seen=[],pending=[],now=Date.now()){
  const excluded=new Set([...seen,...pending]),names={whatsapp:'WhatsApp',messages:'Mensajes normales',workspace:'Workspace',labor:'Labor logs'};
  const unique=[...new Map((data.events||[]).filter(e=>e.version===2&&names[e.source]&&e.id&&!excluded.has(e.id)&&Number.isFinite(e.at)&&e.at<=now+60000&&now-e.at<900000).map(e=>[e.id,e])).values()].sort((a,b)=>a.at-b.at).slice(0,6);
  if(!unique.length)return null;
- const lines=[];for(const [source,name] of Object.entries(names)){const people=[...new Set(unique.filter(e=>e.source===source).map(e=>lumiInboxTitle(e.route?.query||e.title)))];if(people.length)lines.push(name+': '+people.length+' '+(source==='labor'?'reportes':people.length===1?'conversación':'conversaciones')+' — '+people.slice(0,3).join(', ')+(people.length>3?' y '+(people.length-3)+' más':'')+'.');}
+ const lines=[];for(const [source,name] of Object.entries(names)){const people=[...new Set(unique.filter(e=>e.source===source).map(e=>{const t=lumiInboxTitle(e.route?.query||e.title);try{return LumiInboxDialogue.nombreParaDecir(t);}catch(x){return t;}}))];if(people.length)lines.push(name+': '+people.length+' '+(source==='labor'?'reportes':people.length===1?'conversación':'conversaciones')+' — '+people.slice(0,3).join(', ')+(people.length>3?' y '+(people.length-3)+' más':'')+'.');}
  const total=new Set(unique.filter(e=>e.source!=='labor').map(e=>e.source+'|'+(e.route?.key||e.route?.query||e.title))).size;
  return {ids:unique.map(e=>e.id),events:unique,text:'Amílcar, '+(total?'tienes mensajes nuevos en '+total+' '+(total===1?'conversación':'conversaciones')+'. ':'hay reportes nuevos. ')+lines.join(' ')+(total?' ¿Te los leo?':''),at:now};
 }
@@ -72814,7 +72814,7 @@ function lumiReplyButtons(routes){
  const rows=lumiMessageContexts(routes,SES.user_id+'|'+SES.company_id),log=document.getElementById('asConversacion');if(!rows.length||!log)return;
  const card=document.createElement('div');card.className='as-chat-docs';
  for(const route of rows.slice(0,4)){
-  const b=document.createElement('button');b.type='button';b.textContent='Responder a '+route.query+' · '+({workspace:'Workspace',whatsapp:'WhatsApp',messages:'Mensajes'}[route.app]);b.style.cssText='padding:10px 14px;min-height:44px;border:1px solid #394754;border-radius:16px;background:#182630;color:#e8f3ff;text-align:left;font:inherit;cursor:pointer;';
+  const b=document.createElement('button');b.type='button';b.textContent='Responder a '+(()=>{try{return LumiInboxDialogue.nombreParaDecir(route.query);}catch(x){return route.query;}})()+' · '+({workspace:'Workspace',whatsapp:'WhatsApp',messages:'Mensajes'}[route.app]);b.style.cssText='padding:10px 14px;min-height:44px;border:1px solid #394754;border-radius:16px;background:#182630;color:#e8f3ff;text-align:left;font:inherit;cursor:pointer;';
   b.addEventListener('click',()=>{if(route.owner!==SES.user_id+'|'+SES.company_id)return;lumiSetMessageContext([{...route,source:'selected',at:Date.now()}]);AS.pregunta=null;void asComposeMessage({kind:'partial',query:route.query,app:route.app,key:route.key,text:''},'Responder a '+route.query);});
   card.appendChild(b);
  }
