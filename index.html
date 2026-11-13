@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R448';
+  const APP_BUILD = '2026-11-13-R449';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71052,7 +71052,10 @@ function sinRodeos(t){
  let s=String(t||'');
  for(let i=0;i<4;i++){
   const antes=s;
-  s=s.replace(/^(?:orale|aguas|puchica|puchis|chis|hijole|uy|ay|oiga|oigame|oye|mire|mira|disculpe|disculpa|perdon|perdone|bueno|pues|entonces|ahora|now|y|and|a ver|haber|este|eh)\s+(?=\S)/,'')
+  s=s.replace(/^(?:orale|aguas|puchica|puchis|chis|hijole|uy|ay|oiga|oigame|oye|mire|mira|disculpe|disculpa|perdon|perdone|bueno|pues|entonces|ahora|now|y|and|a ver|haber|este|eh|andale|andele|sale|asi que|so)\s+(?=\S)/,'')
+     // 13-nov-2026 (examen G): lo que CUENTA antes de pedir no cambia lo que pide: "vengo manejando
+     // no puedo ver el telefono dime que me escribio...", "antes de que se me olvide leeme...".
+     .replace(/^(?:(?:vengo|voy|ando|estoy|vamos) manejando|(?:ando|estoy) (?:ocupado|ocupada|manejando)|no puedo (?:ver|agarrar|tocar|mirar) el (?:telefono|cel|celular)|tengo las manos (?:ocupadas|sucias|llenas|mojadas)|antes (?:de )?que se me olvide|i(?: a|')?m driving|my hands are (?:full|dirty|wet)|i can(?:'t| not|not) look at (?:my|the) phone)\s+(?=\S)/,'')
      .replace(/^(?:lumi|una pregunta|la molestia|pero|cuando pueda|cuando puedas|por favorcito|por favor|porfa|please|saber si|saber)\s+(?=\S)/,'')
      .replace(/^(?:si no es (?:mucha )?molestia|sera que|a poco|a saber si|no se si|me pregunto si|quisiera saber si|quiero saber si|(?:fijese|fijate) que(?= (?:quisiera|quiero|no se|sera|me pregunto))|i wonder if|do you know if)\s+(?=\S)/,'')
      .replace(/^(?:me (?:haria|harias|hace|haces|hara) el favor de|hagame el favor de|hazme el favor de|haga el favor de|me (?:puede|puedes|podria|podrias) (?:hacer el favor de )?|(?:puede|puedes|podria|podrias)|quisiera(?: que)?|quiero(?: que)?|necesito(?: que)?|dale una (?:revisada|checada|mirada|ojeada) a|echale un ojo a|could you|can you|would you)\s+(?=\S)/,'');
@@ -71070,7 +71073,9 @@ function dictadoDuro(t){
   .replace(/\bmen sa[jg]es?\b/g,'mensajes').replace(/\b(?:mesa[yj]es|mesages|mensayes|mensaes)\b/g,'mensajes')
   .replace(/\b(?:los|mis|unos) (?:tex|text|testos|textos|tes)\b/g,'los mensajes')
   .replace(/\bla ?bor (?=lo[gxk]s?\b|logs?\b)/g,'labor ').replace(/\b(?:lei?b[oe]r|la[bv]or) los\b/g,'labor logs')
-  .replace(/\b(\w+) \1\b/g,'$1');                    // "lee lee los mensajes", "stop stop"
+  .replace(/\b(\w+) \1\b/g,'$1')                     // "lee lee los mensajes", "stop stop"
+  .replace(/\b(\w+ \w+) \1\b/g,'$1')                // 13-nov-2026: "que dijo que dijo el rigo"
+  .replace(/\b(?:le eme|lee eme|le e me)\b/g,'leeme'); // 13-nov-2026: "le eme lo de..."
 }
 function dictado(t){
  return dictadoDuro(String(t||''))
@@ -71086,17 +71091,54 @@ function dictado(t){
   .replace(/\b(me|nos) a(n?) escrito\b/g,'$1 ha$2 escrito')                          // "me a escrito"
   .replace(/^(?:vorra|bora|vora|borra)(me|lo|la|los|las)?\b/,'borra$1')               // "vorra el mensaje"
   .replace(/\bojas?\b/g,'hojas')
+  .replace(/\brecad(?:os?|itos?)\b/g,'mensajes')                                      // 13-nov-2026: un recado es un mensaje
   .replace(/\s{2,}/g,' ').trim();
 }
 
+// 13-nov-2026 (examen G). El voseo (GT/SV) y lo que se dice AL FINAL sin cambiar la orden:
+// "decime", "abrime", "... a ver", "... al fin", "... o no", "... mientras estaba en el crawl space".
+function colas(t){
+ let s=String(t||'').replace(/\bdecime\b/g,'dime').replace(/\bdecile\b/g,'dile').replace(/\bescribile\b/g,'escribele')
+  .replace(/\babrime\b/g,'abreme').replace(/\bmostrame\b/g,'muestrame').replace(/\bcontame\b/g,'cuentame').replace(/\bfijate vos\b/g,'fijate');
+ for(let i=0;i<3;i++)s=s.replace(/\s+(?:pues|vos|va|verdad|porfa|porfis|por fa|a ver|al fin|por fin|de una vez|ahorita|en voz alta|o no|o que|o todavia(?: no| nada)?|o nada|todavia|or not)$/,'')
+  .replace(/\s+mientras (?:estaba|andaba|estuve|manejaba|venia|trabajaba|comia)\b.*$/,'')
+  .replace(/\s+while i was\b.*$/,'');
+ return s;
+}
+// 13-nov-2026 (examen D). Se corrige a media frase: "lee los... no, mejor dime cuantos hay". Vale
+// LO ULTIMO. Solo cuando lo primero era leer, borrar o contar: "dile que no, mejor el jueves" no entra.
+function loUltimo(t){
+ const m=/^(?:lee|leeme|leelo|leelos|leemelos|leemelo|borra|borralo|borrala|borralos|dime cuantos|cuantos|read|delete)\b.{0,40}?\s(?:no )+(?:mejor|better)\s+(\S.*)$/.exec(String(t||''));
+ return m?m[1]:null;
+}
+// 13-nov-2026. De una frase sale el NOMBRE solo: sin "la", "don", "doña", sin "hoy en la manana",
+// sin "en el guasap". La app busca cada palabra en el nombre del chat; con el articulo no lo hallaba.
+function soloQuien(x){
+ let q=String(x||'').trim().replace(/\s+(?:y|and) (?:dime|leeme|lee|leelo|tell me|read)\b.*$/,'');
+ for(let i=0;i<3;i++)q=q
+  .replace(/\s+(?:hoy|ayer|anoche|antier|ahorita|ahora|ya|hace (?:rato|poco|un rato)|(?:hoy |ayer )?(?:en|por) la (?:manana|tarde|noche)|esta (?:manana|tarde|noche)|today|yesterday|this morning|last night|just now|al fin|por fin|a ver|pues|verdad|todavia)$/,'')
+  .replace(/\s+(?:en|por|on|in) (?:el |la |los |the )?(?:chat|grupo|guasap|wasap|whatsapp|mensajes?|texto|telefono|cel|workspace|group chat|messages)$/,'')
+  .replace(/\s+(?:de lo de|de lo del|sobre|acerca de|about|de lo que)\s.*$/,'');
+ q=q.replace(/^(?:(?:el|la|los|las|the|don|dona|senor|senora|sr|sra|mr|mrs|ms|mi|my)\s+)+/,'')
+    .replace(/^(?:group chat|chat group|grupo|chat|group)\b(?: (?:de|del|con|of|with))?(?: (?:la|el|los|las|the))?\s*/,'');
+ return q.trim();
+}
+// Lo que NO es una persona: "que dice el medidor", "que dice el contrato". Eso no es leer mensajes.
+const NO_PERSONA=/\b(?:whatsapp|wasap|guasap|workspace|field reports|imessage|apple|sms|medidor|metro|meter|contrato|contract|factura|invoice|estimado|estimate|reporte|report|lectura|reading|clima|tiempo|pronostico|weather|forecast|radar|mapa|map|gps|letrero|papel|recibo|manual|pantalla|aparato|etiqueta|hojas?|calendario|reloj|termostato|app|correo|email|biblia|ley|norma|codigo|permiso|poliza|seguro|carta|nota|radio|tele|noticias|news|labor|logs?|dehu|fan|abanico|maquina|caja|bote|lata|instructivo|instrucciones|orden|receta|plano|scope|xactimate|companycam|sistema|computadora|telefono|eso|esto|ahi|aqui|alla|decir|hacer|comer|tomar|saber|ser|que|si|no|cuando|donde|error|mensajes?|textos?|messages?|texts?|gente|muchachos|todos|alguien|nadie|ellos|they|everyone|it|that|this|trabajo|precio|total|saldo|cuenta|banco|zelle|sign|label|screen|display|depot|lowes|amazon|tienda|store|ferreteria|we|need|i)\b/;
+const esPersona=q=>!!q&&q.length<=40&&q.split(' ').length<=3&&/^[a-z0-9 .'-]+$/.test(q)&&!NO_PERSONA.test(q)&&!/\b(?:en|para|por|con|sobre|y|a|al|in|on|for|about|at|to|and|with|he|she|him|her|usted|tu|el de|la de)\b/.test(q.replace(/\b(?:de|del) (?:la |el |los |las )?(?=[a-z]+$)/,''));
+
 function modismos(t){
- return t
+ return colas(t)
   // Lo que se dice antes o despues y no cambia nada: "este... leeme los mensajes pues", "vos".
   .replace(/^(?:(?:este|esto|eh|em|mmm|vos|usted)\s+)+(?=\S+\s)/,'')
   .replace(/\s+(?:pues|vos|va|verdad|porfa|porfis|por fa)$/,'')
   .replace(/^(?:mire|mira|fijate|fijese) a ver\s+/,'revisa ')
   // arranques que no dicen nada: "a ver que dicen", "vamos a ver los mensajes"
   .replace(/^(?:a ver|vamos a ver|vamos a|haber|aver)\s+/,'')
+  // 13-nov-2026: "dale con lo que escribieron", "echale con los que no he leido" = lee;
+  // "(quiero) oir lo que escribio el plomero" = lee.
+  .replace(/^(?:dale|echale|echele|entrale|siguele) con\s+/,'lee ')
+  .replace(/^(?:oir|escuchar)\s+(?=lo que|los mensajes|el mensaje|lo de|lo ultimo)/,'lee ')
   // mirar = revisar. GT/SV: "fijate", "fijese", "mire", "vea"
   .replace(/^(?:fijate|fijese|mira|mire|vea|ve)\s+(?=que\b)/,'')
   .replace(/^(?:fijate|fijese|fijate en|mira|mire|vea|ve|veme|ojea|ojeame)\s+/,'revisa ')
@@ -71118,17 +71160,68 @@ function intent(text){
  // Al arreglar el dictado, "mensaje" se volvia "mensajes" y "el mensaje dice..." dejaba de
  // pegar en este guardia: una instruccion que venia DENTRO de un mensaje de otra persona se
  // habria ejecutado como si el la hubiera dicho. Lo cazaron sus propias pruebas.
- const crudo=modismos(sinRodeos(normal(text)));
- if(!crudo||crudo.length>650||/^(?:no |don't |do not |el mensaje dice|me dijo|ella dijo|el dijo|he said|she said)/.test(crudo))return null;
+ let crudo=modismos(sinRodeos(normal(text)));
+ // 13-nov-2026: si se corrige a media frase vale lo ultimo, y ya venia hablando de mensajes.
+ const corregido=loUltimo(crudo);if(corregido)crudo=modismos(sinRodeos(corregido));
+ // "no ha dicho nada la oficina" empieza con "no" y es una PREGUNTA, no una negativa.
+ const noHa=/^no (?:me |nos )?(?:ha|han) (?:dicho|escrito|mandado|contestado|respondido|puesto) /.test(crudo);
+ if(!crudo||crudo.length>650||(!noHa&&/^(?:no |don't |do not |el mensaje dice|me dijo|ella dijo|el dijo|he said|she said)/.test(crudo)))return null;
+ // TRAMPA (examen G, 13-nov-2026): "el mensaje del medidor dice error que hago" la puso a revisar
+ // el buzon. El mensaje de un aparato, o contar lo que DICE un mensaje, no es pedir los mensajes.
+ if(/^(?:el|un|ese|este|the|that|a) (?:mensaje|mensajito|message|texto|text|letrero|aviso|error)\b.{0,40}\b(?:dice|decia|says|said|marca|sale|aparece|salio)\b/.test(crudo))return null;
+ if(/\b(?:mensajes?|messages?|aviso|letrero) (?:de|del|en|from|on) (?:el |la |the )?(?:medidor|meter|error|pantalla|screen|maquina|machine|dehu\w*|deshu\w*|aparato|sistema|impresora|printer|termostato|thermostat|camion|troca|truck|tablero|app|aplicacion|computadora|banco|bank)\b/.test(crudo))return null;
+ // Contar lo que otro MANDO DECIR es un relato ("me mando decir con el Rigo que...").
+ if(/\b(?:me|nos) mando decir\b/.test(crudo))return null;
+ // Apuntar o recordar algo es una NOTA, no una consulta ("apuntame comprar una", "recuerdame...").
+ if(/\b(?:apunta(?:me|le|lo|melo)?|anota(?:me|le|lo|melo)?|recuerdame|recordame|acuerdame|hazme acordar|remind me|write down|make a note|note down)\b/.test(crudo))return null;
  // Una instruccion que viene DENTRO de un mensaje ajeno nunca es una orden del dueno.
  if(/^(?:\S+ ){1,3}(?:dice|dijo|puso|escribio|says|said|wrote)(?: (?:en|in) (?:el|un|the|a) (?:mensaje|chat|grupo|message|text))? (?:que|that)\b/.test(crudo)&&!/^que /.test(crudo))return null;
  // ...y contar lo que otro DIJO, aunque no lleve "que" (tercer examen a ciegas: 'Yesenia me dijo
  // "leeme los mensajes" y yo ni tenia el telefono' la puso a leer). Es un relato, no una orden.
  if(/^(?:\S+ ){1,3}(?:me |nos |le )?(?:dijo|dice|decia|grito|pidio|mando decir|told me|told us|said|says|asked me)\b/.test(crudo)&&!/^(?:que|quien|what|who|dime|lee|leeme|read) /.test(crudo))return null;
  const t=dictado(crudo);
+ const temaM=temaAhora()==='mensajes'||!!corregido;
  // DE UNA PERSONA (examen a ciegas A): "lee el mensaje de Chepe", "que me escribio Lupita",
  // "what did Beto text me", y con el tema puesto "y los de Chepe". Antes se iban al vacio.
+ // 13-nov-2026 (examenes D y G): la misma familia con mas verbos y mas formas -- "que quiere el
+ // Beto", "que dice el grupo de la oficina", "read me what Wilmer sent", "what's the group chat
+ // saying", "los mensajes de Nelson", "abreme el chat con Tavo y dime lo ultimo que puso". Aqui
+ // el nombre se limpia (soloQuien) y lo que no es persona (medidor, contrato, factura) no entra.
  {const q=t.replace(/^(?:si|esos|esas)\s+/,'');
+  const APPSNO='(?!whatsapp\\b|wasap\\b|guasap\\b|workspace\\b|apple\\b|mensajes\\b|imessage\\b|hoy\\b|ayer\\b)';
+  const VERBO='(?:escribio|mando|dijo|puso|texteo|contesto|respondio|envio)';
+  const n=new RegExp('^(?:que|dime que|lee que) (?:me |nos )?'+VERBO+' (?!la gente\\b|alguien\\b)(.{2,60})$').exec(q)
+    ||new RegExp('^(?:lee|leeme|leer|dime|que)(?: me)? ?(?:lo que|lo ultimo que|que) (?:me |nos )?'+VERBO+' (?!la gente\\b|alguien\\b)(.{2,60})$').exec(q)
+    ||new RegExp('^(?:que hay de )?(?:lo que|lo ultimo que) (?:me |nos )?'+VERBO+' (.{2,60}?) (?:leelo|leemelo|leelos|leemelos|lee|leeme)$').exec(q)
+    ||/^read(?: me)? what (.{2,60}?) (?:sent|wrote|said|texted|says|put|replied)(?: (?:me|us))?$/.exec(q)
+    ||/^que (?:me |nos )?(?:dice|dicen|quiere|quieren|queria|querian|ocupa|ocupan) (.{2,60})$/.exec(q)
+    ||/^what(?:'s| s| is|s) (.{2,60}?) saying$/.exec(q)||/^what does (.{2,60}?) (?:say|want)$/.exec(q)||/^what did (.{2,60}?) (?:say|want|put)(?: (?:to me|to us))?$/.exec(q)
+    ||new RegExp('^(?:los |las |el )?(?:ultimos? |nuevos? )?mensajes? (?:de|del) '+APPSNO+'(.{2,60})$').exec(q)
+    ||/^(?:abre|abreme|open)(?: me| up)? (?:la |el |the |my )?(?:conversacion|chat|platica|mensajes?|conversation|thread) (?:con|de|del|with|from) (.{2,60}?) (?:y|and) (?:dime|leeme|lee|tell me|read(?: me)?) (?:lo ultimo|lo que|que|what|the last)\b.*$/.exec(q)
+    ||(temaM?/^(?:lee|leeme|read(?: me)?) (?:los|las|el|la|the ones|the one) (?:de|del|from) (.{2,60})$/.exec(q):null);
+  if(n&&!/\b(?:envia|manda|borra|send|delete|semana|grupo de labor)\b/.test(n[1])){
+   const crudoQuien=n[1].trim(),quien=soloQuien(crudoQuien);
+   // "what's the group chat saying": no nombra a nadie, es leer lo que hay.
+   if(!quien&&/^(?:(?:el|la|los|the|my) )?(?:group chat|chat group|grupo|chat|group|grupos|chats)\b/.test(crudoQuien))return {action:'read',sources:sources(t),english:english(t)};
+   // "que dicen los muchachos en el grupo": la gente en general, se lee lo que hay.
+   if(/^(?:gente|muchachos|todos|ellos|cuadrilla|crew|guys|everyone|they)$/.test(quien)&&/^(?:que (?:me |nos )?dic|what)/.test(q))return {action:'read',sources:sources(t),english:english(t)};
+   if(esPersona(quien))return {action:'read',who:quien,sources:sources(t),english:english(t)};
+  }
+  // SABER SI ALGUIEN YA ESCRIBIO O CONTESTO (13-nov-2026): "me contesto ya la doña Marta o todavia
+  // nada", "no ha dicho nada la oficina", "did Wilmer text me back", y hablando de mensajes "y de
+  // Chepe hay algo". Es una ojeada de esa persona: se dice si hay, no se lee.
+  let o=q.replace(/\s+(?:pero )?(?:no (?:me )?(?:lo|los|la|las) leas|sin leer(?:lo|los|melo|melos)|don't read (?:it|them)|solo dime si hay|nomas dime si hay|nada mas dime si hay|just tell me)\b.*$/,'');
+  const noLeas=o!==q;
+  o=o.replace(/^(?:revisa|checa|chequea|mira|dime|check|see|tell me) (?:si|if) /,'');
+  const v=/^(?:ya )?(?:me|nos) (?:contesto|respondio|texteo|escribio|ha contestado|ha respondido|ha escrito)(?: ya)? (?!alguien\b|la gente\b|nadie\b)(.{2,40})$/.exec(o)
+    ||/^(?:no )?(?:me |nos )?(?:ha|han) (?:dicho|escrito|mandado|contestado|respondido|puesto) (?:nada|algo) (.{2,40})$/.exec(o)
+    ||/^(.{2,40}?) (?:no|ya) (?:me |nos )?(?:ha|han) (?:dicho|escrito|contestado|respondido|mandado)(?: nada| algo)?$/.exec(o)
+    ||/^(.{2,40}?) ya (?:me |nos )?(?:contesto|respondio|escribio)$/.exec(o)
+    ||/^did (?!anyone\b|they\b|the guys\b|you\b|we\b|i\b)(.{2,40}?) (?:text|message|write|reply|respond|answer|get back)(?: to)?(?: (?:me|us))?(?: back)?(?: yet)?$/.exec(o)
+    ||/^has (?!anyone\b)(.{2,40}?) (?:texted|messaged|written|replied|responded|answered|gotten back)(?: to)?(?: (?:me|us))?(?: back)?(?: yet)?$/.exec(o)
+    ||/^(?:have (?:i|we) heard|did (?:i|we) hear|heard|any word|anything|something|any news)(?: anything| back)? from (.{2,40})$/.exec(o)
+    ||((temaM||noLeas)?(/^(?:hay|tengo|llego|cayo) algo (?:de|del) (.{2,40})$/.exec(o)||/^(?:de|del) (.{2,40}?) (?:hay|tengo|llego|cayo) algo$/.exec(o)):null);
+  if(v){const quien=soloQuien(v[1]);if(esPersona(quien)&&quien.split(' ').length<=3)return {action:'overview',who:quien,sources:sources(t),english:english(t)};}
   let m=/^(?:lee|leeme|leer|revisa|read)(?: me)? (?:el |los |la |las |the |my )?(?:ultimos? |nuevos? |last |new )?(?:mensajes|texts?|messages?) (?:de|del|from) (?:la |el )?(?!whatsapp\b|workspace\b|apple\b|mensajes\b|imessage\b)(.{2,60})$/.exec(q)
     ||/^que (?:dice|dicen|decia)(?: el| los)? (?:mensajes|textos?) (?:de|del) (.{2,60})$/.exec(q)
     ||/^que (?:me |nos )?(?:escribio|mando|dijo|puso|texteo) (?!la gente\b|alguien\b)(.{2,60})$/.exec(q)
@@ -71137,7 +71230,7 @@ function intent(text){
     ||/^what did (.{2,60}?) (?:text|message|send|write)(?: (?:me|us))?$/.exec(q)
     ||(temaAhora()==='mensajes'?/^(?:y )?(?:los|las|el|la) (?:de|del) (.{2,60})$/.exec(q):null);
   if(m&&!/\b(?:envia|manda|borra|send|delete|ayer|hoy|semana|grupo de labor)\b/.test(m[1]))
-   return {action:'read',who:m[1].trim(),sources:sources(t),english:english(t)};}
+   return {action:'read',who:soloQuien(m[1])||m[1].trim(),sources:sources(t),english:english(t)};}
  // Reading followed by planning replies is still read-only, never bulk-send authority.
  const plan=t.match(/^(.*?)\s+(?:y|and)\s+(?:vamos a responder(?:los|les)?|los respondemos|vemos que responder|sugiere que responder|dime que (?:les )?responder|(?:let['’]s|lets) reply|suggest (?:replies|responses)|tell me what to reply)$/);
  if(plan){const reading=intent(plan[1]);if(reading?.action==='read')return reading;}
@@ -71149,15 +71242,24 @@ function intent(text){
  if(/^(?:(?:dime|explicame|tell me|explain)\s+)?(?:como|que (?:significa|son|es)|para que|how (?:do|does|can|to)|what (?:is|are|does))\b/.test(t)||/^(?:el|la) (?:cliente|persona|trabajador|trabajadora) (?:dice|dijo)\b/.test(t))return null;
  // "Que me mandaron" es PREGUNTAR, no mandar: el guardia de abajo se lo comia por el
  // "manda\w*" y la frase se perdia (12-nov-2026).
- const queDicen=QUE_DICEN.test(t)||/^(?:lee|leeme) lo que (?:me |nos )?(?:escribieron|mandaron|dijeron|pusieron)$/.test(t);
+ const queDicen=QUE_DICEN.test(t)||/^(?:lee|leeme) lo que (?:me |nos )?(?:escribieron|mandaron|dijeron|pusieron)(?: (?:los muchachos|la gente|todos|ellos|la cuadrilla))?(?: en (?:el|los) (?:chat|chats|grupo|grupos|mensajes))?$/.test(t);
  // Borrar, quitar, botar: son otra orden, nunca lectura (12-nov-2026).
  // "los mensajes que me mandaron" es RECIBIR, no mandar: no es una orden de enviar.
- if(!queDicen&&/\b(?:envia\w*|manda\w*|send|borra\w*|borralo|borrala|delete|remove|elimina\w*|quita\w*|bota\w*|tira\w*|paga|pay|dile|escribe\w*|respond\w*|reply to)\b/.test(t.replace(/\bque (?:me |nos )(?:mandaron|mando|han mandado|enviaron)\b/g,'')))return null;
+ if(!queDicen&&/\b(?:envia\w*|manda\w*|send|borra\w*|borralo|borrala|delete|remove|elimina\w*|quita\w*|bota\w*|tira\w*|paga|pay|dile|escribe\w*|respond\w*|reply to|deja(?:le|les)?|avisa(?:le|les)?)\b/.test(t.replace(/\bque (?:me |nos )(?:mandaron|mando|han mandado|enviaron)\b/g,'')))return null;
  const channel=channelReading(text);if(channel?.explicit){const {explicit,...request}=channel;return request;}
  const noun=/\b(?:mensajes?|messages?|textos?|texts|inbox|novedades)\b/.test(t);
- const ask=/\b(?:hay|tenemos|tengo|llego|llegaron|entro|entraron|recibimos|recibido|nuevos|nuevas|revisa|consulta|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|lees|leas|leer|leeme|leemelo|leemelos|leemelas|leelos|leelas|oir|escuchar|oigo|read|check|look|show|any|have|unread|new|what)\b/.test(t);
- const personal=/^(?:(?:mira|revisa|checa|dime) si )?(?:(?:me|nos) ha(?:n)? escrito(?: alguien)?(?: hoy)?|(?:alguien|quien) (?:me |nos )?(?:escribio|ha escrito|mando algo|ha mandado algo)(?: hoy)?|si alguien (?:me |nos )?(?:escribio|ha escrito|mando algo)|(?:me|nos) escribio alguien|did anyone (?:message|text) (?:me|us)|has anyone (?:messaged|texted) (?:me|us))$/.test(t);
- const standalone=personal||(sources(t).length===1&&/^(?:tengo algo nuevo|llego algo) (?:en|a)\b/.test(t))||/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron|ha escrito|han escrito|mando|mandaron)|who (?:texted|messaged|wrote|has written) (?:me|us)|(?:me|nos) han escrito|any (?:news|updates)|anything new|what s new|whats new|what is new|do we have anything new)$/.test(t)||sources(t).length===1&&/^(?:revisa|checa|mira|check|que hay en|any news in)\b/.test(t);
+ const ask=/\bhow many\b/.test(t)||/\b(?:hay|tenemos|tengo|llego|llegaron|entro|entraron|recibimos|recibido|nuevos|nuevas|revisa|consulta|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|lees|leas|leer|leeme|leemelo|leemelos|leemelas|leelos|leelas|oir|escuchar|oigo|read|check|look|show|any|have|unread|new|what)\b/.test(t);
+ // 13-nov-2026: "me cayo algo", "me han buscado" -- asi pregunta la cuadrilla si le escribieron.
+ const personal=/^(?:(?:mira|revisa|checa|dime) si )?(?:(?:me|nos) ha(?:n)? escrito(?: alguien)?(?: hoy)?|(?:me|nos) (?:cayo|llego|entro|ha caido|ha llegado) (?:algo|alguno|algun mensaje|algun mensajes)(?: nuevo)?|(?:me|nos) han buscado|(?:alguien|quien) (?:me |nos )?(?:escribio|ha escrito|mando algo|ha mandado algo)(?: hoy)?|si alguien (?:me |nos )?(?:escribio|ha escrito|mando algo)|(?:me|nos) escribio alguien|did anyone (?:message|text) (?:me|us)|has anyone (?:messaged|texted) (?:me|us))$/.test(t.replace(/\s+(?:en|por) (?:el |los |la )?(?:chat|mensajes|telefono|cel|celular|buzon)$/,''));
+ // Sin "en el chat" ni "en los mensajes" al final, para medir la frase pelada.
+ const sinDonde=t.replace(/\s+(?:en|por) (?:el |los |la )?(?:chat|mensajes|telefono|cel|celular|buzon)$/,'');
+ const fuente=sources(t).length===1||sinDonde!==t;
+ // "tengo algo nuevo (en el chat)", "cuantos traigo en el guasap", "de quien son los que tengo
+ // pendientes", y hablando de mensajes "cuantos me faltan por leer" (13-nov-2026).
+ const contar=/^(?:tengo|hay|tenemos|me llego|me cayo) algo nuevo$/.test(sinDonde)
+   ||((fuente||temaM)&&/^(?:dime )?cuantos (?:traigo|tengo|hay|son|quedan|me (?:llegaron|cayeron|faltan|quedan)|faltan)(?: (?:por|sin) leer| nuevos| pendientes)?(?: (?:en|por) (?:el |la )?(?:whatsapp|wasap|guasap|workspace))?$/.test(sinDonde))
+   ||(temaAhora()!=='labor'&&/^de quien(?:es)? son (?:los|las|esos)(?: mensajes)?(?: que (?:tengo|hay|faltan|me faltan|me llegaron))?(?: pendientes| sin leer| nuevos| por leer)?$/.test(sinDonde)&&/\b(?:mensajes|pendientes|sin leer|nuevos|por leer|tengo|llegaron)\b/.test(sinDonde));
+ const standalone=contar||personal||(sources(t).length===1&&/^(?:tengo algo nuevo|llego algo) (?:en|a)\b/.test(t))||/^(?:(?:hay|tenemos|recibimos) algo nuevo|quien(?:es)? (?:me |nos )?(?:escribio|escribieron|ha escrito|han escrito|mando|mandaron)|who (?:texted|messaged|wrote|has written) (?:me|us)|(?:me|nos) han escrito|any (?:news|updates)|anything new|what s new|whats new|what is new|do we have anything new)$/.test(t)||sources(t).length===1&&/^(?:revisa|checa|mira|check|que hay en|any news in)\b/.test(t);
  // COMO LO DICE EL DUENO (12-nov-2026). Aqui se exigia la PALABRA "mensajes", y el habla
  // corto: el 12-nov dijo "que leyera a todos" y no le leyo ni uno. Tenia 8 esperando en
  // WhatsApp y Mensajes, y 0 en el buzon de la app; al no pegar la frase, la peticion se iba a
@@ -71175,12 +71277,14 @@ function intent(text){
  const cortoLeer=PIDE_LEER.test(tv)||(vago&&temaAhora()==='mensajes')
    ||/^(?:lee|leeme) lo que (?:me |nos )?(?:escribieron|mandaron|dijeron|pusieron|han escrito)$/.test(t)
    // "leeme eso que acaba de llegar", "leeme todo lo que ha llegado", "read me what came in"
-   ||/^(?:lee|leeme|read)(?: me)? (?:eso|todo|lo|what|everything)?\s?(?:lo )?(?:que )?(?:acaba de llegar|ha llegado|llego|llegaron|entro|entraron|came in|just came in|arrived)$/.test(t);
+   ||/^(?:lee|leeme|read)(?: me)? (?:eso|todo|lo|what|everything)?\s?(?:lo )?(?:que )?(?:acaba de llegar|ha llegado|llego|llegaron|entro|entraron|came in|just came in|arrived)$/.test(t)
+   // 13-nov-2026: "(echale con) los que no he leido", "leeme los nuevos", "read the ones i haven't read"
+   ||/^(?:lee|leeme|read)(?: me)? (?:los|las|the ones)(?: mensajes)? (?:que )?(?:no he leido|sin leer|nuevos|pendientes|que faltan|que me faltan|i haven't read|i have not read|unread)$/.test(t);
  if(!standalone&&!cortoLeer&&!queDicen&&!soloLaPalabra&&!(noun&&ask))return null;
  // Named requests stay with the existing single-conversation reader.
  if(/(?:chat|grupo|conversation|group) (?:de |con |with )?[a-z]/.test(t)||/(?:mensajes (?:de|con)|messages from) (?!whatsapp\b|workspace\b|apple\b)[a-z]/.test(t))return null;
  if(/\b(?:cuentas|calendario|labor|reportes|payments|saldo)\b/.test(t))return null;
- const pideQueLea=cortoLeer||queDicen||/\b(?:lee|lees|leas|leer|leeme|leemelos|leemelas|leelos|leelas|leemelo|oir|escuchar|echame|echamelos|read)\b/.test(t.replace(/\b(?:sin leer|no leidos?|unread|not read)\b/g,'').replace(/\b(?:no|sin|don t|dont|do not|without)(?: me| nos)?(?: los| las| lo| la)? (?:leas|lee|leer|leerlos|leerlas|leyendo|read|reading)(?: them| it)?\b/g,''))||/que (?:me |nos )?(?:dicen|dijeron|escribieron)/.test(t)||/what.*(?:say|said)/.test(t);
+ const pideQueLea=cortoLeer||queDicen||/\b(?:lee|lees|leas|leer|leeme|leemelos|leemelas|leelos|leelas|leemelo|oir|escuchar|echame|echamelos|read)\b/.test(t.replace(/\b(?:sin leer|por leer|no leidos?|unread|not read)\b/g,'').replace(/\b(?:no|sin|don t|dont|do not|without)(?: me| nos)?(?: los| las| lo| la)? (?:leas|lee|leer|leerlos|leerlas|leyendo|read|reading)(?: them| it)?\b/g,''))||/que (?:me |nos )?(?:dicen|dijeron|escribieron)/.test(t)||/what.*(?:say|said)/.test(t);
  return {action:pideQueLea?'read':'overview',sources:sources(t),english:english(t)};
 }
 function snapshot(data,owner,selected=Object.keys(APPS),now=Date.now()){
@@ -71226,6 +71330,12 @@ function follow(text,s,owner,now=Date.now()){
  const channel=channelReading(text);if(channel)return {action:'scope',sources:channel.sources};
  if(/^(?:si|si leelos|si leemelos|claro|dale|adelante|ok|okay|yes|sure|go ahead|leelos|leemelos|lee los mensajes|read them|read the messages)$/.test(t))return {action:'read',index:s.phase==='offer'?0:s.index+1};
  if(/^(?:el |la |los |las |the )?(?:siguiente|siguientes|otro|otra|next)(?: mensaje| chat| message| one)?$/.test(t)||/^(?:(?:sigue|continua)(?: leyendo)?|sigue con el siguiente|vamos (?:con el|al) siguiente|el que sigue|ahora el otro|(?:lee|leeme) el siguiente(?: mensaje)?|continue|keep (?:going|reading)|read (?:the )?next(?: message| one)?|read another)$/.test(t))return {action:'read',index:s.index+1};
+ // 13-nov-2026 (examen G): "otra vez ese, no le entendi", "repitelo", "say that again": se vuelve
+ // a leer EL MISMO, no el siguiente.
+ {const r=dictadoDuro(t);
+  if(/^(?:(?:lee(?:lo|melo)?|leeme(?:lo)?|dilo|dimelo|repite(?:lo|melo|me)?|read (?:it|that)|say (?:it|that)|repeat(?: it| that)?) )?(?:otra vez|de nuevo|again|one more time)(?: (?:ese|esa|eso|el mismo|that one|that))?(?: (?:que |es que |porque )?no (?:le |lo |la |te )?(?:entendi|oi|escuche|agarre|capte))?$/.test(r)
+   ||/^(?:repite|repitelo|repitemelo|repiteme(?: ese| eso)?|repeat|repeat (?:that|it)|say that again|come again)(?: (?:que |es que )?no (?:le |lo |la |te )?(?:entendi|oi|escuche|agarre))?$/.test(r)
+   ||/^no (?:le|lo|la|te) (?:entendi|oi|escuche|agarre|capte)(?: (?:otra vez|de nuevo|repitelo|repite))?$/.test(r))return {action:'read',index:Math.max(0,s.index)};}
  const advice=adviceRequest(text);if(advice&&!advice.query)return {action:'advice',index:s.index};
  let q=t.replace(/^(?:lee|leeme|abre|muestrame|read|open|show)\s+/,'').replace(/^(?:el|la|los|las|the)\s+/,'').replace(/^(?:de|from|one from)\s+/,'');
  if(q==='primero'||q==='first')return {action:'read',index:0};
@@ -71365,15 +71475,39 @@ function reading(item,rows,advice,index,total,en=false,seguido=false){
 // decide afuera: borrar el chat de WhatsApp de otra persona no se puede desde aqui, y decirle
 // que si cuando no, seria peor que no entenderle. Esto solo dice QUE pidio y DE QUIEN.
 function deleteIntent(text){
- const t=modismos(dictado(sinRodeos(normal(text))));
- if(!/^(?:borra|borrame|borralo|borrala|borralos|quita|quitame|elimina|eliminame|bota|botame|tira|tirame|delete|remove)\b/.test(t))return null;
- const esChat=/\b(?:chat|chats|conversacion|conversaciones|platica|platicas|charla|charlas)\b/.test(t);
+ let t=modismos(dictado(sinRodeos(normal(text))));
+ // 13-nov-2026: "leelo... no, mejor borralo": vale lo ultimo.
+ const corregido=loUltimo(t);if(corregido)t=modismos(sinRodeos(corregido));
+ const temaM=temaAhora()==='mensajes'||!!corregido;
+ const INICIO=/^(?:borra|borrame|borralo|borrala|borralos|borrale|quita|quitame|elimina|eliminame|bota|botame|tira|tirame|limpia|limpiame|vacia|vaciame|deshazte de|deshazte del|deshacete de|deshacete del|delete|remove|erase|clear|wipe|trash|get rid of)\b/;
+ // EL OBJETO PRIMERO Y EL VERBO AL FINAL (examenes D y G, 13-nov-2026): "ese chat del numero
+ // desconocido tiralo a la basura", "ese mensaje echalo a la basura". Y con el tema de mensajes
+ // puesto, sin nombrar nada: "ese no lo quiero, quitalo". Fuera de eso, "quitalo" no es de aqui.
+ const AL_FINAL=/\s+(?:(?:borra|quita|elimina|tira|bota)(?:me)?l[oa]s?(?: a la basura| de ahi| ya)?|echal[oa]s? a la basura)$/;
+ if(!INICIO.test(t)&&AL_FINAL.test(t)){
+  const resto=t.replace(AL_FINAL,'');
+  if(/^(?:es[eoa]|est[eoa])(?: (?:ya )?no (?:lo|la) (?:quiero|ocupo|necesito)(?: ver)?| ya no sirve)?$/.test(resto))
+   return temaM?{action:'delete',what:'mensaje',who:null,english:false}:null;
+  if(!/^(?:es[eoa]s?|est[eoa]s?|el|la|los|las|todo|that|this)\b/.test(resto))return null;
+  t='borra '+resto;
+ }
+ if(!INICIO.test(t))return null;
+ // "borra a Rigo del trabajo del viernes": sacar a una PERSONA de algo no es borrar un chat.
+ if(/^\S+ a (?:la |el )?\S+ (?:de|del) /.test(t))return null;
+ const esGrupo=/\b(?:grupo|grupos|group|thread|hilo)\b/.test(t)&&!/\b(?:fotos?|photos?|gastos?|reportes?|labor|hojas?|lecturas?|estimados?|facturas?|citas?|eventos?|clientes?|trabajos?|contactos?|albums?|carpetas?|abanicos?|fans?|dehus?|maquinas?|equipos?|muebles|cajas?|herramientas?)\b/.test(t);
+ const esChat=esGrupo||/\b(?:chat|chats|conversacion|conversaciones|conversation|conversations|platica|platicas|charla|charlas)\b/.test(t);
+ // "borrame eso que mando Nacho": lo que alguien MANDO es un mensaje.
+ const loQueMando=/^(?:borra|borrame|quita|quitame|elimina|delete|erase|remove) (?:eso|esto|lo|what) (?:que )?(?:me |nos )?(?:mando|escribio|puso|envio|sent|wrote) ?(.*?)(?: ya no (?:sirve|lo quiero|lo ocupo))?$/.exec(t);
  const esMensaje=/\b(?:mensaje|mensajes|message|messages|texto|textos|text|texts)\b/.test(t)
-   ||/^(?:borralo|borrala|borralos|delete it|remove it)$/.test(t);
+   ||/^(?:borralo|borrala|borralos|delete it|remove it)$/.test(t)
+   ||!!loQueMando
+   // hablando de mensajes: "delete that one", "borra ese"
+   ||(temaM&&/^(?:borra|borrame|quita|quitame|elimina|delete|erase|remove|trash|get rid of) (?:that one|this one|that|ese|esa|eso|este|esta)$/.test(t));
  // "borra la foto", "borra el reporte", "borra la lectura" NO son esto: que no se las lleve.
  if(!esChat&&!esMensaje)return null;
  let who='';
- const con=t.match(/\b(?:de|con|with|a)\s+(.+)$/);
+ if(loQueMando&&!esChat)return {action:'delete',what:'mensaje',who:soloQuien(loQueMando[1])||null,english:english(text)};
+ const con=t.replace(/\s+(?:que quede|para que quede|ya no|por error|so it)\b.*$/,'').match(/\b(?:de|del|con|with|a)\s+(.+)$/);
  if(con)who=con[1].trim();
  else{const ing=t.match(/^(?:delete|remove)\s+(?:the\s+)?(.+?)\s+(?:chat|conversation|messages?)$/);if(ing)who=ing[1].trim();}
  who=who.replace(/^(?:el|la|los|las|the|mi|mis|my)\s+/,'').replace(/\s+(?:chat|conversacion|platica)$/,'').trim();
@@ -71388,15 +71522,41 @@ const RESPONDER_A_ESTE=/^(?:respondele|contestale|respondele a este|contestale a
 // generoso: una frase corta con una palabra de alto y sin ninguna de seguir, la para.
 const ALTO=/\b(?:silencio|shh+|sh|chis|ya estuvo|no sigas|ya no sigas|aguanta|aguantate|ya no leas|no leas|be quiet|quiet|shut up|hasta ahi|hasta aqui|callese|callate|callar|suficiente|enough|basta|alto|stop|para|parale|parate|parele|espera|esperate|hold on|hold up|calmate|ya ya|ya|okay|ok)\b/;
 const SIGUE=/\b(?:lee|leeme|leelo|leelos|sigue|siguele|siguiente|continua|next|read|responde|respondele|contesta|contestale|dile|decile|escribele|borra|borralo|reply|answer|tell|delete)\b/;
+// 13-nov-2026 (examen G): "pausa ahi", y callarla DANDO LA RAZON: "silencio porfa que me esta
+// entrando una llamada". La palabra de alto va primero; lo que sigue al "que" es el porque.
+const PAUSA=/^(?:ya )?(?:pausa|pausale|pausalo|pausala|pause|pause it|ponle pausa|dale pausa|en pausa|dejalo|dejalo ahi|dejalo asi|dejala ahi|calla|calle|that's it|that's enough)(?: (?:ya|ahi|tantito|un momento|un momentito|un segundo|un ratito|un rato|please|por favor|porfa))?$/;
+const ALTO_CON_RAZON=/^(?:ya )?(?:silencio|callate|callese|shh+|esperate|esperame|esperese|aguanta|aguantame|aguantate|pausa|pausale|stop|quiet|be quiet|hold on|hold up|wait)(?: (?:ya|ahi|tantito|porfa|por favor|please|un momento|un momentito|un segundo|un ratito|un rato))*(?: (?:que|porque|es que|because|cause) \S.*| i(?: a|')?m getting a (?:phone )?call.*| i (?:got|have) (?:a |to take (?:a|this) )?(?:phone )?call.*)$/;
+// A QUIEN SE LE CONTESTA (13-nov-2026). Sin nombre es al del mensaje que se esta leyendo: "escribele
+// que ahorita no puedo", "text her back that...". Con nombre solo los verbos de DECIR ("ponle a
+// Fulano que...", "avisale a Fulano que...", "tell Fulano..."), igual que ya pasaba con "dile a".
+// "mandale un mensaje a Fulano" y "escribele a Fulano" NO entran: redactar un mensaje nuevo es del
+// cerebro grande, con su confirmacion (asi lo pide el examen del dueno).
+const NOMBRE_R='(?!(?:(?:la|el|los|las|mi) )?(?:lista|nota|notas|hoja|factura|estimado|reporte|calendario|troca|camion|maquina|labor|pared|puerta|orden|cuenta)\\b)(?:(?:la|el|los|las|don|dona|mi) )?[a-z]+(?: [a-z]+)?';
+const POR_DONDE='(?: (?:por|en) (?:el |la |un )?(?:chat|whatsapp|guasap|wasap|mensaje|mensajes|texto))?';
+const RESPONDER_MAS=[
+ /^(?:escribele|texteale) que \S/,
+ /^(?:mandale|escribele|contestale|respondele|ponle) de (?:vuelta|regreso)(?: que)? \S/,
+ /^(?:text|write|message) (?:him|her|them) back\b/,
+ /^(?:quiero|necesito|hay que|vamos a|dejame|voy a|let me|i want to|i need to|let's) (?:contestarle|responderle|contestarles|responderles|escribirle de vuelta|reply|answer|text (?:him|her|them) back|write back)(?: (?:a este|a ese|ya|ahorita|now))?$/,
+ new RegExp('^(?:ponle|ponele|digale|diganle|avisale|avisele|comentale|cuentale|contale) a '+NOMBRE_R+POR_DONDE+' que \\S'),
+ new RegExp('^a '+NOMBRE_R+' (?:dile|digale|avisale|contestale|respondele|ponle|escribele) que \\S'),
+ new RegExp('^(?:se me (?:paso|olvido|fue)|me falto|olvide|no le dije|falto) (?:decirle|avisarle|contestarle|responderle) a '+NOMBRE_R+' que \\S'),
+ /^tell (?!me\b|us\b|you\b)[a-z]+(?: [a-z]+)? (?:that |to |i |i'|we |we'|he |she |it |yes|no |not |ok)/
+];
 function paraLaLectura(texto){
- const t=dictadoDuro(norm(texto));
- if(PARAR.test(t))return {accion:'parar'};
- if(t.split(' ').length<=7&&ALTO.test(t)&&!SIGUE.test(t)&&!/^(?:ok|okay|ya)$/.test(t)===true&&/\b(?:silencio|shh+|ya estuvo|no sigas|aguanta|no leas|quiet|shut up|hasta ahi|hasta aqui|callese|callate|suficiente|enough|basta|alto|stop|parale|espera|hold|calmate)\b|^para\b(?! que| el| la| los| las| un| una| hoy| manana| ayer| mi| su)|\bpara$/.test(t))return {accion:'parar'};
+ let t=dictadoDuro(norm(texto));
+ // "borralo... no no, mejor contestale que gracias": vale lo ultimo.
+ const corregido=loUltimo(t);if(corregido)t=corregido;
+ t=t.replace(/\bdecile\b/g,'dile').replace(/\bescribile\b/g,'escribele').replace(/\bcontestale vos\b/g,'contestale');
+ if(PARAR.test(t)||PAUSA.test(t))return {accion:'parar'};
+ if(t.split(' ').length<=16&&ALTO_CON_RAZON.test(t))return {accion:'parar'};
+ if(t.split(' ').length<=7&&ALTO.test(t)&&!SIGUE.test(t)&&!/^(?:para que|por que|porque|que|como|cuando|donde|quien|why|what|how|when|where)\b/.test(t)&&!/^espera(?:te|me)? (?:a )?que (?:llegue|lleguen|venga|vengan|termine|terminen|acabe|acaben|se seque|pase|pasen|abran|salga|den)\b/.test(t)&&!/^(?:ok|okay|ya)$/.test(t)===true&&/\b(?:silencio|shh+|ya estuvo|no sigas|aguanta|no leas|quiet|shut up|hasta ahi|hasta aqui|callese|callate|suficiente|enough|basta|alto|stop|parale|espera|hold|calmate)\b|^para\b(?! que| el| la| los| las| un| una| hoy| manana| ayer| mi| su)|\bpara$/.test(t))return {accion:'parar'};
  if(RESPONDER_A_ESTE.test(t))return {accion:'responder'};
  // "contestale que si", "respondele que manana a las ocho", "reply to him": responder, y si
  // trae lo que hay que decir, se guarda en `que` para redactar con eso.
  const conQue=/^(?:respondele|contestale|dile|responde|contesta|reply|answer|tell (?:him|her|them))(?: (?:a este|a ese|to (?:him|her|them|this)))?(?: (?:que |that )?(.+))?$/.exec(t);
  if(conQue&&(conQue[1]||/^(?:reply|answer)/.test(t)))return {accion:'responder',que:conQue[1]||null};
+ if(RESPONDER_MAS.some(r=>r.test(t)))return {accion:'responder',que:null};
  return null;
 }
 // ---------------------------------------------------------------------------------------------
@@ -71413,6 +71573,10 @@ function vetada(frase){
  if(/^(?:\S+ ){1,3}(?:me |nos |le )?(?:dijo|dice|decia|grito|pidio|puso|escribio|mando decir|told me|told us|said|says|asked me|wrote)\b/.test(t)&&!/^(?:que|quien|what|who|dime|lee|leeme|read|a ver|haber|aver|me|nos|te|le|ya|si|no|hoy|ayer|did|has|have) /.test(t))return 'relato de lo que otro dijo';
  if(/\b(?:dice|dijo|pusieron|puso|escribio|escribieron) (?:en (?:el|un) (?:mensaje|chat|grupo) )?que\b/.test(t)&&!/^que /.test(t))return 'instruccion citada';
  if(/^(?:hazme|haz|crea|creame|llena|llename|anota|anotame|apunta|apuntame|registra|make|create|fill|log my|write down|manda|mandale|mandales|envia|enviale|send|share|forward|reenvia|paga|pagale|pay)\b/.test(t))return 'orden de crear, enviar o pagar';
+ // 13-nov-2026: una NOTA o un recordatorio no se le pregunta al modelo ("recuerdame leer los mensajes en
+ // la noche" lo llamo leer), ni un relato de lo que otro mando decir.
+ if(/\b(?:apunta(?:me|le|lo|melo)?|anota(?:me|le|lo|melo)?|recuerdame|recordame|acuerdame|hazme acordar|remind me|write down|make a note|note down)\b/.test(t))return 'nota o recordatorio';
+ if(/\b(?:me|nos) mando decir\b/.test(t))return 'relato de lo que otro dijo';
  // DINERO: tiene sus propias herramientas y confirmaciones. "cuanto le debo a Wilmer" el modelo lo llamo labor.
  if(/\b(?:debo|debe|debemos|deben|deuda|saldo|pago|pagos|pagar|pague|pagale|cobro|cobrar|cobrale|adelanto|adelantale|dinero|precio|cuesta|cuestan|cotizacion|estimado|factura|invoice|owe|owes|pay|paid|payment|price|cost|balance|zelle|cheque|efectivo|cash)\b/.test(t))return 'dinero';
  return null;
@@ -73760,7 +73924,9 @@ const LUMI_LABOR_READ = (() => {
  let s=String(t||'');
  for(let i=0;i<4;i++){
   const antes=s;
-  s=s.replace(/^(?:orale|aguas|puchica|puchis|chis|hijole|uy|ay|oiga|oigame|oye|mire|mira|disculpe|disculpa|perdon|perdone|bueno|pues|entonces|ahora|now|y|and|a ver|haber|este|eh)\s+(?=\S)/,'')
+  s=s.replace(/^(?:orale|aguas|puchica|puchis|chis|hijole|uy|ay|oiga|oigame|oye|mire|mira|disculpe|disculpa|perdon|perdone|bueno|pues|entonces|ahora|now|y|and|a ver|haber|este|eh|andale|andele|sale|asi que|so)\s+(?=\S)/,'')
+     // 13-nov-2026 (examen G): lo que CUENTA antes de pedir no cambia lo que pide ("vengo manejando...").
+     .replace(/^(?:(?:vengo|voy|ando|estoy|vamos) manejando|(?:ando|estoy) (?:ocupado|ocupada|manejando)|no puedo (?:ver|agarrar|tocar|mirar) el (?:telefono|cel|celular)|tengo las manos (?:ocupadas|sucias|llenas|mojadas)|antes (?:de )?que se me olvide|i(?: a|')?m driving|my hands are (?:full|dirty|wet)|i can(?:'t| not|not) look at (?:my|the) phone)\s+(?=\S)/,'')
      .replace(/^(?:lumi|una pregunta|la molestia|pero|cuando pueda|cuando puedas|por favorcito|por favor|porfa|please|saber si|saber)\s+(?=\S)/,'')
      .replace(/^(?:si no es (?:mucha )?molestia|sera que|a poco|a saber si|no se si|me pregunto si|quisiera saber si|quiero saber si|(?:fijese|fijate) que(?= (?:quisiera|quiero|no se|sera|me pregunto))|i wonder if|do you know if)\s+(?=\S)/,'')
      .replace(/^(?:me (?:haria|harias|hace|haces|hara) el favor de|hagame el favor de|hazme el favor de|haga el favor de|me (?:puede|puedes|podria|podrias) (?:hacer el favor de )?|(?:puede|puedes|podria|podrias)|quisiera(?: que)?|quiero(?: que)?|necesito(?: que)?|dale una (?:revisada|checada|mirada|ojeada) a|echale un ojo a|could you|can you|would you)\s+(?=\S)/,'');
@@ -73788,6 +73954,11 @@ const LUMI_LABOR_READ = (() => {
     // 13-nov-2026: "leibor lobs" no pegaba. Tras una palabra que suena a labor, cualquier "lo"+consonante es logs.
     .replace(/\b(?:la[bv]o(?:u)?r|l[ae]i[bv][oe]r|leb[oe]r|label|laber)\s*(?:lo[bcdgkpqtwx]s?|lou?gs?|locks?|logos?)\b/g,'labor logs')
     .replace(/\btime ?sheets?\b/g,'labor logs')
+    // 13-nov-2026 (examenes D y G): "el leibor lo del rigo", "revisa los leibor lo de ayer". Tras
+    // "leibor"/"lavor" MAL ESCRITO, un "lo" suelto es "log". Con "labor" bien escrito no se toca:
+    // "el labor lo paga el seguro" es dinero.
+    .replace(/\b(?:(?:los|las|unos|mis|sus) )(?:lei?b[oe]r|laibor|lavor|leiber) lo\b/g,'los labor logs')
+    .replace(/\b(?:lei?b[oe]r|laibor|lavor|leiber) lo\b/g,'labor log')
     .replace(/\boras\b/g,'horas')
     .replace(/\bojas?\b/g,'hojas')
     .replace(/\s{2,}/g,' ').trim();
@@ -73800,6 +73971,42 @@ const LUMI_LABOR_READ = (() => {
     // antes o despues: un trato ("vos", "fijate", "mire a ver"), una muletilla ("este...",
     // "pues"), u otro verbo ("leeme", "checa", "dame"). Nada de eso cambia lo que pide.
     t=sinRodeos(t);
+    // ---- 13-nov-2026 (examen G) -------------------------------------------------------------
+    // TRAMPA: "...me mando decir con el Rigo que la hoja de la sierra ya no corta, entonces
+    // apuntame comprar una" se fue a los labor logs. Tres candados, cada uno por su familia:
+    // contar lo que otro mando decir, apuntar o recordar algo (es una nota), y mas abajo las hojas
+    // que son de una herramienta o de un papel.
+    if(/\b(?:me|nos) mando decir\b/.test(t))return null;
+    if(/\b(?:apunta(?:me|le|lo|melo)?|anota(?:me|le|lo|melo)?|recuerdame|recordame|acuerdame|hazme acordar|remind me|write down|make a note|note down)\b/.test(t))return null;
+    if(/^(?:\S+ ){1,3}(?:me |nos |le )?(?:dijo|decia|grito|pidio|told me|told us|asked me)\b/.test(t)&&!/^(?:que|quien|quienes|what|who|dime|revisa|muestra|muestrame|lee|leeme|show|check) /.test(t))return null;
+    // HABLAR DE DINERO NO ES PEDIR LAS HOJAS: "cuanto cobro de labor", "the labor on that invoice".
+    const DINERO=/\b(?:cuesta|cuestan|cobro|cobra|cobran|cobrar|cobramos|precio|precios|estimado|estimate|factura|invoice|cost|costs|price|rate|charge|caro|barato|mano de obra|pagar|pago|pague|pagaron|debo|debe|presupuesto|cotizacion)\b/;
+    // LO QUE VA AL FINAL: "las horas del equipo de esta semana ensenamelas", "...como van".
+    t=t.replace(/\s+(?:pues|vos|va|verdad|porfa|a ver|al fin|por fin|de una vez|ahorita|o no|o todavia(?: no| nada)?)$/,'').replace(/\s+(?:pues|vos|va|verdad|porfa)$/,'')
+       .replace(/^(.+?) (?:ensenamel[oa]s|muestramel[oa]s|pasamel[oa]s|dimel[oa]s|leemel[oa]s|damel[oa]s|ensenamelo|muestramelo|show them to me)$/,'muestrame $1')
+       .replace(/^(.+?) como van$/,'muestrame $1');
+    // "LEIBOR" A SECAS, como lo deja el microfono: "ya llegaron los leibor". Solo mal escrito o en
+    // plural, y nunca hablando de dinero. "labor de hoy" / "labor del martes": con una FECHA detras
+    // son las hojas; con cualquier otra cosa ("labor de parto", "labor day") no se toca.
+    if(!DINERO.test(t)){
+      t=t.replace(/\b(los|unos|mis|sus|esos) (?:lei?b[oe]rs?|laibors?|lavors?|leibers?|leibols?|labors)\b(?! logs?\b)/g,'$1 labor logs')
+         .replace(/^(?:muestrame |revisa )?(?:el |los |la |mi |mis )?(?:labor|lei?b[oe]r|laibor|lavor) (?:de|del) (?=(?:hoy|ayer|antier|anteayer|anoche|esta semana|la semana|el lunes|el martes|el miercoles|el jueves|el viernes|el sabado|el domingo|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b)/,'muestrame los labor logs de ');
+    }
+    // LAS HORAS DE LA GENTE, dichas de otro modo (examen D): "cuanto tiempo trabajo Fulano",
+    // "a que hora entro y salio Fulano", "los tiempos de la gente". Una maquina tambien "trabaja":
+    // por eso el candado de MAQUINA_T, y camiones, clientes y pedidos no entran ni salen a trabajar.
+    {const MAQUINA_T=/\b(?:fan|fans|abanicos?|ventilador\w*|dehus?|deshu\w*|dehumidifier\w*|hepa|scrubber|air mover\w*|maquinas?|equipos?|generador|heater|calentador|secado|bateria|pila|motor|compresor|camion|troca|truck|bomba|pump)\b/;
+     const NO_GENTE=/\b(?:camion|troca|truck|material|materiales|pedido|cliente|clienta|ajustador|inspector|vuelo|sol|basurero|tienda|oficina)\b/;
+     let x;
+     if((x=/^cuanto tiempo (?:trabajo|trabajaron|estuvo trabajando|laboro|hizo|hicieron) (?:la |el |los |las )?(.+)$/.exec(t)||/^how long did (.+?) work\b(.*)$/.exec(t))&&!MAQUINA_T.test(t)&&!NO_GENTE.test(t)&&!DINERO.test(t))
+       t='muestrame los labor logs de '+x[1]+(x[2]||'');
+     else if((x=/^a que horas? (?:entro|llego|entraron|llegaron) y (?:a que horas? )?(?:salio|se fue|salieron|se fueron) (?:la |el |los |las )?(.+)$/.exec(t))&&!MAQUINA_T.test(t)&&!NO_GENTE.test(t))
+       t='muestrame los labor logs de '+x[1].replace(/ el (lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/,' del $1');
+     t=t.replace(/\b(?:los )?tiempos de (?:la gente|los muchachos|la cuadrilla|el crew|los trabajadores|todos|los de la cuadrilla)\b/,'los labor logs');
+    }
+    // "las horas del equipo de esta semana": aqui "equipo" es la GENTE, porque trae fecha.
+    t=t.replace(/\bhoras (?:del equipo|del crew|de la cuadrilla)(?= (?:de |del )?(?:hoy|ayer|antier|esta semana|la semana|el lunes|el martes|el miercoles|el jueves|el viernes|el sabado|el domingo)\b)/,'labor logs');
+    // -----------------------------------------------------------------------------------------
     t=t.replace(/^(?:(?:este|esto|eh|em|mmm|vos|usted)\s+)+/,'').replace(/\s+(?:pues|vos|va|verdad|porfa)$/,'')
        .replace(/^(?:(?:mire|mira|fijate|fijese)(?: a ver)?|vea|a ver)\s+(?=\S)/,'revisa ')
        .replace(/^revisa (?=quien|quienes|que |cuantas|cuantos|si )/,'')
@@ -73807,6 +74014,9 @@ const LUMI_LABOR_READ = (() => {
     // LA HOJA DE DRYWALL NO ES UNA HOJA DE HORAS. Trampa en la que cayo: "la hoja de drywall
     // cuanto cuesta" se iba a los labor logs.
     if(/\bhojas? de (?:drywall|sheetrock|tabla ?roca|plywood|triplay|lija|papel|madera|lamina|durock|cemento|yeso|plastico|carton)\b/.test(t))return null;
+    // 13-nov-2026: tampoco la hoja de una herramienta ni la de un papel ("la hoja de la sierra",
+    // "dos hojas del contrato", "la hoja de calculo").
+    if(/\bhojas? (?:de|del|para) (?:la |el |los |las |mi |un |una )?(?:sierra|serrucho|segueta|navaja|cuchilla|cutter|cortadora|caladora|disco|multitool|multiherramienta|esmeril|maquina|contrato|calculo|excel|ruta|vida|datos|seguridad|inspeccion|permiso|firma|firmas|cuaderno|libreta|arbol|afeitar|osb|foam|aislante|insulation|vidrio|metal|aluminio|zinc|estimado|factura|poliza|reclamo|claim)\b/.test(t))return null;
     // Una instruccion CITADA de otra persona no es una orden.
     if(/^(?:\S+ ){1,3}(?:dice|dijo|puso|escribio|says|said|wrote)(?: (?:en|in) (?:el|un|the|a) (?:mensaje|chat|grupo|message|text))? (?:que|that)\b/.test(t)&&!/^que /.test(t))return null;
     // Conversational lead-in keeps the same read-only intent.
@@ -73861,8 +74071,15 @@ const LUMI_LABOR_READ = (() => {
     // Seguir la platica: "y los de ayer", "y los de Chepe", "los de la semana pasada".
     else if(tema==='labor'){
       const crudoT=dictado(norm(String(text||''))).replace(/^(?:y|and|ahora|now|tambien|also)\s+/,'');
-      const m=/^(?:los|las|el|la) (?:de|del) (.{2,60})$/.exec(t)||/^(?:los|las|el|la) (?:de|del) (.{2,60})$/.exec(crudoT);
-      if(m)t='muestrame los labor logs de '+m[1];
+      // 13-nov-2026 (examen G): "solo el de la Yesenia", "leeme los de Ever", "quien falta".
+      const m=/^(?:muestrame |revisa )?(?:(?:solo|solamente|nada mas|nomas|only|just) )?(?:los|las|el|la) (?:de|del) (?:la |el )?((?:\S+)(?: \S+){0,2})$/.exec(t)||/^(?:los|las|el|la) (?:de|del) (.{2,60})$/.exec(crudoT);
+      const falta=/^(?:quien|quienes|cuantos|cuantas) (?:falta|faltan|me falta|me faltan|no (?:ha|han) mandado|ya mando|ya mandaron|mando|mandaron|llevan?|llevamos|van|hay|llegaron|han llegado)(?: (?:de|por) (?:mandar|enviar|entregar))?(?: (?:hoy|ayer|todavia|aun))?$/.test(t);
+      const todos=/^(?:ya )?(?:mandaron|entregaron|llegaron|cayeron|estan) (?:todos|todas)$/.test(t);
+      const missing=/^who(?:'s| s| is|s)? (?:missing|left)(?: (?:today|yesterday|still))?$/.test(t);
+      if(falta)t=t+' labor logs';
+      else if(todos)t='ya llegaron todos los labor logs';
+      else if(missing)t='who is missing a labor log';
+      else if(m)t='muestrame los labor logs de '+m[1];
       // una o dos palabras sueltas despues de hablar de labor logs: una persona o un dia
       else if(/^(?:y|and|ahora|now|tambien|also)\s+\S/.test(dictado(norm(String(text||''))))&&crudoT.split(' ').length<=4&&!/\b(?:mensajes?|chat|whatsapp|paga|manda|borra|mapa|fotos?|equipo|materiales?)\b/.test(crudoT)&&!/^(?:lee|leeme|dime|muestra|revisa|que|quien|cuant)/.test(crudoT))
        t='muestrame los labor logs '+(/^(?:ayer|hoy|anoche|yesterday|today|la semana|esta semana|last week|this week|el (?:lunes|martes|miercoles|jueves|viernes|sabado|domingo))/.test(crudoT)?'de ':'de ')+crudoT;
@@ -73871,12 +74088,12 @@ const LUMI_LABOR_READ = (() => {
     if(/^(?:the |my |mis )?labor logs? \S/.test(t))t='muestrame los '+t.replace(/^(?:the |my |mis )/,'');
     // UNA PALABRA SUELTA YA ES UNA ORDEN: decir "labor logs" o "hojas" a secas es pedirlos.
     if(/^(?:los?|las?|mis|the|my)?\s*(?:labor logs?|hojas?)$/.test(t))t='muestrame los labor logs';
-    if(/^(?:los?|las?)\s+(?:labor|labour|label|leibor|leiber)\s*logs?\b/.test(t))t='muestra '+t;
+    if(/^(?:el|los?|las?|mis|sus)\s+(?:labor|labour|label|leibor|leiber)\s*logs?\b/.test(t))t='muestra '+t;   // 13-nov-2026: tambien "el labor log de..."
     if(!validDate(today)||t.length>1200||!/(?:\b(?:labor|labour|label|leibor|leiber)\s*logs?\b|\breportes? (?:de trabajo|de mudanza|de restauracion|recibidos)\b|\b(?:moving|restoration) reports?\b)/.test(t))return null;
     if(/^(?:no |don't |do not )/.test(t))return null;
     if(/^(?:(?:dime|digame|explicame|cuentame|tell me|explain)\s+)?(?:que (?:significa|es|son|quiere decir|puedes|podrias|puedo|debo|debe|deberia)|cual es (?:el|la)|para que|what (?:does|is|are|can|could|should)|how (?:do|does|can|could|should|to)|como|por que|why)\b/.test(t))return null;
     // A query can mention sending as a status, but cannot execute a send.
-    if(!/^(?:hay|queda|quedan|quedaron|nos quedan?|aun hay|todavia hay|tenemos|tengo|ya (?:mando|mandaron|llego|llegaron|estan)|falta|faltan|alguien |que |cuales |cuantos |cuantas |quien |quienes |revisa|revisame|dime|muestra|muestrame|ensena|ensename|busca|buscame|quiero ver|puedes (?:ver|revisar|mostrar|buscar)|me puedes (?:mostrar|decir|ensenar)|do we have|do i have|have we got|are there|is there|are any|any|what |which |who |how many |show |check |find |can you (?:show|check|find))\b/.test(t))return null;
+    if(!/^(?:hay|queda|quedan|quedaron|nos quedan?|aun hay|todavia hay|tenemos|tengo|ya (?:mando|mandaron|llego|llegaron|estan|cayo|cayeron|entro|entraron|entregaron|subieron)|falta|faltan|alguien |que |cuales |cuantos |cuantas |quien |quienes |revisa|revisame|dime|muestra|muestrame|ensena|ensename|busca|buscame|quiero ver|puedes (?:ver|revisar|mostrar|buscar)|me puedes (?:mostrar|decir|ensenar)|do we have|do i have|have we got|are there|is there|are any|any|what |which |who |how many |show |check |find |can you (?:show|check|find))\b/.test(t))return null;
     if(/\b(?:y|and|luego|then)\s+(?:me )?(?:envia|envialo|envialos|manda|mandalo|mandalos|send|share|archiva(?:lo|los|la|las)?|archive|borra(?:lo|los|la|las)?|delete)\b/.test(t))return null;
     const en=/^(?:do we have|do i have|have we got|are there|is there|are any|any|what |which |how many |show |check |find |can you )/.test(t);
     let kind=/\b(?:mudanzas?|moving|amg)\b/.test(t)?'mudanza':/\b(?:restauracion|restoration|doctor)\b/.test(t)?'restauracion':area==='moving'?'mudanza':area==='restoration'?'restauracion':null;
