@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R446';
+  const APP_BUILD = '2026-11-13-R447';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -73655,6 +73655,52 @@ async function asCommercialQuote(order,texto){
 }
 
 // R349: read-only labor-log queries. No send, archive, payment or seen writes.
+// LUMI_NAV_BEGIN  (13-nov-2026) ABRIR Y CERRAR PANTALLAS DEL MANAGER, AL INSTANTE.
+// Probado en vivo: "abre la página de pagos" -> 25 s y "No encontré una página para pagos. Di que no
+// la encontré"; "ciérrala" -> "No encontré esa ventana" (lo tomaba por una ventana de la Mac). La lista
+// rápida solo conocía las pantallas de la cuadrilla. Esta conoce las del manager y sabe cerrar y volver.
+// Solo frases COMPLETAS (verbo + nombre de pantalla): "abre los pagos de Aníbal" NO es de aquí.
+const LUMI_NAV_PANTALLAS = [
+  // [expresión del nombre, destino, cómo se dice]
+  [/(?:horas y pagos|horas del equipo|horas de la cuadrilla|horas del crew|pagos? del crew|pagos? de la cuadrilla|pagos?|payments?|payroll|crew hours)/, 'pagos', 'Pagos'],
+  [/(?:gastos recibidos|gastos|expenses|receipts|recibos)/, 'gastos', 'Gastos'],
+  [/(?:labor logs? recibidos|labor logs?|hojas recibidas|hojas de trabajo|reportes recibidos)/, 'labor_logs', 'Labor logs recibidos'],
+  [/(?:mudanzas recibidas|mudanzas|reportes de mudanza|moving reports)/, 'mudanzas', 'Mudanzas recibidas'],
+  [/(?:planos y medidas|planos|floor ?plans?)/, 'planos', 'Planos y medidas'],
+  [/(?:perfil|mi perfil|profile|my profile)/, 'perfil', 'Perfil'],
+  [/(?:codigos|codes)/, 'codigos', 'Códigos'],
+  [/(?:precio al cliente|precios al cliente|tarifas|rates)/, 'precios', 'Precio al cliente'],
+  [/(?:calendario|calendar)/, 'calendario', 'Calendario'],
+  [/(?:finanzas|finances)/, 'finanzas', 'Finanzas'],
+  [/(?:invoices?|facturas)/, 'invoices', 'Invoices'],
+  [/(?:solicitudes de pago|peticiones de pago|solicitudes|peticiones)/, 'peticiones', 'Solicitudes de pago'],
+];
+function lumiNavRapida(texto) {
+  const l = String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¡!¿?.,;:]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/^(?:(?:oye|hey|ey|lumi|porfa|por favor|please)\s+)+/, '').replace(/\s+(?:porfa|por favor|please|lumi)$/, '');
+  if(!l) return null;
+  // VOLVER AL INICIO
+  if(/^(?:(?:cierra|close) todo y )?(?:regresa|regresate|regresame|vuelve|vuelveme|ve|vete|llevame|vamos|go|take me)(?: back| de vuelta)? (?:al|a|to)(?: la| el| the)? (?:inicio|menu|menu principal|pantalla principal|principio|home|main screen)$/.test(l)
+    || /^(?:inicio|al inicio|menu principal|home)$/.test(l)) return { tipo: 'inicio' };
+  // CERRAR / REGRESAR
+  const NOMBRES = LUMI_NAV_PANTALLAS.map(p => p[0].source).join('|') + '|(?:ajustes|configuracion|settings|mensajes|messages|horas|manual)';
+  if(/^(?:cierra|cierrala|cierralo|cierrame|cierrale|cerrar|close)(?: (?:esa|esta|esto|eso|ese|este|la|el|it|this|that))?(?: (?:pagina|pantalla|ventanita|seccion|parte|page|screen))?$/.test(l)
+    || new RegExp('^(?:cierra|cierrame|cerrar|close)(?: (?:el|la|los|las|the))?(?: (?:pagina|pantalla|seccion|page|screen) (?:de|del|de los|de las|de la|of))?(?: (?:el|la|los|las|the))? (?:' + NOMBRES + ')$').test(l)
+    || /^(?:sal|salte|salir|salgamos|salgase|quitate|quita)(?: de)? (?:ahi|aqui|alli|aca|eso|esa pagina|esta pagina|esa pantalla|esta pantalla)$/.test(l)
+    || /^(?:regresa|regresate|regresame|atras|para atras|pa atras|vuelve|vuelve atras|regresa atras|echale para atras|back|go back)$/.test(l)) return { tipo: 'cerrar' };
+  // ABRIR
+  const m = /^(?:abre|abreme|abrime|abrir|abrele|ve a|vete a|ir a|vamos a|llevame a|llevame|quiero ir a|quiero ver|pasame a|ponme|pon|muestrame|ensename|open|go to|take me to|show me|bring up)\s+(.+)$/.exec(l);
+  if(!m) return null;
+  const resto = m[1].replace(/^(?:a |al )/, '').replace(/^(?:el |la |los |las |the |mi |mis |my )/, '')
+    .replace(/^(?:pagina|pantalla|seccion|ventana|parte|page|screen|section) (?:de las |de los |de la |del |de |of the |of |for )/, '').replace(/^(?:el |la |los |las |the )/, '')
+    .replace(/ (?:page|screen|section)$/, '');
+  for(const [re, destino, nombre] of LUMI_NAV_PANTALLAS) if(new RegExp('^' + re.source + '$').test(resto)) return { tipo: 'abrir', destino, nombre };
+  // "abre la página de mensajes" (la de la app). "abre mensajes" a secas se queda como estaba (la app Mensajes de la Mac).
+  if(/^(?:mensajes|messages)$/.test(resto) && /\b(?:pagina|pantalla|seccion|page|screen|section)\b/.test(l)) return { tipo: 'abrir', destino: 'mensajes', nombre: 'Mensajes' };
+  return null;
+}
+if(typeof module === 'object' && module.exports) module.exports.lumiNavRapida = lumiNavRapida;
+// LUMI_NAV_END
 // LUMI_HORA_BEGIN  (13-nov-2026) "¿Qué hora es?" lo mandaba a la nube, tardaba ~55 s y contestaba "el reloj
 // del teléfono no llegó". La hora y la fecha las sabe el aparato: se contestan aquí, al instante.
 // Solo frases COMPLETAS de hora/fecha (sola o junto con "¿en qué aparato estoy?"); nada más se toca.
@@ -74122,6 +74168,21 @@ function lumiIncompleteSpeechReply(text){
         const command=lumiComposeParse(texto,d,lumiCurrentMessageContext(owner));
         if(command){await asComposeMessage(command,texto);return;}
       }
+    }
+    // (13-nov-2026) ABRIR / CERRAR PANTALLAS DEL MANAGER: aquí mismo, sin la nube (ver LUMI_NAV).
+    if(!dictando&&!AS.conf&&!AS.pregunta&&SES.role==='manager'&&isManager()&&!AS.sandbox){const nav=lumiNavRapida(texto);
+      const enInicio=()=>!!document.querySelector('.tab-panel[data-tab="manager"].active')&&!(typeof navStack!=='undefined'&&navStack.length);
+      const alHub=()=>{asCerrar();SIDE='manager';applySide();enterApp();};
+      const toca=sel=>()=>{alHub();try{goManagerHome();}catch(e){}const b=document.querySelector(sel);if(b)b.click();};
+      const IR={pagos:()=>asNavegar({pantalla:'pagos_crew'}),labor_logs:()=>asNavegar({pantalla:'labor_logs'}),mudanzas:()=>asNavegar({pantalla:'mudanzas_recibidas'}),planos:()=>asNavegar({pantalla:'planos'}),
+        codigos:toca('#mgrGoCodes'),calendario:()=>asNavegar({pantalla:'calendario_amg'}),finanzas:()=>asNavegar({pantalla:'finanzas_amg'}),invoices:()=>asNavegar({pantalla:'invoices_amg'}),
+        gastos:toca('#mgrGoGastos'),precios:toca('#mgrGoRates'),mensajes:toca('#mgrGoMensajes'),perfil:toca('[data-rd-tab="perfil"]'),
+        peticiones:()=>{alHub();window.__msgPend={abrir:'mensajes',pestana:'peticiones'};if(typeof msgAbrirPendiente==='function')msgAbrirPendiente();}};
+      let dicho=null,luego=null;
+      if(nav&&nav.tipo==='abrir'&&IR[nav.destino]){dicho='Va. Te abro '+nav.nombre+'.';luego=IR[nav.destino];}
+      else if(nav&&nav.tipo==='inicio'){dicho=enInicio()?'Ya estás en el inicio.':'Va, al inicio.';luego=enInicio()?null:()=>{alHub();try{goManagerHome();}catch(e){}};}
+      else if(nav&&nav.tipo==='cerrar'&&!enInicio()){dicho='Listo, la cerré.';luego=()=>{asCerrar();goBack();};}   // en el inicio no hay pantalla que cerrar: sigue como antes (ventanas de la Mac)
+      if(dicho){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,dicho);asMostrarRespuesta(dicho);asHablar(dicho,luego||asSeguirOyendo);return;}
     }
     // (13-nov-2026) LA HORA VA PRIMERO. Estaba al final: antes pasaba por la Mac ("¿que quiso decir?",
     // hasta 5 s medidos) y hasta despues contestaba algo que el aparato ya sabe.
