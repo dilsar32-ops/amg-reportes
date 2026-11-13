@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R432';
+  const APP_BUILD = '2026-11-12-R433';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -73098,6 +73098,20 @@ function details(snapshot,order){
 }
 function review(snapshot,order){
  const s=snapshot,p=s.person;
+ // (12-nov-2026, decision del dueno) UN ADELANTO SE ANOTA AUNQUE FALTE CONFIRMAR HORAS. Dijo "le
+ // adelante a Minor 300" y Lumi se nego porque Minor tenia 1 turno sin confirmar: sin horas
+ // confirmadas no hay saldo de fiar. Pero un adelanto es dinero que YA salio; no depende del
+ // saldo. Solo para adelantos, y solo cuando lo que falta es confirmar horas (saldoPendiente): se
+ // anota y se dice derecho que el saldo todavia no se puede calcular. Un PAGO normal sigue igual.
+ if(order.kind==='adelanto'&&s.balance===null&&s.saldoPendiente&&!s.unverified){
+  if(s.warning&&s.warning!==s.hourWarning)return {error:s.warning+' Revisa esa diferencia antes de registrar.'};
+  if(!Number.isFinite(order.amount)||order.amount<=0)return {error:'¿De cuánto fue el adelanto? Necesito el monto entregado.'};
+  if(order.amount>20000)return {error:'Ese monto debe registrarse desde Pagos.'};
+  if(!['cheque','zelle','efectivo'].includes(order.method))return {error:'¿Lo entregaste por cheque, Zelle o efectivo?'};
+  if(order.method==='cheque'&&!p.fullName)return {error:'Falta verificar el nombre completo del beneficiario del cheque.'};
+  const closes=!!s.request&&Number.isFinite(s.request.amount)&&s.request.amount>0&&cents(order.amount)+cents(s.request.paid||0)>=cents(s.request.amount);
+  return {amount:order.amount,after:null,closes,summary:'Registrar '+money(order.amount)+' como adelanto de '+p.name+' por '+order.method+'. Su saldo todavía no lo puedo calcular: '+s.saldoPendiente+'. El adelanto queda anotado igual.'+(s.request?(closes?' La petición quedará enviada, esperando su confirmación.':' La petición seguirá pendiente por el resto.'):' No hay una petición abierta que cerrar.')};
+ }
  if(!Number.isFinite(s.balance)||s.unverified)return {error:'No pude verificar el saldo completo. No registraré un pago con datos incompletos.'};
  if(s.warning&&s.warning!==s.hourWarning)return {error:s.warning+' Revisa esa diferencia antes de registrar.'};
  if(!Number.isFinite(order.amount)||order.amount<=0)return {error:'¿De cuánto fue el pago? Necesito el monto entregado; no usaré el saldo como si ya lo hubieras pagado.'};
@@ -73219,7 +73233,15 @@ async function lumiPaySnapshot(person,order,owner=lumiPayOwner()){
   lumiBasicAll('/rest/v1/'+table+'?select=*'+q+'&'+field+'=eq.'+p.id,owner),
   lumiBasicAll('/rest/v1/mensajes?select=id,peticion,monto,estado,borrado_at,de_user_id,de_casual_id,created_at'+q+'&tipo=eq.peticion&'+(p.kind==='crew'?'de_user_id':'de_casual_id')+'=eq.'+p.id,owner)]);
  let balance,warning='';
- if(p.kind==='crew'){balance=await lumiBasicBalance({id:p.id},owner);warning=await lumiPayHourWarnings(p,owner);}
+ let saldoPendiente='';
+ if(p.kind==='crew'){
+  // Solo para ADELANTOS: si lo unico que impide sacar el saldo es que faltan horas por confirmar,
+  // se sigue sin saldo (null) y se dice por que. Para un pago normal el error sube como siempre.
+  try{balance=await lumiBasicBalance({id:p.id},owner);}
+  catch(e){const m=/^Todavía no puedo sacar el saldo de esa persona: (.+?)\. Arréglalo/.exec(String(e&&e.message||''));
+   if(order?.kind==='adelanto'&&m&&!/más de una tarifa|no pude leer sus pagos/.test(m[1])){balance=null;saldoPendiente=m[1];}else throw e;}
+  try{warning=await lumiPayHourWarnings(p,owner);}catch(e){if(saldoPendiente)warning='';else throw e;}
+ }
  else{
   // Scoped, paginated reads with deadlines. Do not load/change the Payments UI
   // or let a failed hours request masquerade as an empty account.
@@ -73239,7 +73261,7 @@ async function lumiPaySnapshot(person,order,owner=lumiPayOwner()){
  if(selection.error)warning+=' '+selection.error;
  if(selection.request)selection.request.paid=ledger.filter(x=>String(x.note||'').includes('Petición #'+selection.request.id)&&x.kind===order.kind&&x.accepted!==false&&!x.settlement).reduce((sum,x)=>sum+Number(x.amount||0),0);
  if(ledger.some(x=>x.accepted===false&&!x.resolved_accepted&&!ledger.some(y=>y.corrige_id===x.id)))warning+=' Hay un pago rechazado sin resolver; compruébalo en Pagos.';
- lumiPayGuard(owner);return {person:p,balance,request:selection.request||null,warning:warning.trim(),hourWarning,ledgerIds:ledger.map(x=>x.id).sort(),ledger,verifiedAt:Date.now()};
+ lumiPayGuard(owner);return {person:p,balance,saldoPendiente,request:selection.request||null,warning:warning.trim(),hourWarning,ledgerIds:ledger.map(x=>x.id).sort(),ledger,verifiedAt:Date.now()};
 }
 function lumiPaySay(text,{append=false,speak=true}={}){
  if(append){const last=document.getElementById('asConversacion')?.lastElementChild;if(last?.dataset.role==='assistant')last.dataset.keepPreview='1';}
@@ -73357,7 +73379,7 @@ function lumiPayIO(owner,escrito){
    let notice={state:'disabled',text:''};
    try{notice=await lumiPayNotify(f,receipt,owner);}catch{lumiPayGuard(owner);notice={state:'pending',text:' El pago quedó registrado; falta comprobar el aviso en su chat. Puede pedirme revisar ese pago para reintentar solo el aviso.'};}
    lumiPayGuard(owner);
-   return {notice:notice.state,noticeId:notice.id||null,state:'recorded',id:receipt.id,text:'Registré '+P.money(f.order.amount)+' para '+f.person.name+' por '+f.order.method+'. '+(fresh.balance>0?'Quedan '+P.money(fresh.balance)+' pendientes.':fresh.balance<0?'Queda '+P.money(-fresh.balance)+' a su favor.':'Quedó al día.')+requestText+notice.text};
+   return {notice:notice.state,noticeId:notice.id||null,state:'recorded',id:receipt.id,text:'Registré '+P.money(f.order.amount)+' para '+f.person.name+' por '+f.order.method+'. '+(fresh.balance===null?'Su saldo lo calculo cuando se confirmen sus horas.':fresh.balance>0?'Quedan '+P.money(fresh.balance)+' pendientes.':fresh.balance<0?'Queda '+P.money(-fresh.balance)+' a su favor.':'Quedó al día.')+requestText+notice.text};
   }
  };
 }
