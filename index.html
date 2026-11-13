@@ -19601,7 +19601,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R424';
+  const APP_BUILD = '2026-11-12-R425';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71666,6 +71666,13 @@ function lumiNoticeBatch(data,seen=[],pending=[],now=Date.now()){
 function lumiNoticeSay(text,routes=[],meta={}){
  const blocked=(SES.role==='manager'&&!asDeviceSession().active())||!AS.abierto||AS.enviando||AS_DESKTOP_BUSY||lumiReplyInProgress()||AS.estado==='hablando'||AS.estado==='pensando'||AS.estado==='escuchando'&&AS.texto?.trim();
  if(blocked){if(!meta.ids||!LUMI_NOTICE_SPOKEN.some(n=>n.ids?.some(id=>meta.ids.includes(id))))LUMI_NOTICE_SPOKEN.push({text,routes,...meta});return false;}
+ // (12-nov-2026) EL MISMO AVISO NO SE REPITE. Visto en vivo: "tienes mensajes nuevos en 2
+ // conversaciones..." salio tres veces seguidas, palabra por palabra. Cada vez que la vigilancia
+ // de la Mac se reinicia vuelve a marcar esos chats como recien llegados, con otro numero de
+ // aviso, y aqui se decia de nuevo. Si el texto es el mismo de hace menos de 20 minutos, se da
+ // por dicho y no se repite.
+ if(window.__lumiAvisoDicho&&window.__lumiAvisoDicho.text===text&&Date.now()-window.__lumiAvisoDicho.at<1200000){if(meta.ids)lumiNoticeSeen(meta.ids,meta.owner);return true;}
+ window.__lumiAvisoDicho={text,at:Date.now()};
  if(routes.length){if(!LUMI_MESSAGE_DRAFT||!['incomplete','draft','prepared','uncertain','sending'].includes(LUMI_MESSAGE_DRAFT.status))lumiSetMessageContext(routes);LUMI_INBOX_SESSION={owner:SES.user_id+'|'+SES.company_id,at:Date.now(),items:routes.map(r=>({...r,unreadCount:null})),index:-1,phase:'offer',english:false,selected:[...new Set(routes.map(r=>r.app))],health:{}};}
  const last=document.getElementById('asConversacion')?.lastElementChild;if(last?.dataset.role==='assistant')last.dataset.keepPreview='1';
  asMostrarRespuesta(text);const current=document.getElementById('asConversacion')?.lastElementChild;if(current)current.dataset.keepPreview='1';
@@ -73764,6 +73771,8 @@ function lumiIncompleteSpeechReply(text){
  return null;
 }
 
+  setInterval(function(){ try{ const c=AS.colaTeclado; if(!c)return; if(Date.now()-c.at>90000||!AS.abierto){AS.colaTeclado=null;return;}
+    if(AS.enviando||AS.estado==='hablando'||AS.estado==='pensando')return; AS.colaTeclado=null; asEnviar(c.texto,true); }catch(e){} },400);
   let AS_ENTENDER_MAC=null;
   async function asEntender(texto){
     try{
@@ -73782,8 +73791,13 @@ function lumiIncompleteSpeechReply(text){
       finally{call(route,{method:'DELETE'}).catch(()=>{});}
       try{asBit('entender '+(Date.now()-t0)+' ms -> '+(frase||'nada'));}catch(e){}
       if(!frase||owner!==SES.user_id+'|'+SES.company_id)return false;
-      if(/labor logs/.test(frase))return !!(await asLaborRead(frase));
-      return !!(await asInboxDialogue(frase));
+      // En la burbuja y en el historial queda lo que EL dijo, no la frase traducida ("tengo
+      // mensajes"): se le presta su texto a asTranscribir mientras corre la puerta escogida.
+      const _trans=asTranscribir; let hecho=false;
+      try{ asTranscribir=function(x,...resto){return _trans(x===frase?texto:x,...resto);};
+        hecho=/labor logs/.test(frase)?!!(await asLaborRead(frase)):!!(await asInboxDialogue(frase)); }
+      finally{ asTranscribir=_trans; }
+      return hecho;
     }catch(e){return false;}
   }
   async function asEnviar(texto, desdeTeclado, oculto){
@@ -73795,7 +73809,12 @@ function lumiIncompleteSpeechReply(text){
     // leyendo -- ni siquiera aparecia lo que el escribio. Esto es lo UNICO que se atiende
     // mientras ella trabaja, y solo si ella VA LEYENDO y solo a las palabras de parar.
     if(!AS.dictado&&typeof lumiPararLectura==='function'&&lumiPararLectura(texto))return;
-    if(AS.enviando) return;
+    // (12-nov-2026) LO QUE EL ESCRIBE NO SE PIERDE. Visto en vivo: tecleo una pregunta mientras
+    // ella hablaba y desaparecio sin aviso -- la caja se vaciaba y este portero la tiraba. Lo
+    // tecleado se guarda (lo ultimo manda) y sale solo en cuanto ella se desocupa, hasta 90 s.
+    // Lo DICHO por microfono no se guarda: ahi un eco o un ruido se colaria como orden.
+    if(AS.enviando){ if(desdeTeclado){ AS.colaTeclado={texto,at:Date.now()}; try{asBit('tecleado en espera');asEstado(AS.estado,'En cuanto termine te contesto eso.');}catch(e){} } return; }
+    AS.colaTeclado=null;
     AS.turnStartedAt=Date.now();
     void asDeviceClaim(); // User input chooses the reply device; warming here delayed short replies.
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
