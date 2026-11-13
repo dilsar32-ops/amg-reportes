@@ -19597,7 +19597,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R416';
+  const APP_BUILD = '2026-11-12-R417';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -66477,6 +66477,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // texto (la foto no), y al escribir en el plano o en las medidas el cliente
   // aparece: un toque llena el nombre Y la direccion.
   const CLIENTES_KEY = 'clientes1';
+  // La lista es de UNA empresa: se apunta de quien es. Si en este telefono entra otra
+  // cuenta (otra empresa), la lista vieja no se ve ni se sube; la nube trae la suya.
+  const CLIENTES_EMPRESA_KEY = 'clientes1:empresa';
+  const cliEmpresa = () => { try{ return (typeof SES !== 'undefined' && SES && SES.company_id) ? String(SES.company_id) : ''; }catch(e){ return ''; } };
+  const cliEsDeOtra = () => { const e = cliEmpresa(); if(!e) return false; try{ return localStorage.getItem(CLIENTES_EMPRESA_KEY) !== e; }catch(x){ return false; } };
   // SE BORRAN SOLOS A LOS 15 DIAS (14 sep 2026, su pedido: "que se borren
   // automaticamente cada 15 dias para que podamos seguir poniendo clientes
   // nuevos"). Cuentan desde que se agrego o se corrigio por ultima vez. En la
@@ -66484,8 +66489,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // se muestran ni se vuelven a subir.
   const CLIENTES_DIAS = 15;
   const clienteVence = c => Math.max(+(c && c.at) || 0, +(c && c.nubeAt) || 0) + CLIENTES_DIAS * 86400000;
-  const clientesLeer = () => { try{ const l = JSON.parse(localStorage.getItem(CLIENTES_KEY) || '[]'); return Array.isArray(l) ? l.filter(c => c && clienteVence(c) > Date.now()) : []; }catch(e){ return []; } };
-  const clientesEscribir = l => { try{ localStorage.setItem(CLIENTES_KEY, JSON.stringify(l)); return true; }catch(e){ almacenLleno('los clientes'); return false; } };
+  const clientesLeer = () => { try{ if(cliEsDeOtra()) return []; const l = JSON.parse(localStorage.getItem(CLIENTES_KEY) || '[]'); return Array.isArray(l) ? l.filter(c => c && clienteVence(c) > Date.now()) : []; }catch(e){ return []; } };
+  const clientesEscribir = l => { try{ localStorage.setItem(CLIENTES_KEY, JSON.stringify(l)); const e = cliEmpresa(); if(e) localStorage.setItem(CLIENTES_EMPRESA_KEY, e); return true; }catch(e){ almacenLleno('los clientes'); return false; } };
   const cliNorm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
   // (31 oct 2026, el dueño: "si entra a CompanyCam, cómo buscar los clientes automáticamente") Lumi dice "abre CompanyCam en Anderson":
   // se busca el cliente en la lista de Clientes, se pregunta a CompanyCam por su proyecto y se abre ESE proyecto. Si no sale, se abre
@@ -66694,7 +66699,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // Todos los ven y los agregan; borrarlo para todos, quien lo agrego o el
   // manager. Sin la tabla (404) se apaga solo y quedan en el telefono como antes.
   let CLIENTES_NUBE = true;
-  const CLIENTES_BORRAR_KEY = 'clientesBorrarPendiente1';   // [{k, ms}]
+  const cliBorrarKey = () => 'clientesBorrarPendiente1:' + (cliEmpresa() || 'x');   // por empresa, igual que cliGeo1   // [{k, ms}]
   let clientesSyncUltima = 0, clientesSyncEnCurso = null;
 
   // Mezclar lo del telefono con lo de la nube. Pura, para probarla sola.
@@ -66798,7 +66803,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   async function clientesMandarBorrados(){
     const yo = nubeYo();
     if(!yo || !CLIENTES_NUBE) return;
-    for(const b of nubeLeerJSON(CLIENTES_BORRAR_KEY, [])){
+    for(const b of nubeLeerJSON(cliBorrarKey(), [])){
       let listo = false;
       try{
         const res = await authFetch('/rest/v1/job_clients?company_id=eq.' + SES.company_id + '&dir_key=eq.' + encodeURIComponent(b.k) + '&select=dir_key,deleted_at', {
@@ -66808,7 +66813,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(res.status === 404){ CLIENTES_NUBE = false; return; }
         listo = res.ok;
       }catch(e){}
-      if(listo) nubeEscribirJSON(CLIENTES_BORRAR_KEY, nubeLeerJSON(CLIENTES_BORRAR_KEY, []).filter(x => x.k !== b.k));
+      if(listo) nubeEscribirJSON(cliBorrarKey(), nubeLeerJSON(cliBorrarKey(), []).filter(x => x.k !== b.k));
     }
   }
   function clientesSincronizar(forzar){
@@ -66835,10 +66840,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(pag.length < 1000) break;
         off += pag.length;
       }
-      const m = clientesMezclar(clientesLeer(), remotas, nubeLeerJSON(CLIENTES_BORRAR_KEY, []));
+      const m = clientesMezclar(clientesLeer(), remotas, nubeLeerJSON(cliBorrarKey(), []));
       clientesEscribir(m.lista);
       if(m.borrar.length){
-        nubeEscribirJSON(CLIENTES_BORRAR_KEY, nubeLeerJSON(CLIENTES_BORRAR_KEY, []).concat(m.borrar.map(k => ({ k, ms: Date.now() }))));
+        nubeEscribirJSON(cliBorrarKey(), nubeLeerJSON(cliBorrarKey(), []).concat(m.borrar.map(k => ({ k, ms: Date.now() }))));
         await clientesMandarBorrados();
       }
       if(m.subir.length) await clientesSubir(m.subir);
@@ -66855,8 +66860,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!puede){ alert('A «' + (c.nombre || c.direccion) + '» lo agregó otra persona.\n\nSolo quien lo agregó o el manager lo puede borrar.'); return; }
     if(!confirm('¿Borrar a «' + (c.nombre || c.direccion) + '» de Clientes?\n\nSe borra en todos los teléfonos del equipo. Las medidas y los planos de ese cliente NO se borran.')) return;
     clientesEscribir(clientesLeer().filter(x => clienteClave(x) !== k));
-    const l = nubeLeerJSON(CLIENTES_BORRAR_KEY, []).filter(x => x.k !== k); l.push({ k, ms: Date.now() });
-    nubeEscribirJSON(CLIENTES_BORRAR_KEY, l);
+    const l = nubeLeerJSON(cliBorrarKey(), []).filter(x => x.k !== k); l.push({ k, ms: Date.now() });
+    nubeEscribirJSON(cliBorrarKey(), l);
     clientesPintar();
     await clientesMandarBorrados();
   }
