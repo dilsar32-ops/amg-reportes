@@ -6554,6 +6554,10 @@ body.rd-fpv-edit .fpv-drawer.fp-con-sel:not(.fp-plegada) .fpv-icon-btn{border:1p
 body.rd-fpv-edit .fpv-drawer.fp-con-sel.fp-plegada .fpv-drawer-fold{display:grid !important; place-items:center; position:absolute; top:50%; right:calc(2*var(--rdu)); left:auto; transform:translateY(-50%); width:44px; height:44px; padding:0; border:0; background:none; z-index:2;}
 
 body.rd-fpv .fpv-body{position:relative; flex:1 1 auto; min-height:calc(280*var(--rdu)); margin:0 0 calc(4*var(--rdu)); border:2px solid #e3242b; border-top:0; border-radius:0 0 calc(13.75*var(--rdu)) calc(13.75*var(--rdu)); overflow:hidden; background:#fff; box-shadow:0 0 calc(9.17*var(--rdu)) rgba(255,40,40,.32);}
+/* (12-nov-2026, Palma) EL TELÉFONO DE LADO: el recuadro del plano mide lo que de verdad queda entre los renglones de arriba y la barra de
+   abajo. Su alto mínimo de 280 (que de lado crece con el ancho, ~400 px) lo hacía más alto que la pantalla: la mitad del plano quedaba
+   debajo de la barra o fuera. Solo pantallas bajitas acostadas (el iPhone de lado); el teléfono derecho, el iPad y la compu no cambian. */
+@media (orientation:landscape) and (max-height:540px){ html body.rd-fpv .fpv-body{min-height:0;} }
 body.rd-fpv .fpv-stage{background:#fff;}
 body.rd-fpv .rdv-tag{position:absolute; left:calc(9.17*var(--rdu)); top:calc(9.17*var(--rdu)); z-index:3; max-width:calc(100% - calc(80*var(--rdu))); padding:calc(5.5*var(--rdu)) calc(11*var(--rdu)); border-radius:calc(7.33*var(--rdu)); background:rgba(115,118,122,.82); color:#fff; font:600 calc(12.83*var(--rdu))/1.2 "Avenir Next", var(--sf); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none;}
 body.rd-fpv .rdv-tag:empty{display:none;}
@@ -15269,6 +15273,11 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     "Passage removed - Undo brings it back.": "Paso quitado. Deshacer lo regresa.",
     "Turn this passage into solid wall? The wall closes across the span - Undo brings it back.": "¿Convertir este paso en pared? La pared se cierra en ese tramo. Deshacer lo regresa.",
     "It is already a passage.": "Ya es un paso.", "Just drag the passage along its wall.": "Solo arrastre el paso por su pared.",
+    // (12-nov-2026, Molde-2) los letreros de aberturas de la R419 que no tenían su español
+    "Now an open passage (no door leaf). Undo brings it back.": "Ahora es un paso abierto (sin hoja de puerta). Deshacer lo regresa.",
+    "There is already a door here. Nothing was changed.": "Aquí ya hay una puerta. No se cambió nada.",
+    "There is already a window here. Nothing was changed.": "Aquí ya hay una ventana. No se cambió nada.",
+    "There is already an open passage here. Nothing was changed.": "Aquí ya hay un paso. No se cambió nada.",
     "Turn this door into solid wall? The wall closes across the span - Undo brings it back.": "¿Convertir esta puerta en pared? La pared se cierra en ese tramo. Deshacer la regresa.",
     "Turn this window into solid wall? The wall closes across the span - Undo brings it back.": "¿Convertir esta ventana en pared? La pared se cierra en ese tramo. Deshacer la regresa.",
     "Now solid wall - Undo brings it back.": "Ahora es pared. Deshacer la regresa.",
@@ -19610,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R456';
+  const APP_BUILD = '2026-11-13-R457';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -23334,8 +23343,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         r.level = Math.max(1, Math.round(+r.level) || 1);
         (Array.isArray(r.objects) ? r.objects : []).forEach(o => { if(o && typeof o === 'object'){ o.rotationDeg = +o.rotationDeg || 0; } });
       });
-      floorplanAlignRooms(d);
-      if(!d._handEdited){ try{ fpValidarParches(d); }catch(e){ console.warn('parches', e); } floorplanRectifyWalls(d); floorplanRefineGeometry(d); floorplanCloseCorners(d); try{ fpResolverParedesAjenas(d); }catch(e){ console.warn('paredes ajenas', e); } } else { try{ fpResolverParedesAjenasEditado(d); }catch(e){ console.warn('paredes ajenas', e); } }
+      fpPrepararGeometria(d, true);
       fpCleanPhantomSpaceLabels(d);
       floorplanDetectSubAreas(d);
       tok.data = d;
@@ -30604,14 +30612,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     try{ d = JSON.parse(JSON.stringify(data)); }catch(e){ return null; }
     d.rooms = (Array.isArray(d.rooms) ? d.rooms : []).filter(r => r && typeof r === 'object');
     d.rooms.forEach(r => { r.level = Math.max(1, Math.round(+r.level) || 1); });
-    try{
-      floorplanAlignRooms(d);
-      if(!d._handEdited){
-        try{ fpValidarParches(d); }catch(e){}
-        floorplanRectifyWalls(d); floorplanRefineGeometry(d); floorplanCloseCorners(d);
-        try{ fpResolverParedesAjenas(d); }catch(e){}
-      } else { try{ fpResolverParedesAjenasEditado(d); }catch(e){} }
-    }catch(e){ console.warn('pared del plano: preparar', e); }
+    try{ fpPrepararGeometria(d, false); }catch(e){ console.warn('pared del plano: preparar', e); }
     MED_PP_PREP.set(data, d);
     return d;
   }
@@ -31248,6 +31249,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const dueno = {};
     medPlanosDelTrabajo().forEach(p => {
     if(!p || !Array.isArray(p.data.rooms)) return;
+    if(typeof fpConocerPlano === 'function') fpConocerPlano(p.data);   // (12-nov) ver fpPlanoDelCuarto
     p.data.rooms.forEach(r => {
       if(r.deleted) return;
       const planta = fpPlantaSupuesta(p.data, r.level || 1);
@@ -31255,7 +31257,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       dueno[planta] = p.id;
       const en = medAInglesElCuarto(r.roomName);
       if(!planta || !en) return;
-      const a = fpRoomDisplayAreaSqFt(r);
+      const a = fpPisoPorRevisar(r) ? 0 : fpRoomDisplayAreaSqFt(r);   // (12-nov-2026, Molde-2) "needs review" no le da tope a Medidas
       if(!(a > 0)) return;
       if(!salida[planta]) salida[planta] = {};
       // Si hay dos con el mismo nombre en la misma planta, el mas grande: es el
@@ -31592,6 +31594,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   function medFormasDelPlano(d, nivelPlano){
     const out = {}, formas = {};
     if(!d || !Array.isArray(d.rooms)) return { paredes: out, formas };
+    if(typeof fpConocerPlano === 'function') fpConocerPlano(d);        // (12-nov) ver fpPlanoDelCuarto
     const rooms = d.rooms.filter(x => x && !x.deleted && (x.walls || []).length && (x.level || 1) === nivelPlano);
     const todos = d.merged === false ? null : rooms;
     const r2 = v => Math.round(v * 100) / 100;
@@ -33250,6 +33253,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // paredes, así que ningún lector tiene que saber que esto es un resumen.
   function fpResumenDe(data){
     if(!data) return data;
+    if(typeof fpConocerPlano === 'function') fpConocerPlano(data);     // (12-nov) el área del resumen es la del plano (ver fpPlanoDelCuarto)
     return {
       job: data.job || {},
       _nivelBase: data._nivelBase || '',
@@ -33260,7 +33264,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         roomName: r.roomName || '',
         level: r.level || 1,
         deleted: !!r.deleted,
-        summary: { floorAreaSqFt: fpRoomDisplayAreaSqFt(r) || 0 }
+        summary: fpPisoPorRevisar(r) ? { floorAreaSqFt: 0, porRevisar: true } : { floorAreaSqFt: fpRoomDisplayAreaSqFt(r) || 0 }   // (12-nov-2026, Molde-2) "needs review": sin número, como en el plano
       }))
     };
   }
@@ -34281,6 +34285,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
 
   function saveFloorplanDraft(){
     if(!floorplanData){ return; }
+    // (12-nov-2026) LO QUE SE VE AL EDITAR ES LO QUE SALE AL VOLVER A ABRIR. Al abrir un plano editado a mano, fpOpenSaved corre
+    // fpResolverParedesAjenasEditado (marca las paredes prestadas); mientras se editaba no corría, y el editor enseñaba otros
+    // sq ft que los del plano guardado (Kitchen 206.3 al editar, 175.3 al volver a abrir). Corre aquí, antes de guardar (y de
+    // pintar: quien guarda pinta después), el mismo arreglo con las mismas rejas: lo guardado ya trae sus marcas y volver a
+    // abrirlo no cambia nada. Si no hay encime entre los contornos crudos sale enseguida.
+    if(floorplanData._handEdited){ try{ fpResolverParedesAjenasEditado(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } }
     if(!floorplanId) floorplanId = 'fp' + Date.now() + Math.floor(Math.random()*1000);
     // La fecha se renueva cada vez que lo toca: los 3 dias cuentan desde la
     // ULTIMA vez que trabajo en el, no desde que lo escaneo.
@@ -34380,8 +34390,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(typeof saveDraft === 'function') saveDraft();
     try{ localStorage.setItem(FLOORPLAN_DRAFT_KEY, e.id); }catch(e2){}
     fpResetUndoStack();
-    floorplanAlignRooms(floorplanData);
-    if(!floorplanData._handEdited){ try{ fpValidarParches(floorplanData); }catch(e){ console.warn('parches', e); } floorplanRectifyWalls(floorplanData); floorplanRefineGeometry(floorplanData); floorplanCloseCorners(floorplanData); try{ fpResolverParedesAjenas(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } } else { try{ fpResolverParedesAjenasEditado(floorplanData); }catch(e){ console.warn('paredes ajenas', e); } }
+    fpPrepararGeometria(floorplanData, true);
     const goneNames = fpCleanPhantomSpaceLabels(floorplanData);
     if(goneNames && goneNames.length){ floorplanData._phantomLabelsRemoved = goneNames; saveFloorplanDraft(); }
     renderFloorplan(floorplanData);
@@ -34452,19 +34461,34 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // data afterward with no special-casing anywhere else. Idempotent: an
   // already-aligned plan's own dominant angle comes back ~0, so calling
   // this again (e.g. on every draft load) is a safe no-op.
+  // (12-nov-2026, Vecino) EL ÁNGULO DEL GRUPO DE PAREDES QUE MANDA, NO EL PROMEDIO DE TODAS. Antes se promediaban todas las
+  // paredes: una pared de verdad sesgada (~20°) jalaba el promedio ~2°, el plano se giraba esos 2° CADA VEZ que se volvía a abrir
+  // (después de pintar el Mapa de humedad, por ejemplo), la sesgada se enderezaba un poco en cada vuelta y el piso se pasaba de un
+  // cuarto al de al lado (Bedroom 67.7 -> 71.0 en tres vueltas). Ahora se busca el ángulo (módulo 90°) que junta más pies de pared
+  // a ±3° (el mismo margen de floorplanRectifyWalls) y se promedian solo esas: las sesgadas no cuentan, y un plano ya enderezado
+  // da 0 y no se vuelve a girar. Sin paredes sesgadas da lo mismo que antes.
   function floorplanDominantAngle(rooms){
-    let sumX = 0, sumY = 0;
+    const ps = [];
     (rooms||[]).forEach(room => {
       (room.walls||[]).forEach(w => {
         if(!w || !w.start || !w.end || w._invisible) return; // la pared invisible es solo una raya: no endereza nada
         const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y;
         const len = Math.sqrt(dx*dx + dy*dy);
-        if(len < 0.5) return; // ignore tiny/degenerate walls as noise
-        const angle = Math.atan2(dy, dx);
-        sumX += len * Math.cos(4*angle);
-        sumY += len * Math.sin(4*angle);
+        if(!(len >= 0.5)) return; // ignore tiny/degenerate walls as noise
+        ps.push({ len, a4: 4 * Math.atan2(dy, dx) });
       });
     });
+    if(!ps.length) return 0;
+    const VENTANA = 4 * 3 * Math.PI / 180;   // ±3° de pared = ±12° en 4θ
+    const dif = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    let mejor = null, mejorPeso = -1;
+    ps.forEach(c => {
+      let peso = 0;
+      ps.forEach(p => { if(dif(p.a4, c.a4) <= VENTANA) peso += p.len; });
+      if(peso > mejorPeso + 1e-9){ mejorPeso = peso; mejor = c; }
+    });
+    let sumX = 0, sumY = 0;
+    ps.forEach(p => { if(dif(p.a4, mejor.a4) <= VENTANA){ sumX += p.len * Math.cos(p.a4); sumY += p.len * Math.sin(p.a4); } });
     if(Math.abs(sumX) < 1e-6 && Math.abs(sumY) < 1e-6) return 0;
     return Math.atan2(sumY, sumX) / 4;
   }
@@ -34502,6 +34526,46 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       });
     });
   }
+  // (12-nov-2026, Vecino) ABRIR UN PLANO NO LO CAMBIA. Al abrir (o al pintarlo el manager o Medidas) a un plano sin editar a mano se
+  // le vuelve a pasar todo el arreglo del escaneo (enderezar, poner a escuadra, juntar paredes compartidas, cerrar esquinas). Sobre
+  // un plano YA arreglado eso no daba lo mismo: con una pared en ángulo, cada vez que se guardaba (pintar el Mapa de humedad guarda)
+  // y se volvía a abrir, las esquinas se corrían otro poquito y el piso se pasaba de un cuarto al de al lado. Ahora, al terminar el
+  // arreglo, el plano lleva la firma de sus paredes (_geoLista); si al abrirlo las paredes son las mismas, ya está arreglado y no se
+  // le vuelve a pasar. Cualquier cambio en las paredes (un parche de Completar escaneo, un plano de antes) cambia la firma y se
+  // arregla como siempre. Lo editado a mano sigue su propio camino (fpResolverParedesAjenasEditado).
+  const FP_GEO_V = 1;   // subirlo vuelve a arreglar TODOS los planos al abrirlos (cuando el arreglo del escaneo cambie)
+  function fpFirmaGeo(d){
+    let h = 0x811c9dc5;
+    const add = t => { for(let i = 0; i < t.length; i++){ h ^= t.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } };
+    const n = v => Number(v).toFixed(3);
+    add(FP_GEO_V + ':' + ((d && d.rooms) || []).length + (d && d.merged === false ? 'u' : ''));
+    ((d && d.rooms) || []).forEach((r, ri) => {
+      if(!r) return;
+      add('|' + ri + (r.deleted ? 'x' : '') + ':' + (r.level || 1));
+      (r.walls || []).forEach(w => { if(w && w.start && w.end) add(';' + n(w.start.x) + ',' + n(w.start.y) + '>' + n(w.end.x) + ',' + n(w.end.y) + (w._ajena ? 'a' : '') + (w._removed ? 'r' : '')); });
+      [].concat(r.doors || [], r.openings || [], r.windows || []).forEach(o => { if(o && o.position) add('o' + n(o.position.x) + ',' + n(o.position.y)); });
+    });
+    return 'g' + FP_GEO_V + '-' + h.toString(36);
+  }
+  function fpGeoYaLista(d){ return !!(d && !d._handEdited && d._geoLista && d._geoLista === fpFirmaGeo(d)); }
+  function fpSellarGeo(d){ if(d && !d._handEdited) d._geoLista = fpFirmaGeo(d); }
+  // El arreglo de siempre al abrir un plano guardado (antes copiado en cuatro lugares). `avisar`: escribe los errores en la consola.
+  function fpPrepararGeometria(d, avisar){
+    if(!d || !d.rooms) return false;
+    if(fpGeoYaLista(d)) return false;
+    const w = (que, e) => { if(avisar) console.warn(que, e); };
+    floorplanAlignRooms(d);
+    if(!d._handEdited){
+      try{ fpValidarParches(d); }catch(e){ w('parches', e); }
+      floorplanRectifyWalls(d); floorplanRefineGeometry(d); floorplanCloseCorners(d);
+      try{ fpResolverParedesAjenas(d); }catch(e){ w('paredes ajenas', e); }
+      fpSellarGeo(d);
+    } else {
+      // (20-oct) editado a mano: el mismo arreglo de paredes ajenas, con las rejas de fpResolverParedesAjenasEditado.
+      try{ fpResolverParedesAjenasEditado(d); }catch(e){ w('paredes ajenas', e); }
+    }
+    return true;
+  }
   function floorplanAlignRooms(data){
     if(!data || !data.rooms) return;
     const rotateRooms = (roomList, angle, soloCuarto) => {
@@ -34520,6 +34584,15 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         });
       });
       fpTransformarInspeccion(data.inspection, (x, y) => rot({ x, y }), soloCuarto);
+      // (12-nov-2026, Vecino) las manchas de humedad y los huecos con nombre giran con el plano (Girar/Voltear ya lo hacía; aquí
+      // no, y al enderezar un plano ya pintado las manchas se quedaban encima del vecino)
+      const mv = o => { if(o && typeof o.x === 'number' && typeof o.y === 'number'){ const n = rot(o); o.x = n.x; o.y = n.y; } };
+      const deEste = m => soloCuarto == null || (m && m.roomIdx === soloCuarto);
+      (data._moistureMarks || []).forEach(m => { if(!deEste(m)) return; (m.corners || []).forEach(mv); (m.points || []).forEach(mv); });
+      if(soloCuarto == null){
+        (data._waterMarks || []).forEach(m => (m.points || []).forEach(mv));
+        (data._spaceLabels || []).forEach(mv);
+      }
     };
     if(data.merged === false){
       // Unmerged rooms live in INDEPENDENT coordinate frames with
@@ -34887,9 +34960,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           // muebles adentro del rincón en TODOS los cuartos del nivel; baño por nombre O por sus muebles; '' = sin rótulo.
           const name = fpRotuloDeRincon(room, { cx, cy, w: width, d: depth, u: { x: bcux, y: bcuy }, v: { x: abux, y: abuy }, conPuerta: puertaEnLaBoca }, data);
           if(!name) continue;                                   // sin rótulo = no es un sub-espacio (lo nombrado a mano sobrevive más abajo)
+          // (12-nov-2026, Molde) _aparte: el rincón se detectó como CLÓSET con su frente (un espacio aparte). La marca se queda
+          // en el rincón: cambiarle el nombre ("Pantry") ya no lo vuelve piso del cuarto (antes la resta y su renglón solo
+          // valían si el nombre decía "closet" y el piso salía dos veces). Planos viejos sin la marca: sigue valiendo el nombre.
           found.push({ name, cx: Math.round(cx*100)/100, cy: Math.round(cy*100)/100,
                        w: Math.round(width*100)/100, d: Math.round(depth*100)/100, _suggested: true, conPuerta: puertaEnLaBoca || undefined,
-                       _frente: frente || undefined });
+                       _frente: frente || undefined, _aparte: (frente && /cl[oó]set/i.test(name)) || undefined });
         }
       }
       // Dedupe overlapping detections (an alcove can match from both
@@ -34916,6 +34992,26 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         // dibujo: la deteccion lo reemplaza en cada render.
         return old ? Object.assign(p, { name: old.name, _renamed: true, _suggested: false, _quitado: old._quitado,
           _offFt: old._offFt, _labelScale: old._labelScale }) : p;
+      });
+      // (12-nov-2026, Molde) EL CLÓSET QUE NADIE MOVIÓ SE QUEDA. Un clóset aparte de antes (con su frente) que esta pasada no
+      // volvió a encontrar igual (mover la pared de al lado cambia el contorno: el rincón sale de otro fondo y sin frente) se queda
+      // con su frente, su renglón y sus sq ft mientras sus cuatro paredes sigan donde estaban (fpClosetSigueEnPie) y su centro
+      // quede adentro; lo que la detección vio en su lugar es el mismo rincón y se va. Quitarle el frente o mover el clóset sí lo
+      // cambia (la detección manda). Va antes que el de abajo: ese le quita el frente a un nombrado que no se volvió a detectar.
+      // (typeof: varias pruebas copian esta función con una lista corta de vecinas; sin ella se comporta como antes)
+      // Girar el plano trueca su ancho y su fondo (fpTransformPlan): el mismo clóset con w/d al revés es el mismo clóset, y uno de
+      // antes que quedó al revés se prueba derecho (la boca es la que NO va por el contorno, fpClosetSigueEnPie).
+      const mismo = (p, q) => Math.hypot(p.cx - q.cx, p.cy - q.cy) <= 0.1 && ((Math.abs(p.w - q.w) <= 0.1 && Math.abs(p.d - q.d) <= 0.1) || (Math.abs(p.w - q.d) <= 0.1 && Math.abs(p.d - q.w) <= 0.1));
+      if(poly && poly.length >= 3 && typeof fpClosetSigueEnPie === 'function') prev.filter(q => q && q._frente && !q._quitado && !q._invLlevado && q.w > 0 && q.d > 0).forEach(q => {
+        if(carried.includes(q) || carried.some(p => p._frente && mismo(p, q))) return;
+        if(!fpPointInPolygon({ x: q.cx, y: q.cy }, poly)) return;
+        let mc = fpClosetSigueEnPie(room, q, poly);
+        if(!mc){ const q2 = Object.assign({}, q, { w: q.d, d: q.w }); mc = fpClosetSigueEnPie(room, q2, poly); if(mc){ q.w = q2.w; q.d = q2.d; } }
+        if(!mc) return;
+        const encima = p => { const rx = p.cx - q.cx, ry = p.cy - q.cy;
+          return Math.abs(rx * mc.u.x + ry * mc.u.y) <= q.w / 2 + 0.3 && Math.abs(rx * mc.v.x + ry * mc.v.y) <= q.d / 2 + 0.3; };
+        for(let i = carried.length - 1; i >= 0; i--) if(encima(carried[i])) carried.splice(i, 1);
+        carried.push(q);
       });
       // This assignment used to be unconditional, and it runs on EVERY
       // render - so the moment detection came back empty (a hand edit
@@ -35141,20 +35237,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       floorplanData = data;
       if(floorplanData && floorplanData.rooms){
         fpResetUndoStack();
-        floorplanAlignRooms(floorplanData); // retroactively straightens drafts saved before this fix existed
-        // The human is final: once a plan carries hand edits, the automatic
-        // scan-noise cleanup (straightening/reconciliation) must never
-        // re-snap what a person deliberately placed.
-        if(!floorplanData._handEdited){
-          try{ fpValidarParches(floorplanData); }catch(e){ console.warn('parches', e); }
-          floorplanRectifyWalls(floorplanData);
-          floorplanRefineGeometry(floorplanData);
-          floorplanCloseCorners(floorplanData);
-          try{ fpResolverParedesAjenas(floorplanData); }catch(e){ console.warn('paredes ajenas', e); }
-        } else {
-          // (20-oct) editado a mano: el mismo arreglo de paredes ajenas, con las rejas de fpResolverParedesAjenasEditado.
-          try{ fpResolverParedesAjenasEditado(floorplanData); }catch(e){ console.warn('paredes ajenas', e); }
-        }
+        // retroactively straightens drafts saved before this fix existed. The human is final: once a plan carries hand edits, the
+        // automatic scan-noise cleanup (straightening/reconciliation) must never re-snap what a person deliberately placed.
+        fpPrepararGeometria(floorplanData, true);
         const gone = fpCleanPhantomSpaceLabels(floorplanData);
         if(gone && gone.length){ floorplanData._phantomLabelsRemoved = gone; saveFloorplanDraft(); }
         renderFloorplan(floorplanData);
@@ -35475,6 +35560,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // Las paredes del cuarto de al lado que se vieron por una abertura se
       // le devuelven a su dueño (13-oct, el Hallway de Harold encima de la sala).
       try{ fpResolverParedesAjenas(result); }catch(e){ console.warn('paredes ajenas', e); }
+      fpSellarGeo(result);   // (12-nov) ya arreglado: al abrirlo no se le vuelve a pasar (ver fpPrepararGeometria)
       (result.rooms||[]).forEach(room => {
         if(room.voiceName && !fpEsOrdenDeCuarto(room.voiceName)){
           // El nombre dicho reemplaza al que hubiera (nunca un segundo rótulo) y se centra en el cuarto.
@@ -36420,13 +36506,18 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     return true;
   }
   // (R132) en las hojas de RD: el cuarto en su cuadrito rojo y el nivel en azul fuerte (en las de AMG, como siempre)
+  // (12-nov) el plano, el Mapa de humedad y su tabla de medidas ya no lo usan: el nombre del cuarto va sin cuadrito (su pedido)
   function rdhjCuarto(nombreHtml){ return (typeof rdEsRd === 'function' && rdEsRd()) ? '<b class="rdhj-cuarto">' + nombreHtml + '</b>' : '<b>' + nombreHtml + '</b>'; }
   function rdhjNivel(txtHtml){ return (typeof rdEsRd === 'function' && rdEsRd()) ? '<span class="rdhj-nivel">' + txtHtml + '</span>' : txtHtml; }
-  // (R132) en el dibujo del plano: cada nombre de cuarto (los renglones azules seguidos de FP_AZUL_NOMBRE) dentro de un cuadrito rojo. El
-  // cuadrito va justo antes de sus renglones, dentro del mismo grupo: si el nombre se arrastra, se va con él. El ancho se calcula por letra
-  // (la letra del nombre es mayúscula en negrita); el blanco de adentro es casi transparente para que se vea el color del mapa de humedad.
-  // En RD el nombre va en negro (su "tienen que ser en negro, no en azul"); el azul solo marca cuáles renglones son el nombre.
+  // (R132) en el dibujo del plano de RD el nombre de cada cuarto va en negro (su "tienen que ser en negro, no en azul"); el azul solo
+  // marca cuáles renglones son el nombre.
+  // (12-nov, su pedido: "a los nombres de las habitaciones quítale el contorno rojo, la cajita roja, no se ve bien") Ya NO lleva el
+  // cuadrito rojo: solo el nombre en negro, en el dibujo (plano, editor, Mapa de humedad y sus hojas).
   function rdhjCajasEnSvg(svg){
+    return String(svg).split('fill="' + FP_AZUL_NOMBRE + '"').join('fill="#111"');
+  }
+  // (R132, ya sin usar desde el 12-nov) el cuadrito rojo alrededor del nombre; se queda por si lo vuelve a pedir
+  function rdhjCajasRojasEnSvg(svg){
     return String(svg).replace(new RegExp('(?:<text[^>]*fill="' + FP_AZUL_NOMBRE + '"[^>]*>[\\s\\S]*?</text>)+', 'g'), grupo => {
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, fsM = 0;
       for(const m of grupo.matchAll(/<text([^>]*)>([\s\S]*?)<\/text>/g)){
@@ -37749,6 +37840,36 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const enLinea = o => { const ovx = o.b.x - o.a.x, ovy = o.b.y - o.a.y, oL = Math.hypot(ovx, ovy) || 1;
       if(Math.abs((ovx / oL) * ux + (ovy / oL) * uy) < 0.98) return false;
       return Math.abs((o.a.x - ax.x) * n.x + (o.a.y - ax.y) * n.y) <= 0.3 && Math.abs((o.b.x - ax.x) * n.x + (o.b.y - ax.y) * n.y) <= 0.3; };
+    // (12-nov-2026, Molde) LA T DEL CLÓSET (real_plan: la pared 7B93508B del Master Bedroom, la de abajo del clóset). Si en una
+    // punta de la pared sigue en línea una pared que NO es orilla de su cuarto (la jamba del frente del clóset) y de lado sale una
+    // pared a escuadra (el lado del clóset; o ella y su copia del cuarto de al lado, hacia el mismo lado), esa punta se suelta del
+    // nudo: la jamba se queda donde está y la punta corre por la pared de lado (al soltar, rdvTCerrar la parte ahí o la alarga). Antes se llevaba una jamba (4A25CA82) y la
+    // otra no (695AB42F): el frente quedaba chueco, el clóset dejaba de contar aparte y sus 15 sq ft se le sumaban al cuarto
+    // (185 -> 207 por 1 ft x 6.97 ft). La pared de afuera que pasa por dos cuartos (es orilla de su cuarto) se sigue llevando, y
+    // la jamba es del MISMO cuarto que la pared (el frente de su clóset): una en línea de OTRO cuarto que no va por su contorno
+    // (live_plan_closet: las del Hallway de contorno roto, arriba del Living) no hace T y se lleva como antes.
+    // Nada del plano ni del grafo se toca aquí: solo cuáles puntas se mueven (t.movedNodes) y el tope.
+    t.rdvT = [];
+    const mias = [t.end].concat(t.coupled), propios = new Set();
+    mias.forEach(o => { propios.add(o.wall.start); propios.add(o.wall.end); });
+    const marcada = w => !!(w && (w._recorte || w._ajena || w._invisible || w._invUnir || w._studWall || w._cierre));
+    const orilla = o => { const r = ((floorplanData && floorplanData.rooms) || [])[o.roomIdx]; let pg = null;
+      try{ pg = r ? fpOrderedRoomPolygon(r) : null; }catch(e){ pg = null; }
+      return !pg || pg.length < 3 || fpDistToPolygon({ x: (o.a.x + o.b.x) / 2, y: (o.a.y + o.b.y) / 2 }, pg) <= 0.3; };
+    if(!mias.some(o => marcada(o.wall))) [t.end.a, t.end.b].forEach(N => {
+      const otros = t.graph.ends.filter(o => !mias.includes(o) && (o.a === N || o.b === N));
+      const jambas = otros.filter(o => enLinea(o) && !orilla(o)), lados = otros.filter(o => !jambas.includes(o));
+      if(!jambas.length || !lados.length || jambas.some(o => o.roomIdx !== t.end.roomIdx) || lados.some(o => marcada(o.wall)) || jambas.some(o => marcada(o.wall))) return;
+      // la de lado (o ella y su copia en el cuarto de al lado): a escuadra, todas hacia el mismo lado
+      const cs = lados.map(P => { const F = P.a === N ? P.b : P.a, pv = { x: F.x - N.x, y: F.y - N.y }, pL = Math.hypot(pv.x, pv.y);
+        return pL >= 1 && Math.abs((pv.x * n.x + pv.y * n.y) / pL) >= 0.98 ? pv.x * n.x + pv.y * n.y : NaN; });
+      if(cs.some(c => !isFinite(c)) || !(cs.every(c => c > 0) || cs.every(c => c < 0))) return;
+      const NN = { x: N.x, y: N.y, refs: N.refs.filter(p => propios.has(p)) };
+      if(!NN.refs.length) return;
+      t.movedNodes.delete(N); t.movedNodes.add(NN);
+      t.rdvT.push({ nodo: NN, N0: { x: N.x, y: N.y }, lados: lados.map(P => ({ lado: P, k: P.a === N ? 'start' : 'end' })),
+        c: cs.reduce((m, c) => Math.abs(c) < Math.abs(m) ? c : m) });
+    });
     let otra = true;
     while(otra){ otra = false;
       t.graph.ends.forEach(o => { if(o === t.end || t.coupled.includes(o)) return;
@@ -37761,7 +37882,31 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const disc = aDot * aDot - (v2.x * v2.x + v2.y * v2.y) + 0.25; if(disc <= 0) return;
       const r1 = aDot - Math.sqrt(disc), r2 = aDot + Math.sqrt(disc);
       if(r1 >= 0) dMax = Math.min(dMax, r1); if(r2 <= 0) dMin = Math.max(dMin, r2); });
+    // (12-nov-2026, Molde) la punta suelta corre por la pared de lado hasta medio pie antes de su otra punta, no más allá
+    t.rdvT.forEach(T => { if(T.c > 0) dMax = Math.min(dMax, T.c - 0.5); else dMin = Math.max(dMin, T.c + 0.5); });
     t.dMin = dMin; t.dMax = dMax;
+  };
+  // (12-nov-2026, Molde) Al soltar (dentro del fpCommitEdit del arrastre, ya movidas las puntas): la punta suelta de rdvRecta quedó
+  // SOBRE la pared de lado (se movió hacia su otra punta) -> esa pared se parte ahí, así el contorno tiene su esquina y el tramo de
+  // la vieja esquina a la punta queda adentro (entre el clóset y el piso nuevo); o se alejó -> la pared de lado se alarga hasta la
+  // punta y la jamba queda sobre ella. Las puertas y ventanas de esa pared se quedan con el tramo donde están.
+  window.rdvTCerrar = function(t){
+    (t.rdvT || []).forEach(T => T.lados.forEach(L => {
+      const w = L.lado.wall, k = L.k, o = k === 'start' ? 'end' : 'start', room = ((floorplanData && floorplanData.rooms) || [])[L.lado.roomIdx];
+      if(!room || !w || !w[k] || !w[o]) return;
+      const Q = { x: T.nodo.x, y: T.nodo.y }, mv = { x: Q.x - T.N0.x, y: Q.y - T.N0.y };
+      if(Math.hypot(mv.x, mv.y) < 1e-6) return;
+      const largo = x => { x.lengthFt = Math.round(Math.hypot(x.end.x - x.start.x, x.end.y - x.start.y) * 100) / 100; delete x._lengthOverrideFt; x._geomEdited = true; };
+      if((w[o].x - w[k].x) * mv.x + (w[o].y - w[k].y) * mv.y > 0){
+        const pieza = JSON.parse(JSON.stringify(w));
+        pieza.id = fpNewId(); pieza[k] = { x: w[k].x, y: w[k].y }; pieza[o] = { x: Q.x, y: Q.y };
+        w[k].x = Q.x; w[k].y = Q.y;
+        largo(w); largo(pieza);
+        room.walls.splice(room.walls.indexOf(w) + 1, 0, pieza);
+        [].concat(room.doors || [], room.windows || [], room.openings || []).forEach(op => {
+          if(op && op.position && String(op.wallId) === String(w.id) && fpDistSeg(op.position, pieza.start, pieza.end) < fpDistSeg(op.position, w.start, w.end)) op.wallId = pieza.id; });
+      } else { w[k].x = Q.x; w[k].y = Q.y; largo(w); }
+    }));
   };
   // (su "siempre unirla a donde llega") el imán de la esquina: a otra esquina o sobre otra pared, a ~18 pt de la pantalla
   window.rdvImanEsquina = function(t, x, y){
@@ -37782,13 +37927,19 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // arrastrar un puntito: la otra punta se queda; al soltar, el ancho nuevo (y su centro) se guarda como el +3" de siempre
     st.addEventListener('pointerdown', e => {
       const p = e.target.closest && e.target.closest('.rdv-ab-punto'); if(!p || !document.body.classList.contains('rd-fpv-edit')) return;
+      // (12-nov-2026, Palma) solo el PRIMER dedo agarra un puntito: si ya hay otro dedo en el plano, este es parte de un pellizco y
+      // va al plano (antes se lo quedaba el puntito, el plano nunca lo contaba y el otro dedo arrancaba su propio arrastre)
+      if(!e.isPrimary || fpPointers.size || fpToolDrag || fpLabelDrag || RDVB.arr) return;
       const a = rdvAbEscogida(), svgEl = p.ownerSVGElement; if(!a || !svgEl) return;
       e.stopPropagation(); e.preventDefault();
       try{ p.setPointerCapture(e.pointerId); }catch(_){}
-      RDVB.arr = { a, svgEl, lado: p.dataset.lado, sA: a.sA, sB: a.sB, id: e.pointerId, movio: false, x0: e.clientX, y0: e.clientY };
+      RDVB.arr = { a, svgEl, lado: p.dataset.lado, sA: a.sA, sB: a.sB, id: e.pointerId, movio: false, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };
       rdvBorrarEsconder();
     }, true);
-    const mover = e => { const t = RDVB.arr; if(!t || e.pointerId !== t.id) return; e.stopPropagation();
+    // (12-nov-2026, Palma) un segundo dedo (fpSoltarPorSegundoDedo): el puntito se suelta SIN guardar, el ancho no cambia (se guarda
+    // solo al soltar, en 'soltar') y su dedo entra al pellizco desde donde está
+    RDVB.cancelar = () => { const t = RDVB.arr; if(!t) return null; RDVB.arr = null; rdvEdLuego(); return { id: t.id, x: t.x, y: t.y }; };
+    const mover = e => { const t = RDVB.arr; if(!t || e.pointerId !== t.id) return; e.stopPropagation(); t.x = e.clientX; t.y = e.clientY;
       if(Math.hypot(e.clientX - t.x0, e.clientY - t.y0) > 3) t.movio = true; if(!t.movio) return;
       const q = fpClientToFeet(t.svgEl, e.clientX, e.clientY); if(!q) return;
       const s = (q.x - t.a.S0.x) * t.a.ux + (q.y - t.a.S0.y) * t.a.uy, MIN = 1, MAX = 20;
@@ -37825,7 +37976,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         return null; }
       return { tipo: d.classList.contains('fp-obj') ? 'obj' : d.classList.contains('fp-window') ? 'window' : 'door', ri: Number(d.dataset.roomIdx), id: d.classList.contains('fp-obj') ? d.dataset.objId : d.dataset.openingId }; };
     let dedo = null;
-    st.addEventListener('pointerdown', e => { dedo = { x: e.clientX, y: e.clientY, t: Date.now(), id: e.pointerId };
+    // (12-nov-2026, Palma) dos dedos no son un toque (un pellizco corto con un dedo quieto no cuenta como el primer toque de "dos toques");
+    // y el "no escojas nada" de soltar un puntito es solo para el clic de ese mismo dedo: un dedo nuevo ya es otro toque
+    st.addEventListener('pointerdown', e => { dedo = e.isPrimary ? { x: e.clientX, y: e.clientY, t: Date.now(), id: e.pointerId } : { id: null }; RDVB.suelto = 0;
       if(!(e.target.closest && e.target.closest('.rdv-borrar'))) rdvBorrarEsconder();
       const edN = document.getElementById('rdvNomEd'); if(!edN || edN.hidden) { const o2 = document.getElementById('rdvNomOps'); if(o2) rdHid(o2, true); }
  }, true);
@@ -37861,11 +38014,33 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       clearTimeout(sostenP && sostenP.t); sostenP = null;
       let herramienta = 'select'; try{ herramienta = fpActiveTool; }catch(_){}
       if(!document.body.classList.contains('rd-fpv-edit') || herramienta !== 'select' || fpLabelDrag || fpToolDrag) return;
+      // (12-nov-2026, Palma) sostener es de UN dedo: el que baja con otro dedo ya en el plano es parte de un pellizco (antes, quieto
+      // 0.38 s sobre una pared, la escogía y cortaba el pellizco). El segundo dedo, además, apaga el sostener del primero (arriba).
+      if(!e.isPrimary || fpPointers.size || RDVB.arr) return;
+      // (12-nov-2026, Palma) una puerta, ventana u objeto SIN escoger: sostener 0.38 s = escogerlo y arrastrarlo, como la pared (un dedo
+      // que solo pasa encima corre el plano; lo ya escogido se arrastra de una, en el pointerdown del plano)
+      const ab = e.target.closest && !e.target.closest('.rdv-ab-punto, .fp-obj-agarre, .fp-corner-handle') ? e.target.closest('.fp-door, .fp-window, .fp-obj') : null;
+      if(ab && !fpEsLoEscogido(ab)){
+        const q = { tipo: ab.classList.contains('fp-obj') ? 'obj' : ab.classList.contains('fp-window') ? 'window' : 'door', ri: Number(ab.dataset.roomIdx),
+                    id: ab.classList.contains('fp-obj') ? ab.dataset.objId : ab.dataset.openingId };
+        const ev = { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY };
+        sostenP = { ev, t: setTimeout(() => {
+          const s0 = sostenP; sostenP = null; if(!s0 || fpLabelDrag || fpToolDrag || fpPointers.size > 1 || RDVB.arr) return;
+          if(q.tipo === 'obj') openFloorplanObjDetail(q.ri, q.id); else openFloorplanOpeningDetail(q.ri, q.tipo, q.id);
+          const el = document.querySelector('#floorplanSvgWrap ' + (q.tipo === 'obj' ? '.fp-obj[data-room-idx="' + q.ri + '"][data-obj-id="' + CSS.escape(String(q.id)) + '"]'
+            : '.fp-' + q.tipo + '[data-room-idx="' + q.ri + '"][data-opening-id="' + CSS.escape(String(q.id)) + '"]'));
+          if(!el) return;
+          try{ fpPointers.delete(s0.ev.pointerId); fpBeginGesture(); }catch(_){}   // el plano deja de correrse: ahora se mueve eso
+          try{ if(fpPointers.size === 0) fpBeginToolDrag(s0.ev, el); }catch(_){}
+          rdvEdLuego();
+        }, 380) };
+        return;
+      }
       if(e.target.closest && e.target.closest('.rdv-ab-punto, .fp-obj-agarre, .fp-corner-handle, .fp-door, .fp-window, .fp-obj')) return;
       const w = paredBajo(e.clientX, e.clientY); if(!w || w.id == null) return;
       const ev = { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY };
       sostenP = { ev, w, t: setTimeout(() => {
-        const s0 = sostenP; sostenP = null; if(!s0 || fpLabelDrag || fpToolDrag) return;
+        const s0 = sostenP; sostenP = null; if(!s0 || fpLabelDrag || fpToolDrag || fpPointers.size > 1 || RDVB.arr) return;
         let sel = false; try{ sel = String(fpSelectedWallId) === String(s0.w.id) && fpSelectedWallRoomIdx === s0.w.ri; }catch(_){}
         if(!sel) openFloorplanWallDetail(s0.w.ri, s0.w.id);
         const grab = document.querySelector('#floorplanSvgWrap .fp-wall-grab'); if(!grab) return;
@@ -37890,11 +38065,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       clearTimeout(sostener && sostener.t); sostener = null;
       let herramienta = 'select'; try{ herramienta = fpActiveTool; }catch(_){}
       if(!document.body.classList.contains('rd-fpv-edit') || herramienta !== 'select' || fpLabelDrag || fpToolDrag) return;
+      if(!e.isPrimary || fpPointers.size || RDVB.arr) return;   // (12-nov-2026, Palma) de UN dedo, como el de la pared (arriba)
       if(e.target.closest && e.target.closest('.rdv-ab-punto, .fp-obj-agarre, .fp-corner-handle, .fp-wall-grab')) return;
       const n = nombreBajo(e.clientX, e.clientY); if(!n) return;
       const ev = { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY };
       sostener = { ev, n, t: setTimeout(() => {
-        const s0 = sostener; sostener = null; if(!s0 || fpLabelDrag || fpToolDrag) return;
+        const s0 = sostener; sostener = null; if(!s0 || fpLabelDrag || fpToolDrag || fpPointers.size > 1 || RDVB.arr) return;
         try{ fpPointers.delete(s0.ev.pointerId); }catch(_){}
         if(fpPointers.size === 0 && fpBeginLabelDrag(s0.ev, s0.n)){ s0.n.classList.add('rdv-agarrado'); rdvNomEsconder(); }
       }, 380) };
@@ -39585,6 +39761,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const planos = medPlanosDelTrabajo();
     if(!clave || !planos.length) return 0;
     let mejor = 0;
+    if(typeof fpConocerPlano === 'function') planos.forEach(p => { if(p) fpConocerPlano(p.data); });   // (12-nov) ver fpPlanoDelCuarto
     planos.forEach(p => (p && Array.isArray(p.data.rooms) ? p.data.rooms : []).forEach(r => {
       if(r.deleted) return;
       const n = String(r.roomName || '').toLowerCase()
@@ -39593,7 +39770,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // Se acepta que uno contenga al otro: el plano dice "Recámara" y la
       // tarjeta "Recamara principal", o al reves.
       if(n === clave || n.includes(clave) || clave.includes(n)){
-        const a = fpRoomDisplayAreaSqFt(r);
+        const a = fpPisoPorRevisar(r) ? 0 : fpRoomDisplayAreaSqFt(r);   // (12-nov-2026, Molde-2) "needs review": 0 = no compares
         if(a > mejor) mejor = a;
       }
       // (R102) el clóset aparte de un cuarto se enlaza por su nombre, con su propia área
@@ -40139,7 +40316,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           const yaHay = o._kindOverride || k;
           fpSetTool('select');
           fpHint('There is already ' + (yaHay === 'opening' ? 'an open passage' : 'a ' + yaHay) + ' here. Nothing was changed.');
-          if(k !== 'opening') openFloorplanOpeningDetail(roomIdx, k, String(o.id != null ? o.id : (list||[]).indexOf(o)));
+          // (12-nov-2026, Molde-2) el paso también tiene su hoja ("Passage"): se abre como la de puertas y ventanas (antes solo avisaba)
+          openFloorplanOpeningDetail(roomIdx, k === 'opening' ? 'passage' : k, String(o.id != null ? o.id : (list||[]).indexOf(o)));
           return false;
         }
       }
@@ -40189,6 +40367,42 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // with an optional near-anchor fallback (allowNear) for placement taps
   // that land just outside a noisy outline. Unmerged rooms each live in
   // their own svg, so the svg IS the answer there.
+  // (12-nov, Vecino) EL CUARTO QUE SE TOCÓ: si dos contornos se enciman en ese punto, gana el que lo tiene MÁS ADENTRO (más
+  // lejos de su orilla), no el último de la lista. Antes el toque al centro del Hallway escogía el Bathroom (y el Mapa de
+  // humedad le pintaba el piso mojado al Bathroom). La raíz del encime es aparte (el motor); esto solo escoge bien.
+  function fpCuartoEnPunto(pt, rooms, vale){
+    const cand = [];
+    (rooms || []).forEach((room, ri) => {
+      if(!vale(room)) return;
+      const poly = fpOrderedRoomPolygon(room);
+      if(!(poly && poly.length >= 3 && fpPointInPolygon(pt, poly))) return;
+      let d = Infinity;
+      for(let i = 0; i < poly.length; i++) d = Math.min(d, fpLgDistPS(pt, poly[i], poly[(i + 1) % poly.length]));
+      cand.push({ ri, poly, d });
+    });
+    if(cand.length <= 1) return cand.length ? cand[0].ri : null;
+    // un cuarto que queda ENTERO dentro del contorno de otro (un clóset que el contorno del cuarto grande abraza) gana sobre el
+    // grande: su piso es suyo aunque el punto quede más lejos de la orilla del grande
+    const area = c => (c.area != null ? c.area : (c.area = fpPolygonAreaSqFt(c.poly) || 0));
+    let vivos = cand.filter(B => !cand.some(A => A !== B && area(A) < area(B) && area(A) > 0 && fpEncimeSqFt(A.poly, B.poly, 0.25) >= 0.9 * area(A)));
+    if(!vivos.length) vivos = cand;
+    // un punto que queda DETRÁS de una pared del cuarto (la raya del punto a su rótulo cruza una pared suya) no es de su piso:
+    // es el pedazo que su contorno se comió del vecino
+    const cruza = (p, q, a, b) => {
+      const o = (u, v, w) => (v.x - u.x) * (w.y - u.y) - (v.y - u.y) * (w.x - u.x);
+      const d1 = o(a, b, p), d2 = o(a, b, q), d3 = o(p, q, a), d4 = o(p, q, b);
+      return ((d1 > 1e-9 && d2 < -1e-9) || (d1 < -1e-9 && d2 > 1e-9)) && ((d3 > 1e-9 && d4 < -1e-9) || (d3 < -1e-9 && d4 > 1e-9));
+    };
+    const detrasDePared = c => {
+      const room = rooms[c.ri], an = floorplanLabelAnchor(room);
+      if(!an || !Number.isFinite(an.x) || !Number.isFinite(an.y)) return false;
+      return (room.walls || []).some(w => w && w.start && w.end && !w._removed && !w._ajena && cruza(pt, an, w.start, w.end));
+    };
+    const limpios = vivos.filter(c => !detrasDePared(c));
+    let mejor = null;
+    (limpios.length ? limpios : vivos).forEach(c => { if(!mejor || c.d > mejor.d + 1e-9) mejor = c; });
+    return mejor.ri;
+  }
   function fpRoomIdxAtClient(svgEl, clientX, clientY, allowNear){
     if(!floorplanData) return null;
     const pt = fpClientToFeet(svgEl, clientX, clientY);
@@ -40198,12 +40412,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       return (floorplanData.rooms||[])[ri] ? ri : null;
     }
     const multi = floorplanLevels(floorplanData).length > 1;
-    let roomIdx = null, bestDist = Infinity, bestIdx = null;
+    let bestDist = Infinity, bestIdx = null;
+    const vale = room => !room.deleted && (room.walls||[]).length && !(multi && (room.level||1) !== floorplanSelectedLevel);
+    let roomIdx = fpCuartoEnPunto(pt, floorplanData.rooms, vale);
     (floorplanData.rooms||[]).forEach((room, ri) => {
-      if(room.deleted || !(room.walls||[]).length) return;
-      if(multi && (room.level||1) !== floorplanSelectedLevel) return;
-      const poly = fpOrderedRoomPolygon(room);
-      if(poly && poly.length >= 3 && fpPointInPolygon(pt, poly)){ roomIdx = ri; }
+      if(!vale(room)) return;
       const a = floorplanLabelAnchor(room);
       const d = Math.hypot(a.x-pt.x, a.y-pt.y);
       if(d < bestDist){ bestDist = d; bestIdx = ri; }
@@ -40640,6 +40853,36 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(roomIdx == null && startSnap) roomIdx = startSnap.roomIdx;
       if(roomIdx == null && snap) roomIdx = snap.roomIdx;
       if(roomIdx == null) roomIdx = bestIdx;
+      // (12-nov-2026) La pared nueva va al cuarto al que le FALTA, no al que ya la tiene. El punto medio cae en
+      // la ORILLA del cuarto de al lado (ese cuarto ya tiene su pared en esa línea) y el "último que lo contiene"
+      // se la daba a él: el cuarto abierto no cerraba y sus pies se quedaban perdidos (Hallway 30.4 -> 13.2 al
+      // borrar una pared y volverla a dibujar de esquina a esquina). Si el escogido ya tiene sus propias paredes
+      // en la mitad o más de esta línea y un candidato (el cuarto del otro lado de la pared, o el de una punta
+      // pegada) casi no tiene (menos de 20 %), va a ese. Lo demás queda igual que antes.
+      const enLinea = ri => {
+        const r = (floorplanData.rooms || [])[ri]; if(!r || r.deleted) return 0;
+        const L = Math.hypot(bx-a.x, by-a.y); if(L < 1e-6) return 0;
+        const ux = (bx-a.x)/L, uy = (by-a.y)/L, tramos = [];
+        (r.walls || []).forEach(w => {
+          if(!w.start || !w.end || w._ajena || w._removed) return;
+          if(Math.abs((w.start.x-a.x)*-uy + (w.start.y-a.y)*ux) > 0.05 || Math.abs((w.end.x-a.x)*-uy + (w.end.y-a.y)*ux) > 0.05) return;
+          const t1 = (w.start.x-a.x)*ux + (w.start.y-a.y)*uy, t2 = (w.end.x-a.x)*ux + (w.end.y-a.y)*uy;
+          const lo = Math.max(0, Math.min(t1, t2)), hi = Math.min(L, Math.max(t1, t2)); if(hi > lo) tramos.push([lo, hi]);
+        });
+        tramos.sort((p, q) => p[0] - q[0]); let s = 0, fin = -Infinity;
+        tramos.forEach(([lo, hi]) => { if(hi > fin){ s += hi - Math.max(lo, fin); fin = hi; } });
+        return s / L;
+      };
+      if(enLinea(roomIdx) >= 0.5){
+        const L = Math.hypot(bx-a.x, by-a.y), nx = -(by-a.y)/L, ny = (bx-a.x)/L, cands = [];
+        [1, -1].forEach(sg => { const p = { x: mid.x + nx*0.25*sg, y: mid.y + ny*0.25*sg };
+          (floorplanData.rooms || []).forEach((r, ri) => { if(ri === roomIdx || r.deleted || !(r.walls || []).length) return;
+            if(multi && (r.level || 1) !== floorplanSelectedLevel) return;
+            const poly = fpOrderedRoomPolygon(r); if(poly && poly.length >= 3 && fpPointInPolygon(p, poly)) cands.push(ri); }); });
+        [startSnap, snap].forEach(s0 => { if(s0 && s0.roomIdx != null && s0.roomIdx !== roomIdx) cands.push(s0.roomIdx); });
+        const otro = cands.find(ri => enLinea(ri) < 0.2);
+        if(otro != null) roomIdx = otro;
+      }
     }
     const room = (floorplanData.rooms||[])[roomIdx];
     if(!room) return;
@@ -40669,6 +40912,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(jogEntry && hDueno) jogEntry.heightFt = hDueno;
     fpPendingWallStart = null;
     fpRemoveGhost();
+    // (12-nov-2026, Molde) de pared a pared por dentro de un cuarto: lo parte en dos cuartos y el piso no se pierde
+    if(!jogEntry && startSnap && snap && fpPartirConParedSolida(roomIdx, entry)) return;
     // (12-nov, revision) Una pared dibujada no cambia piso, perimetro, rodapie ni pared EN SILENCIO: van al seguro. El contorno
     // a veces la agarraba de orilla y el cuarto perdia o ganaba sq ft sin avisar (casa real 624.2 -> 538.7). Se prueba puesta,
     // se mide y se quita. Si algun numero cambia, solo entra la que CIERRA el cuarto: la que quita orilla supuesta por la app
@@ -41017,6 +41262,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       level: floorplanSelectedLevel || 1,
       roomIdx: floorplanData.merged === false ? Number(svgEl.dataset.fpRoomIdx) : null
     };
+    fpToolDrag.antes = fpAntesDeArrastre();   // (12-nov-2026, Palma) para devolverlo exacto si un segundo dedo lo vuelve pellizco
     fpPushUndo();
     if(fpToolDrag.kind === 'erase'){
       // A tap-erase (no drag) must still erase what's under the finger.
@@ -41212,6 +41458,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       return false;
     }
     try{ if(window.__rdvLibre) window.__rdvLibre(fpToolDrag); }catch(e){}   // (R124) Mover libre
+    fpToolDrag.antes = fpAntesDeArrastre();   // (12-nov-2026, Palma) para devolverlo exacto si un segundo dedo lo vuelve pellizco
     fpPushUndo(); // popped again if the finger never actually moves
     return true;
   }
@@ -41359,9 +41606,23 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     }else{
       fpClearUndoSnapshot(); // pop the pre-pushed snapshot - nothing changed
     }
+    fpDevolverAntes(fpToolDrag.antes);   // (12-nov-2026, Palma) Undo/Redo y "sin mandar" exactos como antes de empezar
     const eraAgarre = fpToolDrag.kind === 'objagarre';
     fpToolDrag = null;
     if(eraAgarre) fpRenderEditHandles();   // (1-nov, Escalera) las agarraderas se escondieron al arrastrar
+  }
+  // (12-nov-2026, Palma) LO DE ANTES DE UN ARRASTRE. fpPushUndo, al empezar a arrastrar, vacía Redo, tira el paso más viejo si la pila
+  // está llena y marca el plano como "sin mandar"; sacar solo la foto de Undo (fpClearUndoSnapshot) no devolvía eso. Un arrastre
+  // cancelado (un segundo dedo lo volvió pellizco, o el dedo no se movió) deja las pilas y la marca EXACTAS como estaban.
+  function fpAntesDeArrastre(){
+    let sm; try{ sm = fpSmLeer()[floorplanId || '_nuevo']; }catch(e){}
+    return { undo: fpUndoStack.slice(), redo: fpRedoStack.slice(), sm };
+  }
+  function fpDevolverAntes(a){
+    if(!a) return;
+    fpUndoStack = a.undo; fpRedoStack = a.redo;
+    try{ const m = fpSmLeer(), k = floorplanId || '_nuevo'; if(a.sm == null) delete m[k]; else m[k] = a.sm; localStorage.setItem(FP_SM_KEY, JSON.stringify(m)); }catch(e){}
+    fpUpdateUndoBtn();
   }
 
   function fpImanPuntasSueltas(t, draggedSet){
@@ -41400,13 +41661,35 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const out = new Map();
     if(!floorplanData) return out;
     const multi = floorplanLevels(floorplanData).length > 1, idx = [];
-    (floorplanData.rooms||[]).forEach((r, i) => { if(r && !r.deleted && (r.walls||[]).length && (!multi || (r.level||1) === floorplanSelectedLevel)) idx.push(i); });
+    // (12-nov-2026, Molde-2) un cuarto "needs review" no está en el total: su piso no se cuenta dos veces (antes el freno lo citaba)
+    (floorplanData.rooms||[]).forEach((r, i) => { if(r && !r.deleted && (r.walls||[]).length && (!multi || (r.level||1) === floorplanSelectedLevel) && !fpPisoPorRevisar(r)) idx.push(i); });
     const polys = idx.map(i => { try{ return fpOrderedRoomPolygon(floorplanData.rooms[i]); }catch(e){ return null; } });
     for(let a = 0; a < idx.length; a++) for(let b = a+1; b < idx.length; b++){
       const sq = fpEncimeSqFt(polys[a], polys[b]);
       if(sq > 0) out.set(idx[a] + '|' + idx[b], sq);
     }
     return out;
+  }
+  // (12-nov-2026) Una movida (pared o esquina) que deja un cuarto en "needs review" (su contorno se cruza) saca su piso del
+  // total: el total bajaba CALLADO (una esquina corrida al otro lado del cuarto: 220 -> 100 sq ft sin un aviso). La movida se
+  // queda (puede ser a propósito), pero se avisa con el nombre y los dos totales, como al poner una pared. Deshacer la regresa.
+  function fpPorRevisarAhora(){
+    const s = new Set();
+    ((floorplanData && floorplanData.rooms) || []).forEach((r, i) => { try{ if(r && !r.deleted && (r.walls||[]).length && fpPisoPorRevisar(r)) s.add(i); }catch(e){} });
+    return s;
+  }
+  function fpAvisarPorRevisarNuevo(antes, totAntes){
+    if(!floorplanData || !antes) return '';
+    const nuevos = [...fpPorRevisarAhora()].filter(i => !antes.has(i));
+    if(!nuevos.length) return '';
+    const nom = nuevos.map(i => floorplanData.rooms[i].roomName || `Room ${i+1}`).join(', ');
+    const t0 = (+totAntes || 0).toFixed(1), t1 = fpDisplayTotalAreaSqFt(floorplanData).toFixed(1);
+    const txt = (typeof r135 === 'function' ? r135 : (es, en) => en)(
+      `${nom}: el contorno se cruza y queda "needs review"; su piso sale del total (${t0} -> ${t1} sq ft). Deshacer lo regresa.`,
+      `${nom} now needs review: its outline crosses itself, so its floor is out of the total (${t0} -> ${t1} sq ft). Undo brings it back.`);
+    const hint = $('#fpToolHint');
+    if(hint){ hint.hidden = false; hint.textContent = txt; }
+    return txt;
   }
   // (12-nov, revision) Tras mover una pared o una esquina, las puertas y ventanas de las paredes que se estiraron, acortaron o
   // inclinaron vuelven a caer SOBRE su pared y entre sus puntas (antes se quedaban donde estaban: fuera de la pared o colgando
@@ -41528,12 +41811,14 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const dx = t.n.x*dd, dy = t.n.y*dd;
       const movedWalls = new Set();
       const encAntes = floorplanData.merged !== false ? fpEncimePorPareja() : null;   // (12-nov, revision) ver abajo
+      const revAntes = fpPorRevisarAhora(), totRevAntes = fpDisplayTotalAreaSqFt(floorplanData);   // (12-nov-2026) ver fpAvisarPorRevisarNuevo
       fpCommitEdit(() => {
         // Move the nodes; refs write-back moves every wall sharing them.
         t.movedNodes.forEach(node => {
           node.x += dx; node.y += dy;
           node.refs.forEach(p => { p.x = node.x; p.y = node.y; });
         });
+        if(t.rdvT && t.rdvT.length && window.rdvTCerrar) window.rdvTCerrar(t);   // (12-nov-2026, Molde) la T del clóset (rdvRecta)
         // T-junction reattach: an endpoint dead-ending mid-span of the
         // dragged wall's OLD centerline follows it (merged plans only).
         if(floorplanData.merged !== false && !t.libre){   // (R124) libre: solo esa pared
@@ -41596,6 +41881,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           alert(aviso);
         }
       }
+      if(t.pointerId !== -1) fpAvisarPorRevisarNuevo(revAntes, totRevAntes);   // (12-nov-2026) si el freno la regresó, no hay nada nuevo
       return;
     }
     if(t.kind === 'corner'){
@@ -41613,6 +41899,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         return;
       }
       const rooms = new Set();
+      const encAntesE = floorplanData.merged !== false ? fpEncimePorPareja() : null;   // (12-nov-2026, Molde-2) ver abajo
+      const revAntesE = fpPorRevisarAhora(), totRevAntesE = fpDisplayTotalAreaSqFt(floorplanData);   // (12-nov-2026) ver fpAvisarPorRevisarNuevo
       fpCommitEdit(() => {
         t.node.x = nx; t.node.y = ny;
         t.node.refs.forEach(p => { p.x = nx; p.y = ny; });
@@ -41624,6 +41912,24 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         });
         fpAsentarAberturas(t.connected);   // (12-nov, revision) las puertas y ventanas siguen a su pared (antes no se tocaba ninguna)
       }, [...rooms]);
+      // (12-nov-2026, Molde-2) el mismo freno que al soltar una pared (arriba): si con ESTA esquina dos cuartos quedan contando el
+      // mismo piso (4 sq ft o más, y más de 1 sq ft nuevo), la esquina regresa y se avisa. Antes la esquina se quedaba y el total
+      // subía callado (en RD, "Mover libre" suelta solo esa pared y su punta entraba al cuarto de al lado).
+      if(encAntesE && fpUndoStack.length && t.pointerId !== -1){
+        let peor = null;
+        fpEncimePorPareja().forEach((sq, k) => { const sube = sq - (encAntesE.get(k) || 0); if(sq >= 4 && sube > 1 && (!peor || sube > peor.sube)) peor = { k, sq, sube }; });
+        if(peor){
+          const nomC = i => (floorplanData.rooms[i] && floorplanData.rooms[i].roomName) || `Room ${i+1}`, par = peor.k.split('|').map(Number);
+          const A = nomC(par[0]), B2 = nomC(par[1]), n = peor.sq.toFixed(1);
+          const aviso = (typeof r135 === 'function' ? r135 : (es, en) => en)(
+            `No se movió la esquina. ${A} y ${B2} contarían los dos ${n} sq ft del mismo piso y el total lo contaría dos veces. Muévala menos, o arregle primero el contorno de uno de los dos.`,
+            `Corner not moved. ${A} and ${B2} would both count ${n} sq ft of the same floor, and the total would count it twice. Move it less, or fix the outline of one of them first.`);
+          fpRestoreSnapshot(fpUndoStack.pop());
+          fpUpdateUndoBtn();
+          alert(aviso);
+        }
+      }
+      if(t.pointerId !== -1) fpAvisarPorRevisarNuevo(revAntesE, totRevAntesE);   // (12-nov-2026) igual que al soltar una pared
     }
   }
   // ==================== MOISTURE MAP (second window) ====================
@@ -41671,14 +41977,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   function fmRoomAtPoint(pt, svgEl){
     if(floorplanData.merged === false) return Number(svgEl.dataset.fpRoomIdx);
     const multi = floorplanLevels(floorplanData).length > 1;
-    let found = null;
-    (floorplanData.rooms||[]).forEach((room, ri) => {
-      if(room.deleted || !(room.walls||[]).length) return;
-      if(multi && (room.level||1) !== floorplanSelectedLevel) return;
-      const poly = fpOrderedRoomPolygon(room);
-      if(poly && poly.length >= 3 && fpPointInPolygon(pt, poly)) found = ri;
-    });
-    return found;
+    // (12-nov, Vecino) la misma regla que el editor: gana el que tiene el punto más adentro, no el último de la lista
+    return fpCuartoEnPunto(pt, floorplanData.rooms, room => !room.deleted && (room.walls||[]).length && !(multi && (room.level||1) !== floorplanSelectedLevel));
   }
   function fmRender(){
     const wrap = $('#fmSvgWrap');
@@ -42423,6 +42723,27 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(g) g.removeAttribute('transform');
     fpLabelDrag = null;
   }
+  // (12-nov-2026, Palma) UN SEGUNDO DEDO SIEMPRE GANA. Si un dedo ya está arrastrando algo (la pared escogida o su esquina, una puerta,
+  // un objeto, un trazo de Daño, un nombre, el puntito del ancho de una abertura) y baja OTRO dedo, era un pellizco: ese arrastre se
+  // cancela sin guardar nada (todo vuelve a donde estaba, sin paso de Undo) y se devuelve dónde está el primer dedo para que entre al
+  // pellizco. Antes el segundo dedo se ignoraba y el primero movía la pared: los sq ft del seguro cambiaban con un gesto para MIRAR.
+  function fpSoltarPorSegundoDedo(id){
+    if(fpToolDrag && fpToolDrag.pointerId !== id){
+      const t = fpToolDrag, p = t.lastEvent || { clientX: t.startX, clientY: t.startY };
+      fpCancelToolDrag();
+      return { id: t.pointerId, x: p.clientX, y: p.clientY };
+    }
+    if(fpLabelDrag && fpLabelDrag.pointerId !== id){
+      const L = fpLabelDrag, s = fpView.scale || 1;
+      const x = L.startClientX + (L.liveDx - L.baseDx) * s, y = L.startClientY + (L.liveDy - L.baseDy) * s;
+      fpCancelLabelDrag();
+      document.querySelectorAll('#floorplanSvgWrap .rdv-agarrado').forEach(n => n.classList.remove('rdv-agarrado'));
+      return { id: L.pointerId, x, y };
+    }
+    const B = window.__rdvB;
+    if(B && B.arr && B.arr.id !== id && B.cancelar) return B.cancelar();
+    return null;
+  }
   function fpBeginGesture(){
     const pts = [...fpPointers.values()];
     const rect = $('#fpStage').getBoundingClientRect();
@@ -42456,20 +42777,42 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!r.width || !r.height) return null;
     return { w: r.width / s, h: r.height / s };
   }
+  // (12-nov-2026, Palma) LA PARTE DEL RECUADRO QUE SE VE: #fpStage recortado por la pantalla y por lo que lo contiene con scroll o
+  // recorte (el <main> de RD, que con el teléfono de lado termina donde empieza la barra de abajo). "Ajustar" y el tope del arrastre
+  // centraban el plano en el recuadro ENTERO y de lado la mitad del plano quedaba debajo de la barra. En el teléfono derecho, el iPad
+  // y la compu el recuadro se ve entero y esto da el mismo rectángulo de siempre. Medido desde la esquina del recuadro (como tx/ty).
+  function fpParteVisible(rect){
+    const stage = $('#fpStage');
+    let t = rect.top, b = rect.bottom, l = rect.left, r = rect.right;
+    for(let p = stage && stage.parentElement; p && p !== document.documentElement; p = p.parentElement){
+      const cs = getComputedStyle(p);
+      if(cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+      const q = p.getBoundingClientRect();
+      t = Math.max(t, q.top + p.clientTop); b = Math.min(b, q.top + p.clientTop + p.clientHeight);
+      l = Math.max(l, q.left + p.clientLeft); r = Math.min(r, q.left + p.clientLeft + p.clientWidth);
+    }
+    t = Math.max(t, 0); l = Math.max(l, 0); b = Math.min(b, window.innerHeight); r = Math.min(r, window.innerWidth);
+    // se ve entero (clientWidth/Height vienen redondeados: menos de 1 px no cuenta), o casi nada a la vista (el panel abriéndose o
+    // cerrándose): el recuadro entero, como antes
+    const entero = t - rect.top <= 1 && rect.bottom - b <= 1 && l - rect.left <= 1 && rect.right - r <= 1;
+    if(entero || b - t < 40 || r - l < 40) return { x: 0, y: 0, w: rect.width, h: rect.height };
+    return { x: l - rect.left, y: t - rect.top, w: r - l, h: b - t };
+  }
   function fpClampPan(){
     const content = fpContentSize();
     if(!content) return;
     const rect = $('#fpStage').getBoundingClientRect();
+    const vis = fpParteVisible(rect);   // (12-nov-2026, Palma) lo que se ve del recuadro, no el recuadro entero
     const cw = content.w * fpView.scale, ch = content.h * fpView.scale;
     const slack = 60;
-    fpView.tx = cw <= rect.width ? (rect.width - cw) / 2 : Math.min(slack, Math.max(rect.width - cw - slack, fpView.tx));
+    fpView.tx = cw <= vis.w ? vis.x + (vis.w - cw) / 2 : Math.min(vis.x + slack, Math.max(vis.x + vis.w - cw - slack, fpView.tx));
     // Same portrait top-bias as fpFitToScreen: when the content fits, park
     // it at the top rather than re-centering - a bare tap on the stage
     // runs this clamp, and vertical re-centering silently slid the plan
     // back down behind the bottom sheet.
     const topBias = window.matchMedia && window.matchMedia('(orientation:portrait)').matches;
-    const centeredY = (rect.height - ch) / 2;
-    fpView.ty = ch <= rect.height ? (topBias ? Math.min(centeredY, 24) : centeredY) : Math.min(slack, Math.max(rect.height - ch - slack, fpView.ty));
+    const centeredY = vis.y + (vis.h - ch) / 2;
+    fpView.ty = ch <= vis.h ? (topBias ? Math.min(centeredY, vis.y + 24) : centeredY) : Math.min(vis.y + slack, Math.max(vis.y + vis.h - ch - slack, fpView.ty));
   }
   function fpApplyTransform(){
     const layer = $('#fpZoomLayer');
@@ -42547,8 +42890,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   function fpZoomBy(factor, clientX, clientY){
     const rect = $('#fpStage').getBoundingClientRect();
-    const ax = clientX != null ? clientX - rect.left : rect.width / 2;
-    const ay = clientY != null ? clientY - rect.top : rect.height / 2;
+    const vis = fpParteVisible(rect);   // (12-nov-2026, Palma) los botones acercan al centro de lo que se ve
+    const ax = clientX != null ? clientX - rect.left : vis.x + vis.w / 2;
+    const ay = clientY != null ? clientY - rect.top : vis.y + vis.h / 2;
     const cx = (ax - fpView.tx) / fpView.scale, cy = (ay - fpView.ty) / fpView.scale;
     fpView.scale = Math.min(fpView.maxScale, Math.max(fpView.minScale, fpView.scale * factor));
     fpView.tx = ax - cx * fpView.scale;
@@ -42566,27 +42910,34 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!content || !stage) return;
     const rect = stage.getBoundingClientRect();
     if(!rect.width || !rect.height) return;
+    // (12-nov-2026, Palma) se ajusta a la parte del recuadro que SE VE (de lado, la barra de abajo tapaba la mitad del recuadro)
+    const vis = fpParteVisible(rect);
     // For a single merged plan this fits the whole sheet; for stacked
     // unmerged rooms it fits the WIDTH (a whole-stack fit would shrink
     // each room to a stamp) and starts at the top, panning down the stack.
-    const fitBoth = Math.min(rect.width / content.w, rect.height / content.h) * 0.94;
-    const fitWidth = (rect.width / content.w) * 0.94;
+    const fitBoth = Math.min(vis.w / content.w, vis.h / content.h) * 0.94;
+    const fitWidth = (vis.w / content.w) * 0.94;
     const fit = content.h > content.w * 2.2 ? fitWidth : fitBoth;
     fpView.minScale = Math.min(fit, fitBoth);
     fpView.scale = fit;
     fpView.maxScale = Math.max(fit * 6, 4);
-    fpView.tx = (rect.width - content.w * fit) / 2;
+    fpView.tx = vis.x + (vis.w - content.w * fit) / 2;
     // Portrait: bias the plan toward the TOP of the stage instead of
     // vertically centering it - the detail sheet now floats over the
     // bottom, so a top-seated plan stays fully visible while adjusting.
     const topBias = window.matchMedia && window.matchMedia('(orientation:portrait)').matches;
-    const centeredY = (rect.height - content.h * fit) / 2;
-    fpView.ty = content.h * fit <= rect.height ? (topBias ? Math.min(centeredY, 24) : centeredY) : 20;
+    const centeredY = vis.y + (vis.h - content.h * fit) / 2;
+    fpView.ty = content.h * fit <= vis.h ? (topBias ? Math.min(centeredY, vis.y + 24) : centeredY) : vis.y + 20;
     fpApplyTransform();
   }
 
   const fpStageEl = $('#fpStage');
   fpStageEl.addEventListener('pointerdown', e => {
+    // (12-nov-2026, Palma) El "no abras nada" de un arrastre (fpSuprimirClick) es SOLO para el clic que manda ESE arrastre al soltar
+    // (el ratón de la compu sí lo manda). Un dedo que se movió, o dos dedos, no mandan clic: la bandera se quedaba puesta y se comía
+    // el primer toque de verdad de los 0.7 s siguientes (correr el plano y tocar enseguida una pared no la escogía). Un dedo que baja
+    // ya es otro toque.
+    fpSuppressNextClick = false;
     // The floating zoom-control buttons live inside the stage (so they can
     // float over the plan) - without this guard, setPointerCapture below
     // would capture their taps too and swallow the button's own click,
@@ -42603,6 +42954,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // arrastre del rotulo y las herramientas de edicion a la vez. La
     // captura es una comodidad; perder el gesto entero no lo es.
     try{ fpStageEl.setPointerCapture(e.pointerId); }catch(_){}
+    // (12-nov-2026, Palma) Un segundo dedo SIEMPRE gana: si el primero estaba arrastrando algo, ese arrastre se cancela sin guardar
+    // (fpSoltarPorSegundoDedo) y los dos dedos hacen el pellizco desde donde están.
+    const primero = fpSoltarPorSegundoDedo(e.pointerId);
+    if(primero){
+      fpPointers.set(primero.id, { x: primero.x, y: primero.y });
+      try{ fpStageEl.setPointerCapture(primero.id); }catch(_){}   // el puntito del ancho se había quedado con su dedo
+      fpPointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      fpDragDistance = 0;
+      fpBeginGesture();
+      return;
+    }
     // While a label is mid-drag, extra fingers are ignored entirely -
     // letting one join fpPointers would start a phantom pan underneath
     // the drag.
@@ -42623,7 +42985,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // pans; two fingers always zoom.
     if(fpEditMode && fpActiveTool === 'select' && fpPointers.size === 0 && !fpLabelDrag){
       const h = e.target.closest('.fp-obj-agarre, .fp-corner-handle, .fp-wall-grab, .fp-obj, .fp-door, .fp-window') || fpAberturaEscogidaBajo(e);
-      if(h && fpBeginToolDrag(e, h)) return;
+      // (12-nov-2026, Palma) Solo lo ESCOGIDO se va con el dedo al bajarlo. Una puerta, ventana u objeto SIN escoger deja correr el
+      // plano, igual que una pared sin escoger: un dedo que empezaba encima de una puerta para mirar la corría por su pared, o mandaba
+      // un objeto a otro cuarto. Se escoge con un toque, o se sostiene el dedo 0.38 s (rdvAbCablear) y se arrastra.
+      if(h && fpEsLoEscogido(h) && fpBeginToolDrag(e, h)) return;
     }
     if(fpEditMode && fpActiveTool === 'water' && fpPointers.size === 0 && !fpLabelDrag){
       const svgEl = e.target.closest('svg');
@@ -43749,9 +44114,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // Se arma la herramienta de pared y se le dice qué hacer. El corte
       // mismo lo hace fpSplitRoomAtStudWall cuando ella prenda el
       // interruptor de la pared que dibuje: aquí solo se le pone en la mano.
+      // (12-nov-2026, Molde) De orilla a orilla la pared ya parte el cuarto al dibujarla (fpPartirConParedSolida) y pregunta el
+      // nombre del lado nuevo; el interruptor de maderas va después y marca las dos copias.
       if(!fpEditMode){ fpEditMode = true; fpUpdateEditModeUI(); }
       fpSetTool('wall');
-      fpHint('Toca donde EMPIEZA la pared de maderas y donde TERMINA. Luego prende "Pared de solo maderas" y toca "Partir el cuarto aquí".');
+      fpHint(r135('Toca donde EMPIEZA la pared de maderas y donde TERMINA, de pared a pared: el cuarto se parte ahí mismo y la app pregunta el nombre del lado nuevo. Luego toca la pared y prende "Pared de solo maderas".',
+        'Tap where the stud wall STARTS and where it ENDS, wall to wall: the room splits right there and the app asks the new side\'s name. Then tap the wall and turn on "Studs-only wall".'));
       const wrap = $('#floorplanSvgWrap'); if(wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
@@ -43898,7 +44266,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     return (room.walls || []).find((w, i) => String(w.id != null ? w.id : i) === String(id));
   }
   function floorplanWallEffectiveLength(w){
-    return w._lengthOverrideFt != null ? w._lengthOverrideFt : w.lengthFt;
+    if(w._lengthOverrideFt != null) return w._lengthOverrideFt;
+    // (12-nov, Vecino) una pared guardada sin lengthFt (planos editados a mano de Scanova) reventaba su hoja con NaN'-NaN":
+    // el largo sale de sus puntas
+    if(Number.isFinite(w.lengthFt)) return w.lengthFt;
+    return (w.start && w.end) ? Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) : 0;
   }
   // (12-nov, revision) El largo tecleado corria solo wall.end: la esquina quedaba abierta y los sq ft salian al azar. Ahora se
   // corre la pared de al lado (la que sale en escuadra de una punta, del mismo cuarto) por el MISMO camino que arrastrarla con
@@ -44284,6 +44656,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         // pared del LiDAR borraría la nota de "pared a otra altura" del PDF.
         if(!(w.heightFt > 0)){ const h = fpAltoParaParedNueva(room); if(h) w.heightFt = h; }
       } else { delete w._studWall; }
+      // (12-nov-2026, Molde) la pared sólida que ya partió el cuarto (fpPartirConParedSolida) tiene su copia en el otro cuarto: las
+      // dos quedan de solo maderas con la misma pareja (lo mismo que deja "Partir el cuarto aquí"); sin pareja una sola sería guía
+      // sin partir y el contorno de su cuarto se abriría.
+      if(w._paredPar) (floorplanData.rooms || []).forEach(r => { if(r && !r.deleted) (r.walls || []).forEach(x => { if(!x || x._paredPar !== w._paredPar) return;
+        if(on){ x._studWall = true; x._studPairId = w._paredPar; if(!(x.heightFt > 0) && w.heightFt > 0) x.heightFt = w.heightFt; }
+        else { delete x._studWall; delete x._studPairId; } }); });
     }, [fpSelectedWallRoomIdx]);
     openFloorplanWallDetail(fpSelectedWallRoomIdx, fpSelectedWallId);
   });
@@ -44823,6 +45201,18 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!h || h.tipo !== 'opening' || h.ri !== fpSelectedOpeningRoomIdx || h.kind !== fpSelectedOpeningKind || String(h.id) !== String(fpSelectedOpeningId)) return null;
     return svgEl.querySelector(`.fp-${h.kind}[data-room-idx="${h.ri}"][data-opening-id="${CSS.escape(String(h.id))}"]`);
   }
+  // (12-nov-2026, Palma) ¿Lo que está bajo el dedo es lo ESCOGIDO? Las agarraderas, las esquinas y la raya de la pared solo se dibujan
+  // para lo escogido; una puerta, ventana u objeto se compara con lo que tiene abierto el editor.
+  function fpEsLoEscogido(h){
+    if(!h || !h.classList) return false;
+    if(h.classList.contains('fp-obj-agarre') || h.classList.contains('fp-corner-handle') || h.classList.contains('fp-wall-grab')) return true;
+    const ri = Number(h.dataset.roomIdx);
+    if(h.classList.contains('fp-door') || h.classList.contains('fp-window'))
+      return fpSelectedOpeningId != null && fpSelectedOpeningRoomIdx === ri && String(fpSelectedOpeningId) === String(h.dataset.openingId)
+        && fpSelectedOpeningKind === (h.classList.contains('fp-door') ? 'door' : 'window');
+    if(h.classList.contains('fp-obj')) return fpSelectedObjId != null && fpSelectedRoomIdx === ri && String(fpSelectedObjId) === String(h.dataset.objId);
+    return false;
+  }
 
   $('#fpObjConfirm').addEventListener('click', () => {
     const o = findFloorplanObject(fpSelectedRoomIdx, fpSelectedObjId);
@@ -44955,6 +45345,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const room = floorplanData && floorplanData.rooms[fpSelectedWallRoomIdx];
     if(!w || !room) return;
     if(w._invisible){ fpQuitarParedInvisible(fpSelectedWallRoomIdx, fpSelectedWallId); return; }
+    // (12-nov-2026, Molde) la pared sólida que partió el cuarto: se van las dos copias y los dos cuartos vuelven a ser uno
+    if(w._paredPar && fpQuitarParticionSolida(fpSelectedWallRoomIdx, fpSelectedWallId) !== null) return;
     // (12-nov, revision) Regla 11: una pared entre dos cuartos existe en LOS DOS (cada cuarto guarda su copia). Antes se quitaba solo
     // la copia de este cuarto: la del vecino seguia dibujada y los sq ft cambiaban a escondidas (Bathroom 37.0 -> 61.3). Ahora se
     // quitan todas las copias con sus puertas y ventanas; y si con eso cambia algun sq ft, NO se quita nada y se avisa.
@@ -44997,7 +45389,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         data._removals.walls = (data._removals.walls||0) + 1;
       };
       // Se prueba en una COPIA (el plano de verdad no se toca): los mismos pasos de fpCommitEdit, sin guardar ni dibujar.
-      const sqft = d => d.rooms.map(r => (!r || r.deleted) ? '' : fpRoomDisplayAreaSqFt(r) + '/' + fpRoomGrossAreaSqFt(r)).concat(fpDisplayTotalAreaSqFt(d));
+      // (12-nov-2026, Molde-2) un cuarto "needs review" se compara y se nombra como en el plano (fpAreaTxt): sin su número crudo
+      const sqft = d => d.rooms.map(r => (!r || r.deleted) ? '' : fpPisoPorRevisar(r) ? 'needs review' : fpRoomDisplayAreaSqFt(r) + '/' + fpRoomGrossAreaSqFt(r)).concat(fpDisplayTotalAreaSqFt(d));
       const deVerdad = floorplanData; let antes = null, despues = null;
       try{
         floorplanData = JSON.parse(fpSnapshotString());
@@ -45012,7 +45405,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(cambio >= 0){
         let que = '';
         if(antes && despues){ const tot = cambio === antes.length - 1, rr = floorplanData.rooms[cambio];
-          que = ' (' + (tot ? 'total' : (rr.roomName || ('Room ' + (cambio + 1)))) + ' ' + String(antes[cambio]).split('/').pop() + ' -> ' + String(despues[cambio]).split('/').pop() + ' sq ft)'; }
+          const vd = String(despues[cambio]).split('/').pop();   // (12-nov-2026, Molde-2) "needs review" va sin "sq ft"
+          que = ' (' + (tot ? 'total' : (rr.roomName || ('Room ' + (cambio + 1)))) + ' ' + String(antes[cambio]).split('/').pop() + ' -> ' + vd + (vd === 'needs review' ? ')' : ' sq ft)'); }
         alert('This wall is shared with ' + otros + '. Removing it would change the square footage' + que + ', so it was not removed. Nothing changed.');
         return;
       }
@@ -45150,7 +45544,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       || (room && fpSelectedOpeningKind === 'passage' ? (room.openings || []).find((x, i) => String(x.id != null ? x.id : i) === String(fpSelectedOpeningId)) : null);
     if(!o || !room) return;
     const curKind = fpSelectedOpeningKind;
-    if(newKind === curKind){ fpFlashHint(`It is already a ${curKind}.`); return; }
+    // (12-nov-2026, Molde-2) un paso que el panel de revisión marcó "door" (_kindOverride) se ve y se mide como puerta y su hoja dice
+    // "Door": Type > Passage sí lo vuelve paso de verdad (antes contestaba "It is already a passage." y lo dejaba de puerta)
+    if(newKind === curKind && !(curKind === 'passage' && o._kindOverride)){ fpFlashHint(`It is already a ${curKind}.`); return; }
     const ri = fpSelectedOpeningRoomIdx, oid = fpSelectedOpeningId;
     // (12-nov, revision) Reglas 11 y 14: puerta -> paso -> puerta no regresaba (se borraba el estilo de la puerta y la
     // gemela se quedaba de paso). Ahora cada registro guarda en _antesDeTipo como estaba (lista, lugar, campos) y al
@@ -45172,6 +45568,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         const lista = rm[a.lista] = rm[a.lista] || [];
         lista.splice(Math.min(a.i, lista.length), 0, rec);
         (a.nuevas || []).forEach(k => { if(rm[k] && !rm[k].length) delete rm[k]; });
+        // (12-nov-2026, Molde-2) de vuelta a paso porque la persona escogió Passage: la marca "door"/"window" del panel no regresa
+        // (la vuelta exacta se la devolvía y el paso se seguía dibujando y midiendo como puerta)
+        if(destino === 'openings' && rec._kindOverride){ delete rec._kindOverride; rec._reviewed = true; rec._typeSetByHand = true; }
         return;
       }
       if(regreso) return;                                 // la gemela que no se toco a la ida tampoco se toca a la vuelta
@@ -45182,12 +45581,13 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         rec._antesDeTipo = { lista: de, i: rm[de].indexOf(rec), llaves: Object.keys(rec), campos, nuevas: [] };
       }
       if(!rm[destino]){ rm[destino] = []; rec._antesDeTipo.nuevas.push(destino); }
-      rm[de].splice(rm[de].indexOf(rec), 1);
+      const enLista = rm[de].indexOf(rec);   // (12-nov-2026, Molde-2) el paso marcado que se queda en openings no cambia de lugar
+      rm[de].splice(enLista, 1);
       // Door-only styling can't ride into a window/passage record.
       delete rec._doorStyle; delete rec._swingAcross; delete rec._hingeFlip; delete rec._kindOverride;
       rec._reviewed = true;       // a human classified it - the review nag is answered
       rec._typeSetByHand = true;  // disclosure trail, same spirit as _movedByHand
-      rm[destino].push(rec);
+      if(de === destino) rm[destino].splice(enLista, 0, rec); else rm[destino].push(rec);
     };
     // (12-nov, revision) Regla 11: la gemela es la del cuarto vecino DEL MISMO NIVEL, este guardada como puerta o como
     // paso (antes se buscaba en todos los niveles y solo en la lista del mismo tipo).
@@ -46636,13 +47036,27 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // Los planos que el motor ha visto (el de la pantalla, el del editor, la copia que se dibuja). El plano de un cuarto es el que lo
   // contiene (por identidad); si ninguno lo contiene, la regla no se aplica y el contorno sale como siempre.
   const fpPlanosVistos = [];
+  // (12-nov-2026) UN CUARTO SIEMPRE SABE DE QUÉ PLANO ES. Medidas (fpAreaOfScannedRoom, medAreasDelPlanoPorPlanta), el resumen que
+  // se guarda (fpResumenDe) y la fila de la nube miden planos que no son el abierto: fpListLive() vuelve a leer localStorage en
+  // cada llamada (otro objeto), y los del equipo bajan de la nube. fpPlanoDe no los encontraba, la regla del piso ajeno se
+  // apagaba y el A/C salía con 145.7 en Medidas y 130.7 en el plano. Regla: toda función que recibe un plano y mide sus cuartos
+  // lo presenta primero (fpConocerPlano): cada cuarto queda ligado a su plano (WeakMap: no retiene nada ni mueve la lista de los
+  // planos vistos). Así el mismo plano da el mismo número en el rótulo, la hoja, la tabla, Medidas, el resumen y la nube.
+  // (Se pregunta con typeof, como floorplanData: las pruebas que sacan funciones sueltas del HTML no traen estas dos.)
+  const fpPlanoDelCuarto = new WeakMap();
+  function fpConocerPlano(data){
+    if(!data || !Array.isArray(data.rooms)) return data;
+    data.rooms.forEach(r => { if(r && typeof r === 'object') fpPlanoDelCuarto.set(r, data); });
+    return data;
+  }
   function fpUsarContextoDePlano(data){
     if(!data || !Array.isArray(data.rooms)) return;
+    if(typeof fpConocerPlano === 'function') fpConocerPlano(data);
     const i = fpPlanosVistos.indexOf(data); if(i >= 0) fpPlanosVistos.splice(i, 1);
     fpPlanosVistos.unshift(data); if(fpPlanosVistos.length > FP_PLANOS_VISTOS) fpPlanosVistos.length = FP_PLANOS_VISTOS;
   }
   function fpPlanoDe(room, data){
-    const cands = [data].concat(fpPlanosVistos, [typeof floorplanData !== 'undefined' ? floorplanData : null]);
+    const cands = [data].concat(fpPlanosVistos, [typeof floorplanData !== 'undefined' ? floorplanData : null, typeof fpPlanoDelCuarto !== 'undefined' && room && typeof room === 'object' ? fpPlanoDelCuarto.get(room) : null]);
     for(const d of cands){ if(d && Array.isArray(d.rooms) && d.merged !== false && d.rooms.indexOf(room) >= 0) return d; }
     return null;
   }
@@ -46727,7 +47141,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     return out;
   }
   // El piso cerrado de los OTROS cuartos del nivel que este contorno no puede pisar: [poly, ...]
-  function fpPisoAjeno(room, data){
+  // (`soloCerrados`: solo los pisos cerrados, la regla del 31-oct; con eso se saca la primera vuelta de un cuarto abierto)
+  function fpPisoAjeno(room, data, soloCerrados){
     if(!room) return [];
     const d = fpPlanoDe(room, data); if(!d) return [];
     const ri = d.rooms.indexOf(room), nivel = room.level || 1;
@@ -46739,15 +47154,61 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // (revisión) los espacios de una pared invisible son UN solo piso: entre ellos no se cuentan, y para los demás cuartos
     // valen como el cuarto de antes de partirlo (su contorno juntado), así partir no mueve el piso de nadie.
     const grupos = fpInvGrupos(d), mio = grupos.get(ri);
+    // (12-nov-2026) EL PISO DE UN CUARTO ABIERTO TAMBIÉN SE RESPETA. La regla del 31-oct solo protegía el piso de los cuartos que
+    // sus paredes cierran solas (puentes de puerta, 3.5 ft o menos). Un cuarto con un puente más largo (la sala con su arco de
+    // 4.0 ft, el baño al que le borraron la pared de afuera, un pasillo que no cierra solo) quedaba sin piso: el cierre del vecino
+    // pasaba por él y los dos contaban el mismo piso (la sala y el pasillo de live_plan_closet; el A/C y el baño cuando al baño le
+    // borran la pared de afuera; la cocina y el pasillo del 12-nov).
+    // Regla: entre dos cuartos abiertos, el piso es del que NO necesita al otro para cerrar. Se saca el contorno de cada uno con la
+    // regla de siempre (rodeando los pisos cerrados: primeraVuelta) y se mira quién mete sus líneas de cierre (puentes y
+    // rodeos, que son cálculo) en el piso del otro. Si solo uno lo hace, ese rodea el piso del otro. Si los dos lo hacen, manda el
+    // que cierra con la línea más corta (la más segura; con 0.5 ft de margen: si las dos miden lo mismo es la misma abertura y
+    // nadie rodea a nadie). Un contorno que se cruza o de menos de 4 sq ft no es piso de nadie y no se protege. Los cuartos
+    // cerrados no cambian: siguen respetando solo pisos cerrados.
+    // (Van aquí adentro: solo esta regla las usa, y quien saca fpPisoAjeno se las lleva.)
+    const primeraVuelta = qi => {
+      let c = fpPisoCache.get(d); if(!c){ fpContornoPropio(d, -1); c = fpPisoCache.get(d); }
+      if(!c.vuelta1) c.vuelta1 = new Map();
+      if(c.vuelta1.has(qi)) return c.vuelta1.get(qi);
+      const gi = {}; let poly = [];
+      try{ poly = fpContornoDeCuarto(d.rooms[qi], gi, fpPisoAjeno(d.rooms[qi], d, true), true) || []; }catch(e){ poly = []; }
+      const tramos = [];   // [a, b, largo del puente]: cada tramo de cada línea de cierre (con su rodeo)
+      (gi.bridgeSegs || []).forEach(b => { const r = (gi.rodeos || []).find(x => Math.hypot(x.a.x - b.a.x, x.a.y - b.a.y) < 1e-6 && Math.hypot(x.b.x - b.b.x, x.b.y - b.b.y) < 1e-6);
+        const ruta = [b.a].concat(r ? r.por : [], [b.b]); for(let k = 1; k < ruta.length; k++) tramos.push([ruta[k - 1], ruta[k], b.d]); });
+      const out = { poly, tramos, valido: poly.length >= 3 && !gi.roto && !fpContornoRoto(poly) && fpContornoArea(poly) >= FP_PISO_MIN_SQFT };
+      c.vuelta1.set(qi, out); return out;
+    };
+    const abiertoQueManda = qi => {
+      const Q = primeraVuelta(qi); if(!Q.valido) return null;
+      const R = primeraVuelta(ri);
+      // el largo de la línea de cierre más larga de A que se mete en el piso de B (0 = no se mete)
+      const mete = (A, B) => B.valido ? A.tramos.reduce((m, [p, q, l]) => (l > m && fpTramoEnPisoAjeno(p, q, [B.poly])) ? l : m, 0) : 0;
+      const rq = mete(R, Q); if(!rq) return null;
+      const qr = mete(Q, R);
+      if(qr && !(qr < rq - 0.5)) return null;
+      disputa = !!qr;
+      return Q.poly;
+    };
+    // (12-nov-2026) DISPUTA. Si los DOS meten su cierre en el piso del otro, manda el de la línea más corta, pero eso es a ojo:
+    // la línea más corta puede salir de una pared que no es suya (pasilloL del banco: la sala trae un pedazo de la pared
+    // pasillo/baño, cierra con 5.4 ft por dentro del pasillo y el pasillo, que lo rodea, imprimía 65.5 de 84 sin aviso). La
+    // lista que sale lleva `disputa`; si el que cede además solo cierra dejando fuera una de sus paredes (la regla de reparar
+    // de fpContornoDeCuarto), su contorno se marca roto: el número sale, con aviso de revisar. Ceder sin más no avisa (la sala
+    // y el pasillo de live_plan_closet: el pasillo rodea a la sala y cierra con sus paredes).
+    let disputa = false;
+    const yoAbierto = !soloCerrados && !mio && ri >= 0 && !fpContornoPropio(d, ri, true).cerrado;
     d.rooms.forEach((q, qi) => {
+      disputa = false;
       if(qi === ri || !q || q.deleted || (q.level || 1) !== nivel) return;
       if(mio && mio.includes(qi)) return;
       const g = grupos.get(qi), u = g ? fpInvUnionDe(d, g, true) : null;
       if(u && qi !== g[0]) return;
-      const c = u || fpContornoPropio(d, qi, true); if(!c.cerrado) return;
-      if(centro && fpPointInPolygon(centro, c.poly)) return;                                                     // también es su propio piso
-      if(mios.some(p => fpPointInPolygon(p, c.poly) && fpDistAlBordeDe(p, c.poly) > FP_PISO_ADENTRO)) return;     // él dibujó una pared ahí: manda
-      out.push(c.poly);
+      const c = u || fpContornoPropio(d, qi, true);
+      const piso = c.cerrado ? c.poly : ((yoAbierto && !u) ? abiertoQueManda(qi) : null);
+      if(!piso) return;
+      if(centro && fpPointInPolygon(centro, piso)) return;                                                     // también es su propio piso
+      if(mios.some(p => fpPointInPolygon(p, piso) && fpDistAlBordeDe(p, piso) > FP_PISO_ADENTRO)) return;     // él dibujó una pared ahí: manda
+      out.push(piso); if(disputa) out.disputa = true;
     });
     return out;
   }
@@ -46781,7 +47242,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // Un bucle de casi nada (el contorno sale por una pared prestada y vuelve por el mismo lugar: la espuela que deja una pared
   // vista por la puerta del vecino, con el rodeo de vuelta) se quita: del punto repetido al punto repetido, si lo que encierra
   // es menos de 1 sq ft. Sin esto el contorno se marcaba "roto" (vértice repetido) aunque el piso ya estuviera bien.
-  function fpQuitarBucles(poly){
+  function fpQuitarBucles(poly, cruces){
     let out = poly.slice(); let vuelta = 0;
     while(vuelta++ < 20){
       let hecho = false;
@@ -46792,6 +47253,29 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           const sub = out.slice(i, j + 1); let ar = 0;
           for(let k = 0, m = sub.length - 1; k < sub.length; m = k++) ar += sub[m].x * sub[k].y - sub[k].x * sub[m].y;
           if(Math.abs(ar) / 2 < 1.0){ out.splice(i + 1, j - i); hecho = true; }
+        }
+      }
+      // (12-nov-2026) El mismo bucle de casi nada, pero cerrado en un CRUCE y no en un punto repetido: una pared que termina
+      // unos pulgadas por dentro del piso cerrado del vecino y el rodeo que la alcanza (la cocina de Hamilton: la pared
+      // 7600AF79 entra 0.59 ft en la sala; el rodeo salta a la orilla de la sala y regresa cruzando la propia pared). El
+      // contorno se corta en el cruce: sigue la pared hasta donde empieza el piso del vecino y de ahí la orilla del vecino.
+      // Solo si lo que encierra el rizo es menos de 1 sq ft (un rizo así nunca es piso de verdad); si no, se deja y se avisa.
+      // Solo en el contorno que se enseña (`cruces`, el `reparar` de fpContornoDeCuarto): el contorno crudo con el que el
+      // resolvedor de paredes ajenas decide sigue como siempre (en el banco de casas de prueba, cortarlo ahí le cambiaba
+      // decisiones que estaban bien).
+      for(let i = 0; cruces && i < out.length && !hecho && out.length >= 4; i++){
+        for(let j = i + 2; j < out.length && !hecho; j++){
+          if(i === 0 && j === out.length - 1) continue;
+          const a = out[i], b = out[i + 1], c = out[j], e = out[(j + 1) % out.length];
+          const o = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+          const d1 = o(c, e, a), d2 = o(c, e, b), d3 = o(a, b, c), d4 = o(a, b, e);
+          if(!(d1 * d2 < -1e-9 && d3 * d4 < -1e-9)) continue;
+          const t = d1 / (d1 - d2), X = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+          const dentro = [X].concat(out.slice(i + 1, j + 1)), fuera = [X].concat(out.slice(j + 1), out.slice(0, i + 1));
+          const area = q => { let ar = 0; for(let k = 0, m = q.length - 1; k < q.length; m = k++) ar += q[m].x * q[k].y - q[k].x * q[m].y; return Math.abs(ar) / 2; };
+          const aD = area(dentro), aF = area(fuera);
+          if(aD < 1.0 && aD <= aF){ out = out.slice(0, i + 1).concat([X], out.slice(j + 1)); hecho = true; }
+          else if(aF < 1.0 && aF < aD){ out = dentro; hecho = true; }
         }
       }
       if(!hecho) break;
@@ -46816,10 +47300,15 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     for(let i = 1; i < ruta.length; i++) if(fpTramoEnPisoAjeno(ruta[i - 1], ruta[i], ajenos)) return { por: [], cruza: true };
     const largo = ruta.reduce((s, p, i) => i ? s + Math.hypot(p.x - ruta[i - 1].x, p.y - ruta[i - 1].y) : 0, 0);
     if(largo > 4 * recto + 2) return { por: [], cruza: true };     // un rodeo que da la vuelta a la casa no es un cierre
-    return { por: ruta.slice(1, -1), cruza: false };
+    // (12-nov-2026) Un punto del rodeo a menos de 0.05 ft del anterior o de la punta b es el mismo punto (la esquina del vecino
+    // y la punta de la pared a 0.02 ft, en Hamilton): dos vértices así se leían como "contorno repetido" y el contorno bueno se tiraba.
+    const por = [];
+    ruta.slice(1, -1).forEach(p => { const u = por.length ? por[por.length - 1] : a; if(Math.hypot(p.x - u.x, p.y - u.y) >= 0.05) por.push(p); });
+    while(por.length && Math.hypot(por[por.length - 1].x - b.x, por[por.length - 1].y - b.y) < 0.05) por.pop();
+    return { por, cruza: false };
   }
   // El contorno de un cuarto con sus paredes; `ajenos` = el piso cerrado de los demás que los puentes no pueden pisar ([] = sin mirar a nadie).
-  function fpContornoDeCuarto(room, gapInfo, ajenos){
+  function fpContornoDeCuarto(room, gapInfo, ajenos, reparar){
     const cadena = (room, gapInfo) => {
       // Una pared de solo studs DIBUJADA Y NO PARTIDA (sin pareja) no es borde:
       // si entrara, el encadenado la cosería al anillo y la hoja imprimiría un
@@ -46837,6 +47326,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         const suelta = (p, k) => !walls.some((o, j) => j !== k && (Math.hypot(o.start.x - p.x, o.start.y - p.y) <= 1.0 || Math.hypot(o.end.x - p.x, o.end.y - p.y) <= 1.0));
         const fuera = walls.filter((w, k) => !w._added && ((suelta(w.start, k) && fpPuntoEnPisoAjeno(w.start, ajenos, FP_PISO_HONDO)) || (suelta(w.end, k) && fpPuntoEnPisoAjeno(w.end, ajenos, FP_PISO_HONDO))));
         if(fuera.length && walls.length - fuera.length >= 2){ if(gapInfo) gapInfo.apartadas = fuera.map(w => w.id); walls = walls.filter(w => !fuera.includes(w)); }
+      }
+      // (12-nov-2026) MUÑÓN DE ESQUINA. Una pared de menos de 1 ft que sale de una esquina donde ya se juntan otras dos paredes (en
+      // el mismo punto, a menos de 0.05 ft) y cuya otra punta no llega a ninguna pared, no es borde: es un pedazo que el escáner
+      // dejó en la esquina. Si el encadenado la toma, se va a un callejón y brinca hasta 1 ft a la pared siguiente cortando la
+      // esquina (el Master de Harold, 1CA71353: 6.2 sq ft menos; el baño del A/C, 0.67 ft en diagonal: 0.9 sq ft menos en
+      // cuanto el baño pierde otra pared). Se deja fuera del contorno; no se borra del dibujo.
+      if(walls.length > 3){
+        const junto = (p, k) => walls.reduce((n, o, j) => n + (j !== k && (Math.hypot(o.start.x - p.x, o.start.y - p.y) <= 0.05 || Math.hypot(o.end.x - p.x, o.end.y - p.y) <= 0.05) ? 1 : 0), 0);
+        const munones = walls.filter((w, k) => Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) < 1.0 &&
+          ((junto(w.start, k) >= 2 && junto(w.end, k) === 0) || (junto(w.end, k) >= 2 && junto(w.start, k) === 0)));
+        if(munones.length && walls.length - munones.length >= 3) walls = walls.filter(w => !munones.includes(w));
       }
       // Dos paredes ya forman un cuarto SOLO cuando lo demás eran paredes
       // ajenas: un pasillo abierto en las dos puntas, al devolverle a la sala
@@ -46934,10 +47434,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       }
       if(rodeoCierre) rodeoCierre.por.forEach(p => poly.push({x:p.x,y:p.y}));
       if(poly.length>3 && closeDist <= tol) poly.pop();
-      if(poly.length>=3) return fpPruneOutlineSpikes(fpQuitarBucles(poly));
+      if(poly.length>=3) return fpPruneOutlineSpikes(fpQuitarBucles(poly, reparar));
       return walls.map(w=>w.start);
     };
-    const pasar = (g, p) => { if(gapInfo){ if(g) Object.assign(gapInfo, g); if(fpContornoRoto(p) || (g && g.cruzaPiso)) gapInfo.roto = true; } };
+    const pasar = (g, p) => { if(gapInfo){ if(g) Object.assign(gapInfo, g); if(fpContornoRoto(p) || (g && (g.cruzaPiso || g.disputa))) gapInfo.roto = true; } };
     // Qué parte (0..1) del piso `c` queda adentro del contorno `p` (muestreo cada 0.5 ft).
     function fpParteTapada(c, p){
       const xs = c.map(q => q.x), ys = c.map(q => q.y);
@@ -46948,18 +47448,80 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         const q = { x, y }; if(!fpPointInPolygon(q, c)) continue; dentro++; if(fpPointInPolygon(q, p)) tapado++; }
       return dentro ? tapado / dentro : 0;
     }
+    // (12-nov-2026) CONTORNO QUE SE CRUZA POR UNA PARED DE ADENTRO. Si el contorno que se va a enseñar se cruza (o su cierre pisa
+    // piso ajeno sin rodeo) es porque el encadenado cosió al anillo una pared que no es borde: una pared interior que llegó como
+    // cadena suelta (el pasillo del 12-nov: la pared C0EC38D3 entre el pasillo y el cuartito de arriba; el encadenado la alcanzó
+    // con un puente de 13 ft y regresó con otro de 11). Es la misma regla de las "sobras" de arriba (una cadena que no es borde es
+    // pared interior), ahora también cuando el anillo no había cerrado: se prueba el contorno sin cada pared y se queda el SANO
+    // que sus paredes cierran mejor (menos pies de puente; a igual cierre, el de más piso). Una pared interior le cuesta al
+    // anillo un desvío de ida y vuelta, que casi no encierra piso: sin ella cierra con MENOS líneas, con 0.6 o menos de los pies
+    // de puente de antes (el pasillo: 13 + 11 -> 7.1) y con el MISMO piso (±10 %: 90.1 -> 86.9). Si no es así no se quita nada:
+    // la pared era parte del contorno, el cuarto no cierra, y se sigue avisando como roto. Un número equivocado sin aviso es
+    // peor que un contorno roto con aviso: en el banco de casas de prueba, quitar paredes sin esas rejas pintaba pasillos de
+    // 2 y 3 veces su piso. Lo mismo para un contorno repetido que no se compone quitando una pared corta (la regla de abajo).
+    // Solo para el contorno que se enseña (`reparar`): lo que diagnostica la geometría cruda (fpContornoPlano, fpContornoPropio) sigue
+    // viendo el contorno de siempre.
+    // (12-nov-2026, segunda vuelta) Tres cosas más, cada una con el caso que la pide:
+    //  1. El primer contorno junta en uno los vértices a menos de 0.05 ft (lado de largo cero; ver fpPruneOutlineSpikes).
+    //  2. La regla de abajo para el contorno REPETIDO (quitar una pared corta, quedarse con el sano de más piso) prueba PRIMERO
+    //     las paredes con una punta SUELTA (ninguna otra punta a 1 ft, la tolerancia del encadenado), y solo si ninguna lo
+    //     compone, todas las cortas como antes. Una pared pegada por las dos puntas casi siempre es borde: quitarla abre el anillo
+    //     y el de "más piso" se come lo de al lado (Harold del banco, editado a mano: sin la pared de 2.6 ft de la sala junto a
+    //     la cocina, la sala pasaba de 324 a 338 sq ft contando el hueco de al lado; la suelta de 2.6 ft deja los 324 de R412).
+    //     Pero si no hay suelta se sigue probando como antes: en closet_de_pared (Scanova, 1-nov) la recámara solo se compone
+    //     quitando su pared de 2.5 ft junto al clóset, y después la regla de R102 de abajo saca el clóset (182.8, como en R412);
+    //     sin eso salía roto, con el clóset adentro (175.1, 27.6 sq ft del clóset contados dos veces).
+    //  3. FRENTE DE CLÓSET (cuerda). Una pared que tiene, en CADA punta, otras dos o más puntas a 0.3 ft (una T en cada lado)
+    //     es una cuerda: corta el anillo en dos y el encadenado sigue derecho por ella y deja el clóset como cadena suelta, que
+    //     luego cose con diagonales largas (taller de Vecino: la oficina imprimía 48 en vez de ~67.5; nicho: la recámara 140
+    //     en vez de ~179). Si el contorno sale roto (en el crudo también: las pruebas lo leen sin `reparar`), se prueba sin
+    //     cada cuerda y se queda la que deja un contorno SANO que sus paredes cierran solas (todos los puentes de puerta,
+    //     3.5 ft o menos), con 0.6 o menos de los pies de puente de antes y sin tapar piso ajeno (la medida del resolvedor:
+    //     3 sq ft o el 5 % del menor). Así el clóset queda dentro del anillo y su número lo saca la regla de clósets. Una pared
+    //     dibujada a mano (_added) nunca se quita.
     const elegir = (room) => {
-      const gi = gapInfo ? {} : null;
-      const p0 = cadena(room, gi);
-      if(!fpContornoRepetido(p0) || !room || !Array.isArray(room.walls)) return { p: p0, g: gi };
+      const gi = {};
+      const p0 = fpPruneOutlineSpikes(cadena(room, gi), 0.05);
+      const repetido = fpContornoRepetido(p0), cruzado = !repetido && (fpContornoRoto(p0) || !!gi.cruzaPiso);
+      if(!(repetido || cruzado) || !room || !Array.isArray(room.walls)) return { p: p0, g: gi };
+      const tramoDe = w => fpRecorteVigente(w) ? w._recorte : w;
+      const vivas = room.walls.filter(x => x && x.start && x.end && !x._ajena).map(x => ({ w: x, t: tramoDe(x) }));
+      const extremos = (q, w, r) => vivas.reduce((n, o) => n + (o.w !== w && (Math.hypot(o.t.start.x - q.x, o.t.start.y - q.y) <= r || Math.hypot(o.t.end.x - q.x, o.t.end.y - q.y) <= r) ? 1 : 0), 0);
+      const suelta = w => { const t = tramoDe(w); return extremos(t.start, w, 1.0) === 0 || extremos(t.end, w, 1.0) === 0; };
+      const cuerda = w => { const t = tramoDe(w); return extremos(t.start, w, 0.3) >= 2 && extremos(t.end, w, 0.3) >= 2; };
+      const sin = w => { const g2 = {}; return { p: cadena(Object.assign({}, room, { walls: room.walls.filter(x => x !== w) }), g2), g: g2 }; };
       let mejor = null;
-      room.walls.forEach(w => {
-        if(!w || !w.start || !w.end || Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) >= 3) return;
-        const g2 = gapInfo ? {} : null;
-        const p2 = cadena(Object.assign({}, room, { walls: room.walls.filter(x => x !== w) }), g2);
-        if(fpContornoRoto(p2)) return;
-        const a = fpContornoArea(p2);
-        if(!mejor || a > mejor.a) mejor = { p: p2, g: g2, a };
+      if(repetido) for(const soloSueltas of [true, false]){
+        room.walls.forEach(w => {
+          if(!w || !w.start || !w.end || Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) >= 3 || (soloSueltas && !suelta(w))) return;
+          const c = sin(w);
+          if(fpContornoRoto(c.p)) return;
+          const a = fpContornoArea(c.p);
+          if(!mejor || a > mejor.a) mejor = { p: c.p, g: c.g, a };
+        });
+        if(mejor) break;
+      }
+      const pu0 = (gi.bridges || []).reduce((t, b) => t + b, 0), n0 = (gi.bridges || []).length, a0 = fpContornoArea(p0);
+      const viaRepetido = !!mejor;
+      if(!mejor && reparar) room.walls.forEach(w => {
+        if(!w || !w.start || !w.end) return;
+        const c = sin(w);
+        if(fpContornoRoto(c.p) || c.g.cruzaPiso) return;
+        const a = fpContornoArea(c.p), pu = (c.g.bridges || []).reduce((t, b) => t + b, 0);
+        if(!((c.g.bridges || []).length < n0 && pu <= 0.6 * pu0 && Math.abs(a - a0) <= 0.1 * a0)) return;
+        if(!mejor || pu < mejor.pu - 0.05 || (Math.abs(pu - mejor.pu) <= 0.05 && a > mejor.a)) mejor = { p: c.p, g: c.g, a, pu };
+      });
+      // (12-nov-2026) Cedió piso en una DISPUTA (fpPisoAjeno) y además solo cierra dejando fuera una de sus paredes: son dos
+      // conjeturas encimadas, el número sale pero con aviso de revisar (pasilloL del banco).
+      if(mejor && !viaRepetido && ajenos && ajenos.disputa) mejor.g.disputa = true;
+      if(!mejor) room.walls.forEach(w => {
+        if(!w || !w.start || !w.end || w._ajena || w._added || !cuerda(w)) return;
+        const c = sin(w);
+        if(fpContornoRoto(c.p) || c.g.cruzaPiso) return;
+        const pu = (c.g.bridges || []).reduce((t, b) => t + b, 0);
+        const a = fpContornoArea(c.p);
+        if(!(c.g.bridges || []).every(b => b <= FP_PISO_PUENTE_MAX) || !(pu <= 0.6 * pu0) || (ajenos || []).some(A => fpEncimeSqFt(c.p, A) > Math.max(3, 0.05 * Math.min(a, fpContornoArea(A))))) return;
+        if(!mejor || pu < mejor.pu - 0.05 || (Math.abs(pu - mejor.pu) <= 0.05 && a > mejor.a)) mejor = { p: c.p, g: c.g, a, pu };
       });
       return mejor ? { p: mejor.p, g: mejor.g } : { p: p0, g: gi };
     };
@@ -46997,7 +47559,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // El contorno de un cuarto: sus paredes encadenadas, y ningún puente por el piso cerrado de otro cuarto (gapInfo.plano = su plano,
   // si se sabe; si no, el motor lo busca entre los planos que ha visto).
   function fpOrderedRoomPolygon(room, gapInfo){
-    return fpContornoDeCuarto(room, gapInfo, fpPisoAjeno(room, gapInfo && gapInfo.plano));
+    return fpContornoDeCuarto(room, gapInfo, fpPisoAjeno(room, gapInfo && gapInfo.plano), true);
   }
   // ESPINAS DEL CONTORNO. El encadenado consume paredes ENTERAS y no
   // puede partir una, asi que cuando una pared se extiende mas alla del
@@ -47628,7 +48190,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!quedan.length || !(encime() < e0 - 1) || vivos.some(r => area(r) > a0.get(r) + 0.5)){ vivos.forEach(volver); return []; }
     return quedan;
   }
-  function fpPruneOutlineSpikes(poly){
+  function fpPruneOutlineSpikes(poly, cero){
     if(!poly || poly.length < 3) return poly;
     let pts = poly.slice(), changed = true, guard = 0;
     // UNA sola convergencia: quitar una espina puede dejar un lado de
@@ -47648,7 +48210,14 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         // traga lo que tenga al lado: asi desaparecio un closet real de
         // 8'0" x 1'6" del detector de huecos, y AI Fix llego a decir
         // "every space labeled" con un espacio sin nombre en el plano.
-        if(pts.length > 3 && Math.hypot(b.x-c.x, b.y-c.y) < 0.02){ pts.splice(i, 1); changed = true; break; }
+        // (12-nov-2026) `cero`: el largo que cuenta como cero. Por omisión 0.02 ft, como siempre. El encadenado (elegir, en
+        // fpContornoDeCuarto) pide 0.05 -- lo que fpContornoRepetido llama "el mismo punto" -- solo para su PRIMER contorno: un
+        // lado de 0.028 ft (una esquina arrimada 1/4" que el imán regresa) se leía como contorno repetido y salía otro cuarto
+        // (el Hallway de live_plan_closet: de 31 a 57 sq ft en el contorno crudo, y al volver a abrir la sala perdía 15). Con
+        // 0.05 en TODAS partes (los contornos de prueba de elegir y los demás que pasan por aquí) el resolvedor de paredes ajenas
+        // veía otros contornos y repartía mal paredes compartidas sin avisar: en el banco de casas de prueba un comedor de 192
+        // sq ft quedaba en 42, una cocina de 192 en 78.5 y otro comedor en 589.
+        if(pts.length > 3 && Math.hypot(b.x-c.x, b.y-c.y) < (cero || 0.02)){ pts.splice(i, 1); changed = true; break; }
         // (2) ESPINA. El encadenado consume paredes ENTERAS y no puede
         // partir una, asi que cuando una pared se extiende mas alla del
         // cuarto (la del Bathroom real mide 16.07 pies y solo 7.37 bordean
@@ -47684,7 +48253,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // (w x d, la misma del letrero). Los rincones abiertos (Vanity, Shower, el Closet de rincón sin frente) siguen dentro del cuarto.
   // El total del nivel no cambia: cuarto + clóset = lo de antes (fpRoomGrossAreaSqFt).
   const FP_CLOSET_APARTE_RE = /cl[oó]set/i;
-  function fpEsClosetAparte(sa){ return !!(sa && sa._frente && !sa._quitado && FP_CLOSET_APARTE_RE.test(sa.name || '') && sa.w > 0 && sa.d > 0); }
+  // (12-nov-2026, Molde) Clóset aparte por su marca (_aparte, la pone floorplanDetectSubAreas), no por su nombre: renombrado
+  // ("Pantry") sigue aparte. Sin la marca (planos guardados antes) decide el nombre, como siempre.
+  function fpEsClosetAparte(sa){ return !!(sa && sa._frente && !sa._quitado && (sa._aparte || FP_CLOSET_APARTE_RE.test(sa.name || '')) && sa.w > 0 && sa.d > 0); }
   function fpAreaSubArea(sa){ return Math.round(sa.w * sa.d * 10) / 10; }
   // (1-nov, Remiendo) UNA sola regla de "el clóset cuenta aparte": la de fpRoomDisplayAreaSqFt (frente, no quitado, que
   // sumen menos de la mitad del cuarto, y el cuarto mismo NO se llama Closet). Si esa función restó, aquí salen los clósets;
@@ -47712,7 +48283,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // "incl." en la lista, nunca escondido ni restado (1-nov, Remiendo).
     if(/cl[oó]set/i.test((room && room.roomName) || '')) return bruto;
     let cl = 0;
-    for(const sa of ((room && room._subAreas) || [])) if(sa && sa._frente && !sa._quitado && /cl[oó]set/i.test(sa.name || '') && sa.w > 0 && sa.d > 0) cl += Math.round(sa.w * sa.d * 10) / 10;
+    // (12-nov-2026, Molde) la misma regla de fpEsClosetAparte: la marca _aparte o, en planos viejos, el nombre
+    for(const sa of ((room && room._subAreas) || [])) if(sa && sa._frente && !sa._quitado && (sa._aparte || /cl[oó]set/i.test(sa.name || '')) && sa.w > 0 && sa.d > 0) cl += Math.round(sa.w * sa.d * 10) / 10;
     return (cl > 0 && cl < bruto * 0.5) ? Math.round((bruto - cl) * 10) / 10 : bruto;
   }
   // Building total recomputed from the same corrected per-room areas the
@@ -47746,7 +48318,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // del piso contado dos veces). Ese cuarto dice "needs review", no imprime numero y no entra a ningun total.
   // Un cruce de menos de 4 sq ft (una astilla en una esquina) se queda como estaba: su piso se imprime y se suma.
   function fpPisoPorRevisar(room){
-    if(!room || room.deleted || !(room.walls||[]).length) return false;
+    if(!room || room.deleted) return false;
+    // (12-nov-2026, Molde-2) el cuarto del resumen (plano en el disco) no trae paredes: lo dice su resumen (fpResumenDe)
+    if(!(room.walls||[]).length) return !!(room.summary && room.summary.porRevisar);
     const gi = {}, poly = fpOrderedRoomPolygon(room, gi);
     if(!(poly && poly.length >= 3)) return true;
     if(!gi.roto) return false;
@@ -47757,6 +48331,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // Lo que se pega junto a un total para que diga que le falta un cuarto (vacio si no falta ninguno).
   function fpNotaPorRevisar(rooms){ const n = fpCuantosPorRevisar(rooms); return n ? ` (${n} room${n > 1 ? 's' : ''} not included: needs review)` : ''; }
   function fpDisplayTotalAreaSqFt(data){
+    if(typeof fpConocerPlano === 'function') fpConocerPlano(data);     // (12-nov) ver fpPlanoDelCuarto
     // (12-nov, revision) el cuarto sin piso que dar no se suma: el total es la suma de lo que SI se imprime
     return Math.round(((data && data.rooms) || []).reduce((sum, r) => r.deleted || (typeof fpPisoPorRevisar === 'function' && fpPisoPorRevisar(r)) ? sum : sum + fpRoomGrossAreaSqFt(r), 0)*10)/10;
   }
@@ -47813,6 +48388,23 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(err < md){ md = err; mejor = { u: { x: dx / L, y: dy / L }, v: { x: vx, y: vy } }; }
     }
     return mejor;
+  }
+  // (12-nov-2026, Molde) ¿Las cuatro paredes de este clóset siguen donde estaban? Fondo y lados cubiertos por paredes del cuarto
+  // (90 %), y el frente por lo menos media boca (lo mismo que pide floorplanDetectSubAreas para _frente). La boca da al cuarto: su
+  // medio NO va por el contorno (un clóset con ancho y fondo trocados toma un lado por boca y no pasa). Devuelve su marco
+  // (fpMarcoDelCloset: u a lo largo de la boca, v del centro al fondo) o null.
+  function fpClosetSigueEnPie(room, sa, poly){
+    const mc = fpMarcoDelCloset(sa, poly); if(!mc) return null;
+    const ws = ((room && room.walls) || []).filter(w => w && w.start && w.end && !w._ajena && !w._invisible).map(w => fpRecorteVigente(w) || w)
+      .filter(w => Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) > 0.05);
+    const cerca = (p, a, b) => { const vx = b.x - a.x, vy = b.y - a.y, l2 = vx * vx + vy * vy, t = l2 ? Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / l2)) : 0;
+      return Math.hypot(p.x - a.x - vx * t, p.y - a.y - vy * t) <= 0.3; };
+    const cubre = (A, B) => { const n = Math.max(4, Math.ceil(Math.hypot(B.x - A.x, B.y - A.y) / 0.25)); let k = 0;
+      for(let i = 0; i <= n; i++){ const p = { x: A.x + (B.x - A.x) * i / n, y: A.y + (B.y - A.y) * i / n }; if(ws.some(w => cerca(p, w.start, w.end))) k++; }
+      return k / (n + 1); };
+    const P = (a, b) => ({ x: sa.cx + mc.u.x * a * sa.w / 2 + mc.v.x * b * sa.d / 2, y: sa.cy + mc.u.y * a * sa.w / 2 + mc.v.y * b * sa.d / 2 });
+    if(fpDistToPolygon(P(0, -1), poly) <= 0.3) return null;
+    return cubre(P(-1, 1), P(1, 1)) >= 0.9 && cubre(P(-1, 1), P(-1, -1)) >= 0.9 && cubre(P(1, 1), P(1, -1)) >= 0.9 && cubre(P(-1, -1), P(1, -1)) >= 0.5 ? mc : null;
   }
   function fpRoomMeasurements(room, opts){
     const entero = !!(opts && opts.entero);   // sin partir el clóset (el corte de studs compara el cuarto entero)
@@ -48353,12 +48945,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   // PARTIR UN CUARTO POR UN CAMINO, en memoria (no toca el plano). camino = [p0, ..., pn] en pies: p0 y pn en la orilla del cuarto,
   // los de en medio adentro. Devuelve { roomA, roomB, par, pA, pB, largo } o { error } (en español, para el aviso).
-  function fpInvCandidatos(room, camino){
+  function fpInvCandidatos(room, camino, opts){
     if(!room || !Array.isArray(room.walls)) return { error: 'no hay cuarto' };
     if(!camino || camino.length < 2) return { error: 'la línea necesita dos puntas' };
     const gi = {}; const poly = fpOrderedRoomPolygon(room, gi);
     if(!poly || poly.length < 3 || gi.roto) return { error: 'el cuarto no tiene un contorno cerrado que partir' };
-    if((gi.bridgeSegs || []).some(b => b && b.d > 4)) return { error: 'el cuarto tiene un hueco abierto en su orilla; ciérrelo primero' };
+    // (12-nov-2026, Molde) opts.hueco (la pared sólida, fpPartirConParedSolida): un hueco abierto a más de 1 ft de la línea no
+    // estorba (real_plan: el Living Room abierto 4.06 ft al pasillo, lejos de la pared nueva); se queda en su lado tal cual y los
+    // candados igual revisan que los dos cierren y que el piso no cambie. La pared invisible sigue pidiendo cerrarlo primero.
+    const lejosDeLaLinea = b => !!(opts && opts.hueco && b.a && b.b) && camino.every((p, k) => { const q = camino[k + 1]; if(!q) return true;
+      return !fpInvCruce(p, q, b.a, b.b) && Math.min(fpDistSeg(b.a, p, q), fpDistSeg(b.b, p, q), fpDistSeg(p, b.a, b.b), fpDistSeg(q, b.a, b.b)) >= 1; });
+    if((gi.bridgeSegs || []).some(b => b && b.d > 4 && !lejosDeLaLinea(b))) return { error: 'el cuarto tiene un hueco abierto en su orilla; ciérrelo primero' };
     const pts = camino.map(p => ({ x: p.x, y: p.y }));
     const s = fpInvProyectar(poly, pts[0]), e = fpInvProyectar(poly, pts[pts.length - 1]);
     if(!s || !e || s.d > FP_INV_PUNTA_FT || e.d > FP_INV_PUNTA_FT) return { error: 'las dos puntas tienen que tocar la orilla del cuarto' };
@@ -48555,15 +49152,15 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   // (revisión 2) Si lo ÚNICO que falla es el redondeo (una décima que se va de un lado al otro), la línea se corre a lo más
   // 0.05 ft (media pulgada) hasta que los números impresos cuadren. Devuelve { cand, san } (el primero que pase, o el de origen).
-  function fpInvPartirAjustado(room, camino, data){
-    let cand = fpInvCandidatos(room, camino);
+  function fpInvPartirAjustado(room, camino, data, opts){
+    let cand = fpInvCandidatos(room, camino, opts);
     if(cand.error) return { cand, san: null };
     let san = fpInvCandados(room, cand, data);
     if(san.ok || !san.soloRedondeo) return { cand, san };
     const a = camino[0], b = camino[camino.length - 1], L = Math.hypot(b.x - a.x, b.y - a.y) || 1, nx = -(b.y - a.y) / L, ny = (b.x - a.x) / L;
     const pasos = []; for(let k = 1; k <= 20; k++){ pasos.push(k * 0.0025, -k * 0.0025); }
     for(const t of pasos){
-      const c2 = fpInvCandidatos(room, camino.map(p => ({ x: p.x + nx * t, y: p.y + ny * t }))); if(c2.error) continue;
+      const c2 = fpInvCandidatos(room, camino.map(p => ({ x: p.x + nx * t, y: p.y + ny * t })), opts); if(c2.error) continue;
       const s2 = fpInvCandados(room, c2, data, { rapido: true }); if(!s2.ok) continue;
       const s3 = fpInvCandados(room, c2, data); if(s3.ok) return { cand: c2, san: s3 };
     }
@@ -48623,6 +49220,148 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(typeof fpMemRememberRoom === 'function') fpMemRememberRoom(nombre, cand.roomB);
     fpHint(nombre0 + ' ' + n1(fpRoomDisplayAreaSqFt(room)) + ' · ' + nombre + ' ' + n1(fpRoomDisplayAreaSqFt(cand.roomB)) + ' sq ft');
     return true;
+  }
+  // (12-nov-2026, Molde) PARED SÓLIDA DE LADO A LADO: PARTE EL CUARTO EN DOS CUARTOS. Antes la pared nueva solo entraba a la lista
+  // del cuarto: su contorno se cerraba por la pared nueva del lado chico y el otro lado no era de nadie; sus sq ft se iban del
+  // total sin aviso (Harold: Living Room 294.3 -> 142.5, total del nivel 566.2 -> 414.4). Ahora, si las dos puntas caen en la
+  // orilla del cuarto, se parte con el MISMO motor de la pared invisible (fpInvPartirAjustado: los lados, las paredes partidas,
+  // puertas, ventanas, muebles, los clósets con su renglón, y sus candados: el piso se conserva, ningún vecino cambia, el total
+  // del nivel tampoco), y la raya se vuelve la pared de verdad en los dos cuartos (_paredPar, la pareja): con sus dos caras, así
+  // perímetro, pared (SF) y rodapié de cada cuarto la cuentan. El cuarto de antes se queda con el lado grande (su nombre y su
+  // índice); el lado chico es un cuarto nuevo AL FINAL con el nombre que la app le pone a lo que nadie nombró (como AI Fix:
+  // "Closet" si es de 30 sq ft o menos, si no "Room N"; sin repetir uno del nivel), y en RD se le pregunta el nombre con la
+  // misma pregunta de la pared invisible (Cancelar deja ese nombre; el cuarto ya está partido). Un solo Deshacer regresa el plano
+  // exacto (el nombre va en el mismo paso). Devuelve false si no es de lado a lado o no se puede partir así: se agrega como siempre.
+  // Lo que la invisible guarda para volver a juntar (los pedazos de cada pared partida, las paredes de antes, el rótulo) se
+  // guarda con otro nombre (_paredUnir, _paredOrig, _paredRaiz, _paredRotulo): con el de la invisible el cuarto contaría como
+  // "espacio partido" (cotas de la pared de antes, sin enderezar, AI Fix). Quitar la pared los usa (fpQuitarParticionSolida).
+  function fpPartirConParedSolida(roomIdx, entry){
+    const d = floorplanData, room = d && (d.rooms || [])[roomIdx];
+    if(!room || room.deleted || d.merged === false || !entry || !entry.start || !entry.end) return false;
+    let poly = null; try{ poly = fpOrderedRoomPolygon(room); }catch(e){ poly = null; }
+    if(!poly || poly.length < 3) return false;
+    if(fpDistToPolygon(entry.start, poly) > 0.35 || fpDistToPolygon(entry.end, poly) > 0.35) return false;   // las dos puntas en su orilla
+    const { cand, san } = fpInvPartirAjustado(room, [entry.start, entry.end], d, { hueco: true });
+    if(cand.error || !san.ok) return false;
+    const par = cand.par, partido0 = fpInvPartido(room);
+    const solida = (r, id) => { r.walls = (r.walls || []).map(w => {
+      if(w && w._invUnir && w._invUnir[par]){ w._paredUnir = Object.assign({}, w._paredUnir || {}, { [par]: w._invUnir[par] });
+        delete w._invUnir[par]; if(!Object.keys(w._invUnir).length) delete w._invUnir; }
+      if(!(w && w._invisible && w._invPar === par)) return w;
+      const x = { id, start: { x: w.start.x, y: w.start.y }, end: { x: w.end.x, y: w.end.y }, lengthFt: w.lengthFt, _added: true, _paredPar: par };
+      if(entry.heightFt) x.heightFt = entry.heightFt;
+      return x; }); };
+    solida(cand.roomA, entry.id); solida(cand.roomB, fpNewId());
+    if(cand.roomA._invOrig){ cand.roomA._paredOrig = Object.assign({}, room._paredOrig || {}, { [par]: cand.roomA._invOrig[par] });
+      delete cand.roomA._invOrig[par]; if(!Object.keys(cand.roomA._invOrig).length) delete cand.roomA._invOrig; }
+    if(!partido0){ if(!room._paredRaiz && cand.roomA._invRaiz) cand.roomA._paredRaiz = cand.roomA._invRaiz; delete cand.roomA._invRaiz; }
+    if(room._labelOffsetPx) cand.roomA._paredRotulo = Object.assign({}, room._paredRotulo || {}, { [par]: room._labelOffsetPx });
+    delete cand.roomB._invDe;
+    // con la pared de verdad (dos cuartos, no un espacio partido) el piso sigue igual, medido dentro del plano como la hoja
+    const t0 = fpDisplayTotalAreaSqFt(d), g0 = fpRoomGrossAreaSqFt(room);
+    let t1 = NaN, gA = NaN, gB = NaN;
+    d.rooms[roomIdx] = cand.roomA; d.rooms.push(cand.roomB);
+    try{ fpUsarContextoDePlano(d); t1 = fpDisplayTotalAreaSqFt(d); gA = fpRoomGrossAreaSqFt(cand.roomA); gB = fpRoomGrossAreaSqFt(cand.roomB); }
+    finally { d.rooms.pop(); d.rooms[roomIdx] = room; fpUsarContextoDePlano(d); }
+    if(!(Math.abs(t1 - t0) <= 0.15 && Math.abs(gA + gB - g0) <= 0.2)) return false;
+    const level = room.level || 1, nombre0 = room.roomName || ('Room ' + (roomIdx + 1)), newIdx = d.rooms.length, n1 = v => (Math.round(v * 10) / 10).toFixed(1);
+    const chico = cand.areaB <= 30;
+    let nombre = chico ? 'Closet' : 'Room ' + (newIdx + 1);
+    for(let k = 2, n = newIdx + 1; fpStudNameTaken(d, level, nombre, -1) && k < 99; k++) nombre = chico ? 'Closet ' + k : 'Room ' + (++n);
+    cand.roomB.roomName = nombre;
+    const nuevo = cand.roomB;
+    fpPushUndo();
+    fpCommitEdit(() => {
+      const polyViejo = fpOrderedRoomPolygon(room);
+      delete room._subAreas; delete room._labelOffsetPx;
+      Object.assign(room, cand.roomA);
+      d.rooms.push(nuevo);
+      // la humedad pintada antes: un relleno del cuarto entero se vuelve dos; uno ajustado a mano se queda (como la invisible)
+      const marks = d._moistureMarks || [];
+      const mismo = (p1, p2) => p1 && p2 && p1.length === p2.length && p1.every((q, i) => Math.hypot(q.x - p2[i].x, q.y - p2[i].y) < 0.3);
+      marks.slice().forEach(m => {
+        if(!m || m.type !== 'fill' || m.roomIdx !== roomIdx) return;
+        if(!m.corners || mismo(m.corners, polyViejo)){
+          m.corners = fpOrderedRoomPolygon(room).map(q => ({ x: q.x, y: q.y }));
+          marks.push(Object.assign({}, m, { roomIdx: newIdx, corners: fpOrderedRoomPolygon(nuevo).map(q => ({ x: q.x, y: q.y })) }));
+        }
+      });
+    }, [roomIdx, newIdx]);
+    fpSetTool('select');
+    openFloorplanWallDetail(roomIdx, entry.id);
+    const dice = () => nombre0 + ' ' + n1(fpRoomDisplayAreaSqFt(room)) + ' · ' + nuevo.roomName + ' ' + n1(fpRoomDisplayAreaSqFt(nuevo)) + ' sq ft';
+    fpHint(dice());
+    if(rdEnPantalla()) rdPedirTexto({ chips: ['Closet', 'Pantry', 'Laundry', 'Bathroom', 'Hallway', 'Office'],
+        titulo: r135('Nombre del espacio nuevo', 'Name of the new space'),
+        texto: r135(`${n1(fpRoomDisplayAreaSqFt(nuevo))} sq ft. ${nombre0} queda con ${n1(fpRoomDisplayAreaSqFt(room))} sq ft.`, `${n1(fpRoomDisplayAreaSqFt(nuevo))} sq ft. ${nombre0} keeps ${n1(fpRoomDisplayAreaSqFt(room))} sq ft.`),
+        valor: nombre, si: r135('Guardar', 'Save'), no: r135('Dejar ' + nombre, 'Keep ' + nombre),
+        validar: t => !t ? r135('Escriba un nombre.', 'Type a name.')
+          : fpStudNameTaken(floorplanData, level, t, ((floorplanData && floorplanData.rooms) || []).indexOf(nuevo)) ? r135('«' + t + '» ya existe en este nivel. Ponga otro.', '"' + t + '" already exists on this level. Use another one.') : '' })
+      .then(t => {
+        // solo si el cuarto nuevo sigue ahí (Deshacer mientras se preguntaba = nada que nombrar); va en el mismo paso de Deshacer
+        if(!t || t === nuevo.roomName || !floorplanData || floorplanData.rooms[newIdx] !== nuevo || nuevo.deleted) return;
+        fpCommitEdit(() => { nuevo.roomName = t; }, [newIdx]);
+        if(typeof fpMemRememberRoom === 'function') fpMemRememberRoom(t, nuevo);
+        fpHint(dice());
+      });
+    return true;
+  }
+  // (12-nov-2026, Molde) QUITAR LA PARED SÓLIDA QUE PARTIÓ EL CUARTO (fpPartirConParedSolida): se van LAS DOS copias (la de cada
+  // cuarto) y los dos cuartos vuelven a ser uno, igual que al quitar la pared invisible (fpInvUnirEn con sus candados,
+  // fpInvUnirRevisado: el cuarto juntado mide lo que sumaban los dos, ningún vecino cambia, el total del nivel tampoco). Antes se
+  // iba una sola copia y el otro cuarto se quedaba con una pared que ya no compartía: abierto, con piso de más o de menos para el
+  // seguro. Se queda el cuarto de índice menor (el de antes: su nombre y su índice); el otro se marca deleted. Sin cambios
+  // después de partir regresa EXACTO al cuarto de antes. La puerta o ventana puesta en la pared quitada se va con ella. Un solo
+  // Deshacer regresa los dos cuartos. Devuelve null si la pared no tiene su pareja viva (se quita como cualquier pared).
+  // fpParedComoInvisible: en memoria sobre `d`, la pareja vuelve a ser la raya invisible con las marcas guardadas al partir.
+  function fpParedComoInvisible(d, par){
+    const ids = new Set(), duenos = [];
+    (d.rooms || []).forEach(r => { if(!r || r.deleted || !(r.walls || []).some(w => w && (w._paredPar === par || (w._paredUnir && w._paredUnir[par])))) return;
+      duenos.push(r);
+      r.walls = r.walls.map(w => {
+        if(w && w._paredPar === par){ ids.add(String(w.id)); return { id: w.id, start: { x: w.start.x, y: w.start.y }, end: { x: w.end.x, y: w.end.y }, lengthFt: w.lengthFt, _invisible: true, _invPar: par }; }
+        if(!(w && w._paredUnir && w._paredUnir[par])) return w;
+        const x = Object.assign({}, w, { _invUnir: Object.assign({}, w._invUnir || {}, { [par]: w._paredUnir[par] }), _paredUnir: Object.assign({}, w._paredUnir) });
+        delete x._paredUnir[par]; if(!Object.keys(x._paredUnir).length) delete x._paredUnir;
+        return x; });
+      [['_paredOrig', '_invOrig'], ['_paredRotulo', '_invRotulo']].forEach(([de, a]) => { if(!r[de] || r[de][par] === undefined) return;
+        r[a] = Object.assign({}, r[a] || {}, { [par]: r[de][par] }); r[de] = Object.assign({}, r[de]); delete r[de][par]; if(!Object.keys(r[de]).length) delete r[de]; });
+    });
+    // la puerta o ventana puesta EN la pared que se quita se va con ella (como al quitar cualquier pared), en los dos cuartos
+    duenos.forEach(r => [].concat(r.doors || [], r.windows || [], r.openings || []).forEach(o => { if(o && ids.has(String(o.wallId))) o._removed = true; }));
+    // las paredes de antes de TODA pared sólida: solo cuando ya no queda otra que juntar en estos dos cuartos
+    if(!duenos.some(r => r._paredOrig || (r.walls || []).some(w => w && (w._paredPar || w._paredUnir))))
+      duenos.forEach(r => { if(!r._paredRaiz) return; if(!duenos.some(q => q._invRaiz)) r._invRaiz = r._paredRaiz; delete r._paredRaiz; });
+    return ids;
+  }
+  function fpQuitarParticionSolida(roomIdx, wallId){
+    const w = findFloorplanWall(roomIdx, wallId);
+    if(!w || !w._paredPar || !floorplanData) return null;
+    const par = w._paredPar, n1 = v => (Math.round(v * 10) / 10).toFixed(1);
+    const duenos = (floorplanData.rooms || []).map((r, ri) => ({ r, ri })).filter(x => x.r && !x.r.deleted && (x.r.walls || []).some(q => q && q._paredPar === par));
+    if(duenos.length !== 2) return null;
+    const n = duenos.map(x => x.r.roomName || ('Room ' + (x.ri + 1)));
+    const total = duenos.reduce((t, x) => t + fpRoomDisplayAreaSqFt(x.r), 0);
+    // la prueba en una copia (fpInvUnirRevisado deja el contexto de medidas en la copia: se regresa al plano)
+    const t = JSON.parse(JSON.stringify(floorplanData)); fpParedComoInvisible(t, par);
+    let prueba = null; try{ prueba = fpInvUnirRevisado(t, par); } finally { fpUsarContextoDePlano(floorplanData); }
+    if(!prueba.ok){ alert('No se puede quitar así: ' + prueba.fail[0] + '.'); return false; }
+    if(!confirm(r135('¿Quitar la pared? ' + n[0] + ' y ' + n[1] + ' vuelven a ser un solo cuarto (' + n1(total) + ' sq ft). Deshacer lo regresa.',
+      'Remove the wall? ' + n[0] + ' and ' + n[1] + ' become one room again (' + n1(total) + ' sq ft). Undo brings it back.'))) return false;
+    let res = null;
+    fpPushUndo();
+    fpCommitEdit(() => {
+      fpParedComoInvisible(floorplanData, par);
+      res = fpInvUnirEn(floorplanData, par);
+      if(!res) return;
+      const keep = floorplanData.rooms[res.keep], otro = floorplanData.rooms[res.otro];
+      // lo guardado de OTRA pared sólida del cuarto que se fue pasa al que queda (sus paredes ya están en él)
+      ['_paredOrig', '_paredRotulo'].forEach(k => { if(otro[k]) keep[k] = Object.assign({}, otro[k], keep[k] || {}); });
+      if(otro._paredRaiz && !keep._paredRaiz) keep._paredRaiz = otro._paredRaiz;
+    }, duenos.map(x => x.ri));
+    closeFloorplanWallDetail();
+    if(res) fpHint(n[0] + ': ' + n1(fpRoomDisplayAreaSqFt(floorplanData.rooms[res.keep])) + ' sq ft.');
+    return !!res;
   }
   // QUITAR LA PARED INVISIBLE: los dos espacios vuelven a ser uno. Se queda el cuarto de índice menor (el de antes), con su nombre;
   // el otro se marca deleted (nunca splice). Las paredes que la línea partió se vuelven a juntar (la original tal cual, si sus
@@ -48866,6 +49605,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const t = { rooms: 0, floorSqFt: 0, ceilingSqFt: 0, perimeterFt: 0, baseboardFt: 0,
                 grossWallSqFt: 0, openingSqFt: 0, netWallSqFt: 0, guessedFt: 0, guessedRooms: 0,
                 odd: [], noHeight: [], noOutline: [], noFloor: [], insideOpenings: 0 };
+    if(typeof fpConocerPlano === 'function') fpConocerPlano(data);     // (12-nov) ver fpPlanoDelCuarto
     ((data && data.rooms) || []).forEach((r, i) => {
       if(r.deleted || !(r.walls||[]).length) return;
       if(onLevel && !onLevel(r)) return;
@@ -48991,7 +49731,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const htCell = m.heightKnown ? fpFeetInches(m.wallHeightFt) : dash;
       const perCell = m.outlineOk ? n1(m.perimeterFt) : dash;
       const baseCell = m.outlineOk ? n1(m.baseboardFt) : dash;
-      html += `<tr><td style="${td} text-align:left;">${closet ? '&nbsp;&nbsp;' : ''}${rdhjCuarto(esc(nombre))}${mark}</td>`
+      html += `<tr><td style="${td} text-align:left;">${closet ? '&nbsp;&nbsp;' : ''}<b>${esc(nombre)}</b>${mark}</td>`
         + `<td style="${td}">${sinPiso ? dash : n1(m.floorSqFt)}</td><td style="${td}">${wallCell}</td>`
         + `<td style="${td}">${sinPiso ? dash : n1(m.ceilingSqFt)}</td><td style="${td}">${perCell}</td>`
         + `<td style="${td}">${baseCell}</td><td style="${td}">${htCell}</td></tr>`;
@@ -51726,7 +52466,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     return f;
   }
   // EL NOMBRE DE UN CUARTO que no llegaba al mínimo: más grande en su lugar si cabe, si no en otro lugar de
-  // su cuarto, si no afuera con la rayita. e = lo que dio fpBloqueVista (info) + el cuarto.
+  // su cuarto. e = lo que dio fpBloqueVista (info) + el cuarto.
+  // (12-nov, Aroldo: "cuando se envió estaba bien y cuando aparece en CompanyCam ya está afuera") NUNCA afuera con
+  // rayita: si al mínimo no cabe adentro, el más grande que quepa en su punto; si tampoco, igual que en la pantalla.
   function fpLgNombreDeCuarto(ctx, e, X, Y, scale, rooms, minX, minY){
     const { room, label, areaTxt } = e, inf = e.bloque.info;
     const fs = Math.max(inf.fs, ctx.minN), f2 = Math.max(inf.f2, ctx.minD);
@@ -51755,14 +52497,18 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         const pila = fpLgPila(ls, fs, inf.dimTxt, areaTxt, f2, '0.6'), c = pila.caja(Q.x, Q.y);
         if(fpLgCajaEnPoli(c, zona.pts, ctx.mW) && fpLgLibre(ctx, c, false)) return listo(pila, Q, null);
       }
-      // 2. afuera, con su rayita
-      const pila = fpLgPila([label], fs, inf.dimTxt, areaTxt, f2, '0.6');
-      const m = fpLgAfuera(ctx, pila, zona.pts, null, P);
-      if(m) return listo(pila, { x: m.cx, y: m.cy }, m);
+      // 2. en su punto, más chico que el mínimo pero más grande que en la pantalla (el más grande que quepa)
+      for(const t of [0.9, 0.8, 0.7, 0.6]){
+        const fsT = fs * t;
+        if(fsT <= inf.fs + 1e-6) break;
+        for(const ls of opciones){
+          const pila = fpLgPila(ls, fsT, inf.dimTxt, areaTxt, Math.max(inf.f2, f2 * t), '0.6'), c = pila.caja(P.x, P.y);
+          if(fpLgCajaEnPoli(c, zona.pts, ctx.mW) && fpLgLibre(ctx, c, false)) return listo(pila, P, null);
+        }
+      }
     }
-    // 3. sin contorno o sin lugar: en su punto, al mínimo (se avisa: la prueba lo encuentra)
-    if(typeof console !== 'undefined') console.warn('[plano] sin lugar para el nombre de', room && room.roomName);
-    return listo(fpLgPila([label], fs, inf.dimTxt, areaTxt, f2, '0.6'), P, null);
+    // 3. igual que en la pantalla (lo que vio quien lo mandó)
+    return { svg: e.bloque.svg, flechas: e.bloque.flechas || '', caja: e.bloque.caja, guia: null };
   }
   // UN RINCÓN (clóset detectado) o un ESPACIO con nombre: igual que un cuarto, su zona es su rectángulo.
   function fpLgAnotacion(ctx, a, X, Y){
@@ -51783,16 +52529,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         const pila = fpLgPila(ls, fs, dimTxt, areaTxt, f2, '0.4'), c = pila.caja(Q.x, Q.y);
         if(fpLgCajaEnPoli(c, pts, ctx.mW) && fpLgLibre(ctx, c, false)) return { svg: pila.svg(Q.x, Q.y), caja: c };
       }
-      const pila = fpLgPila([nombre], fs, dimTxt, areaTxt, f2, '0.4');
-      const m = fpLgAfuera(ctx, pila, pts, a.padre, P);
-      if(m) return { svg: fpLgGuiaSvg(ctx, m) + pila.svg(m.cx, m.cy), caja: m.caja, guia: m };
     } else {
       // sin medidas: solo el nombre, en su punto si queda libre
       for(const ls of opciones){ const pila = fpLgPila(ls, fs, null, null, f2, '0.4'), c = pila.caja(P.x, P.y); if(fpLgLibre(ctx, c, false)) return { svg: pila.svg(P.x, P.y), caja: c }; }
     }
-    if(typeof console !== 'undefined') console.warn('[plano] sin lugar para el rótulo', a.name);
-    const pila = fpLgPila([nombre], fs, dimTxt, areaTxt, f2, '0.4');
-    return { svg: pila.svg(P.x, P.y), caja: pila.caja(P.x, P.y) };
+    // (12-nov, Aroldo) nunca afuera con rayita: sin lugar al mínimo, sale igual que en la pantalla (null)
+    return null;
   }
 
   function fpEtiquetaVista(label, areaTxt, rb, scale, x, y, escala, libre){
@@ -52321,6 +53063,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           if(dentro(a.d, a.w) > dentro(a.w, a.d)){ ex = a.d; ey = a.w; }
         }
         const r = fpLgAnotacion(hojaCtx, { name: a.name, cx: a.cx, cy: a.cy, w: a.w, d: a.d, ex, ey, k, off: a.meta._offFt || { dx: 0, dy: 0 }, padre: a.padre }, X, Y);
+        if(!r){ anotaciones.set(llave, original()); return; }   // (12-nov) igual que en la pantalla
         anotaciones.set(llave, `<g class="${a.cls}" ${a.attrs} style="cursor:grab;">${r.svg}</g>`);
         fpCajasNombres.push(Object.assign({ room: a.padre || null }, r.caja));
         hojaCtx.cajas.push(Object.assign({ room: null }, r.caja));
@@ -52716,7 +53459,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // (R102) el clóset aparte NO va "incl.": se le restó al cuarto y sale con su propia área
       const aparte = apartes.map(sa => `${esc(sa.name)} ${fpFeetInches(sa.w)} x ${fpFeetInches(sa.d)} &middot; ${fpAreaSubArea(sa).toFixed(1)} sq ft`).join(', ');
       const sev = moisture ? (data._moistureMarks||[]).filter(m => m.type === 'fill' && m.roomIdx === i).map(m => fmKindDef(m.kind).legend.toLowerCase()).join(', ') : '';
-      return `${rdhjCuarto(name)}: ${dims} &middot; ${fpAreaTxt(r)}${subs ? ` (incl. ${subs})` : ''}${aparte ? ` &middot; + ${aparte}` : ''}${sev ? ` &middot; <i>${sev}</i>` : ''}${!moisture && eq ? ` (${eq})` : ''}`;
+      return `<b>${name}</b>: ${dims} &middot; ${fpAreaTxt(r)}${subs ? ` (incl. ${subs})` : ''}${aparte ? ` &middot; + ${aparte}` : ''}${sev ? ` &middot; <i>${sev}</i>` : ''}${!moisture && eq ? ` (${eq})` : ''}`;
     };
     // Decia lo mismo dos veces ("* ajustado a mano..." y despues, dentro
     // del resumen, "Dimensions marked * were set by hand..."). Se queda
@@ -52808,7 +53551,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(data.merged !== false){
       const lvls = levels.length ? levels : [1];
       lvls.forEach((lvl, li) => {
-        const lvlRooms = rooms.map((r, i) => ({r, i})).filter(x => !x.r.deleted && (!multi || (x.r.level||1) === lvl));
+        // (12-nov, la hoja de Aroldo en CompanyCam) un cuarto SIN paredes no se dibuja: tampoco va en la lista ni en "Rooms:"
+        // (decía "Closet: -Infinity'-NaN" x -Infinity'-NaN" · 0.0 sq ft" y contaba 7 cuartos con 6 en el dibujo)
+        const lvlRooms = rooms.map((r, i) => ({r, i})).filter(x => !x.r.deleted && (x.r.walls || []).length && (!multi || (x.r.level||1) === lvl));
         // (20-oct) El dibujo de la hoja que se manda: con la caja que le va a tocar en la hoja (fpMakeSheet:
         // 1142 px de ancho; de alto lo que deja la banda de abajo) sabe a cuántos puntos impresos sale cada
         // letra. Si al armar la hoja la caja salió de otro tamaño, fpAjustarLetraHoja lo vuelve a dibujar.
