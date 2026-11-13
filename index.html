@@ -19601,7 +19601,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R422';
+  const APP_BUILD = '2026-11-12-R423';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71327,7 +71327,50 @@ function paraLaLectura(texto){
  if(conQue&&(conQue[1]||/^(?:reply|answer)/.test(t)))return {accion:'responder',que:conQue[1]||null};
  return null;
 }
-const api={nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
+// ---------------------------------------------------------------------------------------------
+// CUANDO LAS REGLAS NO ENTIENDEN: QUE SE LE PUEDE PREGUNTAR AL MODELO DE LA MAC (12-nov-2026).
+// Tres examenes a ciegas con frases nuevas: 62%, 63%, 60%. Las reglas saben palabras, no
+// intenciones. El modelo local, limitado a escoger etiqueta, sube el examen nunca visto de 70% a
+// 81% en medio segundo y con cero trampas -- pero solo con estos candados, que por eso viven aqui,
+// donde los usan los dos lados (el telefono antes de preguntar, la Mac antes de contestar).
+const sinTildes=x=>String(x||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[¿¡?!,;:"«»“”']/g,' ').replace(/\s+/g,' ').trim();
+// Lo que NI se le pregunta: se va derecho al cerebro grande, como siempre.
+function vetada(frase){
+ const t=sinTildes(frase);
+ if(/^(?:como|donde|por que|para que|que es|que son|que significa|cual es|how do|how can|how to|where do|where can|where is|what is|what does|why)\b/.test(t))return 'pregunta de como se hace';
+ if(/^(?:\S+ ){1,3}(?:me |nos |le )?(?:dijo|dice|decia|grito|pidio|puso|escribio|mando decir|told me|told us|said|says|asked me|wrote)\b/.test(t)&&!/^(?:que|quien|what|who|dime|lee|leeme|read|a ver|haber|aver|me|nos|te|le|ya|si|no|hoy|ayer|did|has|have) /.test(t))return 'relato de lo que otro dijo';
+ if(/\b(?:dice|dijo|pusieron|puso|escribio|escribieron) (?:en (?:el|un) (?:mensaje|chat|grupo) )?que\b/.test(t)&&!/^que /.test(t))return 'instruccion citada';
+ if(/^(?:hazme|haz|crea|creame|llena|llename|anota|anotame|apunta|apuntame|registra|make|create|fill|log my|write down|manda|mandale|mandales|envia|enviale|send|share|forward|reenvia|paga|pagale|pay)\b/.test(t))return 'orden de crear, enviar o pagar';
+ // DINERO: tiene sus propias herramientas y confirmaciones. "cuanto le debo a Wilmer" el modelo lo llamo labor.
+ if(/\b(?:debo|debe|debemos|deben|deuda|saldo|pago|pagos|pagar|pague|pagale|cobro|cobrar|cobrale|adelanto|adelantale|dinero|precio|cuesta|cuestan|cotizacion|estimado|factura|invoice|owe|owes|pay|paid|payment|price|cost|balance|zelle|cheque|efectivo|cash)\b/.test(t))return 'dinero';
+ return null;
+}
+// Lo que SI vale la pena preguntar. Preguntarle todo le sumaria medio segundo a cada platica con
+// el cerebro grande; esto deja pasar solo lo que huele a mensajes o a horas de la gente. Es
+// ancho a proposito (raices, no frases): lo que decide es el modelo, esto solo ahorra el viaje.
+const HUELE=/mensa|mesa[yj]|recad|escri|texto|text|chat|whats|wasa|guasa|contest|respond|\bdij|\bdice|\bpuso|\bpusieron|\bmand[oa]|llego|llegaron|cayo|entro algo|me busc|me hablo|\blee|leer|\boir|escuch|read|wrote|sent|came in|message|inbox|hoja|\bojas?\b|\bhoras?\b|\boras\b|hours|labor|lavor|leibor|trabaj|\btiempos?\b|entro y salio|a que hora (?:entro|salio|llego)|timesheet|worked|clock/;
+function candidata(frase){
+ const t=sinTildes(frase);
+ if(!t||t.length>160||t.split(' ').length<2)return false;
+ if(vetada(frase))return false;
+ return HUELE.test(t);
+}
+// Lo que contesto el modelo se vuelve una frase que las reglas YA entienden. El modelo no hace
+// nada: solo escoge por cual puerta de las de leer se entra. `quien` solo vale si esta, letra
+// por letra, en lo que dijo el dueno: un nombre que el modelo invente no abre nada.
+function frasePara(etiqueta,quien,frase){
+ const en=english(frase);
+ let de='';
+ if(typeof quien==='string'){
+  const q=sinTildes(quien);
+  if(q&&q.length<=40&&/^[a-z0-9 .]+$/.test(q)&&sinTildes(frase).includes(q)&&!/^(?:la gente|los muchachos|todos|alguien|nadie|the guys|everyone)$/.test(q))de=q;
+ }
+ if(etiqueta==='leer')return de?'lee el mensaje de '+de:(en?'read my messages':'leeme los mensajes');
+ if(etiqueta==='ojeada')return en?'do i have messages':'tengo mensajes';
+ if(etiqueta==='labor')return de?'muestrame los labor logs de '+de:'muestrame los labor logs';
+ return null;
+}
+const api={vetada,candidata,frasePara,nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 // LUMI_INBOX_DIALOGUE_CORE_END
@@ -73721,6 +73764,28 @@ function lumiIncompleteSpeechReply(text){
  return null;
 }
 
+  let AS_ENTENDER_MAC=null;
+  async function asEntender(texto){
+    try{
+      if(SES.role!=='manager'||AS.sandbox||typeof LumiInboxDialogue==='undefined'||!LumiInboxDialogue.candidata||!LumiInboxDialogue.candidata(texto))return false;
+      const user=SES.user_id,company=SES.company_id,headers=cloudHeaders(),owner=user+'|'+company;
+      const call=async(url,init={},ms=2500)=>{const r=await authFetch(url,{...init,headers:{...headers,...init.headers},signal:AbortSignal.timeout(ms)});if(!r.ok)throw Error('sin Mac');const t=await r.text();return t?JSON.parse(t):null;};
+      let d=AS_ENTENDER_MAC&&AS_ENTENDER_MAC.owner===owner&&Date.now()-AS_ENTENDER_MAC.at<60000?AS_ENTENDER_MAC.d:null;
+      if(!d){const rows=await call('/rest/v1/asistente_ajustes?select=valor&company_id=eq.'+encodeURIComponent(company)+'&clave=eq.lumi_local_model_device');d=rows?.[0]?.valor||null;AS_ENTENDER_MAC={owner,at:Date.now(),d};}
+      if(!d||!d.available||d.userId!==user||Date.now()-Date.parse(d.updatedAt)>180000)return false;
+      let tema=null;try{tema=LumiInboxDialogue.temaAhora();}catch(e){}
+      const id=crypto.randomUUID(),route='/rest/v1/lumi_model_jobs?id=eq.'+id,t0=Date.now();
+      try{asEstado('pensando','Entendiendo…');}catch(e){}
+      await call('/rest/v1/lumi_model_jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,user_id:user,company_id:company,worker_id:d.workerId,state:'queued',payload:{local_profile:'lumi_entender',frase:String(texto).slice(0,400),tema:tema==='labor'||tema==='mensajes'?tema:null}})});
+      let frase=null;
+      try{const hasta=Date.now()+3000;while(Date.now()<hasta){await new Promise(r=>setTimeout(r,250));const j=(await call(route+'&select=state,result'))?.[0];if(j?.state==='failed')break;if(j?.state==='done'){const r=j.result?.data;if(r&&r.sent===false&&typeof r.frase==='string'&&r.frase)frase=r.frase;break;}}}
+      finally{call(route,{method:'DELETE'}).catch(()=>{});}
+      try{asBit('entender '+(Date.now()-t0)+' ms -> '+(frase||'nada'));}catch(e){}
+      if(!frase||owner!==SES.user_id+'|'+SES.company_id)return false;
+      if(/labor logs/.test(frase))return !!(await asLaborRead(frase));
+      return !!(await asInboxDialogue(frase));
+    }catch(e){return false;}
+  }
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto) return;
@@ -73770,6 +73835,12 @@ function lumiIncompleteSpeechReply(text){
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asPaymentFollowup(texto)))return;
     if(!dictando&&!AS.conf&&SES.role==='manager'&&lumiPaymentRequestIntent(texto)){AS.pregunta=null;if(await asPaymentRequestRead(texto))return;}
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asInboxDialogue(texto)))return;
+    // (12-nov-2026) CUANDO LAS REGLAS NO ENTIENDEN, SE LE PREGUNTA A LA MAC antes de irse al
+    // cerebro grande. Tres examenes a ciegas con frases nuevas sacaron ~60%: las reglas saben
+    // palabras, no intenciones. El modelo de la Mac escoge por cual puerta de LEER se entra
+    // (mensajes, ojeada o labor logs) y devuelve una frase que las reglas ya entienden; no puede
+    // borrar, mandar ni contestar. Si la Mac no esta, tarda o duda, se sigue como siempre.
+    if(!dictando&&!AS.conf&&!AS.pregunta&&(await asEntender(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asQuickReview(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asInboxPending(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLearnReply(texto)))return;
