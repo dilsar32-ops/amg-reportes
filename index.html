@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R462';
+  const APP_BUILD = '2026-11-13-R463';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -76029,9 +76029,9 @@ function lumiIncompleteSpeechReply(text){
          const d=(ok.length?'Listo. Mandé '+ok.length+(ok.length===1?' aviso':' avisos')+' por Mensajes de la app: a '+[...new Set(ok.map(x=>x.para_nombre))].join(', ')+'.':'')+(mal.length?(ok.length?' ':'')+'No pude mandar '+mal.length+': '+[...new Set(mal.map(x=>x.para_nombre))].join(', ')+'. Dígame "mándalos" para intentar otra vez.':'');
          if(mal.length)RV.pide=Date.now();
          asRecordarAccionMac(texto,d);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);return;}
-       if(RV&&RV.pide&&Date.now()-RV.pide<300000&&asEsNo(lw)){RV.pide=0;const d='Va, no mando nada. Los avisos se quedan sin mandar.';asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,d);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);return;}
+       if(RV&&RV.pide&&Date.now()-RV.pide<300000&&(asEsNo(lw)||/^(?:no )+(?:los|lo|las|la)? ?(?:mandes|envies)\b/.test(lw))){RV.pide=0;const d='Va, no mando nada. Los avisos se quedan sin mandar.';asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,d);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);return;}
        if(RV&&RV.pide&&!pideMandar)RV.pide=0;
-       if(RV&&pideMandar&&RV.porMandar&&RV.porMandar.length&&Date.now()-RV.at<1800000){RV.pide=Date.now();const k=RV.porMandar.length,d='Tengo '+k+(k===1?' aviso':' avisos')+' de la revisión: para '+[...new Set(RV.porMandar.map(x=>x.para_nombre))].join(', ')+'. ¿Se '+(k===1?'lo':'los')+' mando?';asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);return;}
+       if(RV&&pideMandar&&RV.porMandar&&RV.porMandar.length&&Date.now()-RV.at<43200000){RV.pide=Date.now();const k=RV.porMandar.length,d='Tengo '+k+(k===1?' aviso':' avisos')+' de la revisión: para '+[...new Set(RV.porMandar.map(x=>x.para_nombre))].join(', ')+'. ¿Se '+(k===1?'lo':'los')+' mando?';asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);return;}
       }
       const rev=lumiRevisionRapida(texto);
       if(rev){asPararOido();asCallar();asTranscribir(texto);asEstado('pensando','Revisando labor logs y horas…');
@@ -78578,6 +78578,73 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     }catch(e){ return 'error'; }
   };
   try{ const pend = sessionStorage.getItem('lumiMacPendiente'); if(pend){ sessionStorage.removeItem('lumiMacPendiente'); setTimeout(function(){ window.__lumiTrabajo(JSON.parse(pend)); }, 1500); } }catch(e){}
+  // ---- (13-nov-2026, punto 2) LA REVISIÓN DIARIA, SOLA ----
+  // Decisión del dueño: "al mediodía del día siguiente". Cualquier aparato suyo con la app abierta, pasado el
+  // mediodía, revisa los días que falten (hasta 3 hacia atrás, terminando en ayer), UNA vez por día entre todos
+  // sus aparatos (se anota en asistente_ajustes), y le avisa a ÉL. A la cuadrilla no le manda nada sin su sí.
+  // Limitación conocida: si ningún aparato suyo abre la app ese día, la revisión se hace al día siguiente.
+  async function lumiRevisionDeUnDia(fecha, owner){
+    const co = '&company_id=eq.' + encodeURIComponent(SES.company_id), f = encodeURIComponent(fecha);
+    const [perfiles, temporales, logs, horas, horasT] = await Promise.all([
+      lumiBasicAll('/rest/v1/profiles?select=id,full_name,labor_alias,status,role' + co, owner),
+      lumiBasicAll('/rest/v1/casual_workers?select=id,name,status' + co, owner),
+      lumiBasicAll('/rest/v1/labor_logs?select=*' + co + '&log_date=eq.' + f, owner),
+      lumiBasicAll('/rest/v1/time_entries?select=id,user_id,work_date,clock_in,clock_out,work_kind' + co + '&work_date=eq.' + f, owner),
+      lumiBasicAll('/rest/v1/casual_hours?select=*' + co + '&work_date=eq.' + f, owner)]);
+    const r = LumiCoincidencias.analizar(LumiCoincidencias.desdeFilas({ fecha: fecha, tolerancia_min: 15,
+      perfiles: perfiles.filter(function(p){ return p.status !== 'removed'; }), temporales: temporales.filter(function(p){ return p.status !== 'removed'; }), labor_logs: logs, time_entries: horas, casual_hours: horasT }));
+    const idsC = new Set(perfiles.map(function(p){ return String(p.id); })), idsT = new Set(temporales.map(function(p){ return String(p.id); }));
+    const claveDe = function(x){ return [x.fecha, x.empresa, x.log_id || '', x.encargado_id || ''].join('|'); };
+    return { r: r, claveDe: claveDe, idsC: idsC, idsT: idsT };
+  }
+  async function lumiRevisionDiaria(){
+    try{
+      if(typeof SES === 'undefined' || !SES || SES.role !== 'manager' || !isManager() || AS.sandbox || document.hidden || !cloudOn()) return;
+      const ahora = new Date(); if(ahora.getHours() < 12) return;
+      if(window.__lumiRevDiariaOcupada) return; window.__lumiRevDiariaOcupada = true;
+      const owner = lumiBasicOwner(), iso = function(d){ return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+      const hoy = iso(ahora), llave = 'lumi_revision_diaria_' + SES.user_id;
+      if(window.__lumiRevDiariaHecha === hoy) return;
+      const estado = (await lumiPaySetting(owner, llave)) || {};
+      if(estado.hecha === hoy){ window.__lumiRevDiariaHecha = hoy; return; }
+      // se aparta el día ANTES de revisar, para que otro aparato suyo no la repita
+      const ultima = String(estado.ultimaFecha || '');
+      await lumiPaySetting(owner, llave, { hecha: hoy, ultimaFecha: iso(new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - 1)), aparato: asDeviceKind() });
+      window.__lumiRevDiariaHecha = hoy;
+      const fechas = [];
+      for(let k = 3; k >= 1; k--){ const f = iso(new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - k)); if(f > ultima) fechas.push(f); }
+      if(!fechas.length) return;
+      let yaAvisados = []; try{ yaAvisados = ((await lumiPaySetting(owner, 'lumi_revision_avisada_' + SES.user_id)) || {}).claves || []; }catch(e){}
+      const partes = [], porMandar = []; let total = 0;
+      for(const f of fechas){
+        const d = await lumiRevisionDeUnDia(f, owner); total += d.r.hallazgos.length;
+        if(d.r.hallazgos.length) partes.push(d.r.resumen);
+        d.r.mensajes.forEach(function(x){
+          const id = String(x.encargado_id || ''); if(!id || id === String(SES.user_id) || !(d.idsC.has(id) || d.idsT.has(id)) || yaAvisados.includes(d.claveDe(x))) return;
+          porMandar.push({ clave: d.claveDe(x), para_user_id: d.idsC.has(id) ? id : null, para_casual_id: d.idsC.has(id) ? null : id, para_nombre: String(x.encargado || '').slice(0, 80), texto: String(x.texto || '').slice(0, 1900) });
+        });
+      }
+      const k = porMandar.length;
+      window.__lumiRevision = { at: Date.now(), fecha: fechas[fechas.length - 1], resultado: null, porMandar: porMandar, pide: 0, diaria: true };
+      const dias = fechas.length === 1 ? 'ayer' : 'los últimos ' + fechas.length + ' días';
+      window.__lumiRevisionAviso = {
+        dicho: total ? 'Amílcar, hice la revisión de ' + dias + ': encontré ' + total + (total === 1 ? ' cosa que no coincide' : ' cosas que no coinciden') + ' entre labor logs y horas. ' + (k ? 'Tengo ' + k + (k === 1 ? ' aviso listo para el encargado' : ' avisos listos para los encargados') + '. Dígame "mándalos" y se los mando.' : 'No hay a quién avisarle; es para que usted lo vea.')
+                     : 'Amílcar, hice la revisión de ' + dias + ': labor logs y horas coinciden. No encontré nada.',
+        texto: (total ? partes.join('\n\n') : 'Revisión de ' + dias + ': todo coincide.') + (k ? '\n\nMENSAJES QUE MANDARÍA POR LA APP (todavía no mando nada):\n' + porMandar.map(function(x){ return '— Para ' + x.para_nombre + ':\n' + x.texto; }).join('\n\n') : '')
+      };
+    }catch(e){ /* sin red o sin permiso: se vuelve a intentar en la siguiente vuelta, ya apartado el día no se repite el aviso */ }
+    finally{ window.__lumiRevDiariaOcupada = false; }
+  }
+  // Decirle el resultado: cuando la plática esté abierta y ella desocupada (no encima de otra respuesta).
+  function lumiRevisionAvisar(){
+    try{
+      const a = window.__lumiRevisionAviso; if(!a) return;
+      if(!AS.abierto || AS.enviando || !['esperando','escuchando'].includes(AS.estado) || (AS.estado === 'escuchando' && AS.texto && AS.texto.trim()) || Date.now() - (window.__lumiUltimoTurno || 0) < 25000) return;
+      window.__lumiRevisionAviso = null;
+      asCallar(); asMostrarRespuesta(a.texto); asHablar(a.dicho, asSeguirOyendo);
+    }catch(e){}
+  }
+  setTimeout(lumiRevisionDiaria, 60000); setInterval(lumiRevisionDiaria, 5 * 60000); setInterval(lumiRevisionAvisar, 10000);
   async function asNavegar(nav){
     if(window.__lumiMacChat && lumiMacEnviar({ nav: nav }, 'Abrí ' + (typeof asCmdNombrePantalla === 'function' && nav && nav.pantalla === 'pantalla' ? asCmdNombrePantalla(nav.destino) : 'la pantalla') + ' en mi ventana')) return;
     if(doorOverlay){
