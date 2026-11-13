@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-12-R435';
+  const APP_BUILD = '2026-11-12-R436';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70244,6 +70244,20 @@ function createLumiNativeStreamPlayer({plugin,fallback,uuid=()=>crypto.randomUUI
     asEstado('esperando',message);
   }
   async function asLlamar(body, onTexto){
+    // (12-nov-2026) Lo de mudanza se dice como lo dice el dueño, no "el conector de este grupo...".
+    const r = await asLlamarCruda(body, onTexto);
+    try{ if(r && r.json && typeof r.json.texto === 'string' && typeof LumiInboxDialogue !== 'undefined' && LumiInboxDialogue.decirMejor) r.json.texto = LumiInboxDialogue.decirMejor(r.json.texto); }catch(e){}
+    // "Manda todos" con de las dos empresas: el cerebro grande manda los de restauración y se CALLABA los de
+    // mudanza. Decisión del dueño (12-nov): mandar solo restauración y AVISAR cuántos de mudanza dejó fuera.
+    try{
+      if(r && r.json && typeof r.json.texto === 'string' && /^Tengo \d+ hoja\(s\):/.test(r.json.texto) && SES.role === 'manager' && !AS.sandbox && LumiInboxDialogue.avisoMudanzaFuera){
+        const q = await authFetch('/rest/v1/labor_logs?select=id&work_kind=eq.mudanza&archived_at=is.null&limit=50', { headers: cloudHeaders(), signal: AbortSignal.timeout(4000) });
+        if(q.ok){ const n = (await q.json()).length; const aviso = LumiInboxDialogue.avisoMudanzaFuera(n, false); if(aviso) r.json.texto += ' ' + aviso; }
+      }
+    }catch(e){}
+    return r;
+  }
+  async function asLlamarCruda(body, onTexto){
     try{ return await asLlamarUnaVez(body, onTexto); }
     catch(e){
       const esRed = AS_RED_RE.test(String((e && e.message) || e));
@@ -71450,7 +71464,25 @@ function suenaComo(palabra,nombres){
  }
  return iguales.length?iguales:cerca;
 }
-const api={readingResumen,quiereTextual,huellaDeSonido,suenaComo,oidoDeObra,ordenHojasAlGrupo,vetada,candidata,frasePara,nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
+// AL GRUPO SOLO VAN LOS LABOR LOGS DE RESTORATION DOCTOR (regla del dueno, 12-nov-2026).
+// "Si llega un labor log de mudanza, no se envia al grupo; esos llegan a otra seccion, en mudanzas."
+// El cerebro grande ya lo cumplia, pero lo decia en tecnico ("El conector de este grupo envia Labor
+// Logs de restauracion") o no lo decia ("No veo un labor log nuevo de..."). Aqui esta la frase del
+// dueno, y lo que hay que agregar cuando un envio dejo fuera reportes de mudanza.
+const FRASE_MUDANZA_ES='Ese es de mudanza; esos no van al grupo. Está en Mudanzas recibidas.';
+const FRASE_MUDANZA_EN='That one is a moving report; those do not go to the group. It is in Moving reports received.';
+function decirMejor(texto){
+ const t=String(texto||'');
+ if(/El conector de este grupo env[ií]a Labor Logs de restauraci[oó]n\.\s*No envi[eé] el reporte de mudanza\.?/.test(t))return t.replace(/El conector de este grupo env[ií]a Labor Logs de restauraci[oó]n\.\s*No envi[eé] el reporte de mudanza\.?/,FRASE_MUDANZA_ES);
+ return t;
+}
+// Lo que se agrega cuando mando (o iba a mandar) labor logs al grupo y habia de mudanza pendientes.
+function avisoMudanzaFuera(cuantos,en){
+ const n=Number(cuantos)||0;if(n<=0)return '';
+ return en?(n===1?'I left out 1 moving report: those do not go to the group; it is in Moving reports received.':'I left out '+n+' moving reports: those do not go to the group; they are in Moving reports received.')
+          :(n===1?'Dejé fuera 1 de mudanza: esos no van al grupo; está en Mudanzas recibidas.':'Dejé fuera '+n+' de mudanza: esos no van al grupo; están en Mudanzas recibidas.');
+}
+const api={FRASE_MUDANZA_ES,FRASE_MUDANZA_EN,decirMejor,avisoMudanzaFuera,readingResumen,quiereTextual,huellaDeSonido,suenaComo,oidoDeObra,ordenHojasAlGrupo,vetada,candidata,frasePara,nombreParaDecir:sinMaybe,APPS,norm,clean,sources,english,helpAnswer,paraLaLectura,adviceRequest,resumeAdvice,intent,deleteIntent,snapshot,overview,follow,evidence,messageBody,messageSender,basicAdvice,safeAdvice,reading,paraOido,dictado,marcarTema,temaAhora,olvidarTema};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiInboxDialogue=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 // LUMI_INBOX_DIALOGUE_CORE_END
@@ -74360,6 +74392,10 @@ function lumiIncompleteSpeechReply(text){
     if(phase==='done')AS_ACTION_TIMER=setTimeout(()=>{el.hidden=true;},4500);
   }
   async function asControlHojaMac(it,action){
+    // (12-nov-2026) Una hoja de mudanza no se copia ni se pega hacia el grupo de Restoration.
+    if(it && (it.work_kind === 'mudanza' || it.kind === 'mudanza' || it.tipo === 'mudanza' || it.empresa === 'mudanza')){
+      const t='Esa hoja es de mudanza; esas no van al grupo. Está en Mudanzas recibidas.';asMostrarRespuesta(t);asHablar(t,asSeguirOyendo);return;
+    }
     const owner=SES.user_id+'|'+SES.company_id,companyId=SES.company_id;
     const call=async(url,init={})=>{const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),15000);try{const r=await authFetch(url,{...init,signal:ctl.signal,headers:{...cloudHeaders(),...init.headers}});if(!r.ok)throw Error('La conexión con la Mac respondió '+r.status);return r.status===204?null:await r.json();}finally{clearTimeout(timer);}};
     let node;asAccionVisible('Conectando con tu Mac…','working');
@@ -76311,6 +76347,16 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       if(!res.ok) throw new Error('HTTP ' + res.status);
       const row = (await res.json())[0]; if(!row) throw new Error('ese labor log ya no está');
       const kind = row.work_kind === 'mudanza' ? 'mudanza' : 'restauracion';
+      // (12-nov-2026) AL GRUPO SOLO VAN LOS LABOR LOGS DE RESTORATION DOCTOR. Regla del dueño: "si llega un
+      // labor log de mudanza, no se envía al grupo; esos llegan a otra sección, en mudanzas". El estudio de
+      // ese día halló que Lumi sí lo cumplía pero ESTA función -- por donde pasan el botón Grupo, la tarjeta
+      // de una hoja y el lote de la Mac -- no revisaba nada: con la Mac conectada, un toque en Grupo sobre
+      // una mudanza la mandaba sola al grupo de Restoration y la archivaba. Solo pasa lo que dice
+      // exactamente 'restauracion'; un tipo vacío o raro tampoco.
+      if(row.work_kind !== 'restauracion'){
+        const e = new Error(row.work_kind === 'mudanza' ? 'Ese reporte es de mudanza; esos no van al grupo. Está en Mudanzas recibidas.' : 'Ese reporte no dice de qué empresa es. No lo mandé al grupo.');
+        e.noVaAlGrupo = true; throw e;
+      }
       // 2. las hojas (el formulario se pinta con el reporte y se imprime a JPG, igual que CompanyCam)
       if(deps.loadPayload || typeof loadPayload === 'function'){ if(typeof laborMode !== 'undefined') laborMode = kind; (deps.loadPayload || loadPayload)(row.payload || {}, kind); }
       // (30 oct, el dueño: "¿por qué va sin precio?") la hoja del grupo va CON precio, igual que la de la galería de Lumi: el manager manda
@@ -80349,11 +80395,15 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   function rdmsRapidos(){
     if(!document.body.classList.contains('rdms-labor')) return;
     const en = typeof idiEn === 'function' && idiEn();
+    // (12-nov-2026) En Mudanzas recibidas NO sale el botón Grupo: los reportes de mudanza no van al grupo.
+    const esMudanza = (typeof laborMode !== 'undefined' && laborMode === 'mudanza');
+    if(esMudanza) document.querySelectorAll('#inboxList .rdms-rb-g').forEach(b => b.remove());
+    else document.querySelectorAll('#inboxList .rdms-rap').forEach(s => { if(!s.querySelector('.rdms-rb-g')) s.remove(); });   // venía de mudanza: se vuelve a armar completo
     document.querySelectorAll('#inboxList .inboxitem').forEach(f => {
       if(f.querySelector('.rdms-rap')) return;
       const s = document.createElement('span'); s.className = 'rdms-rap';
       s.innerHTML = '<span role="button" tabindex="0" class="rdms-rb" data-rdms-rap="ver"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + RDMS_IC.ver + '"/></svg><i>' + (en ? 'View' : 'Ver') + '</i></span>'
-        + '<span role="button" tabindex="0" class="rdms-rb rdms-rb-g" data-rdms-rap="grupo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + RDMS_IC.grupo + '"/></svg><i>' + (en ? 'Group' : 'Grupo') + '</i></span>';
+        + (esMudanza ? '' : '<span role="button" tabindex="0" class="rdms-rb rdms-rb-g" data-rdms-rap="grupo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="' + RDMS_IC.grupo + '"/></svg><i>' + (en ? 'Group' : 'Grupo') + '</i></span>');
       f.appendChild(s); f.classList.add('rdms-con-rap');
     });
   }
