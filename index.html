@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R447';
+  const APP_BUILD = '2026-11-13-R448';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -19719,7 +19719,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const aparato = typeof isNative === 'function' && isNative() && !!actPlugin();
       const res = await fetch((aparato ? VERSION_SITIO : 'version.txt') + '?cb=' + Date.now(), { cache: 'no-store' });   // (R87) el aparato, al sitio
       if(!res.ok) return;
-      const latest = (await res.text()).trim();
+      let latest = (await res.text()).trim();
+      // (13-nov-2026, pedido del dueño) ACTUALIZACIONES SOLO DEL MANAGER. Lo que nada más toca al manager o a Lumi
+      // ya no le saca el aviso a la cuadrilla en pleno trabajo: esas salidas suben `version-manager.txt` y dejan
+      // `version.txt` como está. Solo los aparatos con sesión de manager miran también ese segundo sello.
+      // Una salida que SÍ importa al equipo sube los dos archivos, como siempre.
+      try{
+        if(typeof SES !== 'undefined' && SES && SES.role === 'manager'){
+          const rm = await fetch((aparato ? VERSION_SITIO.replace('version.txt', 'version-manager.txt') : 'version-manager.txt') + '?cb=' + Date.now(), { cache: 'no-store' });
+          if(rm.ok){ const lm = (await rm.text()).trim(); if(/^\d{4}-\d{2}-\d{2}-[A-Za-z0-9]+$/.test(lm) && (!latest || selloMasNuevo(lm, latest))) latest = lm; }
+        }
+      }catch(e){}
       if(!latest || !selloMasNuevo(latest, APP_BUILD)) return;   // solo si es mas nueva, no solo distinta
       if(aparato) return await actNativoNueva(latest);
       let bar = document.getElementById('newVersionBar');
