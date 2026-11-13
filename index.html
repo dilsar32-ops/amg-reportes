@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R440';
+  const APP_BUILD = '2026-11-13-R441';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -73854,15 +73854,16 @@ const LUMI_LABOR_READ = (() => {
   function summarize(rows,q) {
     if(q.error)return q.error;
     const list=select(rows,q),en=q.en,lines=[];
-    const range=q.from?(en?' for ':' del ')+q.from+(q.to!==q.from?' — '+q.to:''):'';
+    // DICHO COMO PERSONA (13-nov-2026): antes "No encontré reportes que coincidan del 2026-11-13."
+    // -- una fecha de maquina leida en voz alta. Ahora: "Hoy todavía no ha llegado ningún labor log."
+    const hoyD=new Date(),hoy=hoyD.getFullYear()+'-'+String(hoyD.getMonth()+1).padStart(2,'0')+'-'+String(hoyD.getDate()).padStart(2,'0');
+    const ayerD=new Date(hoyD.getFullYear(),hoyD.getMonth(),hoyD.getDate()-1),ayer=ayerD.getFullYear()+'-'+String(ayerD.getMonth()+1).padStart(2,'0')+'-'+String(ayerD.getDate()).padStart(2,'0');
+    const MES=en?['January','February','March','April','May','June','July','August','September','October','November','December']:['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const dia=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));return m?(en?MES[+m[2]-1]+' '+(+m[3]):(+m[3])+' de '+MES[+m[2]-1]):String(iso);};
+    const cuando=iso=>iso===hoy?(en?'today':'hoy'):iso===ayer?(en?'yesterday':'ayer'):dia(iso);
+    const range=!q.from?'':q.to!==q.from?(en?' from '+dia(q.from)+' to '+dia(q.to):' del '+dia(q.from)+' al '+dia(q.to)):q.from===hoy||q.from===ayer?(en?' for ':' de ')+cuando(q.from):(en?' for ':' del ')+dia(q.from);
     if(!list.length){
-      // DICHO COMO PERSONA (13-nov-2026): antes "No encontré reportes que coincidan del 2026-11-13."
-      // -- una fecha de maquina leida en voz alta. Ahora: "Hoy todavía no ha llegado ningún labor log."
-      const hoyD=new Date(),hoy=hoyD.getFullYear()+'-'+String(hoyD.getMonth()+1).padStart(2,'0')+'-'+String(hoyD.getDate()).padStart(2,'0');
-      const ayerD=new Date(hoyD.getFullYear(),hoyD.getMonth(),hoyD.getDate()-1),ayer=ayerD.getFullYear()+'-'+String(ayerD.getMonth()+1).padStart(2,'0')+'-'+String(ayerD.getDate()).padStart(2,'0');
-      const MES=en?['January','February','March','April','May','June','July','August','September','October','November','December']:['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-      const dia=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));return m?(en?MES[+m[2]-1]+' '+(+m[3]):(+m[3])+' de '+MES[+m[2]-1]):String(iso);};
-      const cosa=en?(q.sent?'sent ':q.pending?'pending ':'')+'labor log':'labor log'+(q.sent?' enviado':q.pending?' pendiente':'');
+      const cosa=en?(q.sent?'sent ':q.pending?'pending ':'')+'labor log':'labor log'+(q.sent?' enviado':q.pending?' por mandar':'');
       const quien=q.leader?String(q.leader).replace(/(^|\s)\S/g,c=>c.toUpperCase()):'';const de=quien?(en?' from '+quien:' de '+quien):'';
       if(!q.from)lines.push(en?'No '+cosa+'s'+de+' right now.':'No hay ningún '+cosa+de+' ahorita.');
       else if(q.from===q.to&&q.from===hoy)lines.push(en?'No '+cosa+de+' has come in yet today.':'Hoy todavía no ha llegado ningún '+cosa+de+'.');
@@ -73870,17 +73871,23 @@ const LUMI_LABOR_READ = (() => {
       else if(q.from===q.to)lines.push(en?'There is no '+cosa+de+' for '+dia(q.from)+'.':'No hay ningún '+cosa+de+' del '+dia(q.from)+'.');
       else lines.push(en?'There is no '+cosa+de+' from '+dia(q.from)+' to '+dia(q.to)+'.':'No hay ningún '+cosa+de+' del '+dia(q.from)+' al '+dia(q.to)+'.');
       if(q.pending&&!q.archived){
-        const sent=select(rows,{...q,pending:false,unread:false,sent:true}).slice(0,2);
-        if(sent.length)lines.push((en?'Already sent: ':'Ya enviados: ')+sent.map(r=>r.crew_leader+' ('+r.log_date+')').join(', ')+'.');
-        const arch=select(rows,{...q,archived:true,pending:true,unread:false,sent:false}).length;
-        if(arch)lines.push(en?`${arch} archived report(s) have no recorded group send; they are separate from the active queue.`:`Hay ${arch} archivado(s) sin envío registrado; están separados de los pendientes activos.`);
+        // LO MISMO QUE DICE LA PANTALLA (13-nov-2026). Inicio decia "4 reportes pendientes" y Lumi
+        // "ninguno": los 4 ya estaban enviados al grupo pero sin abrir (punto azul). Ahora ella lo
+        // dice asi, sin fechas de maquina y sin el letrero de los archivados.
+        const sinAbrir=rows.filter(r=>!r.archived_at&&r.sent_group_at&&!r.seen&&r.work_kind!=='mudanza'&&(!q.leader||norm(r.crew_leader)===q.leader||norm(r.crew_leader).startsWith(q.leader+' ')));
+        if(sinAbrir.length){
+          const quienes=[...new Set(sinAbrir.map(r=>r.crew_leader))];
+          const nombres=quienes.slice(0,3).join(', ')+(quienes.length>3?(en?' and others':' y otros'):'');
+          lines.push(en?(sinAbrir.length===1?'One already sent to the group is still unopened: ':sinAbrir.length+' already sent to the group are still unopened: ')+nombres+'.'
+            :(sinAbrir.length===1?'Hay uno ya enviado al grupo que no has abierto: ':'Hay '+sinAbrir.length+' ya enviados al grupo que no has abierto: ')+nombres+'.');
+        }
       }
       return lines.join('\n');
     }
     for(const [kind,label] of [['restauracion',en?'Restoration':'Restauración'],['mudanza',en?'Moving':'Mudanzas']]){
       const group=list.filter(r=>(r.work_kind==='mudanza'?'mudanza':'restauracion')===kind);if(!group.length)continue;
       lines.push(`${label}: ${group.length} ${en?(group.length===1?'report':'reports'):(group.length===1?'reporte':'reportes')}${range}.`);
-      for(const r of group.slice(0,3))lines.push('• '+r.crew_leader+' · '+r.log_date+' · '+state(r,en)+'.');
+      for(const r of group.slice(0,3))lines.push('• '+r.crew_leader+' · '+cuando(String(r.log_date||'').slice(0,10))+' · '+state(r,en)+'.');
       if(group.length>3)lines.push(en?`And ${group.length-3} more.`:`Y ${group.length-3} más.`);
     }
     return lines.join('\n');
