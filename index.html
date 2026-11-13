@@ -15155,7 +15155,11 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     <!-- (Albañil, 1 nov 2026) AVISOS DE LA CUENTA: el estado REAL ("prendidos" solo si la nube guardó el teléfono a nombre de esta
          cuenta) y el botón que los prende; con el iPhone en "no", el botón abre los Ajustes de la app. Solo con sesión de cuenta. -->
     <section class="card aj-avisos" id="ajAvisos" hidden><div class="aj-oye-fila"><span class="aj-oye-t"><b>Avisos</b><span class="aj-oye-s" id="ajAvisosS"></span></span><button type="button" class="minibtn" id="cuentaAvisos" hidden>🔔 Prender los avisos</button></div><div class="cuenta-aviso-vidrio" id="ajAvisosVidrio" role="status" aria-live="polite" hidden><p></p></div></section>
-    <section class="card aj-rb" id="ajRb" hidden><button type="button" id="ajRbBloq"><span>Bloqueados</span></button><button type="button" id="ajRbRep" hidden><span>Reportes de mensajes</span><span class="rb-n" id="ajRbRepN"></span></button></section><section class="card aj-sesion"><button class="btn btn-ghost" type="button" id="doorSignOut" hidden>Cerrar sesión</button><button class="btn btn-ghost" type="button" id="doorBorrar" hidden>Borrar mi cuenta</button></section>
+    <section class="card aj-rb" id="ajRb" hidden><button type="button" id="ajRbBloq"><span>Bloqueados</span></button><button type="button" id="ajRbRep" hidden><span>Reportes de mensajes</span><span class="rb-n" id="ajRbRepN"></span></button></section><!-- (12-nov-2026) LA MAC DE LUMI. Cuando la sesion guardada del puente caduca, Lumi se queda muda y hay que darle una
+     sesion buena. Antes eso se hacia pegando JavaScript en la consola de Chrome: el dueno lo pego tres veces en la
+     Terminal por equivocacion. Aqui es un boton: copia la llave y ensena el unico comando que hay que pegar.
+     Solo manager y solo con sesion. No manda nada a ningun lado: la llave va al portapapeles de esta Mac. -->
+    <section class="card aj-maclumi" id="ajMacLumi" hidden><div class="aj-oye-fila"><span class="aj-oye-t"><b>La Mac de Lumi</b><span class="aj-oye-s" id="ajMacLumiS">Si Lumi se queda muda, reconéctela desde aquí</span></span><button type="button" class="minibtn" id="ajMacLumiBtn">Copiar la llave</button></div><div class="cuenta-aviso-vidrio" id="ajMacLumiVidrio" role="status" aria-live="polite" hidden><p></p></div></section><section class="card aj-sesion"><button class="btn btn-ghost" type="button" id="doorSignOut" hidden>Cerrar sesión</button><button class="btn btn-ghost" type="button" id="doorBorrar" hidden>Borrar mi cuenta</button></section>
   </div>
   <div class="aj-pie"><button type="button" class="btn btn-outline" id="ajVolver"><span aria-hidden="true">&larr; </span>Regresar<span class="en"> / Back</span></button></div>
 </div>
@@ -56962,6 +56966,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   // El estado de la cuenta en Ajustes, verdadero: "prendidos" solo con la respuesta de la nube a nombre de esta cuenta.
   function pintarAvisosCuenta(){
+    try{ pintarMacLumi(); }catch(e){}
     const card = $('#ajAvisos'), s = $('#ajAvisosS'), b = $('#cuentaAvisos'); if(!card || !s || !b) return;
     const hayWeb = ('serviceWorker' in navigator) && ('PushManager' in window) && typeof Notification !== 'undefined';
     const plat = (window.Capacitor && typeof window.Capacitor.getPlatform === 'function') ? window.Capacitor.getPlatform() : '';
@@ -56974,6 +56979,37 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     else if(cuentaPushEsperando){ s.textContent = 'Todav\u00eda no est\u00e1n prendidos en este tel\u00e9fono'; b.hidden = false; b.disabled = true; b.textContent = 'Prendiendo\u2026'; }
     else { s.textContent = 'Todav\u00eda no est\u00e1n prendidos en este tel\u00e9fono'; b.hidden = false; b.disabled = false; b.textContent = '\u{1F514} Prender los avisos'; }
   }
+  // LA MAC DE LUMI (12-nov-2026). Copia la sesion de ESTA cuenta al portapapeles y ensena el
+  // comando. Nada sale de esta Mac: es el portapapeles, igual que copiar a mano.
+  function pintarMacLumi(){
+    const card = $('#ajMacLumi'); if(!card) return;
+    let s = null; try{ s = JSON.parse(localStorage.getItem('ses')||'null'); }catch(e){}
+    card.hidden = !(signedIn() && s && s.role === 'manager' && s.access_token);
+  }
+  function macLumiVidrio(txt){
+    const av = $('#ajMacLumiVidrio'); if(!av) return;
+    const p = av.querySelector('p'); if(p) p.textContent = txt;
+    av.hidden = false; av.classList.remove('ver'); setTimeout(()=>av.classList.add('ver'), 20);
+    setTimeout(()=>{ av.classList.remove('ver'); setTimeout(()=>{ av.hidden = true; }, 400); }, 12000);
+  }
+  // Se pinta en cuanto se abre Ajustes (la hoja solo quita el atributo hidden).
+  try{ const hoja = document.getElementById('ajustes');
+    if(hoja && typeof MutationObserver === 'function')
+      new MutationObserver(()=>{ if(!hoja.hidden) { try{ pintarMacLumi(); }catch(e){} } })
+        .observe(hoja, {attributes:true, attributeFilter:['hidden']});
+  }catch(e){}
+  if($('#ajMacLumiBtn')) $('#ajMacLumiBtn').addEventListener('click', async ()=>{
+    let crudo = null; try{ crudo = localStorage.getItem('ses'); }catch(e){}
+    if(!crudo){ macLumiVidrio('No hay sesión guardada en este navegador. Entre con su cuenta y vuelva a intentar.'); return; }
+    let ok = false;
+    try{ await navigator.clipboard.writeText(crudo); ok = true; }
+    catch(e){
+      try{ const ta = document.createElement('textarea'); ta.value = crudo; ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.opacity='0';
+           document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); }catch(e2){}
+    }
+    macLumiVidrio(ok ? 'Llave copiada. Ahora pegue esto en la Terminal: pbpaste | node ~/Library/Mobile\\ Documents/com~apple~CloudDocs/Trabajo/field-report-ios-app/tools/lumi_mac/reconectar.mjs'
+                     : 'Este navegador no dejó copiar. Abra la app en Chrome e intente otra vez.');
+  });
   // La tarjeta de vidrio: entra suave enfrente y se desvanece sola.
   const cuentaVidrioTimers = new Map();
   function cuentaPushVidrio(av){
