@@ -19610,7 +19610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R441';
+  const APP_BUILD = '2026-11-13-R442';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -73645,6 +73645,31 @@ async function asCommercialQuote(order,texto){
 }
 
 // R349: read-only labor-log queries. No send, archive, payment or seen writes.
+// LUMI_HORA_BEGIN  (13-nov-2026) "¿Qué hora es?" lo mandaba a la nube, tardaba ~55 s y contestaba "el reloj
+// del teléfono no llegó". La hora y la fecha las sabe el aparato: se contestan aquí, al instante.
+// Solo frases COMPLETAS de hora/fecha (sola o junto con "¿en qué aparato estoy?"); nada más se toca.
+function lumiHoraAnswer(texto, kind, now) {
+  const n = String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[¿?¡!.,;:]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/^(oye |hey |ey |hola )?(lumi|lumy|lummi) /, '').replace(/ (lumi|por favor|please)$/, '');
+  if(!n) return null;
+  const d = now || new Date();
+  const en = /^(what|whats|which|do you|tell me|where|from)\b/.test(n);
+  const HORA = /^(que hora (es|son|tienes|tenemos|sera)( ahorita| ya| ahora)?|que horas (son|tienes)( ahorita| ya)?|me dices la hora|dime la hora|tienes la hora|la hora|what time is it( now)?|whats the time|what is the time|tell me the time)$/;
+  const FECHA = /^(que dia es( hoy)?|que fecha es( hoy)?|que fecha tenemos( hoy)?|a cuanto(s)? estamos( hoy)?|a que (dia|fecha) estamos|cual es la fecha( de hoy)?|que dia es hoy y que fecha|what day is it( today)?|whats the date( today)?|what is the date( today)?|what is todays date|whats todays date)$/;
+  const hora = () => { let H = d.getHours(); const m = String(d.getMinutes()).padStart(2, '0'); const ap = H >= 12 ? 'PM' : 'AM'; H = H % 12 || 12;
+    return en ? "It's " + H + ':' + m + ' ' + ap + '.' : (H === 1 ? 'Es la 1:' : 'Son las ' + H + ':') + m + ' ' + (ap === 'AM' ? 'de la mañana' : d.getHours() < 19 ? 'de la tarde' : 'de la noche') + '.'; };
+  const fecha = () => { const DIA = en ? ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'] : ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+    const MES = en ? ['January','February','March','April','May','June','July','August','September','October','November','December'] : ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    return en ? 'Today is ' + DIA[d.getDay()] + ', ' + MES[d.getMonth()] + ' ' + d.getDate() + '.' : 'Hoy es ' + DIA[d.getDay()] + ' ' + d.getDate() + ' de ' + MES[d.getMonth()] + '.'; };
+  const una = p => HORA.test(p) ? hora() : FECHA.test(p) ? fecha() : (typeof lumiDeviceAnswer === 'function' ? lumiDeviceAnswer(p, kind) : null);
+  const partes = n.split(/ (?:y|and) (?:tambien |also )?/);
+  if(!partes.some(p => HORA.test(p) || FECHA.test(p))) return null;      // sin hora ni fecha, no es mío
+  const dichas = partes.map(una);
+  if(dichas.some(x => !x)) return null;                                    // trae otra cosa: que la atienda quien sabe
+  return dichas.join(' ');
+}
+if(typeof module === 'object' && module.exports) module.exports.lumiHoraAnswer = lumiHoraAnswer;
+// LUMI_HORA_END
 // LUMI_LABOR_READ_BEGIN
 // LECTURA DE LABOR LOGS. Vivia suelto dentro de index.html, sin pruebas y sin casa.
 // Se saco aqui el 12-nov-2026 para poder probarlo: en el html queda entre sus dos marcadores
@@ -74111,7 +74136,7 @@ function lumiIncompleteSpeechReply(text){
     }
     if(!dictando&&!AS.conf&&!AS.pregunta){const owner=SES.user_id+'|'+SES.company_id;const context=lumiCurrentMessageContext(owner);let compose=lumiComposeParse(texto,LUMI_MESSAGE_DRAFT?.owner===owner?LUMI_MESSAGE_DRAFT:null,context);if(compose?.query){if(!compose.app){await lumiLoadRoutes(owner);if(owner!==SES.user_id+'|'+SES.company_id)return;}compose=lumiResolveCompose(compose,lumiRouteRows(owner),owner);}if(compose){await asComposeMessage(compose,texto);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const quote=lumiQuoteOrder(texto);if(quote){await asCommercialQuote(quote,texto);return;}}
-    if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiDeviceAnswer(texto,asDeviceKind())||lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
+    if(!dictando&&!AS.conf&&!AS.pregunta){const greeting=lumiHoraAnswer(texto,asDeviceKind())||lumiDeviceAnswer(texto,asDeviceKind())||lumiSimpleGreeting(texto)||lumiCapabilityHelp(texto);if(greeting){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,greeting);asMostrarRespuesta(greeting);asHablar(greeting,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const follow=lumiReviewFollowup(texto,LUMI_REVIEW_DETAIL,SES.user_id+'|'+SES.company_id);if(follow){asTranscribir(texto);if(follow.action==='chat'){await asEscritorioMac({app:follow.app,action:'read_chat',query:follow.query});return;}asPararOido();asCallar();const answer=follow.action==='details'?LUMI_REVIEW_DETAIL.text:follow.text;asMostrarRespuesta(answer);asHablar(answer,asSeguirOyendo);return;}}
     if(!dictando&&!AS.conf&&!AS.pregunta){const review=lumiReviewOrder(texto);if(review){await asRevisionCompleta(review,texto);return;}}
     if(!dictando&&!AS.conf){const calendar=LUMI_CAL_CHAT.order(texto);if(calendar){asTranscribir(texto);await asEscritorioMac({...calendar,originalText:texto});return;}}
