@@ -19619,7 +19619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R471';
+  const APP_BUILD = '2026-11-13-R472';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -47719,8 +47719,606 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   // El contorno de un cuarto: sus paredes encadenadas, y ningún puente por el piso cerrado de otro cuarto (gapInfo.plano = su plano,
   // si se sabe; si no, el motor lo busca entre los planos que ha visto).
+  // (13-nov-2026, Cara) Si el cuarto está en un plano que el motor conoce, el contorno sale de fpContornosDelNivel: el de siempre
+  // (fpContornoDeCuarto con su piso ajeno) y encima las dos reglas del dueño del 13-nov (ver fpPisoSuelto). Se saca una vez para
+  // todo el nivel y se guarda mientras nada del plano cambie (fpClaveContornos). Sin plano (un cuarto suelto, una copia) sale como siempre.
   function fpOrderedRoomPolygon(room, gapInfo){
-    return fpContornoDeCuarto(room, gapInfo, fpPisoAjeno(room, gapInfo && gapInfo.plano), true);
+    const d = typeof fpContornosDelNivel === 'function' && room && typeof room === 'object' && !room.deleted ? fpPlanoDe(room, gapInfo && gapInfo.plano) : null;
+    const r = d ? fpContornosDelNivel(d, room) : null;
+    let poly;
+    if(r){ if(gapInfo) Object.assign(gapInfo, JSON.parse(JSON.stringify(r.gi))); poly = r.poly.map(p => ({ x: p.x, y: p.y })); }
+    else poly = fpContornoDeCuarto(room, gapInfo, fpPisoAjeno(room, gapInfo && gapInfo.plano), true);
+    // (13-nov, junto) encima del contorno del nivel (Cara: piso suelto y needs review rehecho) va la regla del piso contado dos veces
+    // (Encime): decide sobre los contornos de siempre y aquí solo recorta; el piso suelto de Cara es piso que nadie tenía, no encima.
+    return typeof fpSinPisoDoble === 'function' ? fpSinPisoDoble(room, poly, gapInfo) : poly;
+  }
+  // (13-nov-2026, Encime) PISO CONTADO DOS VECES. La regla del piso ajeno (31-oct, 12-nov) solo desvía las líneas de CIERRE
+  // (puentes) de un cuarto; las paredes no. Quedaban dos cuartos con el mismo piso adentro de sus contornos, y ese piso salía
+  // en los dos números y dos veces en el total (la app solo avisaba "piso contado dos veces" desde 4 sq ft). Casos del equipo:
+  // el Bath Master que la app dedujo como una caja (fpAutoCompletarEspacios) encima de la Bedroom y del Hallway 2F, que con sus
+  // paredes escaneadas encierran esas dos franjas (5.1 y 7.1 sq ft); el Gimnasio que cierra con una diagonal de 9 ft por la
+  // sala (14.2); el "O" de puros puentes encima del Hallway 2 (4.1).
+  // Regla: el piso que dos contornos encierran es del cuarto cuyas PAREDES DE VERDAD lo encierran. Se mira la línea que cada
+  // uno mete por el piso del otro (lo que separa ese piso del resto del vecino): si es pared de verdad (la vio el láser o la
+  // dibujó el técnico) o cálculo (un puente, un rodeo, una pared que la app dedujo y nadie movió). Gana el que la mete más de
+  // pared de verdad (0.25 de ventaja); el otro cede: su contorno se corta por el borde del que gana. Así el piso se cuenta UNA
+  // vez y nadie lo pierde: lo que uno cede ya está adentro del contorno del otro.
+  // Una pared que los DOS cuartos tienen en su lista no cuenta para ninguno (o es la que los separa, o uno solo la vio por la
+  // puerta). Y no gana un cuarto si la línea que el otro mete en su piso va por una pared de verdad del que ganaría (25% o más):
+  // su contorno pasó por encima de su propia pared para agarrar ese piso (live_plan_closet sin editar: el Bathroom trae dos
+  // paredes del pasillo que vio por la puerta, su contorno cruza su propia pared y le quitaba al Hallway 30 de sus 43.5 sq ft).
+  // Si las dos líneas son igual de verdad (el escaneo se corrió y quedaron dos paredes casi encimadas, cada una de un cuarto),
+  // no se toca: la pared de verdad está en medio, y darle la franja entera a uno le quita al otro piso suyo. En el banco de
+  // planos inventados (tests/_vecino_inventados.cjs, paredes corridas como el LiDAR) darla al más grande o al que cierra solo
+  // empeoraba 50 cuartos y mejoraba 16.
+  // Tampoco se toca una franja de menos de 0.5 ft de ancho (en promedio: su piso entre lo que miden las dos líneas): es del
+  // grueso de una pared y del ruido del escaneo, y ahí "pared de verdad contra puente" no dice de qué lado está el piso (en el
+  // banco, un puente de puerta derecho junto a una pared escaneada corrida 0.1 ft: el que cedía perdía piso suyo).
+  // No se toca: piso de menos de 0.25 sq ft (ruido de una pared compartida); un cuarto "needs review" (no está en ningún total:
+  // ni cede ni gana); un contorno que se cruza (no se sabe de qué lado está su piso); dos espacios de una pared invisible (son
+  // un piso); un cuarto que NO mete ninguna línea en el otro (lo envuelve: quitarlo sería un hoyo) ni uno que quedaría en
+  // pedazos o vacío. En esos casos el contorno sale como siempre (y el aviso de siempre).
+  const FP_DOBLE_MIN_SQFT = 0.25, FP_DOBLE_LINEA_MIN = 0.3, FP_DOBLE_VENTAJA = 0.25, FP_DOBLE_ANCHO_MIN = 0.5;
+  // Una pared de verdad para esta regla: la vio el láser o la dibujó el técnico. No la que la app dedujo y nadie movió
+  // (_inferido), ni la que el cuarto solo vio por una abertura (_ajena), ni la que la app cerró (_cierre), ni la línea invisible.
+  function fpParedDeVerdad(w){
+    return !!(w && w.start && w.end && !w._ajena && !w._cierre && !w._invisible && !(w._studWall && !w._studPairId) && !(w._inferido && !w._movedByHand && !w._geomEdited));
+  }
+  // Los pies de borde de P que van por DENTRO del piso Q (a más de 0.05 ft de su orilla): en pared de verdad de P que el otro
+  // cuarto no tiene (real), en una pared de verdad que los dos tienen en la lista (comun: o es la que los separa o uno solo la vio
+  // por la puerta, y eso no dice de quién es el piso), en una pared de verdad solo del otro (suya) y en cálculo (ninguna).
+  // comun + suya = una pared del otro cuarto por DENTRO de su propio piso: su contorno pasó por encima de su pared.
+  function fpLineaDentroDe(P, Q, paredes, delOtro){
+    let real = 0, calc = 0, comun = 0, suya = 0;
+    const seg = (p, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy, t = L2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)) : 0; return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy); };
+    for(let i = 0; i < P.length; i++){
+      const a = P[i], b = P[(i + 1) % P.length], L = Math.hypot(b.x - a.x, b.y - a.y); if(L < 0.01) continue;
+      const n = Math.max(1, Math.ceil(L / 0.1));
+      for(let k = 0; k < n; k++){
+        const t = (k + 0.5) / n, p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+        if(!fpPointInPolygon(p, Q) || fpDistAlBordeDe(p, Q) <= 0.05) continue;
+        const mia = paredes.some(w => seg(p, w.start, w.end) <= 0.08), deEl = !!delOtro && delOtro.some(w => seg(p, w.start, w.end) <= 0.08);
+        if(mia && deEl) comun += L / n; else if(mia) real += L / n; else if(deEl) suya += L / n; else calc += L / n;
+      }
+    }
+    return { real, calc, comun, suya, total: real + calc + comun + suya };
+  }
+  // P menos el piso W, en UN contorno: se queda el borde de P que no tiene piso de W de su lado de adentro, más el borde de W que
+  // va por dentro de P. null si no se puede: P o W se cruzan, P queda vacío o con un hoyo, o en pedazos (se queda el más grande
+  // solo si los demás suman menos de 1 sq ft: astillas de un contorno de puros puentes, como el "O" del 7-nov).
+  function fpRecortarPiso(P, W){
+    if(!P || !W || P.length < 3 || W.length < 3 || fpContornoRoto(P) || fpContornoRoto(W)) return null;
+    const D = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+    const area = Q => { let s = 0; for(let i = 0, j = Q.length - 1; i < Q.length; j = i++) s += Q[j].x * Q[i].y - Q[i].x * Q[j].y; return s / 2; };
+    const ccw = Q => area(Q) > 0 ? Q.slice() : Q.slice().reverse();     // el piso a la izquierda de cada lado
+    const A = ccw(P), B = ccw(W);
+    // cada lado de X partido donde toca el borde de Y (cruces, y esquinas de Y sobre el lado); de cada pedazo, un punto de su
+    // lado izquierdo (adentro de X) y uno del derecho, a 0.03 ft
+    const partir = (X, Y) => {
+      const out = [], n = Y.length;
+      for(let i = 0; i < X.length; i++){
+        const a = X[i], b = X[(i + 1) % X.length], L = D(a, b); if(L < 1e-6) continue;
+        const ts = [0, 1];
+        for(let k = 0; k < n; k++){
+          const c = Y[k], e = Y[(k + 1) % n];
+          const den = (b.x - a.x) * (e.y - c.y) - (b.y - a.y) * (e.x - c.x);
+          if(Math.abs(den) > 1e-12){
+            const t = ((c.x - a.x) * (e.y - c.y) - (c.y - a.y) * (e.x - c.x)) / den, u = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / den;
+            if(t > 0 && t < 1 && u >= -1e-9 && u <= 1 + 1e-9) ts.push(t);
+          }
+          const t2 = ((c.x - a.x) * (b.x - a.x) + (c.y - a.y) * (b.y - a.y)) / (L * L);
+          if(t2 > 0 && t2 < 1 && Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) / L <= 0.01) ts.push(t2);
+        }
+        ts.sort((x, y) => x - y);
+        let t0 = 0;
+        for(let k = 1; k < ts.length; k++){
+          if((ts[k] - t0) * L < 0.005 && k < ts.length - 1) continue;
+          const p = { x: a.x + (b.x - a.x) * t0, y: a.y + (b.y - a.y) * t0 }, q = { x: a.x + (b.x - a.x) * ts[k], y: a.y + (b.y - a.y) * ts[k] };
+          t0 = ts[k];
+          const l = D(p, q); if(l < 1e-6) continue;
+          const nx = -(q.y - p.y) / l * 0.03, ny = (q.x - p.x) / l * 0.03, mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+          out.push({ p, q, izq: { x: mx + nx, y: my + ny }, der: { x: mx - nx, y: my - ny }, m: { x: mx, y: my } });
+        }
+      }
+      return out;
+    };
+    // lo que queda: el borde de P que no va por dentro del piso de W (si va sobre su borde, el que no tiene piso de W de su lado
+    // de adentro), y el borde de W que va por dentro del piso de P (al revés, para que lo que queda siga a la izquierda); lo
+    // que va sobre el borde de los dos lo pone P. (Se mide en el medio de cada pedazo, no al lado: dos bordes casi encimados,
+    // a 0.02 ft, se leían cada uno del lado del otro y el contorno no cerraba.)
+    const segs = [];
+    partir(A, B).forEach(s => { const db = fpDistAlBordeDe(s.m, B); if(!(db > 0.005 ? fpPointInPolygon(s.m, B) : fpPointInPolygon(s.izq, B))) segs.push({ p: s.p, q: s.q }); });
+    partir(B, A).forEach(s => { if(fpDistAlBordeDe(s.m, A) > 0.005 && fpPointInPolygon(s.m, A)) segs.push({ p: s.q, q: s.p }); });
+    if(segs.length < 3) return null;
+    // encadenar: de la punta de cada pedazo al que empieza ahí (si hay dos, el que da la vuelta más a la derecha)
+    const usado = new Array(segs.length).fill(false), anillos = [];
+    for(let s0 = 0; s0 < segs.length; s0++){
+      if(usado[s0]) continue;
+      const ring = []; let k = s0, guard = 0, cierra = false;
+      while(k >= 0 && !usado[k] && guard++ <= segs.length){
+        usado[k] = true; ring.push(segs[k].p);
+        const s = segs[k], dx = s.q.x - s.p.x, dy = s.q.y - s.p.y;
+        let mejor = -1, ang = Infinity;
+        for(let j = 0; j < segs.length; j++){
+          if(usado[j] && j !== s0) continue;
+          if(D(segs[j].p, s.q) > 0.02) continue;
+          const ex = segs[j].q.x - segs[j].p.x, ey = segs[j].q.y - segs[j].p.y;
+          const a = Math.atan2(dx * ey - dy * ex, dx * ex + dy * ey);   // giro: + a la izquierda, - a la derecha
+          if(a < ang){ ang = a; mejor = j; }
+        }
+        if(mejor === s0){ cierra = true; break; }
+        k = mejor;
+      }
+      if(!cierra) return null;                                                 // un borde que no cierra: no se sabe qué queda
+      if(ring.length >= 3) anillos.push(ring);
+    }
+    const limpios = anillos.map(r => { let q = r.filter((p, k) => D(p, r[(k + 1) % r.length]) >= 0.02); return q.length >= 3 ? fpPruneOutlineSpikes(q, 0.02) : null; })
+      .filter(r => r && r.length >= 3 && Math.abs(area(r)) >= 0.01);
+    if(!limpios.length || limpios.some(r => area(r) < 0)) return null;      // vacío, o con un hoyo
+    limpios.sort((x, y) => area(y) - area(x));
+    const res = limpios[0], resto = limpios.slice(1).reduce((t, r) => t + area(r), 0);
+    if(resto >= 1.0) return null;                                              // quedaría en pedazos
+    if(fpContornoRoto(res)) return null;
+    const a0 = fpPolygonAreaSqFt(P), a1 = fpPolygonAreaSqFt(res);
+    if(!(a1 < a0 - 0.05) || a1 < 1 || fpEncimeSqFt(res, W, 0.1) >= FP_DOBLE_MIN_SQFT) return null;
+    return res;
+  }
+  // La firma de puertas y aberturas (el contorno que se enseña las usa: alcobaAfuera); con la firma de paredes del caché.
+  function fpSelloPuertas(d){
+    let s = '';
+    d.rooms.forEach((r, i) => { if(!r || r.deleted) return; ['doors', 'openings'].forEach(k => (r[k] || []).forEach(o => { if(o && o.position) s += i + k[0] + o.position.x.toFixed(2) + ',' + o.position.y.toFixed(2) + (o._removed ? 'x' : '') + (o.wallId != null ? o.wallId : '') + ';'; })); });
+    // (revisión 13-nov) y las marcas que deciden si una pared es "de verdad" (fpParedDeVerdad): la firma de paredes no las trae
+    d.rooms.forEach((r, i) => { if(!r || r.deleted) return; s += '|' + i; (r.walls || []).forEach(w => { if(w) s += ':' + (w._ajena ? 'a' : '') + (w._cierre ? 'c' : '') +
+      (w._invisible ? 'i' : '') + (w._studWall ? 's' + (w._studPairId || '') : '') + (w._inferido ? 'f' : '') + (w._movedByHand ? 'm' : '') + (w._geomEdited ? 'g' : '') + (w._added ? '+' : ''); }); });
+    return s;
+  }
+  // Las decisiones del plano (una vez por firma de paredes y de puertas): por cuarto, el contorno de siempre y los pisos que cede.
+  function fpPisoDobleDe(d){
+    fpContornoPropio(d, -1);
+    const c = fpPisoCache.get(d); if(!c) return null;
+    const sello = fpSelloPuertas(d);
+    if(c.dobles && c.dobles.sello === sello) return c.dobles;
+    const out = { sello, base: new Map(), cede: new Map(), final: new Map() };
+    c.dobles = out;
+    const grupos = fpInvGrupos(d, true);
+    const cs = [];
+    d.rooms.forEach((r, i) => {
+      if(!r || r.deleted || !(r.walls || []).length) return;
+      const gi = {}; let p = null;
+      try{ p = fpContornoDeCuarto(r, gi, fpPisoAjeno(r, d), true); }catch(e){ p = null; }
+      out.base.set(i, p);
+      if(!p || p.length < 3 || fpContornoRoto(p)) return;                                       // sin contorno, o se cruza
+      if(gi.roto && typeof fpContornoDudaSqFt === 'function' && fpContornoDudaSqFt(p) >= 4) return;   // "needs review"
+      const xs = p.map(q => q.x), ys = p.map(q => q.y);
+      cs.push({ i, r, p, nivel: r.level || 1, caja: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], area: fpPolygonAreaSqFt(p),
+        paredes: (r.walls || []).filter(fpParedDeVerdad).map(w => fpRecorteVigente(w) || w) });
+    });
+    for(let a = 0; a < cs.length; a++) for(let b = a + 1; b < cs.length; b++){
+      const A = cs[a], B = cs[b];
+      if(A.nivel !== B.nivel) continue;
+      const g = grupos.get(A.i); if(g && g.includes(B.i)) continue;                                // un solo piso partido con la línea invisible
+      if(Math.min(A.caja[2], B.caja[2]) - Math.max(A.caja[0], B.caja[0]) < 0.02 || Math.min(A.caja[3], B.caja[3]) - Math.max(A.caja[1], B.caja[1]) < 0.02) continue;
+      const la = fpLineaDentroDe(A.p, B.p, A.paredes, B.paredes); if(la.total < FP_DOBLE_LINEA_MIN) continue;
+      const lb = fpLineaDentroDe(B.p, A.p, B.paredes, A.paredes); if(lb.total < FP_DOBLE_LINEA_MIN) continue;
+      const sf = fpEncimeSqFt(A.p, B.p, 0.1); if(sf < FP_DOBLE_MIN_SQFT) continue;
+      if(2 * sf / (la.total + lb.total) < FP_DOBLE_ANCHO_MIN) continue;                            // una franja del grueso de una pared
+      const fa = la.real / la.total, fb = lb.real / lb.total;
+      const gana = fa >= fb + FP_DOBLE_VENTAJA ? A : fb >= fa + FP_DOBLE_VENTAJA ? B : null;
+      if(!gana) continue;                                                                          // dos paredes de verdad: no se sabe (ver arriba)
+      const pierde = gana === A ? B : A, lp = gana === A ? lb : la;
+      if(lp.comun + lp.suya >= FP_DOBLE_LINEA_MIN && lp.comun + lp.suya >= FP_DOBLE_VENTAJA * lp.total) continue;   // el que gana pasó por encima de su propia pared
+      if(!out.cede.has(pierde.i)) out.cede.set(pierde.i, []);
+      out.cede.get(pierde.i).push({ q: gana.i, poly: gana.p, sf: Math.round(sf * 10) / 10 });
+    }
+    out.cede.forEach((l, i) => l.sort((x, y) => x.q - y.q));
+    return out;
+  }
+  // El contorno que se enseña, sin el piso que este cuarto le cede a otro (ver arriba). gapInfo.pisoDoble = lo que cedió.
+  function fpSinPisoDoble(room, poly, gapInfo){
+    if(!poly || poly.length < 3 || !room) return poly;
+    try{
+      const d = fpPlanoDe(room, gapInfo && gapInfo.plano); if(!d) return poly;
+      const ri = d.rooms.indexOf(room); if(ri < 0) return poly;
+      const P = fpPisoDobleDe(d); if(!P) return poly;
+      const l = P.cede.get(ri); if(!l || !l.length) return poly;
+      const igual = (x, y) => x && y && x.length === y.length && x.every((q, k) => Math.abs(q.x - y[k].x) < 1e-9 && Math.abs(q.y - y[k].y) < 1e-9);
+      let f = P.final.get(ri);
+      if(!f || !igual(f.de, poly)){
+        let p = poly; const hechos = [];
+        l.forEach(x => { const r = fpRecortarPiso(p, x.poly); if(r){ p = r; hechos.push({ con: x.q, sf: x.sf }); } });
+        f = { de: poly.map(q => ({ x: q.x, y: q.y })), p, hechos };
+        P.final.set(ri, f);
+      }
+      if(gapInfo && f.hechos.length) gapInfo.pisoDoble = f.hechos.map(h => Object.assign({}, h));
+      return f.p.map(q => ({ x: q.x, y: q.y }));
+    }catch(e){ return poly; }
+  }
+  // (13-nov-2026, Cara) Todo lo que mueve un contorno: las paredes (puntas, recorte, marcas), las puertas y aberturas (la regla del
+  // clóset de pared las mira), el nivel, y si el cuarto está borrado. Si algo de esto cambia, los contornos del plano se sacan otra vez.
+  function fpClaveContornos(d){
+    const n = v => (typeof v === 'number' && isFinite(v)) ? v.toFixed(3) : String(v);
+    const pt = p => p ? n(p.x) + ',' + n(p.y) : '-';
+    let s = (d.merged === false ? 'M' : '') + d.rooms.length;
+    d.rooms.forEach(r => {
+      if(!r || typeof r !== 'object' || r.deleted){ s += '|x'; return; }
+      s += '|' + (r.level || 1) + (r._sinAjenas ? 's' : '');
+      (r.walls || []).forEach(w => { s += ';' + (w ? w.id + '@' + pt(w.start) + '>' + pt(w.end) + (w._recorte ? 'r' + pt(w._recorte.start) + '>' + pt(w._recorte.end) : '') +
+        (w._ajena ? 'a' : '') + (w._cierre ? 'c' : '') + (w._added ? '+' : '') + (w._inferido ? 'f' : '') + (w._studWall ? 's' + (w._studPairId || '') : '') +
+        (w._invisible ? 'i' + (w._invPar || '') : '') + (w._invUnir ? 'u' : '') + (w._removed ? 'q' : '') : '-'); });
+      [r.doors, r.openings].forEach(l => (l || []).forEach(o => { if(o) s += '#' + pt(o.position) + (o.wallId != null ? o.wallId : '') + (o._removed ? 'q' : ''); }));
+    });
+    return s;
+  }
+  const fpContornosCache = new WeakMap();   // plano -> { clave, niveles: Map(nivel -> Map(índice del cuarto -> { poly, gi })) }
+  function fpContornosDelNivel(d, room){
+    const ri = d.rooms.indexOf(room); if(ri < 0) return null;
+    const clave = fpClaveContornos(d);
+    let c = fpContornosCache.get(d);
+    if(!c || c.clave !== clave){ c = { clave, niveles: new Map() }; fpContornosCache.set(d, c); }
+    const L = room.level || 1;
+    // (mientras se saca el nivel queda un mapa vacío: si algo pidiera un contorno a medio camino, sale como siempre)
+    if(!c.niveles.has(L)){ c.niveles.set(L, new Map()); c.niveles.set(L, fpContornosNivel(d, L)); }
+    return c.niveles.get(L).get(ri) || null;
+  }
+  function fpContornosNivel(d, L){
+    const out = new Map(), idx = [];
+    d.rooms.forEach((r, ri) => { if(r && typeof r === 'object' && !r.deleted && (r.level || 1) === L) idx.push(ri); });
+    idx.forEach(ri => {
+      const room = d.rooms[ri], gi = {}; let poly;
+      try{ poly = fpContornoDeCuarto(room, gi, fpPisoAjeno(room, d), true); }catch(e){ return; }   // sin guardar: sale (y truena) como siempre
+      if(Array.isArray(poly)) out.set(ri, { poly, gi });
+    });
+    if(typeof fpPisoSuelto === 'function'){ try{ fpPisoSuelto(d, idx, out); }catch(e){} }
+    return out;
+  }
+  // (13-nov-2026, Cara) EL ARREGLO PLANO. Tramos (paredes, cierres de huecos chicos, contornos) partidos donde se tocan o se cruzan,
+  // con las puntas a `e` ft o menos juntadas en un solo vértice; de ahí las caras: los pedazos de piso que dejan entre todos. Cada
+  // tramo trae sus marcas (t) y cada arista junta las de todos los tramos que pasan por ella. Las caras de área positiva son pedazos
+  // cerrados; las de área cero o negativa son el lado de afuera de cada grupo de tramos.
+  function fpArregloPlano(segs, e){
+    const V = [], C = 0.5, rejilla = new Map();
+    const vert = (p, de) => {
+      const cx = Math.floor(p.x / C), cy = Math.floor(p.y / C); let k = -1, bd = e;
+      for(let i = cx - 1; i <= cx + 1; i++) for(let j = cy - 1; j <= cy + 1; j++){ const l = rejilla.get(i + ',' + j); if(l) for(const q of l){ const dd = Math.hypot(V[q].x - p.x, V[q].y - p.y); if(dd <= bd){ bd = dd; k = q; } } }
+      if(k < 0){ k = V.length; V.push({ x: p.x, y: p.y, de: [] }); const ck = cx + ',' + cy; if(!rejilla.has(ck)) rejilla.set(ck, []); rejilla.get(ck).push(k); }
+      if(de) V[k].de.push(de);
+      return k;
+    };
+    const juntar = l => { const m = new Map(), r = []; l.forEach(x => { if(x.a === x.b) return; const k = x.a < x.b ? x.a + '_' + x.b : x.b + '_' + x.a, y = m.get(k);
+      if(y) y.t = y.t.concat(x.t); else { const z = { a: x.a, b: x.b, t: x.t.slice() }; m.set(k, z); r.push(z); } }); return r; };
+    const partir = (x, sobre, sal) => { sobre.sort((p, q) => p[0] - q[0]); let prev = x.a; sobre.forEach(([, k]) => { if(k !== prev && k !== x.b){ sal.push({ a: prev, b: k, t: x.t }); prev = k; } }); sal.push({ a: prev, b: x.b, t: x.t }); };
+    const o = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+    let A = juntar(segs.map(s => ({ a: vert(s.a, s.deA), b: vert(s.b, s.deB), t: [s.t] })));
+    for(let vuelta = 0; vuelta < 12; vuelta++){
+      let cambio = false, sal = [];
+      // (1) un vértice a `e` ft o menos de una arista (fuera de sus puntas) la parte ahí
+      A.forEach(x => {
+        const P = V[x.a], Q = V[x.b], dx = Q.x - P.x, dy = Q.y - P.y, L2 = dx * dx + dy * dy;
+        const x0 = Math.min(P.x, Q.x) - e, x1 = Math.max(P.x, Q.x) + e, y0 = Math.min(P.y, Q.y) - e, y1 = Math.max(P.y, Q.y) + e, sobre = [];
+        for(let k = 0; k < V.length; k++){
+          if(k === x.a || k === x.b) continue; const R = V[k];
+          if(R.x < x0 || R.x > x1 || R.y < y0 || R.y > y1) continue;
+          const t = ((R.x - P.x) * dx + (R.y - P.y) * dy) / L2; if(!(t > 0 && t < 1)) continue;
+          if(Math.hypot(R.x - P.x - t * dx, R.y - P.y - t * dy) <= e) sobre.push([t, k]);
+        }
+        if(sobre.length){ cambio = true; partir(x, sobre, sal); } else sal.push(x);
+      });
+      A = juntar(sal);
+      // (2) dos aristas que se cruzan se parten en el cruce
+      const cortes = new Map();
+      const cajas = A.map(x => { const P = V[x.a], Q = V[x.b]; return [Math.min(P.x, Q.x), Math.min(P.y, Q.y), Math.max(P.x, Q.x), Math.max(P.y, Q.y)]; });
+      for(let i = 0; i < A.length; i++){
+        const ci = cajas[i], xi = A[i], P = V[xi.a], Q = V[xi.b];
+        for(let j = i + 1; j < A.length; j++){
+          const cj = cajas[j]; if(cj[0] > ci[2] || cj[2] < ci[0] || cj[1] > ci[3] || cj[3] < ci[1]) continue;
+          const xj = A[j]; if(xj.a === xi.a || xj.a === xi.b || xj.b === xi.a || xj.b === xi.b) continue;
+          const R = V[xj.a], S = V[xj.b], o1 = o(P, Q, R), o2 = o(P, Q, S), o3 = o(R, S, P), o4 = o(R, S, Q);
+          if(!(o1 * o2 < 0 && o3 * o4 < 0)) continue;
+          const t = o3 / (o3 - o4), k = vert({ x: P.x + (Q.x - P.x) * t, y: P.y + (Q.y - P.y) * t });
+          [[i, xi], [j, xj]].forEach(([n, x]) => { if(k === x.a || k === x.b) return;
+            const s = (V[k].x - V[x.a].x) * (V[x.b].x - V[x.a].x) + (V[k].y - V[x.a].y) * (V[x.b].y - V[x.a].y);
+            if(!cortes.has(n)) cortes.set(n, []); cortes.get(n).push([s, k]); });
+        }
+      }
+      if(cortes.size){ cambio = true; sal = []; A.forEach((x, n) => { if(cortes.has(n)) partir(x, cortes.get(n), sal); else sal.push(x); }); A = juntar(sal); }
+      if(!cambio) break;
+    }
+    // medios lados: cada arista dos veces, una por sentido; el siguiente de cada uno deja su cara a la izquierda
+    const H = [];
+    A.forEach((x, i) => { const P = V[x.a], Q = V[x.b]; x.L = Math.hypot(Q.x - P.x, Q.y - P.y); H.push({ o: x.a, d: x.b, e: i, tw: 2 * i + 1 }, { o: x.b, d: x.a, e: i, tw: 2 * i }); });
+    const salen = V.map(() => []);
+    H.forEach((h, k) => { h.ang = Math.atan2(V[h.d].y - V[h.o].y, V[h.d].x - V[h.o].x); salen[h.o].push(k); });
+    const pos = new Int32Array(H.length);
+    salen.forEach(l => { l.sort((p, q) => H[p].ang - H[q].ang || p - q); l.forEach((k, i) => { pos[k] = i; }); });
+    H.forEach(h => { const l = salen[h.d]; h.nx = l[(pos[h.tw] - 1 + l.length) % l.length]; });
+    const caras = [], f = new Int32Array(H.length).fill(-1);
+    for(let k0 = 0; k0 < H.length; k0++){
+      if(f[k0] >= 0) continue;
+      const hs = []; let k = k0, a = 0;
+      while(f[k] < 0){ f[k] = caras.length; hs.push(k); const P = V[H[k].o], Q = V[H[k].d]; a += P.x * Q.y - Q.x * P.y; k = H[k].nx; }
+      caras.push({ hs, area: a / 2 });
+    }
+    return { V, A, H, f, caras };
+  }
+  // (13-nov-2026, Cara) LAS DOS REGLAS DEL DUEÑO (13-nov), sobre el arreglo plano del nivel: sus paredes de verdad (las que vio el
+  // láser o dibujó el técnico; no las rectas que inventa la app), un cierre en cada hueco de 1.25 ft o menos que deja la punta suelta
+  // de una pared (lo que cierra a mano cualquier ojo), y el contorno de cada cuarto (el de siempre). Un contorno de 1 sq ft o menos
+  // no es piso de nadie (no se imprime) y no entra.
+  // (Dos paredes a 0.6 ft o menos también se juntan con un cierre: la rendija entre ellas es el grueso del muro, no piso.)
+  // REGLA 2, NEEDS REVIEW CON PAREDES BUENAS. Un cuarto cuyo contorno se cruza (fpPisoPorRevisar: 4 sq ft o más en duda) se vuelve a
+  // sacar de sus paredes: el pedazo del arreglo que más pared suya tiene en la orilla (sin cruzar paredes, cierres ni el contorno de
+  // otro cuarto). Se queda solo si de verdad es su cuarto: cerrado, sin piso de otro, al menos la mitad de sus paredes en esa orilla y
+  // esa orilla al menos 60 % pared suya, que tape al menos 40 % con su contorno de antes, y que sus paredes no encierren otros dos
+  // cuartos más (el departamento entero escaneado como un cuarto). Si no, sigue "needs review". Un cuarto de 1 o 2 paredes no entra.
+  // REGLA 1, PISO SUELTO. Un pedazo cerrado por paredes de verdad (de quien sean) que ningún cuarto cuenta, y que da a un cuarto por
+  // una línea que no es pared (un puente: la recta que inventa la app para cerrar el contorno), es de ese cuarto: su contorno sigue las paredes (o la orilla
+  // del vecino) en vez de la diagonal. Si da a dos cuartos, es del que más línea abierta comparte con él (el que lo cortó). Nunca
+  // entra piso de otro cuarto (cada cara está o no adentro de cada contorno), ni de afuera (un pedazo que llega a la calle sin pasar
+  // por una pared no está cerrado), ni se inventa piso: solo caras del arreglo. Y solo en la celda de paredes donde vive el cuarto
+  // (la mitad o más de su piso está ahí, o es suyo la mitad o más de lo libre de la celda): si su puente atraviesa una pared y se
+  // mete un poco en el cuartito de al lado, el resto de ese cuartito no es suyo.
+  function fpPisoSuelto(d, idx, out){
+    const E1 = 0.05, HUECO = 1.25, ANGOSTO = 0.6, D2 = q => Math.hypot(q.b.x - q.a.x, q.b.y - q.a.y);
+    const base = new Map();
+    idx.forEach(ri => { const r = out.get(ri); if(r && r.poly && r.poly.length >= 3 && fpContornoArea(r.poly) + Math.max(0, fpContornoDudaSqFt(r.poly)) > 1) base.set(ri, r); });
+    const malos = [...base.keys()].filter(ri => base.get(ri).gi.roto && fpContornoDudaSqFt(base.get(ri).poly) >= 4);
+    const abiertos = [...base.keys()].filter(ri => (base.get(ri).gi.bridges || []).length && !malos.includes(ri));
+    if(!malos.length && !abiertos.length) return;
+    const paredes = [];
+    idx.forEach(ri => (d.rooms[ri].walls || []).forEach(w => {
+      if(!w || !w.start || !w.end || w._cierre || w._invisible || w._removed) return;
+      if(!(Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) > 0.05)) return;
+      paredes.push({ a: w.start, b: w.end, ri, propia: !w._ajena && !(w._studWall && !w._studPairId) });
+    }));
+    const alSeg = (p, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy, t = L2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)) : 0, q = { x: a.x + t * dx, y: a.y + t * dy };
+      return { dd: Math.hypot(p.x - q.x, p.y - q.y), q }; };
+    const segs = [];
+    paredes.forEach(P => segs.push({ a: P.a, b: P.b, t: { p: 1, ri: P.ri, propia: P.propia } }));
+    // una pared invisible (la raya que dibuja la persona para partir un piso abierto entre dos cuartos) o una línea de cierre que ya
+    // quedó guardada en el cuarto no son paredes de verdad, pero son orilla: ningún cuarto pasa su piso suelto por encima de ellas
+    idx.forEach(ri => (d.rooms[ri].walls || []).forEach(w => {
+      if(w && w.start && w.end && (w._invisible || w._cierre) && !w._removed && Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) > 0.05) segs.push({ a: w.start, b: w.end, t: { c: 1 } });
+    }));
+    // la punta suelta de una pared se cierra contra otra pared a 1.25 ft o menos; cualquier punta, contra otra pared a 0.6 ft o menos
+    // (dos paredes casi juntas son el grueso de un muro, no piso: la rendija entre la copia de cada cuarto no se cuenta)
+    paredes.forEach((P, k) => [P.a, P.b].forEach(p => {
+      const libre = !paredes.some((Q, j) => j !== k && alSeg(p, Q.a, Q.b).dd <= E1);
+      paredes.forEach((Q, j) => { if(j === k) return; const r = alSeg(p, Q.a, Q.b); if(r.dd > E1 && r.dd <= (libre ? HUECO : ANGOSTO)) segs.push({ a: p, b: r.q, t: libre ? { c: 1 } : { c: 1, angosto: 1 } }); });
+    }));
+    base.forEach((r, ri) => { const p = r.poly; p.forEach((q, k) => { const k2 = (k + 1) % p.length; segs.push({ a: q, b: p[k2], deA: [ri, k], deB: [ri, k2], t: { o: ri, k } }); }); });
+    const { V, A, H, f, caras } = fpArregloPlano(segs, E1), nC = caras.length, pos = i => caras[i].area > 1e-9;
+    A.forEach(x => { x.muro = x.t.some(t => t.p); x.cierre = x.t.some(t => t.c); x.cierreAncho = x.t.some(t => t.c && !t.angosto); x.par = new Map(); x.t.forEach(t => { if(t.o != null) x.par.set(t.o, (x.par.get(t.o) || 0) + 1); });
+      x.propias = new Set(x.t.filter(t => t.p && t.propia).map(t => t.ri)); });
+    const barrera = x => x.muro || x.cierre;
+    // grupos de tramos (para saber de qué lado de afuera está cada contorno)
+    const padre = V.map((_, i) => i), raiz = i => { while(padre[i] !== i){ padre[i] = padre[padre[i]]; i = padre[i]; } return i; };
+    A.forEach(x => { const a = raiz(x.a), b = raiz(x.b); if(a !== b) padre[Math.max(a, b)] = Math.min(a, b); });
+    const gruposDe = new Map(); A.forEach(x => x.par.forEach((n, ri) => { if(!gruposDe.has(ri)) gruposDe.set(ri, new Set()); gruposDe.get(ri).add(raiz(x.a)); }));
+    const externas = []; caras.forEach((c, i) => { if(!pos(i)) externas.push(i); });
+    // adentro (1) o afuera (0) del contorno de cada cuarto, cara por cara: cruzar una línea de su contorno cambia de lado
+    const st = new Map();
+    base.forEach((r, ri) => {
+      const s = new Int8Array(nC).fill(-1), cola = [];
+      externas.forEach(i => { const v = H[caras[i].hs[0]].o; s[i] = (gruposDe.get(ri) || new Set()).has(raiz(v)) ? 0 : (fpPointInPolygon(V[v], r.poly) ? 1 : 0); cola.push(i); });
+      while(cola.length){ const i = cola.pop(); caras[i].hs.forEach(h => { const g = f[H[h].tw]; if(s[g] >= 0) return; s[g] = s[i] ^ ((A[H[h].e].par.get(ri) || 0) & 1); cola.push(g); }); }
+      st.set(ri, s);
+    });
+    // las celdas de pared (caras unidas sin cruzar pared ni cierre) y las de afuera del edificio (las que llegan a la calle)
+    const celda = new Int32Array(nC).fill(-1), celdaAfuera = []; let nCel = 0;
+    for(let i0 = 0; i0 < nC; i0++){
+      if(celda[i0] >= 0) continue; const cola = [i0]; celda[i0] = nCel; let fuera = false;
+      while(cola.length){ const i = cola.pop(); if(!pos(i)) fuera = true; caras[i].hs.forEach(h => { if(barrera(A[H[h].e])) return; const g = f[H[h].tw]; if(celda[g] < 0){ celda[g] = nCel; cola.push(g); } }); }
+      celdaAfuera.push(fuera); nCel++;
+    }
+    // la orilla de un juego de caras, como contorno: un solo anillo (sin hoyos ni puntos donde se toque) o null. Los vértices que
+    // eran del contorno de antes del cuarto salen con sus coordenadas exactas; los puntos en línea recta que puso el arreglo se quitan.
+    // puntos repetidos y puntos en línea recta que puso el arreglo, fuera (p.nm = lo que no es pared del lado que sale de p)
+    const enLimpio = pts => {
+      for(let cambio = true, vuelta = 0; cambio && vuelta < 2000; vuelta++){
+        cambio = false;
+        for(let i = 0; i < pts.length && pts.length > 3; i++){
+          const p = pts[(i - 1 + pts.length) % pts.length], q = pts[i], r = pts[(i + 1) % pts.length], dx = r.x - p.x, dy = r.y - p.y, L = Math.hypot(dx, dy);
+          const igual = Math.hypot(q.x - p.x, q.y - p.y) < 0.01;
+          const enLinea = !q.mio && L > 1e-9 && Math.abs((q.x - p.x) * dy - (q.y - p.y) * dx) / L <= 0.02 && ((q.x - p.x) * dx + (q.y - p.y) * dy) > 0 && ((r.x - q.x) * dx + (r.y - q.y) * dy) > 0;
+          if(igual || enLinea){ p.nm += q.nm; pts.splice(i, 1); cambio = true; break; }
+        }
+      }
+    };
+    // un "dedo": el contorno sube por la rendija entre dos paredes casi juntas (la copia de cada cuarto) y baja por el otro lado.
+    // Donde una punta del contorno queda a menos de 0.2 ft de un lado que no es el suyo, el contorno se corta ahí y se queda la parte
+    // grande; solo si lo que se quita es 1.5 sq ft o menos (es grueso de muro, no piso; un cuarto de verdad no se toca así).
+    const areaDe = l => { let a = 0; for(let i = 0; i < l.length; i++){ const p = l[i], q = l[(i + 1) % l.length]; a += p.x * q.y - q.x * p.y; } return a / 2; };
+    const sinDedos = pts0 => {
+      let pts = pts0;
+      for(let vuelta = 0; vuelta < 20; vuelta++){
+        const n = pts.length; let corte = null;
+        for(let i = 0; i < n && !corte; i++) for(let j = 0; j < n && !corte; j++){
+          if(j === i || (j + 1) % n === i) continue;
+          const a = pts[j], b = pts[(j + 1) % n], r = alSeg(pts[i], a, b); if(r.dd >= 0.2) continue;
+          const L = Math.hypot(b.x - a.x, b.y - a.y), t = L > 1e-9 ? Math.hypot(r.q.x - a.x, r.q.y - a.y) / L : 0;
+          const uno = [], dos = [];
+          for(let k = i; ; k = (k + 1) % n){ uno.push(Object.assign({}, pts[k])); if(k === j) break; }
+          uno[uno.length - 1].nm = a.nm * t; uno.push({ x: r.q.x, y: r.q.y, mio: false, nm: r.dd });
+          dos.push({ x: r.q.x, y: r.q.y, mio: false, nm: a.nm * (1 - t) });
+          for(let k = (j + 1) % n; ; k = (k + 1) % n){ dos.push(Object.assign({}, pts[k])); if(k === i) break; }
+          dos[dos.length - 1].nm = r.dd;
+          if(uno.length < 3 || dos.length < 3) continue;
+          const A1 = Math.abs(areaDe(uno)), A2 = Math.abs(areaDe(dos));
+          if(Math.min(A1, A2) > 1.5) continue;
+          corte = A1 >= A2 ? uno : dos;
+        }
+        if(!corte) break; pts = corte;
+      }
+      return pts;
+    };
+    const contornoDe = (enS, ri, o) => {
+      const bh = []; H.forEach((h, k) => { if(enS[f[k]] && !enS[f[h.tw]]) bh.push(k); });
+      if(!bh.length) return null;
+      const desde = new Map(); for(const k of bh){ if(desde.has(H[k].o)) return null; desde.set(H[k].o, k); }
+      const cyc = [], usados = new Set(); let k = bh[0];
+      while(k !== undefined && !usados.has(k)){ usados.add(k); cyc.push(k); k = desde.get(H[k].d); }
+      if(k !== bh[0] || usados.size !== bh.length) return null;
+      let pts = cyc.map(k => { const v = V[H[k].o], de = o ? v.de.find(x => x[0] === ri) : null, q = de ? o.poly[de[1]] : v, x = A[H[k].e];
+        return { x: q.x, y: q.y, mio: !!de, nm: x.muro ? 0 : x.L }; });
+      enLimpio(pts);
+      const sd = sinDedos(pts); if(sd !== pts){ pts = sd; enLimpio(pts); }
+      const poly = pts.map(p => ({ x: p.x, y: p.y }));
+      if(poly.length < 3 || fpContornoRoto(poly) || fpContornoArea(poly) < FP_PISO_MIN_SQFT) return null;
+      // lo que no va por pared (cierres, puentes, la orilla abierta del vecino) se reporta como puente, como siempre (más de 1 ft)
+      const segsP = []; pts.forEach((p, i) => { if(p.nm > 1.0){ const q = pts[(i + 1) % pts.length]; segsP.push({ a: { x: p.x, y: p.y }, b: { x: q.x, y: q.y }, d: Math.round(p.nm * 1000) / 1000 }); } });
+      return { poly, bridges: segsP.map(b => b.d), bridgeSegs: segsP };
+    };
+    const cambios = new Map(), dueno = new Int32Array(nC).fill(-1);
+    // ---- REGLA 2 ----
+    malos.forEach(ri => {
+      const propias = paredes.filter(P => P.ri === ri && P.propia);
+      if(propias.length < 3) return;
+      const total = propias.reduce((t, P) => t + D2(P), 0);
+      // (aquí las rendijas angostas no separan: el grueso de muro que queda adentro lo quita sinDedos al sacar el contorno)
+      const pasa = x => !x.muro && !x.cierreAncho && ![...x.par.keys()].some(q => q !== ri);
+      const grupo = new Int32Array(nC).fill(-1), gs = [];
+      caras.forEach((c, i0) => {
+        if(grupo[i0] >= 0 || !pos(i0)) return;
+        const g = { caras: [i0], area: 0, L: 0, Lp: 0, Lc: 0, Lw: 0, abierto: false, otro: false }, id = gs.length; grupo[i0] = id;
+        for(let n = 0; n < g.caras.length; n++){
+          const i = g.caras[n]; g.area += caras[i].area;
+          if(dueno[i] >= 0) g.otro = true;
+          st.forEach((s, q) => { if(q !== ri && s[i] !== 0) g.otro = true; });
+          caras[i].hs.forEach(h => { const x = A[H[h].e], j = f[H[h].tw]; if(!pasa(x) || grupo[j] === id) return;
+            if(!pos(j)){ g.abierto = true; return; } if(grupo[j] < 0){ grupo[j] = id; g.caras.push(j); } });
+        }
+        g.caras.forEach(i => caras[i].hs.forEach(h => { if(grupo[f[H[h].tw]] === id) return; const x = A[H[h].e]; g.L += x.L; if(x.propias.has(ri)) g.Lp += x.L; else if(x.cierre) g.Lc += x.L; if(barrera(x)) g.Lw += x.L; }));
+        gs.push(g);
+      });
+      const buenos = gs.filter(g => !g.abierto && !g.otro && g.area >= FP_PISO_MIN_SQFT);
+      let mejor = null; buenos.forEach(g => { if(!mejor || g.Lp > mejor.Lp + 1e-9 || (Math.abs(g.Lp - mejor.Lp) <= 1e-9 && g.area > mejor.area)) mejor = g; });
+      if(!mejor || mejor.Lp < 0.5 * total || mejor.Lp < 0.6 * mejor.L) return;
+      if(buenos.filter(g => g !== mejor && g.area >= 15 && g.Lp >= 0.6 * g.L).length >= 2) return;      // sus paredes encierran varios cuartos
+      // su clóset: un pedazo cerrado (sin piso de otro) detrás de una pared suya, que su contorno de antes ya rodeaba, con la mitad o
+      // más de su orilla de paredes suyas, todo él entre paredes (si el puente de un vecino lo toca, es piso suelto de ese vecino: la
+      // regla 1) y del tamaño de un clóset (una cuarta parte de él o menos), es piso suyo: como en el encadenado, el clóset va en el
+      // bruto y el resumen lo resta aparte
+      const sv = st.get(ri), enS = new Uint8Array(nC); mejor.caras.forEach(i => { enS[i] = 1; });
+      const junto = new Set([mejor]);
+      const viejo = g => g.caras.reduce((t, i) => t + (sv[i] === 1 ? caras[i].area : 0), 0);
+      const deVecino = g => g.L - g.Lw > 0.05;
+      const pegado = g => g.caras.some(i => caras[i].hs.some(h => { const x = A[H[h].e]; return enS[f[H[h].tw]] && (x.propias.has(ri) || x.cierre); }));
+      for(let mas = true, vuelta = 0; mas && vuelta < 6; vuelta++){
+        mas = false;
+        buenos.forEach(g => { if(junto.has(g) || g.area > 0.25 * mejor.area || g.Lp < 0.5 * g.L || deVecino(g) || viejo(g) < 0.6 * g.area || !pegado(g)) return;
+          junto.add(g); g.caras.forEach(i => { enS[i] = 1; }); mas = true; });
+      }
+      // nada se deja callado: si pegado a él queda piso cerrado entre paredes que su contorno de antes rodeaba y que ningún otro cuarto
+      // cuenta (más ancho que el grueso de un muro, 1.5 sq ft o más: un clóset que no se pudo juntar, un pedazo más grande que puede
+      // ser otro cuarto o suyo), no se sabe cuánto mide y sigue "needs review"
+      const valido = q => q !== ri && base.has(q) && (!malos.includes(q) || cambios.has(q));
+      const dejado = g => g.caras.reduce((t, i) => { if(sv[i] !== 1 || enS[i] || celdaAfuera[celda[i]] || dueno[i] >= 0) return t;
+        for(const [q, s] of st) if(valido(q) && s[i] !== 0) return t; return t + caras[i].area; }, 0);
+      if(gs.some(g => !junto.has(g) && !g.abierto && !deVecino(g) && g.L > 0 && 2 * g.area / g.L > 0.6 && pegado(g) && dejado(g) >= 1.5)) return;
+      // donde el clóset y el cuarto se tocan en una punta con una astilla de muro en medio (medio sq ft o menos, de nadie), o dejan
+      // un hoyito adentro, la astilla se cierra
+      if(junto.size > 1) for(let vuelta = 0; vuelta < 3; vuelta++){
+        const n = new Map(); H.forEach((h, k) => { if(enS[f[k]] && !enS[f[h.tw]]) n.set(h.o, (n.get(h.o) || 0) + 1); });
+        let mas = false;
+        const libre = j => pos(j) && !enS[j] && dueno[j] < 0 && ![...st].some(([q, s]) => valido(q) && s[j] !== 0);
+        n.forEach((c, v) => { if(c > 1) H.forEach((h, k) => { const j = f[k]; if(h.o === v && caras[j].area <= 0.5 && libre(j)){ enS[j] = 1; mas = true; } }); });
+        caras.forEach((c, j) => { if(c.area <= 1.5 && libre(j) && c.hs.every(h => enS[f[H[h].tw]])){ enS[j] = 1; mas = true; } });
+        if(!mas) break;
+      }
+      const nuevo = contornoDe(enS, ri, null); if(!nuevo) return;
+      // que de verdad sea donde estaba: al menos 40 % de su piso nuevo adentro de algún lazo de su contorno de antes
+      const antes = base.get(ri).poly, giro = p => { let w = 0; for(let i = 0; i < antes.length; i++){ const a = antes[i], b = antes[(i + 1) % antes.length], c = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+        if(a.y <= p.y){ if(b.y > p.y && c > 0) w++; } else if(b.y <= p.y && c < 0) w--; } return w; };
+      const xs = nuevo.poly.map(p => p.x), ys = nuevo.poly.map(p => p.y), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const paso = Math.max(0.25, Math.sqrt((x1 - x0) * (y1 - y0)) / 40); let dentro = 0, tapado = 0;
+      for(let x = x0 + paso / 2; x < x1; x += paso) for(let y = y0 + paso / 2; y < y1; y += paso){ const p = { x, y }; if(!fpPointInPolygon(p, nuevo.poly)) continue; dentro++; if(giro(p) !== 0) tapado++; }
+      if(!dentro || tapado < 0.4 * dentro) return;
+      for(let i = 0; i < nC; i++) if(enS[i]) dueno[i] = ri;
+      const gv = base.get(ri).gi, gi = { bridges: nuevo.bridges, bridgeSegs: nuevo.bridgeSegs, rehecho: true };
+      // sus paredes de adentro (el frente de un clóset) siguen siendo sobras, como en el encadenado
+      const sobras = propias.filter(P => { const m = { x: (P.a.x + P.b.x) / 2, y: (P.a.y + P.b.y) / 2 }; return fpPointInPolygon(m, nuevo.poly) && fpDistToPolygon(m, nuevo.poly) > 0.3; })
+        .map(P => [{ x: P.a.x, y: P.a.y }, { x: P.b.x, y: P.b.y }]);
+      if(sobras.length) gi.leftovers = sobras;
+      if(gv.apartadas) gi.apartadas = gv.apartadas;
+      cambios.set(ri, { poly: nuevo.poly, gi });
+    });
+    // ---- REGLA 1 ----
+    // quién puede recibir: un cuarto con contorno que no se cruza (un vértice repetido sí: su "8" se puede componer con el piso suelto)
+    const recibe = ri => { const r = base.get(ri); return !!r && !cambios.has(ri) && !malos.includes(ri) && fpContornoCruces(r.poly) === 0 && fpContornoArea(r.poly) >= FP_PISO_MIN_SQFT; };
+    // cuánto de cada celda es de cada cuarto, y cuánto es de otros
+    const enCelda = new Map();   // ri -> Float64Array(nCel) piso del cuarto en la celda
+    const areaCelda = new Float64Array(nCel), deAlguien = new Float64Array(nCel);
+    for(let i = 0; i < nC; i++){ if(!pos(i)) continue; areaCelda[celda[i]] += caras[i].area; let alguien = false; st.forEach(s => { if(s[i] === 1) alguien = true; }); if(alguien || dueno[i] >= 0) deAlguien[celda[i]] += caras[i].area; }
+    const totales = new Map(), total = ri => { if(!totales.has(ri)){ let t = 0; const s = st.get(ri); for(let i = 0; i < nC; i++) if(pos(i) && s[i] === 1) t += caras[i].area; totales.set(ri, t); } return totales.get(ri); };
+    const suyo = (ri, c) => { if(!enCelda.has(ri)){ const a = new Float64Array(nCel), s = st.get(ri); for(let i = 0; i < nC; i++) if(pos(i) && s[i] === 1) a[celda[i]] += caras[i].area; enCelda.set(ri, a); } return enCelda.get(ri)[c]; };
+    const suelta = i => { if(!pos(i) || celdaAfuera[celda[i]] || dueno[i] >= 0) return false; let ok = true; st.forEach((s, q) => { if(!cambios.has(q) && s[i] !== 0) ok = false; }); return ok; };
+    // solo lo que deja un CORTE EN DIAGONAL (lo que aprobó el dueño): el puente del cuarto que da al pedazo va a más de 10° de la
+    // cuadrícula de las paredes del plano (su ángulo módulo 90°, pesado por el largo; un plano escaneado chueco tiene su cuadrícula
+    // chueca). Un pedazo que solo da a puentes rectos (el barandal de una escalera, el hueco de un pasillo) se queda sin contar,
+    // como siempre: puede no ser piso.
+    let cx = 0, cy = 0; paredes.forEach(P => { const L = D2(P), g = 4 * Math.atan2(P.b.y - P.a.y, P.b.x - P.a.x); cx += L * Math.cos(g); cy += L * Math.sin(g); });
+    const rejilla = Math.atan2(cy, cx) / 4;
+    const chueco = (a, b) => { let g = (Math.atan2(b.y - a.y, b.x - a.x) - rejilla) * 180 / Math.PI; g = ((g % 90) + 90) % 90; return Math.min(g, 90 - g) > 10; };
+    const diag = new Map(); base.forEach((r, ri) => diag.set(ri, r.poly.map((q, k) => chueco(q, r.poly[(k + 1) % r.poly.length]))));
+    // el pedazo: las caras sueltas que se tocan sin cruzar pared ni cierre; quién lo cortó en diagonal
+    const pieza = new Int32Array(nC).fill(-1), cortaron = [];
+    for(let i0 = 0; i0 < nC; i0++){
+      if(pieza[i0] >= 0 || !suelta(i0)) continue; const id = cortaron.length, set = new Set(), cola = [i0]; pieza[i0] = id;
+      while(cola.length){ const i = cola.pop(); caras[i].hs.forEach(h => { const x = A[H[h].e]; if(barrera(x)) return; const g = f[H[h].tw];
+        x.t.forEach(t => { if(t.o != null && diag.get(t.o)[t.k] && recibe(t.o) && st.get(t.o)[g] === 1) set.add(t.o); });
+        if(pieza[g] < 0 && suelta(g)){ pieza[g] = id; cola.push(g); } }); }
+      cortaron.push(set);
+    }
+    const cand = new Map();   // cara suelta -> [cuartos en orden]
+    caras.forEach((c, i) => {
+      if(!suelta(i)) return;
+      const C = celda[i], libre = areaCelda[C] - deAlguien[C], peso = new Map(), corto = cortaron[pieza[i]];
+      c.hs.forEach(h => { const x = A[H[h].e]; if(barrera(x)) return; const g = f[H[h].tw];
+        x.par.forEach((n, q) => { if(!(n & 1) || !corto.has(q) || st.get(q)[g] !== 1) return; peso.set(q, (peso.get(q) || 0) + x.L); }); });
+      const l = [...peso.keys()].filter(q => { const m = suyo(q, C); return m >= 0.5 * total(q) || m >= 0.5 * (m + libre); }).sort((p, q) => peso.get(q) - peso.get(p) || p - q);
+      if(l.length) cand.set(i, l);
+    });
+    // cada pedazo al primero de su lista; si con él el contorno no sale de un anillo limpio, al siguiente
+    const hechos = new Map(), fuera = new Map();   // ri -> [caras que ya tiene], cara -> cuántos de su lista ya no sirvieron
+    const tomada = j => [...hechos.values()].some(h => h.includes(j));
+    // donde dos pedazos se tocan en una punta con una astilla de pared en medio (medio sq ft o menos, de nadie), la astilla se cierra
+    const salen = V.map(() => []); H.forEach((h, k) => salen[h.o].push(k));
+    const sellar = enS => { const extra = [];
+      for(let vuelta = 0; vuelta < 3; vuelta++){
+        const n = new Map(); H.forEach((h, k) => { if(enS[f[k]] && !enS[f[h.tw]]) n.set(h.o, (n.get(h.o) || 0) + 1); });
+        let mas = false;
+        n.forEach((c, v) => { if(c < 2) return; salen[v].forEach(k => { const j = f[k]; if(!enS[j] && caras[j].area <= 0.5 && suelta(j) && !tomada(j)){ enS[j] = 1; extra.push(j); mas = true; } }); });
+        if(!mas) break;
+      }
+      return extra; };
+    for(let vuelta = 0; vuelta < 4; vuelta++){
+      const pide = new Map();
+      cand.forEach((l, i) => { const k = fuera.get(i) || 0; if(k >= l.length || tomada(i)) return; const q = l[k]; if(!pide.has(q)) pide.set(q, []); pide.get(q).push(i); });
+      if(!pide.size) break;
+      pide.forEach((l, ri) => {
+        const r = base.get(ri), s = st.get(ri), enS = new Uint8Array(nC);
+        for(let i = 0; i < nC; i++) if(s[i] === 1 && pos(i)) enS[i] = 1;
+        (hechos.get(ri) || []).forEach(i => { enS[i] = 1; });
+        l.sort((p, q) => caras[q].area - caras[p].area || p - q).forEach(i => {
+          if(tomada(i)) return;
+          enS[i] = 1; const extra = sellar(enS);
+          if(contornoDe(enS, ri, r)){ if(!hechos.has(ri)) hechos.set(ri, []); hechos.get(ri).push(i, ...extra); }
+          else { enS[i] = 0; extra.forEach(j => { enS[j] = 0; }); fuera.set(i, (fuera.get(i) || 0) + 1); }
+        });
+      });
+    }
+    hechos.forEach((l, ri) => {
+      const r = base.get(ri), s = st.get(ri), enS = new Uint8Array(nC);
+      for(let i = 0; i < nC; i++) if(s[i] === 1 && pos(i)) enS[i] = 1;
+      l.forEach(i => { enS[i] = 1; });
+      const nuevo = contornoDe(enS, ri, r); if(!nuevo) return;
+      const a0 = fpContornoArea(r.poly), a1 = fpContornoArea(nuevo.poly);
+      if(!(a1 > a0 + 1)) return;   // menos de 1 sq ft suelto no vale la pena: el contorno de siempre se queda
+      const gi = Object.assign(JSON.parse(JSON.stringify(r.gi)), { bridges: nuevo.bridges, bridgeSegs: nuevo.bridgeSegs, suelto: Math.round((a1 - a0) * 10) / 10 });
+      delete gi.rodeos; gi.roto = !!(gi.cruzaPiso || gi.disputa);
+      cambios.set(ri, { poly: nuevo.poly, gi });
+    });
+    cambios.forEach((v, ri) => out.set(ri, v));
   }
   // ESPINAS DEL CONTORNO. El encadenado consume paredes ENTERAS y no
   // puede partir una, asi que cuando una pared se extiende mas alla del
@@ -48621,10 +49219,31 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(h > 0) bins[h] = (bins[h]||0) + floorplanWallEffectiveLength(w);
     });
     const ranked = Object.entries(bins).sort((a, b) => b[1] - a[1]);
-    const wallHeightFt = ranked.length ? parseFloat(ranked[0][0]) : 0;
+    let wallHeightFt = ranked.length ? parseFloat(ranked[0][0]) : 0;
+    // (13-nov-2026, Alto) Un cuarto chico que pega con la pared alta del vecino (una sala de doble altura) se quedaba con
+    // ESA altura: el Bath de 24 sq ft salía con 16.75 ft y su pared (SF) casi al doble. Regla de Amilcar (13-nov): si la
+    // moda pasa de 12 ft y el cuarto tiene paredes de altura normal (6 a 12 ft) que son una parte de verdad de su borde
+    // (la quinta parte o más), usa la más común de esas. La pared alta no se pierde: sale en oddHeights y la hoja la anota.
+    // (revisión 13-nov) Aquí solo votan las paredes PROPIAS del cuarto: una pared ajena (la del vecino vista por una abertura) no es
+    // borde suyo, y 18 ft de la cocina de 8 ft vistos desde una sala de 17 ft la bajaban a 8. Y las normales tienen que ser la TERCERA
+    // parte o más: una sala alta con un lado bajo un tapanco (la quinta parte) sigue alta. Los casos del equipo: 37, 46 y 66 %.
+    if(wallHeightFt > 12){
+      const propias = {};
+      paraAlto.forEach(w => {
+        if(!w || w._invisible || w._ajena || w._removed) return;
+        const h = Math.round((w.heightFt||0) * 20) / 20;
+        if(h > 0) propias[h] = (propias[h]||0) + floorplanWallEffectiveLength(w);
+      });
+      const rp = Object.entries(propias).sort((a, b) => b[1] - a[1]);
+      const total = rp.reduce((t, e) => t + e[1], 0);
+      const normales = rp.filter(e => { const h = parseFloat(e[0]); return h >= 6 && h <= 12; });
+      const largoNormal = normales.reduce((t, e) => t + e[1], 0);
+      if(normales.length && largoNormal >= 2 && largoNormal >= total / 3) wallHeightFt = parseFloat(normales[0][0]);
+    }
     // Media pulgada de diferencia es ruido de escaneo; medio pie es otra
     // pared. Solo lo segundo se reporta.
-    const oddHeights = ranked.slice(1)
+    // (13-nov, Alto) todas menos la escogida: la escogida ya no es siempre la primera de la lista
+    const oddHeights = ranked
       .filter(e => Math.abs(parseFloat(e[0]) - wallHeightFt) > 0.5)
       .map(e => ({ heightFt: parseFloat(e[0]), lengthFt: e[1] }));
     // Puertas y ventanas se restan de la pared bruta. Las puertas y los
