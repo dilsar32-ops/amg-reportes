@@ -19648,7 +19648,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-13-R476';
+  const APP_BUILD = '2026-11-13-R477';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -75897,6 +75897,18 @@ function lumiPayDate(text){
  return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
 }
 // A notice is part of the owner's reviewed payment, never an instruction to pay.
+// (13-nov-2026) LA NOTA QUE EL DICTA SE GUARDA. Dijo "le pague a Samuel 846, deja una nota que fue
+// por lo de su reloj" y la tarjeta salio sin la nota: solo se guardaba "Lumi". Ahora lo que diga
+// despues de "nota" va en la nota del pago y se ensena en la tarjeta antes de confirmar.
+function lumiPayNota(text){
+ const m=/\b(?:nota|note)\b\s*(?:de\s+que|que\s+diga(?:\s+que)?|que\s+dice(?:\s+que)?|diciendo(?:\s+que)?|saying(?:\s+that)?|that|que|:|,)?\s*([\s\S]+)$/i.exec(String(text||''));
+ if(!m)return '';
+ let n=m[1].replace(/[.;,]\s*(?:pero\s+)?(?:no\s+(?:le\s+|les\s+)?(?:avises|avise|mandes|envies|notifiques)|sin\s+(?:aviso|mensaje)|do\s+not\s+(?:notify|send)|don't\s+(?:notify|send))[\s\S]*$/i,'');
+ n=n.replace(/[«»"“”·]/g,'').replace(/\s+/g,' ').replace(/^[\s:,.-]+|[\s.,;:-]+$/g,'').trim();
+ if(n.length<3)return '';
+ n=n[0].toUpperCase()+n.slice(1);
+ return n.length>140?n.slice(0,139).trim()+'…':n;
+}
 function lumiPayNoticePlan(order){
  const t=lumiPayCore().norm(order.text||'');
  if(/\b(?:no (?:le |les )?(?:avises|avise|mandes|envies|notifiques)|sin (?:aviso|mensaje)|do not (?:notify|send)|don't (?:notify|send))\b/.test(t))return null;
@@ -75944,13 +75956,14 @@ async function lumiPayPrepare(snapshot,order,owner){
  if(snapshot.ledger.some(x=>lumiPayCore().cents(x.amount)===lumiPayCore().cents(order.amount)&&x.metodo===order.method&&x.kind===order.kind&&String(x.paid_on||x.created_at||'').slice(0,10)===date&&x.accepted!==false&&!x.settlement))return {error:'Ya existe un registro de ese monto, método y fecha para esta persona. Revísalo en Pagos; no crearé otro igual.'};
  // Keep the original audit evidence in the private review; do not feed it back as a new instruction.
  const flow={notice:lumiPayNoticePlan(order),hourWarning:snapshot.hourWarning||'',owner,user:SES.user_id,company:SES.company_id,person:snapshot.person,order,date,fingerprint:P.fingerprint(snapshot),request:snapshot.request,review,at:Date.now()};
- const note=['Lumi',snapshot.hourWarning?'Revisión de horas pendiente':'',order.reference?'Cheque #'+order.reference:'',snapshot.request?'Petición #'+snapshot.request.id:''].filter(Boolean).join(' · ');
+ const dicha=lumiPayNota(order.text);
+ const note=['Lumi',dicha,snapshot.hourWarning?'Revisión de horas pendiente':'',order.reference?'Cheque #'+order.reference:'',snapshot.request?'Petición #'+snapshot.request.id:''].filter(Boolean).join(' · ');
  const prompt='Registra un '+order.kind+' de $'+order.amount.toFixed(2)+' a '+snapshot.person.name+' por '+order.method+' con fecha '+flow.date+'. Nota: '+note+'. Solo esa persona; no hagas una lista.';
  const r=await asLlamar({texto:prompt,historial:[],sandbox:false,area:null});lumiPayGuard(owner);
  const card=r.json?.confirmacion;if(!r.ok||!r.json?.ok||!card)throw Error(r.json?.texto||'No pude preparar el registro. No cambié ningún pago.');
  Object.assign(flow,P.issuedAction(card,flow));flow.token=card.token;
  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(flow.company+'|'+flow.person.key+'|'+flow.fingerprint));flow.claimKey='lumi_payment_claim_'+Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
- const preview=review.summary+(flow.notice?'\nAl confirmarlo, le avisaré por su chat privado de Workspace: «'+flow.notice.text+'»':'');
+ const preview=review.summary+(dicha?'\nNota del pago: «'+dicha+'»':'')+(flow.notice?'\nAl confirmarlo, le avisaré por su chat privado de Workspace: «'+flow.notice.text+'»':'');
  flow.review={...review,summary:preview};
  return {flow,card:{...card,resumen:preview,efecto:preview,lumiPayment:flow}};
 }
