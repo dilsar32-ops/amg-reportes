@@ -20232,7 +20232,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-15-R478';
+  const APP_BUILD = '2026-11-15-R479';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -67942,7 +67942,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const faltan = ctGateFirma(t);
     const btn = $('#ct-firmarBtn');
     if(faltan.length){
-      check.innerHTML = '<span class="no">&#9888; Todavía no se puede firmar:</span><br>' + faltan.map(x => '&#8226; ' + x).join('<br>');
+      const atoradas = t.fotos.filter(ctFotoAtorada);
+      check.innerHTML = '<span class="no">&#9888; Todavía no se puede firmar:</span><br>' + faltan.map(x => '&#8226; ' + x).join('<br>')
+        + (atoradas.length ? '<br><button type="button" class="minibtn" data-ct-reintentar>Reintentar</button>' + (atoradas[0].error ? ' <small style="color:var(--ink-soft);">' + esc(atoradas[0].error) + '</small>' : '') : '');   // (R479)
       btn.style.opacity = '.45';
     } else {
       check.innerHTML = '<span class="ok">&#10003; ' + t.fotos.length + ' fotos en la nube</span> &middot; <span class="ok">&#10003; ' + ctObjetos(t).length + ' objetos con estado</span><br>' + ctResumenHtml(r).replace(/^<b>[^<]*<\/b>/, '').replace(/^ &middot; /, '');
@@ -68097,7 +68099,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   async function ctEnlaceCrear(){
     const t = ctActual(); if(!t || t.estado !== 'abierto') return;
     const faltan = ctGateFirma(t);
-    if(faltan.length){ ctProcesarCola(); ctPintarFirma(); alert('Todavía no se puede mandar el enlace:\n\n' + faltan.map(x => '• ' + x.replace(/<[^>]+>/g, '')).join('\n')); return; }
+    if(faltan.length){ const otraVez = ctReintentarDe(t); ctPintarFirma(); alert('Todavía no se puede mandar el enlace:\n\n' + faltan.map(x => '• ' + x.replace(/<[^>]+>/g, '')).join('\n') + (otraVez ? '\n\nYa se está subiendo otra vez. Espere un momento con señal y vuelva a tocar.' : '')); return; }
     showOverlay('Creando el enlace…');
     try{
       const empresa = ctEmpresa();
@@ -68204,7 +68206,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   async function ctFirmarFlujo0(){
     const t = ctActual(); if(!t || t.estado !== 'abierto' || ctFirmando) return;
     const faltan = ctGateFirma(t);
-    if(faltan.length){ ctProcesarCola(); ctPintarFirma(); alert('Todavía no se puede firmar:\n\n' + faltan.map(x => '• ' + x.replace(/<[^>]+>/g, '')).join('\n')); return; }
+    if(faltan.length){ const otraVez = ctReintentarDe(t); ctPintarFirma(); alert('Todavía no se puede firmar:\n\n' + faltan.map(x => '• ' + x.replace(/<[^>]+>/g, '')).join('\n') + (otraVez ? '\n\nYa se está subiendo otra vez. Espere un momento con señal y vuelva a tocar.' : '')); return; }
     const revision = await ctGaleria(t);
     if(!revision) return;
     const datos = await ctFirmaCapa(t);
@@ -68548,6 +68550,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         }
         f.intentos = (f.intentos || 0) + 1; f.error = String((e && e.message) || e).slice(0, 140);
         f.subida = ((e && e.permanente) || f.intentos >= 6) ? 'error' : 'tel';
+        if(f.subida === 'error') f.errorAt = Date.now();               // (R479) a los 10 min se vuelve a intentar sola (ctRevivirErrores)
         ctEscribirLote(); ctPintarColaLuego(f);
         if(!(e && e.permanente)){                                     // sin señal o servidor ocupado
           st.fallos++;
@@ -68612,6 +68615,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   async function ctProcesarCola(){
     if(!ctReg.cargado) return;                                         // (26-oct) el registro todavía se está leyendo del archivo
+    ctRevivirErrores();                                                // (R479) una foto que se rindió (6 fallos, casi siempre sin señal) vuelve a la fila a los 10 min
     try{ ctH4Pronto(); }catch(e){}                                     // (R126) las hojas 4x4 de lo firmado, aparte (no detienen esta cola)
     ctDesenfocarCola().catch(() => {});                                // (21 oct 2026) las copias desenfocadas que quedaron en la fila
     if(ctSubiendo){ ctOtraVuelta = true; return; }                       // (27-oct) lo que llegó mientras subía: otra vuelta al terminar
@@ -68668,6 +68672,28 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     }
   }
   function ctReintentar(){ Object.values(CT.trabajos).forEach(t => t.fotos.forEach(f => { if(f.subida === 'error'){ f.subida = 'tel'; f.intentos = 0; } })); ctEscribir(); ctPintarFotos(); ctProcesarCola(); }
+  // (R479, 15-nov-2026, Anderson / Kirk Streitmater) Una foto que falló 6 veces quedaba 'error' PARA SIEMPRE: la cola ya no la
+  // tomaba y el botón Reintentar vive en #ctFotosCard, que el diseño de RD esconde. "120 de 121 fotos en la nube" y no se podía
+  // firmar ni mandar el enlace. Ahora: (a) a los 10 min vuelve sola a la fila; (b) tocar Firmar / Mandar el enlace la reintenta ya;
+  // (c) la tarjeta de firmar trae su propio Reintentar. Nunca la de "la nube tiene otra foto con el número N" (esa pisaría otra foto).
+  function ctErrorDeNumero(f){ return /^la nube tiene otra foto/.test(String((f && f.error) || '')); }
+  function ctFotoAtorada(f){ return f.subida === 'error' && (!f.enNube || f.dirty) && !ctErrorDeNumero(f); }
+  function ctRevivirErrores(){
+    if(!ctReg.cargado) return 0;
+    const ahora = Date.now(); let n = 0;
+    Object.values(CT.trabajos).forEach(t => { if(t.estado !== 'abierto') return; t.fotos.forEach(f => {
+      if(ctFotoAtorada(f) && (f.intentos || 0) >= 6 && ahora - (+f.errorAt || 0) > 10 * 60 * 1000){ f.subida = 'tel'; f.intentos = 0; n++; }
+    }); });
+    if(n) ctEscribir();
+    return n;
+  }
+  function ctReintentarDe(t){
+    let n = 0;
+    if(t && t.estado === 'abierto') t.fotos.forEach(f => { if(ctFotoAtorada(f)){ f.subida = 'tel'; f.intentos = 0; n++; } });
+    if(n) ctEscribir();
+    ctProcesarCola();
+    return n;
+  }
 
   // ---- los nombres (la inteligencia nombra en el servidor, con las fotos ya subidas) ----
   let ctNombrando = false, ctNombrarDesde = 0, ctNombrarFallos = 0, ctNombrarEspera = 0, ctNombrarTm = null;
@@ -69478,7 +69504,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(bo){ ctBorrarTrabajoAbierto(bo.dataset.ctBorrartrabajo); return; }
       const qt = e.target.closest('[data-ct-quitartrabajo]');
       if(qt){ ctQuitarDelTelefono(qt.dataset.ctQuitartrabajo); return; }
-      if(e.target.closest('[data-ct-reintentar]')){ ctReintentar(); return; }
+      if(e.target.closest('[data-ct-reintentar]')){ ctReintentar(); try{ ctPintarFirma(); }catch(_){} return; }
       if(e.target.closest('[data-ct-guardar]')){ ctGuardarYSalir(); return; }
       const en = e.target.closest('[data-ct-enlace]');
       if(en){ const a = en.dataset.ctEnlace; if(a === 'revisar') ctEnlaceRevisar(t, false); else if(a === 'sms') ctEnlaceSms(t); else if(a === 'compartir') ctEnlaceCompartir(t); else if(a === 'copiar') ctEnlaceCopiar(t); else if(a === 'quitar') ctEnlaceQuitar(t); return; }
@@ -69547,7 +69573,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // la pantalla esta abierta (el reclamo de la nube es atomico: nunca se paga dos veces).
   document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && ctContenidosAbierto()){ ctPedirNombres(); ctRefrescarNombresNube(ctActual()); } });
   document.addEventListener('visibilitychange', () => { if(document.visibilityState !== 'visible') return; const t = ctActual(); if(t && t.enlace && t.estado === 'abierto'){ ctEnlaceRevisar(t, true); ctEnlaceVigilar(t); } });
-  setInterval(() => { if(ctTrabajosPendientes().length) ctProcesarCola(); }, 60000);
+  setInterval(() => { ctRevivirErrores(); if(ctTrabajosPendientes().length) ctProcesarCola(); }, 60000);
   setInterval(() => { if(ctContenidosAbierto()) ctRefrescarNombresNube(ctActual()); }, 60000);   // (21 oct 2026) los nombres de Claude llegan solos
   setTimeout(() => ctProcesarCola(), 7000);
   function ctPillNube(nube, hayCc){
