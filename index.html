@@ -20232,7 +20232,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-15-R481';
+  const APP_BUILD = '2026-11-15-R482';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -91687,7 +91687,7 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
   /*SIRENA-TRABAJO:INICIO*/
   // (15-nov-2026, R480) El dueño: "cada vez que mando un nuevo trabajo al grupo de trabajo el teléfono de ellos debe sonar como
   // una sirena, para que ellos por el sonido sepan que hay un nuevo trabajo".
-  // Cómo: la nube (notify-manager, bloque SIRENA_TRABAJO) manda el aviso de la tarjeta de Nuevo trabajo con sound "aviso_trabajo.wav" (desde R481; en R480 era "sirena.wav").
+  // Cómo: la nube (notify-manager, bloque SIRENA_TRABAJO) manda el aviso de la tarjeta de Nuevo trabajo con sound "alarma_trabajo.wav" (desde R482; R481 "aviso_trabajo.wav", R480 "sirena.wav").
   // iOS busca ese archivo en Library/Sounds de la app. Esta web lo arma aquí mismo (la sirena se calcula, no hay archivo que
   // bajar: el aparato solo baja index.html) y lo guarda ahí una vez. Mientras un teléfono no lo tenga, iOS toca el sonido de
   // siempre (no se pierde el aviso). Con la app ABIERTA el aviso llega callado (el plugin no lo enseña): aquí suena la misma
@@ -91696,29 +91696,42 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
   // (15-nov-2026, R481) El dueño la cambió por algo elegante ("a veces están comiendo con sus familiares"): escogió el "Aviso",
   // cuatro notas de vibráfono que suben (do-mi-sol-do), 3.6 s. Va con OTRO nombre de archivo (aviso_trabajo.wav, ver 2) para que
   // iOS no siga tocando la sirena que tenía guardada con el nombre viejo, y la sirena.wav vieja se borra del teléfono.
-  const SIRENA = { ver: 2, nombre: 'aviso_trabajo.wav', viejo: 'sirena.wav', seg: 3.6, sr: 44100, wav: null, url: null, guardada: false, audio: null, ultima: 0 };
-  // El aviso: cada nota con tres parciales de barra de vibráfono (1, 4 y 10 veces la nota), caída suave y un leve temblor de
-  // 5.2 Hz, como el aviso por altavoz de un hotel. Pico a 0.7 (no a todo volumen). Es el mismo archivo 3_aviso.wav que él oyó.
+  // (15-nov-2026, R482) Es compañía de secado de agua por EMERGENCIA: pidió sonidos de emergencia y escogió el "20 Alarma de
+  // evacuación": el "whoop" que sube de 420 a 1150 Hz en 0.6 s, tres veces, + eco, pico 0.72, 2.4 s. Otro nombre de archivo
+  // (alarma_trabajo.wav, ver 3); se borran del teléfono los de antes (sirena.wav de R480 y aviso_trabajo.wav de R481) para que
+  // iOS no toque uno viejo.
+  const SIRENA = { ver: 3, nombre: 'alarma_trabajo.wav', viejos: ['sirena.wav', 'aviso_trabajo.wav'], seg: 2.4, sr: 44100, wav: null, url: null, guardada: false, audio: null, ultima: 0 };
+  // Cada "whoop": onda casi cuadrada (armónicos impares 1-9) que sube en curva de 420 a 1150 Hz, con saturación de bocina y sin
+  // lo chillón (paso bajo a 3800 Hz); empieza cada 0.72 s. Luego un eco de cuarto chico (6 peines + 2 pasa-todo, 15 %).
+  // Es EXACTAMENTE el 20_alarma_evacuacion.wav que él oyó (la prueba lo compara byte por byte); por eso las cuentas van en este orden.
   function sirenaMuestras(sr, seg){
-    const n = Math.round(sr * seg), d = new Float32Array(n);
-    const P = [[1, 1, 1.6], [4, 0.18, 0.35], [10, 0.03, 0.08]];
-    const notas = [[0, 523.25], [0.32, 659.26], [0.64, 783.99], [0.96, 1046.5]];
-    for(const [t0, f] of notas){
-      const i0 = Math.round(t0 * sr);
-      for(const [r, a, tau] of P){
-        const fr = f * r; if(fr > sr / 2.2) continue;
-        const largo = Math.min(n - i0, Math.round(tau * 7 * sr));
-        for(let k = 0; k < largo; k++){
-          const t = k / sr, env = Math.min(1, t / 0.006) * Math.exp(-t / tau);
-          const tm = 1 - 0.3 * 0.5 * (1 - Math.cos(2 * Math.PI * 5.2 * t));
-          d[i0 + k] += a * env * tm * Math.sin(2 * Math.PI * fr * t);
-        }
+    const n = Math.round(sr * seg), d = new Float32Array(n), dur = 0.6, satur = 1.8, vol = 1;
+    const a = 1 - Math.exp(-2 * Math.PI * 3800 / sr), tk = Math.tanh(satur);
+    for(let w = 0; w < 3; w++){
+      const i0 = Math.round(w * 0.72 * sr), m = Math.min(n - i0, Math.round(dur * sr));
+      let ph = 0, lp = 0;
+      for(let k = 0; k < m; k++){
+        const t = k / sr, f = 420 * Math.pow(1150 / 420, Math.min(1, t / 0.6));
+        ph += 2 * Math.PI * f / sr;
+        let x = 0; for(let h = 1; h <= 9; h += 2){ if(f * h > 10000) break; x += Math.sin(h * ph) / h; }
+        x = Math.tanh(satur * x) / tk; lp += a * (x - lp);
+        const env = Math.min(1, t / 0.03) * Math.min(1, (dur - t) / 0.25); d[i0 + k] += vol * env * lp;
       }
     }
-    let pico = 0; for(let i = 0; i < n; i++){ const x = Math.abs(d[i]); if(x > pico) pico = x; }
-    const g = 0.7 / (pico || 1); for(let i = 0; i < n; i++) d[i] *= g;
-    const nc = Math.round(0.25 * sr); for(let k = 0; k < nc; k++) d[n - 1 - k] *= k / nc;
-    return d;
+    const y = new Float32Array(n);
+    for(const dl of [1116, 1188, 1277, 1356, 1422, 1491]){
+      const buf = new Float32Array(dl); let j = 0, st = 0;
+      for(let i = 0; i < n; i++){ const o = buf[j]; st = o * 0.7 + st * 0.3; buf[j] = d[i] + st * 0.8; j = (j + 1) % dl; y[i] += o / 6; }
+    }
+    for(const dl of [556, 441]){
+      const buf = new Float32Array(dl); let j = 0;
+      for(let i = 0; i < n; i++){ const b = buf[j], o = -y[i] + b; buf[j] = y[i] + b * 0.5; j = (j + 1) % dl; y[i] = o; }
+    }
+    const z = new Float32Array(n); for(let i = 0; i < n; i++) z[i] = d[i] + 0.15 * y[i];
+    let pico = 0; for(let i = 0; i < n; i++) pico = Math.max(pico, Math.abs(z[i]));
+    const g = 0.72 / (pico || 1); for(let i = 0; i < n; i++) z[i] *= g;
+    const nc = Math.round(0.3 * sr); for(let k = 0; k < nc; k++) z[n - 1 - k] *= k / nc;
+    return z;
   }
   // WAV de 16 bits, un canal (iOS acepta wav/aiff/caf de hasta 30 s para un aviso).
   function sirenaWav(sr, seg){
@@ -91740,7 +91753,7 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
     const C = window.Capacitor;
     try{ return !!(C && typeof C.isNativePlatform === 'function' && C.isNativePlatform() && C.getPlatform() === 'ios'); }catch(e){ return false; }
   }
-  // La guarda en Library/Sounds/aviso_trabajo.wav si no está o si es de otra versión (la marca es solo una ayuda: si se pierde, se
+  // La guarda en Library/Sounds/alarma_trabajo.wav si no está o si es de otra versión (la marca es solo una ayuda: si se pierde, se
   // vuelve a escribir, que no hace daño). Nunca truena la app: cualquier falla se queda callada y se intenta al siguiente arranque.
   async function sirenaGuardar(){
     if(SIRENA.guardada || !sirenaEsIphone()) return false;
@@ -91755,8 +91768,8 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
         try{ localStorage.setItem(marca, String(SIRENA.ver)); }catch(e){}
       }
       SIRENA.guardada = true;
-      // la sirena vieja (R480) ya no se usa: se borra (si no está, no pasa nada)
-      if(SIRENA.viejo && SIRENA.viejo !== SIRENA.nombre){ try{ await F.deleteFile({ directory: 'LIBRARY', path: 'Sounds/' + SIRENA.viejo }); }catch(e){} }
+      // los sonidos de antes ya no se usan: se borran (si no están, no pasa nada)
+      for(const v of (SIRENA.viejos || [])){ if(v !== SIRENA.nombre){ try{ await F.deleteFile({ directory: 'LIBRARY', path: 'Sounds/' + v }); }catch(e){} } }
       return true;
     }catch(e){ return false; }
   }
