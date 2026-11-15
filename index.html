@@ -9779,7 +9779,7 @@ html body.rd-msgs .msg-root .miq-fila{border-top-color:#e6e7ea;}
 /* ===== (7-nov-2026) INFO DEL GRUPO EN NEGRO (Manager y quien no está en RD blanco): la misma pantalla que se corre hasta abajo.
    Antes era una caja más alta que la pantalla, dentro de otra que no deja correr: "se queda frisada y no puedo bajar". ===== */
 html body:not(.rd-msgs) .msg-root .msg-miembros:not([hidden]){position:absolute; inset:0; z-index:40; margin:0; padding:0 16px calc(110px + env(safe-area-inset-bottom, 0px)); border-radius:0; background:#000; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain;}
-html body:not(.rd-msgs) .msg-root .rdgi-cab{position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:space-between; margin:0 -16px; padding:10px 16px; background:rgba(18,18,20,.97); border-bottom:1px solid #26262a;}
+html body:not(.rd-msgs) .msg-root .rdgi-cab{position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:space-between; margin:0 -16px; padding:calc(env(safe-area-inset-top, 0px) + 10px) 16px 10px; background:rgba(18,18,20,.97); border-bottom:1px solid #26262a;}
 html body:not(.rd-msgs) .msg-root .rdgi-cab b{font:700 17px -apple-system, sans-serif; color:#f2f2f4;}
 html body:not(.rd-msgs) .msg-root .rdgi-listo{min-height:44px; padding:0 4px; border:0; background:none; color:#3d8bff; font:700 17px -apple-system, sans-serif; cursor:pointer;}
 html body:not(.rd-msgs) .msg-root .rdgi-top{display:flex; flex-direction:column; align-items:center; gap:6px; padding:18px 0 14px;}
@@ -20232,7 +20232,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-15-R479';
+  const APP_BUILD = '2026-11-15-R480';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -91684,6 +91684,123 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
   msgIconoEscuchar();
   window.__icono = { estado: () => ICONO, total: msgIconoTotal, alSalir: msgIconoAlSalir, alVolver: msgIconoAlVolver, cero: msgIconoCero };
   /*ICONO-NUMERITO:FIN*/
+  /*SIRENA-TRABAJO:INICIO*/
+  // (15-nov-2026, R480) El dueño: "cada vez que mando un nuevo trabajo al grupo de trabajo el teléfono de ellos debe sonar como
+  // una sirena, para que ellos por el sonido sepan que hay un nuevo trabajo".
+  // Cómo: la nube (notify-manager, bloque SIRENA_TRABAJO) manda el aviso de la tarjeta de Nuevo trabajo con sound "sirena.wav".
+  // iOS busca ese archivo en Library/Sounds de la app. Esta web lo arma aquí mismo (la sirena se calcula, no hay archivo que
+  // bajar: el aparato solo baja index.html) y lo guarda ahí una vez. Mientras un teléfono no lo tenga, iOS toca el sonido de
+  // siempre (no se pierde el aviso). Con la app ABIERTA el aviso llega callado (el plugin no lo enseña): aquí suena la misma
+  // sirena, como sonido "ambient" (respeta el botón de silencio igual que el aviso, se mezcla con la música y el radio sin
+  // cortarlos) y se calla con cualquier toque o al salir de la app. Solo la tarjeta de Nuevo trabajo suena (no un texto suelto).
+  const SIRENA = { ver: 1, nombre: 'sirena.wav', seg: 10, sr: 22050, wav: null, url: null, guardada: false, audio: null, ultima: 0 };
+  // La sirena: subida y bajada larga (wail), luego rápida (yelp) y otra larga. Tono de 650 a 1450 Hz (se oye bien en la bocina
+  // del teléfono), con dos armónicos y un poco de saturación para que suene fuerte sin tronar.
+  function sirenaMuestras(sr, seg){
+    const n = Math.round(sr * seg), d = new Float32Array(n), lo = 650, hi = 1450;
+    const wail = (u, sube) => u < sube ? Math.sin(Math.PI / 2 * u / sube) : Math.cos(Math.PI / 2 * (u - sube) / (1 - sube));
+    const forma = t => {
+      if(t < 3) return wail(t / 3, 0.45);
+      if(t < 6.2){ const u = ((t - 3) % 0.32) / 0.32; return 0.5 - 0.5 * Math.cos(2 * Math.PI * u); }
+      return wail(Math.min(1, (t - 6.2) / (seg - 6.2)), 0.4);
+    };
+    let ph = 0, pico = 0; const k = 1.8, tk = Math.tanh(k);
+    for(let i = 0; i < n; i++){
+      const t = i / sr, f = lo + (hi - lo) * forma(t);
+      ph += 2 * Math.PI * f / sr; if(ph > 2 * Math.PI) ph -= 2 * Math.PI;
+      let x = 0.62 * Math.sin(ph) + 0.25 * Math.sin(2 * ph) + 0.13 * Math.sin(3 * ph);
+      x = Math.tanh(k * x) / tk;
+      const ent = Math.min(1, t / 0.03), sal = Math.min(1, (seg - t) / 0.25);
+      x *= ent * sal; d[i] = x; const a = Math.abs(x); if(a > pico) pico = a;
+    }
+    const g = 0.89 / (pico || 1); for(let i = 0; i < n; i++) d[i] *= g;
+    return d;
+  }
+  // WAV de 16 bits, un canal (iOS acepta wav/aiff/caf de hasta 30 s para un aviso).
+  function sirenaWav(sr, seg){
+    const m = sirenaMuestras(sr, seg), datos = m.length * 2, b = new ArrayBuffer(44 + datos), v = new DataView(b);
+    const txt = (o, s) => { for(let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    txt(0, 'RIFF'); v.setUint32(4, 36 + datos, true); txt(8, 'WAVE'); txt(12, 'fmt '); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); txt(36, 'data'); v.setUint32(40, datos, true);
+    for(let i = 0; i < m.length; i++) v.setInt16(44 + i * 2, Math.max(-32767, Math.min(32767, Math.round(m[i] * 32767))), true);
+    return new Uint8Array(b);
+  }
+  function sirenaBytes(){ if(!SIRENA.wav) SIRENA.wav = sirenaWav(SIRENA.sr, SIRENA.seg); return SIRENA.wav; }
+  function sirenaBase64(u8){
+    let s = ''; const paso = 0x8000;
+    for(let i = 0; i < u8.length; i += paso) s += String.fromCharCode.apply(null, u8.subarray(i, i + paso));
+    return btoa(s);
+  }
+  function sirenaEsIphone(){
+    const C = window.Capacitor;
+    try{ return !!(C && typeof C.isNativePlatform === 'function' && C.isNativePlatform() && C.getPlatform() === 'ios'); }catch(e){ return false; }
+  }
+  // La guarda en Library/Sounds/sirena.wav si no está o si es de otra versión (la marca es solo una ayuda: si se pierde, se
+  // vuelve a escribir, que no hace daño). Nunca truena la app: cualquier falla se queda callada y se intenta al siguiente arranque.
+  async function sirenaGuardar(){
+    if(SIRENA.guardada || !sirenaEsIphone()) return false;
+    const F = window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem; if(!F) return false;
+    const ruta = 'Sounds/' + SIRENA.nombre, marca = 'sirenaVer';
+    try{
+      let ya = false;
+      try{ const st = await F.stat({ directory: 'LIBRARY', path: ruta }); ya = !!st && Number(st.size) === 44 + Math.round(SIRENA.sr * SIRENA.seg) * 2; }catch(e){}
+      let ver = ''; try{ ver = localStorage.getItem(marca) || ''; }catch(e){}
+      if(!ya || ver !== String(SIRENA.ver)){
+        await F.writeFile({ directory: 'LIBRARY', path: ruta, data: sirenaBase64(sirenaBytes()), recursive: true });
+        try{ localStorage.setItem(marca, String(SIRENA.ver)); }catch(e){}
+      }
+      SIRENA.guardada = true; return true;
+    }catch(e){ return false; }
+  }
+  // Con la app abierta. Una a la vez: si llegan dos trabajos juntos no se enciman.
+  // El tipo de sonido de la página se pone en "ambient" solo mientras suena y luego se regresa al que tenía (Lumi pone "playback").
+  function sirenaSesion(tipo){
+    try{ const s = navigator.audioSession; if(!s) return null; const antes = s.type; s.type = tipo; return antes; }catch(e){ return null; }
+  }
+  function sirenaParar(){
+    const a = SIRENA.audio; if(!a) return false;
+    SIRENA.audio = null;
+    try{ a.pause(); }catch(e){}
+    if(SIRENA.antes != null){ sirenaSesion(SIRENA.antes); SIRENA.antes = null; }
+    return true;
+  }
+  function sirenaTocar(){
+    try{
+      if(SIRENA.audio && !SIRENA.audio.paused && !SIRENA.audio.ended) return false;
+      if(SIRENA.audio) sirenaParar();
+      if(!SIRENA.url) SIRENA.url = URL.createObjectURL(new Blob([sirenaBytes()], { type: 'audio/wav' }));
+      SIRENA.antes = sirenaSesion('ambient');
+      const a = SIRENA.audio = new Audio(SIRENA.url); SIRENA.ultima = Date.now();
+      a.onended = () => { if(SIRENA.audio === a) sirenaParar(); };
+      a.onerror = () => { if(SIRENA.audio === a) sirenaParar(); };
+      const p = a.play(); if(p && typeof p.catch === 'function') p.catch(() => { if(SIRENA.audio === a) sirenaParar(); });
+      return true;
+    }catch(e){ return false; }
+  }
+  // cualquier toque la calla (el que toca ya se enteró)
+  document.addEventListener('pointerdown', () => { if(SIRENA.audio) sirenaParar(); }, true);
+  function sirenaEsAviso(a){
+    const d = a && a.data; if(!d) return false;
+    const s = d.sirena; return s === 1 || s === '1' || s === true || s === 'true';
+  }
+  function sirenaEscuchar(){
+    if(SIRENA.escuchando || !sirenaEsIphone()) return;
+    const PN = window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications; if(!PN) return;
+    SIRENA.escuchando = true;
+    try{
+      const r = PN.addListener('pushNotificationReceived', a => { if(sirenaEsAviso(a)) sirenaTocar(); });
+      if(r && typeof r.catch === 'function') r.catch(() => {});
+    }catch(e){}
+  }
+  try{ sirenaEscuchar(); }catch(e){}
+  setTimeout(() => { sirenaGuardar().catch(() => {}); }, 6000);
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'hidden'){ if(SIRENA.audio) sirenaParar(); return; }
+    if(document.visibilityState === 'visible' && !SIRENA.guardada) setTimeout(() => { sirenaGuardar().catch(() => {}); }, 1500);
+  });
+  window.__sirena = { estado: () => SIRENA, guardar: sirenaGuardar, tocar: sirenaTocar, parar: sirenaParar, esAviso: sirenaEsAviso, wav: sirenaBytes };
+  /*SIRENA-TRABAJO:FIN*/
   window.__as = { abrir: asAbrir, hojaReal: asHojaRealHtml, cerrar: asCerrar, enviar: asEnviar, galeria: asGaleriaMostrar, galeriaQuitar: asGaleriaQuitar, hojaLabor: asHojaLaborHtml, galeriaVoz: asGalPorVoz, galeriaGrande: asGalGrandeMostrar, reporte: asReporte, confirmar: asConfirmar, cancelar: asCancelar, estado: function(){ return AS; }, medir: asMedirAqui, esMedir: asEsMedir, nivelDicho: asNivelDicho, mandarHojas: laborMandarHojas, tarjeta: asMostrarTarjeta, hablar: asHablar, frases: asFrasesCompletas, escuchar: asEscuchar, reposar: asReposar, esAdios: asEsAdios, relleno: asRelleno, nombre: asNombreDePila };
   Object.assign(window.__as, { area: asAreaActual, puerta: { toque: asPuertaToque, pintar: asPuertaPintar, abrirPanel: asPuertaAbrirPanel }, estadoPoner: asEstado, respuesta: asMostrarRespuesta, tarjeta: asMostrarTarjeta, reposar: asReposar });
   Object.assign(window.__as, { copiar: asCopiar, vista: function(v){ asVistaPintar($('#asVista'), v); }, irA: asIrA });   // (1-nov) para las pruebas: copiar, el recibo, marcar pagado   // (R88) ganchos de Lumi en la puerta para las pruebas y el simulador
