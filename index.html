@@ -20232,7 +20232,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-15-R480';
+  const APP_BUILD = '2026-11-15-R481';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -91687,33 +91687,37 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
   /*SIRENA-TRABAJO:INICIO*/
   // (15-nov-2026, R480) El dueño: "cada vez que mando un nuevo trabajo al grupo de trabajo el teléfono de ellos debe sonar como
   // una sirena, para que ellos por el sonido sepan que hay un nuevo trabajo".
-  // Cómo: la nube (notify-manager, bloque SIRENA_TRABAJO) manda el aviso de la tarjeta de Nuevo trabajo con sound "sirena.wav".
+  // Cómo: la nube (notify-manager, bloque SIRENA_TRABAJO) manda el aviso de la tarjeta de Nuevo trabajo con sound "aviso_trabajo.wav" (desde R481; en R480 era "sirena.wav").
   // iOS busca ese archivo en Library/Sounds de la app. Esta web lo arma aquí mismo (la sirena se calcula, no hay archivo que
   // bajar: el aparato solo baja index.html) y lo guarda ahí una vez. Mientras un teléfono no lo tenga, iOS toca el sonido de
   // siempre (no se pierde el aviso). Con la app ABIERTA el aviso llega callado (el plugin no lo enseña): aquí suena la misma
   // sirena, como sonido "ambient" (respeta el botón de silencio igual que el aviso, se mezcla con la música y el radio sin
   // cortarlos) y se calla con cualquier toque o al salir de la app. Solo la tarjeta de Nuevo trabajo suena (no un texto suelto).
-  const SIRENA = { ver: 1, nombre: 'sirena.wav', seg: 10, sr: 22050, wav: null, url: null, guardada: false, audio: null, ultima: 0 };
-  // La sirena: subida y bajada larga (wail), luego rápida (yelp) y otra larga. Tono de 650 a 1450 Hz (se oye bien en la bocina
-  // del teléfono), con dos armónicos y un poco de saturación para que suene fuerte sin tronar.
+  // (15-nov-2026, R481) El dueño la cambió por algo elegante ("a veces están comiendo con sus familiares"): escogió el "Aviso",
+  // cuatro notas de vibráfono que suben (do-mi-sol-do), 3.6 s. Va con OTRO nombre de archivo (aviso_trabajo.wav, ver 2) para que
+  // iOS no siga tocando la sirena que tenía guardada con el nombre viejo, y la sirena.wav vieja se borra del teléfono.
+  const SIRENA = { ver: 2, nombre: 'aviso_trabajo.wav', viejo: 'sirena.wav', seg: 3.6, sr: 44100, wav: null, url: null, guardada: false, audio: null, ultima: 0 };
+  // El aviso: cada nota con tres parciales de barra de vibráfono (1, 4 y 10 veces la nota), caída suave y un leve temblor de
+  // 5.2 Hz, como el aviso por altavoz de un hotel. Pico a 0.7 (no a todo volumen). Es el mismo archivo 3_aviso.wav que él oyó.
   function sirenaMuestras(sr, seg){
-    const n = Math.round(sr * seg), d = new Float32Array(n), lo = 650, hi = 1450;
-    const wail = (u, sube) => u < sube ? Math.sin(Math.PI / 2 * u / sube) : Math.cos(Math.PI / 2 * (u - sube) / (1 - sube));
-    const forma = t => {
-      if(t < 3) return wail(t / 3, 0.45);
-      if(t < 6.2){ const u = ((t - 3) % 0.32) / 0.32; return 0.5 - 0.5 * Math.cos(2 * Math.PI * u); }
-      return wail(Math.min(1, (t - 6.2) / (seg - 6.2)), 0.4);
-    };
-    let ph = 0, pico = 0; const k = 1.8, tk = Math.tanh(k);
-    for(let i = 0; i < n; i++){
-      const t = i / sr, f = lo + (hi - lo) * forma(t);
-      ph += 2 * Math.PI * f / sr; if(ph > 2 * Math.PI) ph -= 2 * Math.PI;
-      let x = 0.62 * Math.sin(ph) + 0.25 * Math.sin(2 * ph) + 0.13 * Math.sin(3 * ph);
-      x = Math.tanh(k * x) / tk;
-      const ent = Math.min(1, t / 0.03), sal = Math.min(1, (seg - t) / 0.25);
-      x *= ent * sal; d[i] = x; const a = Math.abs(x); if(a > pico) pico = a;
+    const n = Math.round(sr * seg), d = new Float32Array(n);
+    const P = [[1, 1, 1.6], [4, 0.18, 0.35], [10, 0.03, 0.08]];
+    const notas = [[0, 523.25], [0.32, 659.26], [0.64, 783.99], [0.96, 1046.5]];
+    for(const [t0, f] of notas){
+      const i0 = Math.round(t0 * sr);
+      for(const [r, a, tau] of P){
+        const fr = f * r; if(fr > sr / 2.2) continue;
+        const largo = Math.min(n - i0, Math.round(tau * 7 * sr));
+        for(let k = 0; k < largo; k++){
+          const t = k / sr, env = Math.min(1, t / 0.006) * Math.exp(-t / tau);
+          const tm = 1 - 0.3 * 0.5 * (1 - Math.cos(2 * Math.PI * 5.2 * t));
+          d[i0 + k] += a * env * tm * Math.sin(2 * Math.PI * fr * t);
+        }
+      }
     }
-    const g = 0.89 / (pico || 1); for(let i = 0; i < n; i++) d[i] *= g;
+    let pico = 0; for(let i = 0; i < n; i++){ const x = Math.abs(d[i]); if(x > pico) pico = x; }
+    const g = 0.7 / (pico || 1); for(let i = 0; i < n; i++) d[i] *= g;
+    const nc = Math.round(0.25 * sr); for(let k = 0; k < nc; k++) d[n - 1 - k] *= k / nc;
     return d;
   }
   // WAV de 16 bits, un canal (iOS acepta wav/aiff/caf de hasta 30 s para un aviso).
@@ -91736,7 +91740,7 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
     const C = window.Capacitor;
     try{ return !!(C && typeof C.isNativePlatform === 'function' && C.isNativePlatform() && C.getPlatform() === 'ios'); }catch(e){ return false; }
   }
-  // La guarda en Library/Sounds/sirena.wav si no está o si es de otra versión (la marca es solo una ayuda: si se pierde, se
+  // La guarda en Library/Sounds/aviso_trabajo.wav si no está o si es de otra versión (la marca es solo una ayuda: si se pierde, se
   // vuelve a escribir, que no hace daño). Nunca truena la app: cualquier falla se queda callada y se intenta al siguiente arranque.
   async function sirenaGuardar(){
     if(SIRENA.guardada || !sirenaEsIphone()) return false;
@@ -91750,7 +91754,10 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
         await F.writeFile({ directory: 'LIBRARY', path: ruta, data: sirenaBase64(sirenaBytes()), recursive: true });
         try{ localStorage.setItem(marca, String(SIRENA.ver)); }catch(e){}
       }
-      SIRENA.guardada = true; return true;
+      SIRENA.guardada = true;
+      // la sirena vieja (R480) ya no se usa: se borra (si no está, no pasa nada)
+      if(SIRENA.viejo && SIRENA.viejo !== SIRENA.nombre){ try{ await F.deleteFile({ directory: 'LIBRARY', path: 'Sounds/' + SIRENA.viejo }); }catch(e){} }
+      return true;
     }catch(e){ return false; }
   }
   // Con la app abierta. Una a la vez: si llegan dos trabajos juntos no se enciman.
