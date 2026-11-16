@@ -1872,6 +1872,15 @@
   .msg-noleidos{display:flex; justify-content:center; margin:8px -14px; padding:6px 0; background:rgba(255,255,255,.06);}
   .msg-noleidos span{color:#e5e5ea; font-size:13px; font-weight:600;}
   /* las burbujas: la letra del iPhone a 17px, la colita curva en la primera de cada tanda, hora y palomitas finas adentro */
+  @media (hover: hover) and (pointer: fine){ .msg-root .msg-b{-webkit-user-select:text; user-select:text; cursor:text;} }   /* (16-nov) en la compu se escoge una parte con el mouse */
+  .msg-sel-hoja{position:fixed; inset:0; z-index:2147482000; display:flex; align-items:flex-end; justify-content:center; background:rgba(0,0,0,.55); padding:16px 16px calc(16px + env(safe-area-inset-bottom, 0px));}
+  .msg-sel-hoja[hidden]{display:none !important;}
+  .msg-sel-caja{width:100%; max-width:560px; max-height:80%; display:flex; flex-direction:column; border-radius:18px; background:#1f2c34; color:#e9edef; border:1px solid rgba(255,255,255,.12); overflow:hidden;}
+  .msg-sel-cab{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px 10px 16px; border-bottom:1px solid rgba(255,255,255,.10);}
+  .msg-sel-cab b{font-size:17px;}
+  .msg-sel-listo{min-height:44px; min-width:72px; border:0; border-radius:12px; background:var(--wa-green, #25d366); color:#000; font-weight:700; font-size:16px; cursor:pointer;}
+  .msg-sel-t{flex:1 1 auto; overflow:auto; padding:16px; font-size:19px; line-height:28px; white-space:pre-wrap; word-break:break-word; -webkit-user-select:text; user-select:text; -webkit-touch-callout:default; outline:none;}
+  .msg-sel-ayuda{margin:0; padding:0 16px 14px; font-size:13px; color:#8696a0;}
   .msg-b{position:relative; max-width:min(80%, 520px); padding:6px 9px 7px 11px; border-radius:17px; font-size:17px; line-height:22px; white-space:pre-wrap; word-break:break-word; color:var(--wa-text);
     -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; touch-action:pan-y; transition:transform .18s ease, opacity .18s ease;}
   .msg-b.in{align-self:flex-start; background:var(--wa-in);}
@@ -20264,7 +20273,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-16-R484';
+  const APP_BUILD = '2026-11-16-R485';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -88607,6 +88616,25 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
       + '</div><span class="msg-voz-t">' + esc(msgDur(a.duracion)) + '</span>';
   }
   // al tocar una burbuja: fijar / quitar de fijados (si la tabla existe) y copiar
+  // (16-nov-2026, su pedido: "trato de copiar un solo número y no me deja") el texto del mensaje en su hoja, para escoger una parte
+  const MSG_ICO_SEL = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6M9 20h6M12 4v16"/></svg>';
+  function msgSelAbrir(m){
+    const root = MSG.root; if(!root || !m || !m.texto) return;
+    let h = root.querySelector('.msg-sel-hoja');
+    if(!h){
+      h = document.createElement('div'); h.className = 'msg-sel-hoja';
+      h.innerHTML = '<div class="msg-sel-caja" role="dialog" aria-modal="true"><div class="msg-sel-cab"><b>Seleccionar texto</b><button type="button" class="msg-sel-listo">Listo</button></div>'
+        + '<div class="msg-sel-t" tabindex="0"></div><p class="msg-sel-ayuda">Deje apretada una palabra o número y mueva las orillas; luego toque Copiar.</p></div>';
+      root.appendChild(h);
+      const cerrar = () => { h.hidden = true; try{ const s = window.getSelection(); if(s) s.removeAllRanges(); }catch(e){} };
+      h.querySelector('.msg-sel-listo').addEventListener('click', cerrar);
+      h.addEventListener('click', (e) => { if(e.target === h) cerrar(); });
+      h.addEventListener('keydown', (e) => { if(e.key === 'Escape') cerrar(); });
+    }
+    h.querySelector('.msg-sel-t').textContent = m.texto;
+    h.hidden = false;
+    try{ h.querySelector('.msg-sel-t').focus({ preventScroll: true }); }catch(e){}
+  }
   function msgAcciones(m){
     if(m.borrado_at || m._pendiente) return '';
     const mio = msgMio(m), fij = MSG.fijados.has(m.id), fx = MSG.reaccionesOk;
@@ -88618,6 +88646,7 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
       + (fx ? b('data-msg-responder="' + esc(m.id) + '"', MSG_ICO.responder, 'Responder') : '')
       + (fx ? b('data-msg-reenviar="' + esc(m.id) + '"', MSG_ICO.reenviar, 'Reenviar') : '')
       + (m.texto ? b('data-msg-copiar="' + esc(m.id) + '"', MSG_ICO.copiar, 'Copiar') : '')
+      + (m.texto ? b('data-msg-sel="' + esc(m.id) + '"', MSG_ICO_SEL, 'Seleccionar texto') : '')   // (16-nov) copiar solo una parte (un número)
       + (MSG.fijadosOk ? b('data-msg-pin="' + esc(m.id) + '"', MSG_ICO.pin, fij ? 'Quitar de fijados' : 'Fijar') : '')
       + (m.tipo !== 'peticion' && fx && mio && reciente && m.texto ? b('data-msg-editar="' + esc(m.id) + '"', MSG_ICO.editar, 'Editar') : '')
       + (mio ? b('data-msg-info="' + esc(m.id) + '"', MSG_ICO.check2, 'Info') : '')
@@ -90952,6 +90981,7 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
         const pin = e.target.closest('[data-msg-pin]'); if(pin){ e.stopPropagation(); MSG.acc = null; msgFijar(pin.dataset.msgPin, !MSG.fijados.has(pin.dataset.msgPin)); return; }
         const inf = e.target.closest('[data-msg-info]'); if(inf){ e.stopPropagation(); msgInfoAbrir(inf.dataset.msgInfo); msgPintarChat(); return; }
         if(e.target.closest('.msg-info-cerrar') || e.target.classList.contains('msg-info')){ msgInfoCerrar(); return; }
+        const sl = e.target.closest('[data-msg-sel]'); if(sl){ e.stopPropagation(); const m = MSG.lista.find(x => x.id === sl.dataset.msgSel); MSG.acc = null; msgPintarChat(); msgSelAbrir(m); return; }
         const cp = e.target.closest('[data-msg-copiar]'); if(cp){ e.stopPropagation(); const m = MSG.lista.find(x => x.id === cp.dataset.msgCopiar); try{ navigator.clipboard.writeText(m ? m.texto : ''); }catch(e2){} MSG.acc = null; msgPintarChat(); return; }
         const ir = e.target.closest('[data-msg-ir]'); if(ir){ const b = root.querySelector('.msg-burbujas [data-msg-id="' + CSS.escape(ir.dataset.msgIr) + '"]'); if(b){ b.scrollIntoView({ block: 'center' }); b.classList.add('resalta'); setTimeout(() => b.classList.remove('resalta'), 1200); } return; }
         const re = e.target.closest('[data-msg-reac]'); if(re){ e.stopPropagation(); msgReaccionar(re.dataset.msgReac, re.dataset.emoji); return; }
@@ -91025,6 +91055,16 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
       const ta0 = root.querySelector('.msg-texto'); ta0.addEventListener('input', () => { ta0.style.height = 'auto'; ta0.style.height = Math.min(ta0.scrollHeight, 132) + 'px'; msgPintarBotones(); });
       ta0.addEventListener('focus', () => { msgTeclado(); setTimeout(msgTeclado, 300); setTimeout(msgTeclado, 650); });
       ta0.addEventListener('blur', () => setTimeout(msgTeclado, 120));
+      // (16-nov-2026, su pedido: "como en WhatsApp, si le doy enter en la computadora, lo envía") En la compu Enter manda y
+      // Shift+Enter baja de renglón. En el teléfono Enter sigue bajando de renglón (ahí se manda con la flecha).
+      ta0.addEventListener('keydown', (e) => {
+        if(e.key !== 'Enter' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.isComposing || e.keyCode === 229) return;
+        let compu = false; try{ compu = window.matchMedia('(hover: hover) and (pointer: fine)').matches; }catch(x){}
+        if(!compu) return;
+        e.preventDefault();
+        const env = root.querySelector('.msg-enviar');
+        if(env && !env.hidden && !env.disabled && (String(ta0.value || '').trim() || MSG.adjunto || MSG.editando)) env.click();
+      });
       // (R80) el micrófono: mantener apretado para grabar (el dedo se sigue aunque salga del botón)
       const mic0 = root.querySelector('.msg-mic');
       mic0.addEventListener('pointerdown', (e) => { e.preventDefault(); try{ mic0.setPointerCapture(e.pointerId); }catch(err){} msgGrabarEmpezar(e); });
@@ -91042,6 +91082,7 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
       // DEJAR APRETADO un mensaje = el menú (Responder, Reenviar, Copiar, Fijar, Editar, Eliminar) y las caritas; DESLIZAR a la derecha = responder
       const box1 = root.querySelector('.msg-burbujas');
       box1.addEventListener('pointerdown', (e) => {
+        if(e.pointerType === 'mouse') return;   // (16-nov) con el mouse se arrastra para escoger una parte del texto, como en WhatsApp de la compu; el menú va con clic derecho
         const b = e.target.closest('.msg-b'); if(!b || String(b.dataset.msgId).startsWith('tmp-') || e.target.closest('a, .msg-voz-play, .msg-voz-onda, .msg-voz-vel, [data-msg-reac], .msg-cita, .msg-pet-acc')) return;
         const g = MSG.toque = { b, id: b.dataset.msgId, x: e.clientX, y: e.clientY, pid: e.pointerId, dx: 0 };
         g.timer = setTimeout(() => { if(MSG.toque !== g || g.dx > 8) return; MSG.toque = null; MSG.toqueLargoAt = Date.now(); MSG.acc = g.id; msgPintarChat(); }, 450);
@@ -91062,7 +91103,9 @@ function createPrivateMessageMedia({scope,request,update,now=Date.now,schedule=f
         if(g.dx > 60 && MSG.reaccionesOk){ MSG.toqueLargoAt = Date.now(); MSG.acc = null; MSG.editando = null; MSG.respondiendo = g.id; msgPintarCitaBarra(); msgPintarBotones(); root.querySelector('.msg-texto').focus(); }
       };
       box1.addEventListener('pointerup', fin1); box1.addEventListener('pointercancel', fin1);
-      box1.addEventListener('contextmenu', (e) => { const b = e.target.closest('.msg-b'); if(!b || String(b.dataset.msgId).startsWith('tmp-')) return; e.preventDefault(); MSG.toqueLargoAt = Date.now(); MSG.acc = b.dataset.msgId; msgPintarChat(); });
+      box1.addEventListener('contextmenu', (e) => { const b = e.target.closest('.msg-b'); if(!b || String(b.dataset.msgId).startsWith('tmp-')) return;
+        try{ const s = window.getSelection(); if(s && !s.isCollapsed && b.contains(s.anchorNode)) return; }catch(x){}   // (16-nov) con una parte escogida: el menú de copiar de siempre
+        e.preventDefault(); MSG.toqueLargoAt = Date.now(); MSG.acc = b.dataset.msgId; msgPintarChat(); });
       // (fr-11) la foto: se achica en el teléfono (1600 px) antes de subirla; la flecha ⌄ aparece al deslizar hacia arriba
       const fotoPoner = async (f) => { try{ const blob = await ctAchicar(f, 1600, 0.82); MSG.adjunto = Object.assign({ blob, url: URL.createObjectURL(blob) }, await msgMedidas(blob)); msgPintarAdjunto(); }catch(err){ root.querySelector('.msg-aviso').textContent = 'No se pudo leer la foto.'; } };
       const fotoElegida = (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if(f){ if(msgEsVideo(f)) msgVideoPoner(f); else fotoPoner(f); } };   // (7-nov) foto o video
