@@ -7340,7 +7340,7 @@ html body .rdmd-caja .rdlh-banda{height:40px; line-height:40px;}
 html body .rdmd-caja .rdlh-banda i{top:8.7px;}
 /* el cuadrito rojo del cuarto es un <b>: sin esto le tocaba el estilo del circulito del número (.rdsh-caja .rdlh-banda b) */
 html body .rdmd-caja .rdlh-banda > span .rdhj-cuarto{position:static; right:auto; top:auto; transform:none; display:inline-block; min-width:0; height:auto; margin:0; padding:2px 10px 3px; border:2px solid #e3242b; border-radius:6px; background:#fff; font:800 17px/1.25 "Avenir Next", var(--sf), -apple-system, sans-serif; color:#111; text-align:left; vertical-align:middle;}
-html body .rdmd-caja .rdlh-banda > span.rdmd-tit{font:700 19px/40px "Avenir Next", var(--sf), -apple-system, sans-serif; color:#111;}
+html body .rdmd-caja .rdlh-banda > span.rdmd-tit{display:inline; font:700 19px/40px "Avenir Next", var(--sf), -apple-system, sans-serif; color:#111;}
 html body .rdmd-t{width:100%; border-collapse:collapse; table-layout:fixed;}
 html body .rdmd-t col.rdmd-c1{width:44%;} html body .rdmd-t col.rdmd-c2{width:22%;} html body .rdmd-t col.rdmd-c3{width:17%;} html body .rdmd-t col.rdmd-c4{width:17%;}
 html body .rdmd-t.rdmd-tot col.rdmd-c1{width:37%;} html body .rdmd-t.rdmd-tot col.rdmd-c2{width:18%;} html body .rdmd-t.rdmd-tot col.rdmd-c3{width:15%;} html body .rdmd-t.rdmd-tot col.rdmd-c4{width:17%;} html body .rdmd-t.rdmd-tot col.rdmd-c5{width:13%;}
@@ -13042,6 +13042,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
         <div class="field">
           <label>Superficie<span class="en"> / Surface</span></label>
           <select id="d-surface">
+            <option value="" selected>Escoja…</option>
             <option value="Floor">Piso / Floor</option>
             <option value="Wall">Pared / Wall</option>
             <option value="Ceiling">Techo / Ceiling</option>
@@ -16710,7 +16711,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
   // Lo obligatorio que NO vive en el paso 1. Se pide en el paso donde de veras
   // esta la casilla, para que el aviso rojo caiga sobre algo que se ve.
   const STEP_REQUIRED_PASO = {
-    drying: { readings: ['d-room'] },
+    drying: { readings: ['d-room', 'd-surface', 'd-material'] },   // (16-nov) superficie y material ya no vienen escogidos
   };
   const stepIdx = {};
   // Which branch of the Materials form they picked. Deliberately not
@@ -20297,7 +20298,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-16-R487';
+  const APP_BUILD = '2026-11-16-R488';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -21841,7 +21842,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       + '</div>'
       + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid #ddd;">'
       +   '<div style="padding:24px 30px;border-right:1px solid #ddd;font-size:15px;line-height:1.6;"><b style="font-size:16px;">FROM</b><br>' + esc(S.from_name||'') + '<br>' + esc(S.from_addr1||'') + '<br>' + esc(S.from_addr2||'') + '<br>' + esc(S.from_addr3||'') + '<br><br>Sent by: <b>' + esc(inv.sent_by || '') + '</b></div>'
-      +   '<div style="padding:24px 30px;border-right:1px solid #ddd;font-size:15px;line-height:1.6;"><b style="font-size:16px;">TO</b><br>' + esc(inv.bill_to || inv.client_name || '') + (addr.length ? '<br>' + addr.map(esc).join('<br>') : '') + (/united states/i.test(inv.client_address||'') ? '' : '<br>United States') + '</div>'
+      +   '<div style="padding:24px 30px;border-right:1px solid #ddd;font-size:15px;line-height:1.6;"><b style="font-size:16px;">TO</b><br>' + esc(inv.bill_to || inv.client_name || '') + (addr.length ? '<br>' + addr.map(esc).join('<br>') : '') + ((!addr.length || /united states/i.test(inv.client_address||'')) ? '' : '<br>United States') + '</div>'
       +   '<div style="padding:24px 30px;"><b style="font-size:16px;">' + (receipt ? 'Total paid' : 'Total due') + '</b><div style="font-size:40px;font-weight:800;margin-top:14px;">$' + invMoney(inv.total) + '</div>' + (receipt ? '<div style="margin-top:10px;display:inline-block;border:3px solid #15803d;color:#15803d;font-weight:900;letter-spacing:3px;padding:4px 12px;transform:rotate(-6deg);">PAID</div>' : '') + '</div>'
       + '</div>'
       + '<table style="width:100%;border-collapse:collapse;font-size:15px;"><thead><tr style="border-bottom:1px solid #ddd;">'
@@ -21936,7 +21937,14 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         }
         if(!listo) await saveAndShareNative(blob, name, text);
       }
-      else { const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); }
+      else {
+        // (16-nov) en la web "Mandar al cliente" bajaba el PDF igual que "PDF": ahora abre la hoja de compartir (iPhone/Mac Safari) con el mensaje
+        let f = null; try{ f = new File([blob], name, { type: 'application/pdf' }); }catch(e){}
+        if(kind !== 'pdf' && f && navigator.canShare && navigator.canShare({ files: [f] })){
+          try{ await navigator.share({ files: [f], text }); listo = true; }catch(e){ if(e && e.name === 'AbortError') listo = true; }
+        }
+        if(!listo){ const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000); }
+      }
     }catch(e){ if(!/cancel/i.test(String((e && e.message) || e))) alert('No se pudo hacer el PDF.\n\n' + ((e && e.message) || e)); }
     hideOverlay();
   }
@@ -22171,6 +22179,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if($('#acListCard')) $('#acListCard').hidden = true;          // la cuadrilla solo agrega: no ve la lista
   }
   if($('#acListAdd')) $('#acListAdd').addEventListener('click', ()=>{
+    try{ if(typeof amgPriceShow === 'function') amgPriceShow('clients'); }catch(e){}   // (16-nov) desde Materiales o Código el formulario salía debajo de esa pantalla
     if($('#acListCard')) $('#acListCard').hidden = true;
     if($('#acFormCard')) $('#acFormCard').hidden = false;
     acFill(null); const n = $('#acName'); if(n){ n.focus(); n.scrollIntoView({ block:'center' }); }
@@ -56086,7 +56095,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   const materialSelect = $('#d-material');
   function populateMaterialOptions(){
     const opts = MATERIAL_OPTIONS[surfaceSelect.value] || [];
-    materialSelect.innerHTML = opts.map(o => `<option value="${o.value}">${o.es}</option>`).join('');
+    materialSelect.innerHTML = '<option value="">Escoja…</option>' + opts.map(o => `<option value="${o.value}">${o.es}</option>`).join('');   // (16-nov) sin escoger no se va "Floor / Tile" solo
   }
   surfaceSelect.addEventListener('change', populateMaterialOptions);
   populateMaterialOptions();
@@ -56115,7 +56124,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const el = document.createElement('div');
     el.className = 'reading-card';
     el.innerHTML = `
-      <div class="reading-head"><span>Reading ${readingsContainer.children.length + 1} / Lectura ${readingsContainer.children.length + 1}</span><button class="icon-btn remove-reading">Eliminar<span class="en"> / Remove</span></button></div>
+      <div class="reading-head"><span data-no-idioma>${(typeof idiEn === 'function' && idiEn()) ? 'Reading ' : 'Lectura '}${readingsContainer.children.length + 1}</span><button class="icon-btn remove-reading">Eliminar<span class="en"> / Remove</span></button></div>
       <div class="row2">
         <div class="field"><label>Fecha<span class="en"> / Date</span></label><input type="date" class="r-date"></div>
         <div class="field"><label><span class="rds-no">Lectura de Humedad %<span class="en"> / Moisture Reading %</span></span><span class="rds-si">Humedad %<span class="en"> / Moisture %</span></span></label><input type="number" inputmode="decimal" class="r-value mono" placeholder="0"></div>
@@ -56128,7 +56137,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     renumberReadings();
   }
   function renumberReadings(){
-    $$('.reading-card', readingsContainer).forEach((card, i) => { $('.reading-head span', card).textContent = `Reading ${i+1} / Lectura ${i+1}`; });
+    $$('.reading-card', readingsContainer).forEach((card, i) => { $('.reading-head span', card).textContent = ((typeof idiEn === 'function' && idiEn()) ? 'Reading ' : 'Lectura ') + (i + 1); });
   }
   readingsContainer.addEventListener('click', (e) => {
     if(e.target.classList.contains('remove-reading')){ e.target.closest('.reading-card').remove(); renumberReadings(); }
@@ -56238,7 +56247,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(typeof medModo !== 'undefined') medModo = null;
     setTimeout(() => goStep('drying', 0), 0);
     $('#d-address').value=''; $('#d-room').value=''; if($('#d-client')) $('#d-client').value=''; if($('#d-phone')) $('#d-phone').value='';
-    surfaceSelect.value = 'Floor'; populateMaterialOptions();
+    surfaceSelect.value = ''; populateMaterialOptions();
     $('#d-tech').value=''; $('#d-pm').value=''; $('#d-sendto').value='';
     $$('input[name="d-priority"]').forEach(r => r.checked = (r.value === 'Priority'));
     $('#d-startdate').value = todayStr(); $('#d-reportdate').value = todayStr(); recalcDaysDrying();
@@ -62575,7 +62584,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     (r.what === 'otro' && r.note ? ' · ' + String(r.note).split(' — ')[0] : '');
   const FIN_METHOD = { efectivo:'Efectivo', zelle:'Zelle', cheque:'Cheque', tarjeta:'Tarjeta', otro:'Otro' };
   const FIN_FIXED = ['seguro','storage'];
-  const finMoney = n => '$' + (Math.round((+n||0)*100)/100).toFixed(2);
+  const finMoney = n => { const v = Math.round((+n||0)*100)/100; return (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 }); };   // (16-nov) $1,729.20 y -$292.50 como en Invoices
   const normClient = s => String(s||'').trim().replace(/\s+/g,' ');
   const clientKey = s => normClient(s).toLowerCase();
   function localToday(){ return todayStr(); }   // eran dos funciones para lo mismo; una sola, o se vuelve a abrir la brecha
@@ -63198,7 +63207,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
              : r.reimbursed_at ? '<span class="matchstatus ok">Devuelto ✓ ' + finDate(r.reimbursed_at) + (r.reimbursed_note ? ' · ' + esc(r.reimbursed_note) : '') + '</span>'
              : r.paid_by_kind === 'e' ? '<span class="matchstatus">Lo pagó la empresa</span>'
              : '<span class="matchstatus partial">Pendiente de devolver</span>';
-    const link = r.shift_no ? ' · turno ' + r.shift_no : '';
+    const link = (r.shift_no && !/^Turno /i.test(String(r.note || ''))) ? ' · turno ' + r.shift_no : '';   // (16-nov) la nota ya dice "Turno N"
     return '<div class="entryrow" data-gid="' + esc(r.id) + '"><span><span class="who">' + esc(finQue(r)) + (r.client ? ' · ' + esc(r.client) : '') + '</span>'
       + '<br><span class="when">' + esc(finDate(r.spent_on)) + ' · lo puso ' + esc(whoLabel(r.paid_by_kind, r.paid_by_name)) + link + (r.note ? ' · ' + esc(r.note) : '') + '</span><br>' + st + '</span>'
       + '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;min-width:0;max-width:100%;"><span class="hrs">' + finMoney(r.amount) + '</span>'
@@ -63941,14 +63950,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const mePut = putBy(meKey); const partnerKey = partner ? partner.kind + ':' + ((partner.id === null || partner.id === undefined) ? partner.name : partner.id) : null; const partnerPut = partnerKey ? putBy(partnerKey) : 0;
     const otherPut = exps.reduce((s, r) => s + (+r.amount||0), 0) - mePut - partnerPut - putByCompany;
     const heldByPartner = partnerKey ? pays.filter(r => r.kind === 'pago' && !r.delivered_at && personKeyOf(r) === partnerKey).reduce((s, r) => s + (+r.amount||0), 0) : 0;
-    const billed = logs.reduce((s, l) => s + (((l.payload||{}).s||[]).length ? rowFixed(l) : 0) + ((l.payload||{}).s||[]).reduce((s2, sh) => s2 + (shiftMathData(sh, (l.payload||{}).r, 'mudanza', (l.payload||{}).t).amount || 0), 0), 0);
+    // (16-nov) el invoice también cobra los materiales (cajas, cinta): se suman aquí para comparar, si no salía "se le cobró de más" por lo que costaron
+    const invMat = (inv && Array.isArray(inv.lines)) ? Math.round(inv.lines.filter(ln => !ln.off && !/^(?:Labor service|Moving service|Extra: |Discount: )/.test(String(ln.d || ''))).reduce((s, ln) => s + (+ln.a || 0), 0) * 100) / 100 : 0;
+    const billed0 = logs.reduce((s, l) => s + (((l.payload||{}).s||[]).length ? rowFixed(l) : 0) + ((l.payload||{}).s||[]).reduce((s2, sh) => s2 + (shiftMathData(sh, (l.payload||{}).r, 'mudanza', (l.payload||{}).t).amount || 0), 0), 0);
+    const billed = Math.round((billed0 + invMat) * 100) / 100;
     // `invoice` viaja dentro del cierre: si no, cada cierre que se guarda pierde
     // para siempre de qué factura fue ese dinero (18 sep 2026).
     const payLines = pays.map(r => ({ date: r.paid_on, method: FIN_METHOD[r.method] || r.method, by: whoLabel(r.received_by_kind, r.received_by_name), amount: +r.amount||0, delivered: !!r.delivered_at, invoice: r.invoice_number || null }));
     const expLines = exps.map(r => ({ date: r.spent_on, what: finQue(r), by: whoLabel(r.paid_by_kind, r.paid_by_name), amount: +r.amount||0, fixed: FIN_FIXED.includes(r.what) }));
     lastCierre = { from, to, client, notes, cobrado, officeHours, officeRate: OFFICE_RATE, oficina,
       invoice: inv ? { number: inv.number, total: +inv.total || 0, status: inv.status, logs: logs.length,
-                       paidOn: inv.paid_on || null, method: inv.paid_method || null, soloFactura: soloPorLaFactura } : null, byClient, payLines, expLines, billed, reports: logs.length, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner,
+                       paidOn: inv.paid_on || null, method: inv.paid_method || null, soloFactura: soloPorLaFactura } : null, byClient, payLines, expLines, billed, reports: logs.length, invMat, labor, laborHours, laborNoRate, people, gastos, fijos, queda, mitad, meName, mePut, partner, partnerPut, otherPut, putByCompany, heldByPartner,
       revision: cierreRevision(logs, inv, exps, people, cobrado, billed) };
     out.innerHTML = cierreHtml(lastCierre);
     out.dataset.calculado = '1';
@@ -71172,6 +71184,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const n = String(Math.max(0, inst - rem)); os.value = n; os.dataset.auto = n; return;
     }
     const base = +b.value || 0;
+    if(rem > base + inst && e.target.classList.contains('eq-removed')){ e.target.value = String(base + inst); return e.target.dispatchEvent(new Event('input', { bubbles: true })); }   // (16-nov) no se retira más de lo que hay
     os.value = String(Math.max(0, base + inst - rem)); os.dataset.auto = os.value;
   });
   // Quien escribe "Visita #" a mano manda: ya no se rehace solo.
@@ -71204,7 +71217,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const d = (rec && rec.data) || {};
     const set = (id, v) => { const el = document.getElementById(id); if(el) el.value = v == null ? '' : String(v); };
     set('d-client', casa.nombre); set('d-address', casa.direccion); set('d-room', d.room);
-    surfaceSelect.value = d.surface || 'Floor'; populateMaterialOptions();       // la superficie ANTES del material
+    surfaceSelect.value = d.surface || ''; populateMaterialOptions();       // la superficie ANTES del material
     if(d.material && [...materialSelect.options].some(o => o.value === d.material)) materialSelect.value = d.material;
     set('d-tech', mismoDia ? d.tech : ((SES && SES.full_name) || d.tech || '')); set('d-pm', d.pm); set('d-sendto', d.sendto);
     $$('input[name="d-priority"]').forEach(r => { r.checked = (r.value === (d.priority || 'Priority')); });
@@ -82392,7 +82405,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   // (el borrador lo aparta en data-pendiente). Se rehacen las opciones y vuelve lo que se había escogido.
   function rdsSup(){
     const ops = MATERIAL_OPTIONS[surfaceSelect.value] || [];
-    if(ops.length && (materialSelect.options.length !== ops.length || ops.some((o, i) => materialSelect.options[i].value !== o.value))){
+    if(materialSelect.options.length !== ops.length + 1 || ops.some((o, i) => materialSelect.options[i + 1].value !== o.value)){   // (16-nov) la primera es la vacía
       const quiere = materialSelect.dataset.pendiente || materialSelect.value;
       populateMaterialOptions();
       if(quiere && ops.some(o => o.value === quiere)) materialSelect.value = quiere;
@@ -82404,6 +82417,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const cards = $$('.reading-card', readingsContainer);
     if(!cards.includes(RDS.abierta)) RDS.abierta = cards[cards.length - 1] || null;
     cards.forEach((c, i) => {
+      { const h = c.querySelector('.reading-head span'), w = rdsEs('Lectura ', 'Reading ') + (i + 1); if(h && h.textContent !== w) h.textContent = w; }   // (16-nov) en el idioma de ahora, no los dos
       const val = String(($('.r-value', c) || {}).value || '').trim(), nota = String(($('.r-notes', c) || {}).value || '').trim();
       rdCls(c, 'rds-cerrada', c !== RDS.abierta && !!val && !c.contains(document.activeElement));
       const r = c.querySelector('.rds-res'); if(!r) return;
@@ -85408,7 +85422,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
         setTimeout(rdmsBarra, 60);
       });
     }
-    const items = rdmsBarraDe(k), firma = k + '|' + items.map(x => x.t).join(',');
+    const items = rdmsBarraDe(k), firma = k + '|' + items.map(x => x.t + '>' + (x.acc || x.id || '')).join(',');   // (16-nov) Pagos→Agregar apuntaba al de Gastos
     if(p.dataset.firma !== firma){
       p.dataset.firma = firma;
       p.innerHTML = items.map(x => '<button type="button" ' + (x.acc ? 'data-rdms-acc="' + x.acc + '"' : 'data-rdms-id="' + x.id + '"') + (x.arriba ? ' data-arriba="1"' : '') + '><svg viewBox="0 0 24 24" aria-hidden="true" style="stroke:' + RDMS_BI[x.i][0] + '"><path d="' + RDMS_BI[x.i][1] + '"/></svg><span>' + x.t + '</span></button>').join('');
