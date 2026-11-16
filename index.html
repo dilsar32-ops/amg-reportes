@@ -17248,6 +17248,30 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     panel.querySelectorAll('.field.missing').forEach(f => f.classList.remove('missing'));
     const w = (dockDe(panel) || panel).querySelector('.stepwarn'); if(w) w.hidden = true;
   }
+  // (16-nov-2026) Lo que falta se quita al llenarlo: antes el aviso "Falta 1 dato" y la casilla marcada se quedaban hasta volver a
+  // tocar Continuar. Al llenar la última casilla marcada se va el aviso.
+  function quitarFaltaAlLlenar(ev){
+    try{
+      const el = ev.target, f = el && el.closest && el.closest('.field.missing'); if(!f) return;
+      if(!String(el.value || '').trim()) return;
+      f.classList.remove('missing');
+      const panel = f.closest('.tab-panel'); if(!panel) return;
+      const w = (dockDe(panel) || panel).querySelector('.stepwarn');
+      const quedan = panel.querySelectorAll('.field.missing').length;
+      if(quedan){   // todavía falta algo: solo se baja la cuenta ("Faltan 2" -> "Falta 1")
+        if(w && !w.hidden && /^(Falta 1 dato|Faltan \d+ datos) para continuar$|^Fill in (1 more thing|\d+ more things) to continue$/.test(w.textContent.trim())){
+          const en = /^Fill/.test(w.textContent.trim());
+          w.textContent = en ? (quedan === 1 ? 'Fill in 1 more thing to continue' : 'Fill in ' + quedan + ' more things to continue')
+                             : (quedan === 1 ? 'Falta 1 dato para continuar' : 'Faltan ' + quedan + ' datos para continuar');
+          try{ if(typeof rdmsSync === 'function') rdmsSync(); }catch(x){}
+        }
+        return;
+      }
+      if(w && !w.hidden){ w.hidden = true; try{ if(typeof rdmsSync === 'function') rdmsSync(); }catch(x){} }
+    }catch(e){}
+  }
+  document.addEventListener('input', quitarFaltaAlLlenar, true);
+  document.addEventListener('change', quitarFaltaAlLlenar, true);
 
   // Forward only. Back is never gated, export is never gated, and Continuar
   // is never disabled - a dead button tells a gloved worker nothing. The
@@ -17757,6 +17781,14 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     // El de atras del paso 1 no retrocede un paso: sale al menu, igual que el
     // "◀ Menú" de arriba (17 sep 2026). goBack respeta de donde vino: si entro
     // desde Visitas o desde el manager, vuelve ahi, no al menu de la casa.
+    // (16-nov-2026) El manager dentro del formulario (Nuevo o Cambiar turnos): salir del paso 1 lo regresa a la lista de
+    // donde entró (o al reporte que estaba cambiando), no a la portada de Manager. El borrador no se borra.
+    if(b && b.dataset.alMenu === '1' && tab === 'labor' && laborFormOpen && SIDE === 'manager' && document.body.classList.contains('mgr')){
+      laborFormOpen = false; goStep('labor', 0);
+      if(openLogId !== null){ try{ showConversion(); mostrarLogAbierto(); }catch(x){} } else { try{ renderInbox(); }catch(x){} }
+      try{ const m = document.querySelector('main'); if(m) m.scrollTop = 0; window.scrollTo(0, 0); }catch(x){}
+      return;
+    }
     if(b && b.dataset.alMenu === '1') return goBack();
     // (20-oct) A un paso por su nombre (las tarjetas a mano -> Revisar; los datos del plano -> el plano), o de vuelta al
     // trabajo / a donde vino.
@@ -20232,7 +20264,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-16-R483';
+  const APP_BUILD = '2026-11-16-R484';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -61769,7 +61801,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     $('#mgrToggle').style.display = 'none';
     // Not "on because he is a manager" - on only inside the Manager section.
     // setMgr() itself decides what "Mis horas" does, so it is not set here.
-    setMgr(false);
+    // (16-nov-2026) Si el puesto llega tarde y ya está DENTRO de Manager (Labor logs, un reporte abierto), no se le apaga:
+    // apagarlo escondía el Total General y dejaba ver el formulario viejo bajo "Labor logs recibidos".
+    let quedarEnMgr = false;
+    try{ const cur = document.querySelector('main > .tab-panel.active'); quedarEnMgr = !!(mgr && SIDE === 'manager' && cur && inMgrContext(cur.dataset.tab)); }catch(e){}
+    if(quedarEnMgr) syncMgrContext(document.querySelector('main > .tab-panel.active').dataset.tab); else setMgr(false);
     if(mgr) refreshAmgCounts();
   }
 
