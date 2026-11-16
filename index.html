@@ -20232,7 +20232,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-15-R482';
+  const APP_BUILD = '2026-11-16-R483';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -80998,7 +80998,14 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       const nuevas = lista.filter(function(n){ return n && n.id && n.texto && !dichas.includes(n.id) && Date.now() - Date.parse(n.at || 0) < 3 * 86400000; }).slice(-5);
       if(!nuevas.length) return;
       try{ localStorage.setItem('lumi_rev_novedades_dichas', JSON.stringify(dichas.concat(nuevas.map(function(n){ return n.id; })).slice(-200))); }catch(e){}
-      const texto = nuevas.map(function(n){ return '• ' + String(n.texto).slice(0, 400); }).join('\n');
+      // (16-nov-2026) El ensayo diario de eventuales de la Mac deja aquí su resumen (id "ensayo-rastro:AAAA-MM-DD"): va con su propio título y completo.
+      const ensayo = nuevas.filter(function(n){ return /^ensayo-rastro:/.test(String(n.id)); }), otras = nuevas.filter(function(n){ return !/^ensayo-rastro:/.test(String(n.id)); });
+      if(ensayo.length && !otras.length){
+        const t = ensayo.map(function(n){ return String(n.texto).slice(0, 900); }).join('\n\n'), uno = ensayo.length === 1 && t.length <= 420;
+        window.__lumiRevisionAviso = { dicho: 'Amílcar, ' + (uno ? t.replace(/\n/g, ' ') : 'le dejo escrito el ensayo de eventuales.'), texto: 'ENSAYO DE EVENTUALES (no registré nada):\n' + t };
+        return;
+      }
+      const texto = otras.map(function(n){ return '• ' + String(n.texto).slice(0, 400); }).concat(ensayo.map(function(n){ return String(n.texto).slice(0, 900); })).join('\n');
       window.__lumiRevisionAviso = { dicho: 'Amílcar, ' + (nuevas.length === 1 ? 'hay una novedad de los avisos de labor log. ' + String(nuevas[0].texto).slice(0, 300) : 'hay ' + nuevas.length + ' novedades de los avisos de labor log. Ahí se las dejo escritas.'), texto: 'NOVEDADES DE LOS AVISOS DE LABOR LOG:\n' + texto };
     }catch(e){}
   }
