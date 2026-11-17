@@ -20569,7 +20569,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-17-R489';
+  const APP_BUILD = '2026-11-17-R490';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -70571,11 +70571,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           try{ donde = await ctPdfEnNube(t); }catch(e){ donde = 'espera'; t.error = String(e.message || e); console.warn('contenidos: pdf en la nube', e); }
           if(donde === 'telefono'){
             t.pdfIntentos = (t.pdfIntentos || 0) + 1; ctEscribir();                      // (31 oct) se anota ANTES: si la app se cae armándolo, cuenta
-            if(t.pdfIntentos > 3){ t.pdfPendiente = false; t.pdfSinArmar = true; t.error = ''; ctEscribir(); console.warn('contenidos: el PDF de ' + t.id + ' falló 3 veces; se arma desde la oficina'); }
-            else { try{ await ctSubirPdf(t); t.pdfIntentos = 0; }catch(e){ t.error = String(e.message || e); console.error('contenidos: pdf', e); } }
+            if(t.pdfIntentos > 3){ t.pdfACompu = true; t.error = ''; ctEscribir(); console.warn('contenidos: el PDF de ' + t.id + ' falló 3 veces en el teléfono; lo arma la computadora de la oficina'); }
+            else { try{ await ctSubirPdf(t); t.pdfIntentos = 0; t.envioSoloPendiente = true; await ctEnvioSolo(t); }catch(e){ t.error = String(e.message || e); console.error('contenidos: pdf', e); } }
           }
         }
         if(t.estado === 'firmado' && t.ccCompletoPendiente) await ctAnotarCompleto(t);
+        if(t.estado === 'firmado' && t.envioSoloPendiente) await ctEnvioSolo(t);
       }
       paro = false;
     } finally {
@@ -70953,36 +70954,41 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // proyecto de CompanyCam, la misma nube encola el envío de fotos + PDF. El teléfono solo pregunta cómo va. Si esa tabla no
   // existe todavía (404: el SQL no se ha corrido), se arma aquí como antes (R67).
   let ctPdfNubeNoHay = false, ctPdfNubeTm = null;
+  // (17-nov-2026, R490) EL DUEÑO: "si son pocas fotos, que lo arme el teléfono; si ya son muchas, que lo mande a la computadora y
+  // que la computadora lo arme y lo suba". Con más de CT_FOTOS_COMPU fotos el PDF firmado lo arma la computadora de la oficina
+  // (tools/contenidos_mac/armar-en-la-compu.mjs, cada 2 min): guarda documento.pdf + las hojas en JPG, anota pdf_path/pdf_hojas y
+  // pide el envío a CompanyCam. El teléfono solo pregunta si ya está. Con pocas fotos lo arma el teléfono (ctSubirPdf) como antes.
+  // La nube (fr-08) ya no lo arma.
+  const CT_FOTOS_COMPU = 60;
+  // (también pasa a la computadora el que el teléfono no pudo armar 3 veces; y la computadora, a los 30 min, arma cualquier firmado
+  // que siga sin PDF: así un trabajo nunca se queda sin nadie aunque el teléfono y la nube cuenten distinto las fotos)
+  const ctParaCompu = t => !!(t && (t.pdfACompu || (Array.isArray(t.fotos) && t.fotos.length > CT_FOTOS_COMPU)));
   async function ctPdfEnNube(t){
-    if(ctPdfNubeNoHay) return 'telefono';
-    const res = await authFetch('/rest/v1/contenidos_pdf_cola?trabajo_id=eq.' + encodeURIComponent(t.id) + '&select=estado,pagina,total_paginas,intentos,error,actualizado_at', { headers: ctCabeceras() });
-    if(res.status === 404){ ctPdfNubeNoHay = true; return 'telefono'; }
-    if(!res.ok) throw new Error('cola del PDF: HTTP ' + res.status);
-    const j = await res.json().catch(() => []);
-    let fila = Array.isArray(j) ? j[0] : null;
-    if(!fila){                                                           // firmado antes de fr-08 y sin apuntar: se le pide a la nube
-      const r2 = await authFetch('/rest/v1/contenidos_pdf_cola?on_conflict=trabajo_id', { method: 'POST', headers: ctCabeceras({ Prefer: 'resolution=ignore-duplicates,return=minimal' }), body: JSON.stringify({ trabajo_id: t.id, company_id: SES.company_id }) });
-      if(!r2.ok) throw new Error('pedir el PDF a la nube: HTTP ' + r2.status);
-      fila = { estado: 'pendiente', pagina: 0, total_paginas: null };
+    const r3 = await authFetch('/rest/v1/contenidos_trabajos?id=eq.' + encodeURIComponent(t.id) + '&select=pdf_path,pdf_hojas,updated_at', { headers: ctCabeceras() });
+    if(!r3.ok) throw new Error('el PDF de la computadora: HTTP ' + r3.status);
+    const f3 = (((await r3.json().catch(() => [])) || [])[0]) || null;
+    if(f3 && f3.pdf_path){
+      t.pdf = { path: f3.pdf_path, hojas: Array.isArray(f3.pdf_hojas) ? f3.pdf_hojas : [], compu: true, at: f3.updated_at || new Date().toISOString() };
+      t.pdfPendiente = false; t.pdfSinArmar = false; t.pdfNube = null; t.pdfIntentos = 0; t.error = ''; ctEscribir();
+      await ctPdfNubeEnvio(t);
+      if(!t.ccEnviado && t.cc && t.cc.id){ t.envioSoloPendiente = true; ctEscribir(); }   // la computadora no lo pidió (o falló): lo pide el teléfono
+      return 'listo';
     }
-    t.pdfNube = { estado: fila.estado, pagina: +fila.pagina || 0, total: +fila.total_paginas || 0, error: fila.error || '', at: new Date().toISOString() };
-    if(fila.estado === 'listo'){
-      const r3 = await authFetch('/rest/v1/contenidos_trabajos?id=eq.' + encodeURIComponent(t.id) + '&select=pdf_path,pdf_resumen_path,pdf_partes,updated_at', { headers: ctCabeceras() });
-      const f3 = r3.ok ? (((await r3.json().catch(() => [])) || [])[0] || null) : null;
-      if(f3 && f3.pdf_path){
-        t.pdf = { path: f3.pdf_path, resumen: f3.pdf_resumen_path || '', partes: Array.isArray(f3.pdf_partes) ? f3.pdf_partes.length : 0, hojas: [], nube: true, at: f3.updated_at || new Date().toISOString() };
-        t.pdfPendiente = false; t.pdfSinArmar = false; t.pdfNube = null; t.pdfIntentos = 0; t.error = ''; ctEscribir();
-        await ctPdfNubeEnvio(t);
-        return 'listo';
-      }
-      throw new Error('la nube dice listo pero no anotó el PDF');
-    }
-    if(fila.estado === 'fallo'){
-      t.pdfNube = null;
-      if(!ctPdfResumenSolo(t)) return 'telefono';                        // chico: lo arma el teléfono como antes
-      t.pdfPendiente = false; t.pdfSinArmar = true; t.error = ''; ctEscribir(); return 'fallo';
-    }
+    if(!ctParaCompu(t)) return 'telefono';
+    t.pdfNube = { estado: 'compu', pagina: 0, total: 0, error: '', at: new Date().toISOString() };
     return 'armando';
+  }
+  // Lo armó el teléfono (pocas fotos): se pide solo el envío a CompanyCam si el inventario ya trae su proyecto (lo mismo que el
+  // botón "Mandar a CompanyCam"; las fotos las sube la nube, no el teléfono).
+  async function ctEnvioSolo(t){
+    if(!t || t.ccEnviado || t.ccCompleto || !t.cc || !t.cc.id){ if(t && t.envioSoloPendiente){ t.envioSoloPendiente = false; ctEscribir(); } return; }
+    if(!t.pdf || t.pdfPendiente) return;
+    try{
+      const r = await ccLlamar({ accion: 'subir_contenidos', job_id: t.id, project_id: String(t.cc.id), project_nombre: String(t.cc.nombre || '').slice(0, 120) });
+      t.ccEnviado = { id: String(t.cc.id), nombre: String(t.cc.nombre || ''), at: new Date().toISOString() }; t.envioSoloPendiente = false;
+      if(r && r.envio){ t.ccNube = Object.assign({ estado: 'pendiente', total: 0, hechas: 0, hojas_hechas: 0, fallidas: 0 }, r.envio, { at: new Date().toISOString() }); ctEnvioAplicar(t); }
+      ctEscribir();
+    }catch(e){ console.warn('contenidos: envío solo a CompanyCam', e); }
   }
   // Con el PDF listo, la nube ya pudo encolar el envío a CompanyCam sola: se refleja en el teléfono (candado, "van X de Y").
   async function ctPdfNubeEnvio(t){
@@ -70997,7 +71003,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   function ctPdfNubeTexto(t){
     const n = (t && t.pdfNube) || {};
-    return n.total ? 'El PDF se está armando en la nube: hoja ' + n.pagina + ' de ' + n.total + '. No hace falta tener la app abierta.' : 'El PDF se está armando en la nube. No hace falta tener la app abierta.';
+    return 'La computadora de la oficina está armando el PDF (' + ((t && t.fotos && t.fotos.length) || 0) + ' fotos). No hace falta tener la app abierta.';
   }
   function ctPdfNubeVigilar(){
     clearTimeout(ctPdfNubeTm); ctPdfNubeTm = null;
@@ -71050,7 +71056,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(ctEnvioPendiente(t)){ alert('La nube ya está mandando este trabajo a CompanyCam: van ' + ctEnvioVan(t.ccNube) + ' de ' + (+t.ccNube.total || 0) + '. No hace falta volver a tocar.'); return; }
     }
     if(t.ccEnviado && !t.ccNube && ctEnColaCompanyCam(t)){ alert('Este trabajo ya se está mandando a CompanyCam: la cola sigue subiendo sus fotos.'); return; }
-    if(!t.pdf || t.pdfPendiente){ alert(t.pdfNube ? ctPdfNubeTexto(t) + (t.cc ? '\n\nCuando termine, la nube lo manda sola a CompanyCam.' : '\n\nCuando termine, vuelva a tocar aquí.') : 'El PDF firmado todavía se está guardando en la nube. Espere un momento y vuelva a tocar.'); ctProcesarCola(); return; }
+    if(!t.pdf || t.pdfPendiente){ alert(t.pdfNube ? ctPdfNubeTexto(t) + (t.cc ? '\n\nCuando termine, la computadora lo manda sola a CompanyCam.' : '\n\nCuando termine, vuelva a tocar aquí.') : 'El PDF firmado todavía se está guardando en la nube. Espere un momento y vuelva a tocar.'); ctProcesarCola(); return; }
     if(t.fotos.some(f => !f.enNube)){ alert('Todavía hay fotos que no han subido a la nube. Con señal suben solas; vuelva a tocar después.'); ctProcesarCola(); return; }
     const p = await ccEnviar('contenidos', ctFuenteCompanyCam(t));
     if(!p) return;
