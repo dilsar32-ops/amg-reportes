@@ -20569,7 +20569,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-18-R493';
+  const APP_BUILD = '2026-11-18-R494';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -80455,6 +80455,97 @@ const LUMI_LABOR_READ = (() => {
 if(typeof module==='object'&&module.exports)module.exports=LUMI_LABOR_READ;
 // LUMI_LABOR_READ_END
 
+// BEGIN LUMI REPORTES VERBAL
+// (18-nov-2026) El dueño: "Hey Lumi, manda los reportes al grupo... me sale una cosa grande arriba para
+// confirmar. No me gusta. Que me pregunte '¿Te parecen bien? ¿Los envío?' y yo le digo que sí o que no.
+// Y si le digo 'envíalos', que los mande de una vez."
+// Solo para LABOR LOGS AL GRUPO (tarjeta grupo_lote_mac). El dinero y lo demás siguen con su tarjeta.
+// Las hojas se enseñan en la charla como siempre; el token firmado del servidor se guarda igual en
+// AS.conf (sin pintar la tarjeta) y el "sí" usa el MISMO asConfirmar: misma Mac viva, mismo lote
+// revisado, mismo seguimiento hasta "transfer_finished".
+// true  = "manda los reportes al grupo" también se envía sin preguntar.
+// false = esa frase pregunta corto; "envíalos / ya / de una vez" envía sin preguntar.
+const LUMI_REPORTES_ENVIO_DIRECTO=false;
+function lumiReportesNorm(s){
+  return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase()
+    .replace(/[¡!¿?.,;:"'«»“”()]/g,' ').replace(/\s+/g,' ').trim();
+}
+// El dictado parte y tuerce las palabras: "manda los" / "en vía los" / "mandarlos" -> "mandalos".
+function lumiReportesArreglar(t){
+  return (' '+t+' ')
+    .replace(/ (?:en via|en bia|embia|enbia|envie|envia|mande|manda) ?(los|las) /g,(m,x)=>' '+(m.includes('man')?'manda':'envia')+x+' ')
+    .replace(/ (?:mandar|mandarr)(los|las) /g,' manda$1 ').replace(/ (?:enviar|embiar|enbiar)(los|las) /g,' envia$1 ')
+    .replace(/ (mandalo|envialo) s /g,' $1s ').replace(/ (?:embialos|enbialos) /g,' envialos ')
+    .replace(/ si+ /g,' si ').replace(/ (?:oki|okey|okay|oka) /g,' ok ').replace(/ ande le /g,' andale ');
+}
+const LUMI_REPORTES_SI=new Set(['si','yes','yeah','yep','yup','sip','simon','ok','dale','andale','va','sale','claro','perfecto','go','sure','adelante','hazlo','send','mandalos','envialos','mandalas','envialas','mandaselos','enviaselos','manda','envia','mandar','enviar','bien','okis','correcto','exacto']);
+const LUMI_REPORTES_RELLENO=new Set(['al','a','el','los','las','grupo','group','por','favor','please','porfa','ya','ahora','mismo','de','una','vez','todo','todos','todas','esos','estos','esas','estas','reportes','reporte','labor','logs','log','hojas','que','pues','estan','esta','me','parecen','parece','them','it','to','the','all','ahead','now','right','away','senor','jefe','lumi','oye','hey','y','tambien','nomas','no mas','do','asi','mi','amor','bueno','pa','para','alla','eso']);
+const LUMI_REPORTES_UNO=new Set(['mandalo','envialo','mandala','enviala','mandamelo']);
+// La respuesta a "¿Te parecen bien? ¿Los envío?": 'si' | 'no' | 'singular' (dijo "mándalo" con varias) | null.
+function lumiReportesRespuesta(input,cantidad){
+  const t=lumiReportesArreglar(lumiReportesNorm(input)).trim();
+  if(!t)return null;
+  if(/^(?:no|nop|nope|nel|negativo|espera|esperate|esperame|aguanta|aguantame|wait|hold|stop|cancela|cancelalo|cancelalos|cancelar|cancel|olvidalo|dejalo|mejor no|todavia no|aun no|ahorita no|not yet|para)\b/.test(t))return 'no';
+  if(/\b(?:no (?:los |las |lo |la )?(?:envies|mandes|mandas|envias|mandar|enviar)|todavia no|aun no|ahorita no|no todavia|not yet|cancela\w*|olvidalo|don t send|dont send|do not send|hold on)\b/.test(t))return 'no';
+  const w=t.split(' ').filter(Boolean);
+  if(w.length>10)return null;
+  let fuerte=false,uno=false;
+  for(const x of w){
+    if(LUMI_REPORTES_SI.has(x)){fuerte=true;continue;}
+    if(LUMI_REPORTES_UNO.has(x)){uno=true;continue;}
+    if(LUMI_REPORTES_RELLENO.has(x))continue;
+    return null;   // una palabra que no es del sí: no es la respuesta
+  }
+  if(uno&&!w.some(x=>/^(?:mandalos|envialos|mandalas|envialas|mandaselos|enviaselos)$/.test(x)))return cantidad===1?'si':'singular';
+  return fuerte?'si':null;
+}
+// La PRIMERA orden. Devuelve null si no es mandar reportes al grupo; si lo es:
+// {texto (sin "ya/de una vez", que el servidor no entiende), directo, pronombre ("envíalos" sin decir qué)}.
+const LUMI_REPORTES_YA='(?:ya mismo|ahora mismo|de una vez|de una|ya|enseguida|en seguida|sin preguntar(?:me)?|right now|right away)';
+function lumiReportesOrden(input){
+  const t=lumiReportesNorm(input).replace(/^(?:(?:hey|oye|hola) )?(?:lumi )?/,'');
+  const pron=new RegExp('^(?:(?:si|ok|okay|dale|bueno) )?(?:envialos|mandalos|enviaselos|mandaselos|mandarlos|enviarlos)(?: '+LUMI_REPORTES_YA+'| ahora)?(?: al grupo)?(?: '+LUMI_REPORTES_YA+')?(?: por favor)?$');
+  if(pron.test(t))return {texto:String(input||''),directo:true,pronombre:true};
+  const raw=String(input||'');
+  const fin=new RegExp('[,\\s]+'+LUMI_REPORTES_YA+'(?:[,\\s]+por favor)?\\s*[.!]*\\s*$','i');
+  const medio=/(\b(?:m[aá]ndalos|env[ií]alos|manda|env[ií]a|mandar|enviar|send)\s+)(?:ya mismo|ya|de una vez|ahora mismo)\s+/i;
+  let limpio=raw, marca=false;
+  if(fin.test(limpio)){limpio=limpio.replace(fin,'');marca=true;}
+  if(medio.test(limpio)){limpio=limpio.replace(medio,'$1');marca=true;}
+  const intento=(typeof lumiLaborSendIntent==='function')?lumiLaborSendIntent(limpio):null;
+  if(!intento||intento.kind!=='send')return null;
+  const verboDirecto=/\b(?:envialos|mandalos|enviaselos|mandaselos)\b/.test(lumiReportesNorm(limpio));
+  return {texto:limpio.trim(),directo:marca||verboDirecto||LUMI_REPORTES_ENVIO_DIRECTO,pronombre:false};
+}
+// La respuesta del servidor: ¿es el lote de reportes con sus hojas en la charla? null = no (tarjeta de siempre).
+// directo = {ids|null} cuando la orden pidió enviar sin preguntar (ids: los que él estaba viendo).
+function lumiReportesModo(j,directo){
+  const c=j&&j.confirmacion, nav=j&&j.navegar, p=nav&&nav.pantalla==='galeria'?nav.payload:null;
+  if(!c||c.tipo!=='grupo_lote_mac'||c.lumiPayment||!p||p.tipo!=='labor_logs'||!Array.isArray(p.items)||!p.items.length)return null;
+  if(p.items.some(it=>!it||it.empresa==='mudanza'))return 'bloqueado';
+  const ids=p.items.map(it=>String(it.id));
+  if(directo&&(!directo.ids||(directo.ids.length===ids.length&&directo.ids.every(x=>ids.includes(x)))))return 'directo';
+  return 'pregunta';
+}
+const LUMI_REPORTES_REVISAR=/\s*(?:Aquí están para revisarlas antes de enviarlas\.?|Here they are to review before sending\.?)\s*$/;
+function lumiReportesPregunta(n,en){
+  return en?(n===1?'Does it look good? Should I send it?':'Do they look good? Should I send them?')
+           :(n===1?'¿Te parece bien? ¿Lo envío?':'¿Te parecen bien? ¿Los envío?');
+}
+function lumiReportesConPregunta(texto,n,en){
+  const q=lumiReportesPregunta(n,en), s=String(texto||'').replace(LUMI_REPORTES_REVISAR,'').trim();
+  return s.endsWith(q)?s:(s?s+' ':'')+q;
+}
+function lumiReportesSinPregunta(texto,n,en){
+  const s=String(texto||'').replace(LUMI_REPORTES_REVISAR,'').trim(), q=en?(n===1?'Sending it now.':'Sending them now.'):(n===1?'Lo envío ahora.':'Los envío ahora.');
+  return s.endsWith(q)?s:(s?s+' ':'')+q;
+}
+function lumiReportesListo(n,en){
+  return en?(n===1?'Done, I sent the report to the Restoration group.':'Done, I sent '+n+' reports to the Restoration group.')
+           :(n===1?'Listo, mandé el reporte al grupo de Restauración.':'Listo, mandé '+n+' reportes al grupo de Restauración.');
+}
+// END LUMI REPORTES VERBAL
+
 // R359: explicit send language stays out of the read-only handler.
 // Recognize explicit report-send requests. This prepares the existing signed flow;
 // it never sends, chooses a destination, or turns a status question into approval.
@@ -80599,6 +80690,7 @@ function lumiIncompleteSpeechReply(text){
     void asDeviceClaim(); // User input chooses the reply device; warming here delayed short replies.
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando&&asReportesTurno(texto))return;   // (18-nov) reportes al grupo: la pregunta de palabra
     if(!dictando&&!AS.conf&&!AS.pregunta){const incomplete=lumiIncompleteSpeechReply(texto);if(incomplete){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(incomplete);asHablar(incomplete,asSeguirOyendo);return;}}
     // (12-nov-2026) EL OIDO DE OBRA: "leibols", "labels", "lavor logs" -> labor logs; "por cel" -> por
     // Zelle. Va aqui, al entrar, para que lo vean todos los que siguen y tambien el cerebro grande.
@@ -80612,6 +80704,7 @@ function lumiIncompleteSpeechReply(text){
       texto=resolved.text;
     }
 
+    if(!dictando)texto=asReportesOrdenEntrada(texto);   // (18-nov) reportes al grupo: ¿pregunta o directo?
     if(!dictando&&!AS.conf&&!AS.pregunta){
       const pdf=lumiPdfOrder(texto);
       if(pdf){if(typeof asLaborDocument==='function'&&(await asLaborDocument(texto))){if(AS.pdfEditor)AS.pdfEditor.focused=false;return;}await asCrearPdf(pdf,texto);return;}
@@ -80906,6 +80999,11 @@ function lumiIncompleteSpeechReply(text){
       AS.ultMs = Date.now() - t0; AS.ultPrimerTrozo = primerTrozo;
       let final = String(j.texto || (j.confirmacion ? j.confirmacion.resumen + '. ¿Lo registro?' : 'No entendí. Dímelo otra vez.'));
       if(window.Cara){ try{ const l = Cara.limpiarEtiqueta(final); final = l.texto; const g = j.confirmacion ? 'pregunta' : (j.gesto || l.gesto || Cara.gestoDelTexto(final)); if(g) Cara.gesto(g, undefined, { texto: final, dinero: !!j.confirmacion }); }catch(err){} }
+      const reportesModo = lumiReportesModo(j, AS.reportesDirecto); AS.reportesDirecto = null;   // (18-nov) reportes al grupo sin tarjeta
+      const reportesN = reportesModo ? j.navegar.payload.items.length : 0;
+      if(reportesModo === 'pregunta') final = lumiReportesConPregunta(final, reportesN, asEn());
+      else if(reportesModo === 'directo') final = lumiReportesSinPregunta(final, reportesN, asEn());
+      else if(reportesModo === 'bloqueado') final = 'Una de esas hojas es de mudanza y no va al grupo de Restauración. No envié nada.';
       asMostrarRespuesta(final);
       asCopiar(j.copiar || null); asVistaPintar($('#asVista'), j.vista || null);   // (1-nov) el número / el código copiados; el recibo
       asMapa(j.dictado ? null : (j.mapa || null));   // (4-nov) la dirección se toca y abre el GPS (en el dictado no: tocarlo cerraría a Lumi)
@@ -80914,8 +81012,8 @@ function lumiIncompleteSpeechReply(text){
       // (R43) "enséñame el de hoy y mándalo al grupo": primero la galería y DESPUÉS la tarjeta (la galería no se la lleva)
       const esGal = !!(j.navegar && j.navegar.pantalla === 'galeria');
       if(esGal) asGaleriaMostrar(j.navegar.payload); else if(AS_GAL.p) asGaleriaQuitar();
-      if(j.confirmacion) asMostrarTarjeta(j.confirmacion); else if(!esGal) asQuitarTarjeta();
-      if(esGal) asGalTarjeta(j.confirmacion || null);
+      if(reportesModo) asReportesPoner(j.confirmacion, reportesModo, j.navegar.payload); else if(j.confirmacion) asMostrarTarjeta(j.confirmacion); else if(!esGal) asQuitarTarjeta();
+      if(esGal && !reportesModo) asGalTarjeta(j.confirmacion || null);
       // (R41) el idioma de la APP: se cambia aquí mismo (lo mismo que tocar Español / English en Ajustes) y Lumi sigue abierta
       const esIdioma = !!(j.navegar && j.navegar.pantalla === 'idioma' && /^(es|en)$/.test(String(j.navegar.idioma || '')));
       if(esIdioma){ try{ if(window.__idioma && window.__idioma.poner) window.__idioma.poner(j.navegar.idioma); }catch(err){ console.warn('idioma por voz', err); } asBit('idioma de la app: ' + j.navegar.idioma); }
@@ -80925,6 +81023,7 @@ function lumiIncompleteSpeechReply(text){
       // (Voz) Lo que se oye: `dicho` del servidor si lo dicho hasta ahora salió de él (o todavía no se dijo nada).
       let paraOir = final;
       if(typeof j.dicho === 'string' && j.dicho.trim() && (conD || !norm(dicho))){ paraOir = j.dicho; if(window.Cara){ try{ paraOir = Cara.limpiarEtiqueta(paraOir).texto; }catch(err){} } }
+      if(reportesModo === 'pregunta') paraOir = lumiReportesConPregunta(paraOir, reportesN, asEn()); else if(reportesModo === 'directo') paraOir = lumiReportesSinPregunta(paraOir, reportesN, asEn()); else if(reportesModo) paraOir = final;
       if(j.idioma === 'es' || j.idioma === 'en') AS.idiomaResp = j.idioma;
       const faltante = asFaltante(paraOir, dicho);
       // The model result is complete. Audio preparation must not discard the next typed turn.
@@ -80933,6 +81032,7 @@ function lumiIncompleteSpeechReply(text){
       if(!vigente())return;
       asAlTerminarDeHablar(function(){
         // (Brújula) El modelo (herramienta medir_aqui, función v4.2) pide ubicar y abrir: la conversación sigue en el teléfono.
+        if(reportesModo === 'directo' && AS.conf && AS.conf.verbal && vigente()){ void asReportesEnviar(); return; }   // (18-nov) "envíalos": sin preguntar
         if(nav && nav.pantalla === 'medir_aqui' && !nav.trabajo){ asMedirAqui(nav.que, { nivel: nav.nivel, cliente: nav.cliente }); return; }
         // (2c) El labor log dictado: la pantalla ya quedó llena; Lumi espera el "sí" para mandarlo con el botón de siempre.
         if(nav && nav.pantalla === 'labor_log_llenar'){ asLaborLlenar(nav); return; }
@@ -81214,6 +81314,68 @@ function lumiIncompleteSpeechReply(text){
       card.appendChild(copy);block.appendChild(card);
     });log.appendChild(block);void asRememberCard(block);asChatFollow(log,true);asActualizarEstadoHojas(block,p.items);
   }
+  // BEGIN LUMI REPORTES VERBAL APP
+  // (18-nov-2026) Reportes al grupo sin la tarjeta grande: la pregunta va de palabra (ver LUMI REPORTES VERBAL).
+  // AS.conf guarda el MISMO token firmado con verbal:true; #asTarjeta nunca se pinta para este lote.
+  function asReportesPoner(c,modo,payload){
+    asQuitarTarjeta();
+    if(modo==='bloqueado')return;
+    const ids=(payload&&Array.isArray(payload.items)?payload.items:[]).map(it=>String(it.id));
+    AS.conf=Object.assign({},c,{verbal:true,directo:modo==='directo',ids,n:ids.length});
+    if(window.Cara){try{Cara.gesto(modo==='directo'?'neutral':'pregunta',4000);}catch(err){}}
+  }
+  function asReportesDecir(m){asMostrarRespuesta(m);asHablar(m,asSeguirOyendo);}
+  async function asReportesEnviar(){
+    const c=AS.conf;if(!c||!c.verbal)return;
+    if(c.enCurso||AS.enviando){asReportesDecir(asEn()?'I am already sending them. I will not repeat it.':'Ya los estoy mandando; no los repito.');return;}
+    if(AS_GAL.p&&AS_GAL.p.tipo==='labor_logs'&&AS_GAL.p.items.some(it=>it&&it.empresa==='mudanza')){asQuitarTarjeta();asReportesDecir('Una de esas hojas es de mudanza y no va al grupo de Restauración. No envié nada.');return;}
+    c.enCurso=true;AS.reportesUltimoEnvio={at:Date.now()};
+    try{await asConfirmar();}
+    finally{c.enCurso=false;if(AS.conf===c)AS.reportesUltimoEnvio=null;}   // sigue pendiente = no salió (Mac apagada, error): se puede volver a decir "sí"
+  }
+  function asReportesCancelar(texto){
+    asPararOido();asCallar();AS.conf=null;
+    const m=asEn()?'Okay, I will not send them.':'Está bien, no los envío.';
+    AS.historial=AS.historial.concat([{role:'user',content:String(texto||'No.')},{role:'assistant',content:m}]);
+    if(window.Cara){try{Cara.estado('reposo');if(Cara.negar)Cara.negar();}catch(err){}}
+    asReportesDecir(m);
+  }
+  // Un turno con la pregunta en el aire. true = ya se contestó aquí.
+  function asReportesTurno(texto){
+    AS.reportesDirecto=null;
+    const c=AS.conf;
+    if(!(c&&c.verbal)){
+      // Un "sí" repetido justo después de enviar no vuelve a enviar nada.
+      const u=AS.reportesUltimoEnvio;
+      if(!c&&!AS.pregunta&&u&&Date.now()-u.at<180000&&lumiReportesRespuesta(texto,0)==='si'&&!/\b(?:reportes?|reports?|labor|logs?|hojas?)\b/.test(lumiReportesNorm(texto))){
+        asPararOido();asCallar();asTranscribir(texto);asReportesDecir(asEn()?'That send is already done or under way. I will not repeat it.':'Ese envío ya salió o va en camino; no lo repito.');return true;
+      }
+      return false;
+    }
+    const r=lumiReportesRespuesta(texto,c.n||0);
+    const low=String(texto||'').toLowerCase().replace(/[¡!¿?.,;:]/g,' ').replace(/\s+/g,' ').trim();
+    if(r==='no'){asTranscribir(texto);asReportesCancelar(texto);return true;}
+    if(r==='si'||(AS_GAL.p&&AS_GAL.p.tipo==='labor_logs'&&asOrdenEnviarLote(low,c.n||0))){asTranscribir(texto);asPararOido();asCallar();void asReportesEnviar();return true;}
+    if(r==='singular'){asTranscribir(texto);asReportesDecir('Hay '+(c.n||0)+' hojas. ¿Cuál quiere enviar? Dígame el nombre y la fecha, o diga «envíalos» si quiere enviar todas.');return true;}
+    // Ver otra hoja ("la segunda", "la siguiente") no suelta la pregunta.
+    if(AS_GAL.p&&asGalPorVoz(texto)){asTranscribir(texto);asSeguirOyendo();return true;}
+    // Otra cosa: la pregunta se suelta (no se envía nada) y la frase sigue su camino normal.
+    AS.conf=null;return false;
+  }
+  // La primera orden: "manda los reportes al grupo ya" -> sin "ya" para el servidor, y sin preguntar.
+  function asReportesOrdenEntrada(texto){
+    if(AS.conf||AS.pregunta||SES.role!=='manager')return texto;
+    const o=lumiReportesOrden(texto);if(!o)return texto;
+    if(o.pronombre){
+      // "envíalos" sin decir cuáles: solo si está viendo hojas; se envía directo solo si el lote es ESE mismo.
+      if(!(AS_GAL.p&&AS_GAL.p.tipo==='labor_logs'&&AS_GAL.p.items.length))return texto;
+      AS.reportesDirecto={ids:AS_GAL.p.items.map(it=>String(it.id))};
+      return asEn()?'send the labor logs to the group':'manda los reportes al grupo';
+    }
+    AS.reportesDirecto=o.directo?{ids:null}:null;
+    return o.texto;
+  }
+  // END LUMI REPORTES VERBAL APP
   async function asSeguirEnvioMac(results,ids){
     if(!Array.isArray(results)||!results.length)return;
     const owner=SES.user_id+'|'+SES.company_id, log=document.getElementById('asConversacion');
@@ -81228,7 +81390,7 @@ function lumiIncompleteSpeechReply(text){
         const done=new Set(receipts.filter(r=>r.valor?.state==='transfer_finished'&&expected.has(r.valor.jobId)).map(r=>r.valor.jobId));
         results.forEach((r,i)=>{if(done.has(r.jobId))document.querySelectorAll('#asConversacion [data-report-id]').forEach(e=>{if(e.dataset.reportId===ids[i])e.textContent='Enviado · transferencia completada';});});
         status.textContent=done.size+' de '+results.length+' enviados · transferencia completada. No confirma lectura.';
-        if(results.every(r=>done.has(r.jobId))){const message='Los '+results.length+' reportes ya fueron enviados. La transferencia terminó; no confirma que los hayan leído.';asMostrarRespuesta(message);if(!AS.enviando)asHablar(message,asSeguirOyendo);return;}
+        if(results.every(r=>done.has(r.jobId))){const message=lumiReportesListo(results.length,asEn());asMostrarRespuesta(message);if(!AS.enviando)asHablar(message,asSeguirOyendo);return;}
       }catch(e){status.textContent='No pude actualizar el estado del envío. No lo repitas sin revisar.';}
       await new Promise(resolve=>setTimeout(resolve,3000));
     }
