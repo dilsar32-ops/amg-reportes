@@ -20569,7 +20569,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-18-R494';
+  const APP_BUILD = '2026-11-18-R495';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -78651,9 +78651,18 @@ function place(text,{bare=false}={}){
 }
 function noticeMoney(x){const c=Math.abs(cents(x));return '$'+(c%100===0?(c/100).toLocaleString('en-US'):(c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}));}
 // kind pago|adelanto, method cheque|zelle|efectivo. Anything else: no notice (null).
-function noticeText({kind,method,amount,where}){
+// (18-nov-2026, el dueno) CON QUIEN PAGA: "Amílcar te mandó tu pago de $X por Zelle." Solo si la app sabe el nombre del que
+// paga (payer); sin el, el texto de siempre (el mismo del servidor, que todavia no lo dice: nota en notas/).
+function payerName(x){const w=String(x||'').normalize('NFC').trim().split(/\s+/)[0]||'';return /^[\p{L}][\p{L}'’.-]{0,29}$/u.test(w)?w:'';}
+function noticeText({kind,method,amount,where,payer}){
  if(!['pago','adelanto'].includes(kind)||!['cheque','zelle','efectivo'].includes(method)||!(Number(amount)>0))return null;
- const m=noticeMoney(amount);
+ const m=noticeMoney(amount),who=payerName(payer);
+ if(who){
+  const lo=kind==='adelanto'?'tu adelanto':'tu pago',w=where?clean(where):'';
+  if(method==='zelle')return who+' te mandó '+lo+' de '+m+' por Zelle. Por favor confirma cuando te llegue.';
+  if(method==='cheque')return who+(w?' te dejó '+(kind==='adelanto'?'tu adelanto de '+m+' en cheque':'tu cheque de '+m)+' en '+w+'.':' te hizo '+(kind==='adelanto'?'tu adelanto de '+m+' en cheque':'tu cheque de '+m)+'.')+' Por favor confirma cuando lo recibas.';
+  return who+(w?' te dejó '+lo+' de '+m+' en efectivo en '+w+'.':' te dio '+lo+' de '+m+' en efectivo.')+' Por favor confirma cuando lo recibas.';
+ }
  const noun=kind==='adelanto'?'Su adelanto de '+m+({cheque:' en cheque',efectivo:' en efectivo',zelle:' por Zelle'})[method]:({cheque:'Su cheque de '+m,efectivo:'Su pago de '+m+' en efectivo',zelle:'Su pago de '+m+' por Zelle'})[method];
  return noun+(where&&method!=='zelle'?' está en '+clean(where)+'.':' ya quedó registrado.')+' Por favor confirme cuando lo reciba.';
 }
@@ -78856,7 +78865,7 @@ function lumiPayNoticePlanV1(order){
 function lumiPayNoticePlan(order){
  const P=lumiPayCore(),t=P.norm(order.text||'');
  if(/\b(?:no (?:le |les )?(?:avises|avise|mandes|envies|notifiques)|sin (?:aviso|mensaje)|do not (?:notify|send)|don't (?:notify|send))\b/.test(t))return null;
- const text=P.noticeText({kind:order.kind||'pago',method:order.method,amount:order.amount,where:P.place(order.text||'')});
+ const text=P.noticeText({kind:order.kind||'pago',method:order.method,amount:order.amount,where:P.place(order.text||''),payer:SES.full_name||SES.name||''});
  return text?{version:2,text}:null;
 }
 async function lumiPayNoticeId(f){
@@ -79020,6 +79029,749 @@ async function asPaymentFollowup(texto){
 }
 
 // END LUMI PAYMENT FOLLOWUP
+// BEGIN LUMI OFFICE ASKS
+// LUMI OFFICE ASKS (18-nov-2026): cuatro preguntas del manager, solo lectura salvo el mensaje al grupo (con tarjeta).
+// 1) "¿quién me debe?"           -> invoices de clientes sin pagar (amg_invoices + client_payments), recordatorio con su texto.
+// 2) "diles a todos que..."      -> mensaje al grupo de la empresa correcta (mudanza nunca al de Restauración), tarjeta.
+// 3) "¿quién no ha confirmado?"  -> pagos de la cuadrilla y eventuales sin confirmar o rechazados (rechazados primero).
+// 4) "¿cuánto debo?"             -> lo que se le debe a la gente (la misma cuenta de Pagos), por persona, y una conversación.
+// Aquí solo hay reglas puras (sin red ni pantalla): entender la frase, sacar las cuentas, escribir lo que ella dice.
+(function(root){
+'use strict';
+const norm=x=>String(x||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[¿¡!?.,;:"“”«»]/g,' ').replace(/\s+/g,' ').trim();
+const money=x=>{const v=Math.round(Number(x)*100)/100;return (v<0?'-':'')+'$'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});};
+const short$=x=>{const c=Math.round(Math.abs(Number(x))*100);return '$'+(c%100===0?(c/100).toLocaleString('en-US'):(c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}));};
+const r2=x=>Math.round(Number(x)*100)/100;
+const clean=x=>String(x||'').replace(/[\r\n<>]/g,' ').replace(/\s+/g,' ').trim();
+const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const MES3=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function ymd(d){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||''));return m?{y:+m[1],m:+m[2],d:+m[3]}:null;}
+function dayEs(d){const x=ymd(d);return x?x.d+' '+MES3[x.m-1]:'';}
+function dayEsLong(d){const x=ymd(d);return x?x.d+' de '+MESES[x.m-1]:'';}
+function dayEn(d){const x=ymd(d);return x?MONTHS[x.m-1]+' '+x.d:'';}
+function daysBetween(a,b){const x=ymd(a),y=ymd(b);if(!x||!y)return null;return Math.round((Date.UTC(y.y,y.m-1,y.d)-Date.UTC(x.y,x.m-1,x.d))/86400000);}
+const hrs=m=>{const h=Math.round(m/60*100)/100;return String(h).replace(/\.0+$/,'');};
+const plural=(n,a,b)=>n===1?a:b;
+
+// ---------- el oido de obra para estas cuatro preguntas ----------
+// Lo que el dictado destroza en estas frases ("medebe", "kien", "imbois", "konfirmado", "cuanto devo").
+const FIX=[[/\bkien(es)?\b/g,'quien$1'],[/\bq\b/g,'que'],[/\bk(?=uanto)/g,'c'],[/\bq(?=uanto)/g,'c'],[/\bmedeb(e|en)\b/g,'me deb$1'],[/\bmedeben\b/g,'me deben'],[/\bdev(o|e|en|emos)\b/g,'deb$1'],
+ [/\bde vo\b/g,'debo'],[/\bdebó\b/g,'debo'],[/\b(?:imbois|inbois|invois|imboice|inboice|envoice|invoys|imbois|inboises|invoises|imboices|envoices|in voices|invoces|invoice s)\b/g,'invoices'],
+ [/\b(?:imboi|invoi|inboy)\b/g,'invoice'],[/\b(?:konfirmad|confirmao|confirmad)o\b/g,'confirmado'],[/\bkonfirm/g,'confirm'],[/\bconfirmao\b/g,'confirmado'],
+ [/\b(?:acetad|aseptad|asetad)o\b/g,'aceptado'],[/\b(?:acetad|aseptad|asetad)os\b/g,'aceptados'],[/\b(?:acetar|aseptar|asetar)on\b/g,'aceptaron'],[/\brechas(o|aron|ado|ados)\b/g,'rechaz$1'],
+ [/\bcuadria\b/g,'cuadrilla'],[/\bno a (confirmado|aceptado|pagado|respondido|contestado)\b/g,'no ha $1'],[/\bno an (confirmado|aceptado|pagado|respondido|contestado)\b/g,'no han $1'],[/\bmuchacho s\b/g,'muchachos'],[/\bmudansa\b/g,'mudanza'],[/\brestaurasion\b/g,'restauracion'],[/\bcuanto s\b/g,'cuantos'],
+ [/\bkuanto\b/g,'cuanto'],[/\bkien(es)?\b/g,'quien$1'],[/\bnomina s\b/g,'nominas'],[/\bfacturas? s\b/g,'facturas']];
+function hear(text){let t=' '+norm(text)+' ';for(const [a,b] of FIX)t=t.replace(a,b);
+ t=t.replace(/^\s*(?:(?:oye|hey|ey|lumi|oiga|mira|a ver|bueno|pues|este|ok|okay|eh+|um+|porfa|por favor|please)\s+)+/,' ').replace(/\s+(?:porfa|por favor|please|lumi)\s*$/,' ');
+ return t.replace(/\s+/g,' ').trim();}
+
+// ---------- 1) los clientes que me deben ----------
+// "deber" + infinitivo es obligacion ("me debe llamar"), y deberle algo que no es dinero tampoco cuenta.
+const NOT_MONEY_DEBT=/^(?:una|un|unas|unos|la|el|las|los|mi|mis)?\s*(?:explicacion|explicaciones|favor|favores|disculpa|disculpas|respuesta|respuestas|llamada|llamadas|cerveza|cervezas|respeto|vida|cafe|comida|almuerzo|lonche|visita|foto|fotos|herramienta|herramientas|taladro|llave|llaves|mensaje|mensajes|reporte|reportes|labor log|labor logs|hoja|hojas|camioneta|troca|carro|escalera|aspiradora|horas|hora|dia|dias|turno|turnos|cita|abrazo|apology|explanation|favor|call|beer|answer|text|ride|lunch)\b/;
+const OBLIG=/^(?:[a-z]+(?:ar|er|ir)(?:me|le|lo|la|nos|les|te)?)\b/;
+function debtTail(t,m){const rest=t.slice(m.index+m[0].length).trim();if(!rest)return true;
+ if(/^(?:dinero|plata|lana|feria|money|todavia|aun|ahorita|ahora|mas de|more than|over|de hace|desde|hace|en (?:mudanza|restauracion|amg)|de (?:mudanza|restauracion|amg)|los clientes|clientes|de los clientes|$)/.test(rest))return true;
+ if(NOT_MONEY_DEBT.test(rest))return false;if(OBLIG.test(rest)&&!/^(?:dinero|todavia|mas)\b/.test(rest))return false;return true;}
+function agingDays(t){
+ if(/\b(?:mas de|over|more than|de mas de|older than|arriba de)\s+(?:un|1|one|a)\s+(?:mes|month)\b/.test(t))return 30;
+ let m=/\b(?:mas de|over|more than|de mas de|older than|arriba de)\s+(\d{1,3}|dos|tres|cuatro|seis|two|three|four|six)\s+(dias|days|semanas|weeks|meses|months)\b/.exec(t);
+ if(m){const n={dos:2,tres:3,cuatro:4,seis:6,two:2,three:3,four:4,six:6}[m[1]]||+m[1];return /seman|week/.test(m[2])?n*7:/mes|month/.test(m[2])?n*30:n;}
+ if(/\b(?:de hace|desde hace) (?:un|1) mes\b|\bmas de 30\b|\bover 30\b|\b30 dias\b|\b30 days\b/.test(t))return 30;
+ if(/\b(?:viejos?|viejas?|atrasad[oa]s?|vencid[oa]s?|old|overdue|late)\b/.test(t))return 30;
+ return 0;}
+function companyHint(t){
+ const mg=/\b(?:mudanza|mudanzas|moving|movers|mudanceros|amg moving|de amg|en amg|los de amg|amg)\b/.test(t),rd=/\b(?:restauracion|restoration|restauraciones|rd|water|agua|mitigation|mitigacion|restoration doctor|los de agua)\b/.test(t);
+ return mg&&!rd?'mudanza':rd&&!mg?'restauracion':mg&&rd?'ambas':'';}
+function clientsIntent(text){
+ const t=hear(text);if(!t||t.length>200)return null;
+ // "a quien le debo" es al reves (feature 4); "Juan me debe 50" sin pregunta no es una consulta
+ if(/\b(?:a quien(?:es)? (?:le |les )?deb|who do i owe|cuanto (?:le |les )?deb)/.test(t))return null;
+ let hit=false;
+ const q=/\b(?:quien|quienes|que clientes?|cuales clientes?|que cliente|cuantos clientes)(?: todavia| aun| ya)? (?:me|nos) (?:deben?|debe)\b/.exec(t);
+ if(q)hit=debtTail(t,q);
+ if(!hit&&/\b(?:quien|quienes|que clientes?|cuales clientes?)(?: todavia| aun)? no (?:me |nos )?(?:ha|han) pagado\b(?!.*\b(?:horas|turno|labor)\b)/.test(t)&&!/\bconfirm/.test(t))hit=true;
+ if(!hit&&/\b(?:who owes (?:me|us)|who still owes|who hasn'?t paid(?: (?:me|us))?(?: yet)?$|which clients (?:owe|haven'?t paid)|what clients owe|unpaid invoices?|outstanding invoices?|open invoices?|overdue invoices?|accounts receivable|who'?s behind on (?:payment|paying))\b/.test(t)&&!/\b(?:explanation|favor|apology|beer|call)\b/.test(t))hit=true;
+ if(!hit&&/\b(?:que|cuales|cuantos?|cuantas|los|las|mis|which|what)? ?(?:invoices?|facturas?)\b.*\b(?:no (?:me |nos )?(?:han|ha) pagado|sin pagar|no pagad[oa]s|pendientes?|abiertas?|abiertos|por cobrar|vencid[oa]s|atrasad[oa]s|que me deben|unpaid|outstanding|open|not paid|haven'?t been paid|overdue)\b/.test(t)&&!/\b(?:crea|haz|hazme|genera|nuevo|nueva|manda|mandale|envia|marca|borra|imprime|make|create|send|new|delete|print)\b/.test(t))hit=true;
+ if(!hit&&/\b(?:cuentas por cobrar|que me falta cobrar|que nos falta cobrar|cuanto me falta cobrar|a quien le tengo que cobrar|a quien(?:es)? le(?:s)? falta pagarme|cuanto me deben(?: los clientes)?|cuanto nos deben)\b/.test(t))hit=true;
+ if(!hit)return null;
+ return {feature:'clients',minDays:agingDays(t),company:companyHint(t),byInvoice:/\b(?:invoices?|facturas?)\b/.test(t),english:/\b(?:who|which|what|unpaid|outstanding|open|owes|invoices)\b/.test(t)&&!/\b(?:quien|que|cuales|facturas|me deben)\b/.test(t)};
+}
+// (ivoices de amg_invoices; pagos de client_payments por numero de factura) -> por cliente
+function clientKey(s){return norm(s).replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();}
+function clientsOwed({invoices=[],payments=[],clients=[],today,minDays=0}){
+ const paidBy=new Map();
+ for(const p of payments){if(p==null||p.invoice_number==null||p.deleted_at)continue;const k=String(p.invoice_number),a=Number(p.amount);if(!Number.isFinite(a))continue;if(p.kind&&!['pago','abono','deposito','payment'].includes(p.kind))continue;paidBy.set(k,r2((paidBy.get(k)||0)+a));}
+ const byClient=new Map(),bad=[];
+ for(const i of invoices){
+  if(!i||i.status==='paid'||i.status==='void'||i.status==='draft'||i.deleted_at)continue;
+  const total=Number(i.total);if(!Number.isFinite(total)){bad.push(i.number);continue;}
+  const owed=r2(total-(paidBy.get(String(i.number))||0));if(owed<=0.004)continue;
+  const days=daysBetween(i.issue_date,today);
+  const k=clientKey(i.client_name||'')||'(sin nombre)';
+  if(!byClient.has(k)){const c=clients.find(c=>clientKey(c.name)===k)||{};
+   byClient.set(k,{client:clean(i.client_name)||'(sin nombre)',owed:0,days:null,invoices:[],phone:clean(i.client_phone||c.phone||''),email:clean(i.client_email||c.email||''),lang:/\b(?:espanol|spanish|habla espanol|en espanol)\b/.test(norm(c.notes||'')+' '+norm(c.idioma||c.language||c.lang||''))||/^es/.test(norm(c.idioma||c.language||c.lang||''))?'es':'en'});}
+  const e=byClient.get(k);e.owed=r2(e.owed+owed);e.invoices.push({number:i.number,total,owed,issue_date:i.issue_date,days,partial:owed<total-0.004});
+  if(days!=null&&(e.days==null||days>e.days))e.days=days;
+  if(!e.phone&&i.client_phone)e.phone=clean(i.client_phone);if(!e.email&&i.client_email)e.email=clean(i.client_email);
+ }
+ let list=[...byClient.values()].map(e=>({...e,invoices:e.invoices.sort((a,b)=>(b.days||0)-(a.days||0))}));
+ if(minDays>0)list=list.map(e=>{const inv=e.invoices.filter(x=>(x.days||0)>=minDays);return inv.length?{...e,invoices:inv,owed:r2(inv.reduce((s,x)=>s+x.owed,0))}:null;}).filter(Boolean);
+ list.sort((a,b)=>(b.days||0)-(a.days||0)||b.owed-a.owed);
+ return {list,total:r2(list.reduce((s,e)=>s+e.owed,0)),bad};
+}
+function clientsSay(res,{minDays=0,company='',english=false}={}){
+ const pre=company==='restauracion'?(english?'Restoration invoices are not kept in the app; these are AMG Moving. ':'Las facturas de Restauración no están en la app; esto es de AMG Moving. '):'';
+ if(!res.list.length)return {short:pre+(english?(minDays?'No AMG Moving invoice is older than '+minDays+' days and unpaid.':'No AMG Moving invoice is unpaid.'):(minDays?'Ningún invoice de AMG Moving tiene más de '+minDays+' días sin pagar.':'Ningún invoice de AMG Moving está sin pagar.')),lines:[],offer:null};
+ const n=res.list.length;
+ const head=english?n+' '+plural(n,'client owes','clients owe')+' '+money(res.total)+(minDays?' from invoices older than '+minDays+' days':'')+' (AMG Moving).':(n===1?'Te debe 1 cliente ':'Te deben '+n+' clientes ')+money(res.total)+(minDays?' en invoices de más de '+minDays+' días':'')+' (AMG Moving).';
+ const lines=res.list.map(e=>e.client+' — '+money(e.owed)+(english?', '+(e.days==null?'date unknown':e.days+' '+plural(e.days,'day','days')):', '+(e.days==null?'sin fecha':'hace '+e.days+' '+plural(e.days,'día','días')))+' ('+e.invoices.map(i=>'#'+i.number+(i.partial?(english?' partly paid':' con abono'):'')).join(', ')+')');
+ const top=res.list[0];
+ const offer=english?'Should I prepare a reminder for '+top.client+'?':'¿Le preparo un recordatorio a '+top.client+'?';
+ return {short:pre+head,lines,offer,offerClient:top.client};
+}
+function reminderText(e,{from='AMG Moving',email='Info@amgmoving.com',lang}={}){
+ const L=lang||e.lang||'en',first=clean(e.client).split(' ')[0]||'';
+ const inv=e.invoices||[];
+ if(L==='es'){
+  const parte=inv.length===1?'la factura #'+inv[0].number+' por '+money(inv[0].owed)+(inv[0].issue_date?' (del '+dayEsLong(inv[0].issue_date)+')':'')+' sigue pendiente':'las facturas '+inv.map(i=>'#'+i.number).join(', ')+' siguen pendientes, por un total de '+money(e.owed);
+  return 'Hola '+first+', le saluda '+from+'. Le escribimos para recordarle amablemente que '+parte+'. Si ya la pagó, muchas gracias y disculpe la molestia. Cualquier pregunta, con gusto le ayudamos.\n'+from+'\n'+email;
+ }
+ const part=inv.length===1?'invoice #'+inv[0].number+' for '+money(inv[0].owed)+(inv[0].issue_date?' (dated '+dayEn(inv[0].issue_date)+')':'')+' is still open':'invoices '+inv.map(i=>'#'+i.number).join(', ')+' are still open, for a total of '+money(e.owed);
+ return 'Hi '+first+', this is '+from+'. Just a friendly reminder that '+part+'. If you have already sent it, thank you, and please disregard this message. Let us know if you have any questions.\n'+from+'\n'+email;
+}
+function digits(p){return String(p||'').replace(/[^\d+]/g,'');}
+function smsHref(phone,text){const d=digits(phone);return d?'sms:'+d+'&body='+encodeURIComponent(text):'';}
+function waHref(phone,text){let d=digits(phone).replace(/^\+/,'');if(d.length===10)d='1'+d;return d.length>=11?'https://wa.me/'+d+'?text='+encodeURIComponent(text):'';}
+function mailHref(email,subject,text){return /@/.test(email||'')?'mailto:'+clean(email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(text):'';}
+function reminderReply(text,pending){
+ if(!pending)return null;const t=norm(text).replace(/^(?:oye |hey |lumi |oiga )+/,'').replace(/ (?:lumi)$/,'');
+ if(/^(?:si|sip|simon|claro|dale|va|ok|okay|okey|yes|yeah|sure|please|por favor|andale|orale|hazlo|preparalo|si preparalo|si por favor|si porfa|si hazlo|si dale|si claro)(?: (?:por favor|porfa|please|gracias))?$/.test(t))return {action:'yes',lang:''};
+ const lang=/\ben espanol\b|\bin spanish\b/.test(t)?'es':/\ben ingles\b|\bin english\b/.test(t)?'en':'';
+ if(lang&&/^(?:si |yes |preparalo |hazlo |dale |mejor )?(?:pero )?(?:en espanol|in spanish|en ingles|in english)$/.test(t))return {action:'yes',lang};
+ let m=/^(?:si |yes |no |mejor )?(?:(?:preparale|hazle|haz|prepara|preparame|escribele|draft|write)(?: uno| un recordatorio| one| a reminder)?(?: (?:a|al|para|to|for))? |(?:a|al|para|to|for) )([a-z][a-z .'-]{1,40}?)(?: (?:en espanol|in spanish|en ingles|in english))?$/.exec(t);
+ if(m&&!/^(?:todos|todas|nadie|ninguno|everyone|nobody)$/.test(m[1]))return {action:'for',client:m[1],lang};
+ if(/^(?:no|nop|nel|no gracias|ahorita no|despues|luego|mejor no|mejor despues|no por ahora|not now|later|no thanks|nah)$/.test(t))return {action:'no'};
+ return null;
+}
+
+// ---------- 2) mensaje a toda la cuadrilla ----------
+const SEND_VERB='(?:dile|diles|avisale|avisales|avisa|mandale|mandales|manda|enviale|envia|escribele|escribeles|ponle|pon|comunicale|comunicales|recuerdale|recuerdales|informale|informales)(?: un mensaje| un aviso| el mensaje| este mensaje)?';
+const CO_Q='(?: de (?:la )?(?:mudanza|mudanzas|restauracion|amg|agua|moving|restoration))?';
+const CREW_NOUN='(?:todos(?: los muchachos| los trabajadores)?|todas|toda la cuadrilla|todo el equipo|todo el mundo|(?:la |las )?cuadrillas?|(?:el )?equipo|(?:los )?muchachos|(?:los )?chavos|(?:los )?trabajadores|(?:la )?gente|(?:los )?movers|(?:los )?mudanceros|los de (?:la )?(?:mudanza|restauracion|agua|amg))';
+const SEND_LEAD=new RegExp('^'+SEND_VERB+' (?:a |al |a la |a los |en |en el )?(?:('+CREW_NOUN+CO_Q+')|(?:el )?grupo(?: ((?!que\\b)[a-z0-9]+(?: (?!que\\b)[a-z0-9]+){0,3}))?(?= que |:| *$))(?: que |: ?|, ?| )(.*)$');
+const SEND_LEAD_EN=/^(?:tell|text|message|notify|let|send|remind)(?: a message to| a note to| word to)? (?:everyone|everybody|the crew|the team|the whole crew|the whole team|the group|all the guys|the guys|the moving crew|the restoration crew|the moving group|the restoration group|the movers)(?: know)?(?: that|:|,)?\s+(.*)$/;
+function crewIntent(text){
+ const raw=String(text||'').trim(),t=hear(raw);if(!t||t.length>600)return null;
+ // otras cosas que van al grupo tienen su propio camino: labor logs, hojas, fotos, gastos; WhatsApp va por la Mac
+ if(/\b(?:labor ?logs?|leibols?|reportes?|hojas?|fotos?|recibos?|gastos|pdf|whatsapp|wasap|guasap)\b/.test(t.split(/ que | that |:/)[0]))return null;
+ if(/^(?:lee|leeme|que dijeron|que dice|que dicen|crea|agrega|saca|quita|borra|abre|read|what did|create|add|remove|open)\b/.test(t))return null;
+ let m=SEND_LEAD.exec(t),en=false,who='',gname='',bodyNorm='';
+ if(m){who=m[1]||'grupo';gname=(m[2]||'').trim();bodyNorm=(m[3]||'').trim();}
+ else{m=SEND_LEAD_EN.exec(t);en=!!m;if(m){who=m[0].slice(0,m[0].length-m[1].length);bodyNorm=m[1].trim();}}
+ if(!m)return null;
+ if(/^(?:todos|todas)\b/.test(who)&&!/ (?:a|al) (?:todos|todas)\b/.test(t))return null;   // "manda todos" = los labor logs, no un mensaje
+ if(/^de /.test(gname)){who+=' '+gname;gname='';}
+ if(!bodyNorm||bodyNorm.split(' ').length<2)return null;
+ // el cuerpo, con las palabras ORIGINALES (acentos, mayusculas), sin el arranque
+ const body=originalBody(raw,bodyNorm);
+ const addressee=norm(raw).slice(0,Math.max(0,norm(raw).length-bodyNorm.length));
+ let company=companyHint(addressee.replace(new RegExp(gname?' '+gname.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b':'^$'),' ')+' '+who);
+ if(gname&&!company)company='';
+ const bodyCompany=companyHint(bodyNorm);
+ return {feature:'crew',company:company==='ambas'?'':company,bodyCompany:bodyCompany==='ambas'?'':bodyCompany,groupQuery:gname,body,english:en};
+}
+function originalBody(raw,bodyNorm){
+ const words=bodyNorm.split(' ').length,toks=String(raw).trim().split(/\s+/);
+ let out=toks.slice(Math.max(0,toks.length-words)).join(' ');
+ if(norm(out)!==bodyNorm){for(let k=words-2;k<=words+2;k++){const c=toks.slice(Math.max(0,toks.length-k)).join(' ');if(norm(c)===bodyNorm){out=c;break;}}}
+ return out.replace(/^(?:que|that)\s+/i,'').replace(/^[:,\s]+/,'');
+}
+// Limpia el dictado SIN tocar horas, fechas ni montos: solo acentos perdidos, muletillas y la puntuacion.
+const ACC={manana:'mañana',tambien:'también',aqui:'aquí',alla:'allá',ahi:'ahí',despues:'después',dia:'día',dias:'días',sabado:'sábado',miercoles:'miércoles',esta:'está',estan:'están',traigan:'traigan',senor:'señor',senora:'señora',ano:'año',porfavor:'por favor',xfa:'por favor',q:'que',xq:'porque',pq:'porque',tmb:'también',bodega:'bodega',reunion:'reunión',camion:'camión',direccion:'dirección',informacion:'información',atencion:'atención',proteccion:'protección',temprano:'temprano',leibol:'labor log',leibols:'labor logs',label:'labor log',labels:'labor logs'};
+function tidyBody(body){
+ let s=' '+String(body||'').replace(/\s+/g,' ').trim()+' ';
+ s=s.replace(/\s(?:eh+|em+|este|um+|uh+|o sea)(?=[\s,])/gi,' ').replace(/\b(\w+)\s+\1\b/gi,'$1');
+ s=s.replace(/\b([A-Za-zÁÉÍÓÚáéíóúñÑ]+)\b/g,(w)=>{const k=w.toLowerCase();if(k==='esta'||k==='estan')return w;return ACC[k]&&!/[áéíóúñ]/i.test(w)?(w[0]===w[0].toUpperCase()&&w.length>1?ACC[k][0].toUpperCase()+ACC[k].slice(1):ACC[k]):w;});
+ s=s.replace(/\s+([,.!?])/g,'$1').replace(/\s+/g,' ').trim();
+ if(!s)return '';
+ s=s[0].toUpperCase()+s.slice(1);
+ if(!/[.!?]$/.test(s))s+='.';
+ return s;
+}
+const NUMW='una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve';
+// horas, fechas y montos como aparecen; se comparan antes y despues de limpiar
+function facts(text){
+ const t=String(text||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¿¡!?,;"“”«»]/g,' ').replace(/\.(?!\d)/g,' ').replace(/\s+/g,' ').trim(),out=[];
+ for(const m of t.matchAll(new RegExp('\\b(?:a la|a las|at|desde las|hasta las|antes de las|despues de las|como a las|por ahi de las)\\s+(\\d{1,2}(?::\\d{2})?|'+NUMW+')(?:\\s*(?:y media|y cuarto|am|pm|a m|p m|de la manana|de la tarde|de la noche|en punto))?','g')))out.push({k:'hora',v:m[0].replace(/^(?:a la|a las|at|desde las|hasta las|antes de las|despues de las|como a las|por ahi de las)\s+/,'')});
+ for(const m of t.matchAll(/\b\d{1,2}:\d{2}(?:\s*(?:am|pm)\b)?|\b\d{1,2}\s*(?:am|pm)\b/g)){const v=m[0].trim();if(!out.some(f=>f.k==='hora'&&f.v.includes(v)))out.push({k:'hora',v});}
+ for(const m of t.matchAll(/\b(?:pasado manana|manana|hoy|esta noche|el lunes|el martes|el miercoles|el jueves|el viernes|el sabado|el domingo|lunes|martes|miercoles|jueves|viernes|sabado|domingo|tomorrow|today|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2} de (?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/g)){if(/^manana$/.test(m[0])&&/\bde la manana\b/.test(t.slice(Math.max(0,m.index-6),m.index+6)))continue;if(!out.some(f=>f.k==='dia'&&f.v.includes(m[0])))out.push({k:'dia',v:m[0]});}
+ for(const m of t.matchAll(/\$\s*\d[\d,.]*|\b\d[\d,.]*\s*(?:dolares|dollars|bucks|pesos)\b/g))out.push({k:'monto',v:m[0].replace(/\s+/g,' ')});
+ return out;
+}
+function sameFacts(a,b){const k=x=>x.map(f=>f.k+':'+norm(f.v)).sort().join('|');return k(facts(a))===k(facts(b));}
+// los grupos de Mensajes: cual es de mudanza y cual de restauracion, por su nombre
+function groupKind(name){const t=norm(name);const mg=/\b(?:mudanza|mudanzas|moving|movers|amg moving|amg|mudanceros)\b/.test(t),rd=/\b(?:restauracion|restoration|rd|rd ?\d(?:\.\d)?|restoration doctor|agua|water|mitigacion|mitigation)\b/.test(t)||/\brd\s*\d/.test(t);return mg&&!rd?'mudanza':rd&&!mg?'restauracion':'';}
+function pickGroup(groups,{company,groupQuery,bodyCompany}){
+ const gs=(groups||[]).filter(g=>g&&g.id&&g.nombre);
+ if(groupQuery){const q=norm(groupQuery),hit=gs.filter(g=>norm(g.nombre)===q||norm(g.nombre).includes(q));if(hit.length===1){const k=groupKind(hit[0].nombre);if((company||bodyCompany)==='mudanza'&&k==='restauracion')return {error:'moving_to_rd',group:hit[0]};return {group:hit[0]};}if(hit.length>1)return {ask:true,choices:hit};}
+ const want=company||bodyCompany;
+ if(!want){const mg=gs.filter(g=>groupKind(g.nombre)==='mudanza'),rd=gs.filter(g=>groupKind(g.nombre)==='restauracion');return {ask:true,choices:mg.concat(rd)};}
+ const hit=gs.filter(g=>groupKind(g.nombre)===want);
+ if(hit.length===1)return {group:hit[0]};
+ if(hit.length>1)return {ask:true,choices:hit};
+ return {missing:want};
+}
+function groupAnswer(text,choices){
+ const t=hear(text);if(!choices||!choices.length)return null;
+ if(/^(?:no|nada|cancela|cancelalo|olvidalo|mejor no|dejalo|ninguno|cancel|never mind|forget it)$/.test(t))return {cancel:true};
+ const byName=choices.filter(g=>t.includes(norm(g.nombre))||norm(g.nombre).includes(t)&&t.length>=3);
+ if(byName.length===1)return {group:byName[0]};
+ const k=companyHint(t);if(k==='mudanza'||k==='restauracion'){const h=choices.filter(g=>groupKind(g.nombre)===k);if(h.length===1)return {group:h[0]};}
+ const n={'el primero':0,'primero':0,'la primera':0,'1':0,'uno':0,'el segundo':1,'segundo':1,'2':1,'dos':1,'el tercero':2,'3':2,'tres':2}[t.replace(/^(?:al|el|la|a) /,'el ').replace(/^el (?=\d|uno|dos|tres)/,'')];
+ if(n!=null&&choices[n])return {group:choices[n]};
+ return null;
+}
+
+// ---------- 3) pagos sin confirmar ----------
+function unconfirmedIntent(text){
+ const t=hear(text);if(!t||t.length>200)return null;
+ if(/^(?:confirma|confirmale|acepta|registra|anota|marca|confirm|accept|record)\b/.test(t))return null;
+ const payWord=/\b(?:pago|pagos|payment|payments|paid|pay|cheque|cheques|zelle|adelanto|adelantos|dinero)\b/.test(t),hoursWord=/\b(?:horas|hora|turno|turnos|hours|shift|shifts|labor log|reporte|cita|mudanza|trabajo)\b/.test(t)&&!payWord;
+ if(hoursWord)return null;
+ const multi=/\b(?:quien|quienes|que pagos|cuales pagos|cuantos pagos|los pagos|pagos|adelantos|que adelantos|who|which payments|what payments|any payments|payments|anyone|alguien|nadie|todos los que|lista)\b/.test(t);
+ if(!multi)return null;
+ const rej=/\b(?:rechaz\w*|rejected|rejects?|refused|reclam\w*|no (?:lo |los )?acept\w*|disputed|dispute|no le llego|didn'?t get|no les llego)\b/.test(t);
+ const pend=/\b(?:no (?:ha|han) (?:confirmado|aceptado|respondido|contestado)|sin confirmar|sin aceptar|por confirmar|pendientes? de (?:confirmar|aceptar)|no confirmad[oa]s|no aceptad[oa]s|falta(?:n)? (?:de )?confirmar|hasn'?t confirmed|haven'?t confirmed|not confirmed|unconfirmed|haven'?t accepted|hasn'?t accepted|not accepted|unaccepted|pending confirmation|still pending)\b/.test(t);
+ if(!(rej||pend))return null;
+ // sin la palabra pago solo vale la pregunta pelona: "¿quién no ha confirmado?", "¿quién rechazó?"
+ if(!payWord&&!/^(?:y )?(?:quien|quienes|who|alguien)(?: me)? (?:no (?:ha|han) (?:confirmado|aceptado)|rechazo|rechazaron|hasn'?t confirmed|haven'?t confirmed|rejected)(?: todavia| aun| yet)?$/.test(t))return null;
+ return {feature:'unconfirmed',rejectedOnly:rej&&!pend,english:/\b(?:who|which|what|payments|rejected|hasn'?t|haven'?t)\b/.test(t)&&!/\b(?:quien|pagos|que)\b/.test(t)};
+}
+function correctedIds(list){const s=new Set();for(const p of list)if(p&&p.corrige_id)s.add(String(p.corrige_id));return s;}
+// corrected = los ids rechazados que ya tienen su correccion (la app la saca con correccionesDe, la regla de la ficha)
+function unconfirmedList({crewPayments=[],casualPayments=[],people=[],today,corrected=null}){
+ const name=k=>{const p=people.find(p=>p.key===k);return p?p.name:'(sin nombre)';};
+ const out=[],corr=corrected||correctedIds(crewPayments);
+ for(const p of crewPayments){
+  if(!p||p.deleted_at||p.accepted===true||p.auto_ok_at||!(Number(p.amount)>0))continue;
+  if(p.accepted===false&&(p.resolved_accepted===true||corr.has(String(p.id))))continue;
+  const date=String(p.paid_on||p.created_at||'').slice(0,10),key='c:'+p.user_id;
+  out.push({key,kind:'crew',id:p.user_id,name:name(key),amount:Number(p.amount),date,method:p.metodo||'',type:p.settlement?'cierre':p.kind||'pago',days:daysBetween(date,today),rejected:p.accepted===false,reason:clean(p.response_note||p.reject_reason||p.motivo||''),fixes:p.corrige_id?String(p.corrige_id):''});
+ }
+ for(const p of casualPayments){
+  if(!p||p.deleted_at||p.accepted===true||p.auto_ok_at||!(Number(p.amount)>0)||p.confirm_needed===false||!('accepted' in p))continue;
+  if(p.kind&&!['pago','adelanto','cierre','settlement'].includes(p.kind))continue;
+  const date=String(p.paid_on||p.created_at||'').slice(0,10),key='t:'+p.casual_worker_id;
+  out.push({key,kind:'casual',id:p.casual_worker_id,name:name(key),amount:Number(p.amount),date,method:p.metodo||p.method||'',type:p.kind||'pago',days:daysBetween(date,today),rejected:p.accepted===false,reason:clean(p.response_note||'')});
+ }
+ out.sort((a,b)=>(b.rejected-a.rejected)||((b.days||0)-(a.days||0)));
+ return out;
+}
+const MET={zelle:'Zelle',cheque:'cheque',efectivo:'efectivo',otro:'otro medio',cashapp:'Cash App',venmo:'Venmo'};
+function unconfirmedSay(list,{rejectedOnly=false,english=false}={}){
+ const L=rejectedOnly?list.filter(x=>x.rejected):list;
+ if(!L.length)return {short:rejectedOnly?(english?'No payment is rejected right now.':'Ningún pago está rechazado ahora.'):(english?'Every payment is confirmed.':'Todos los pagos están confirmados.'),lines:[]};
+ const rej=L.filter(x=>x.rejected).length,pend=L.length-rej;
+ const short=english?(rej?rej+' rejected'+(pend?' and ':''):'')+(pend?pend+' waiting for confirmation':'')+'.':
+  (rej?(rej===1?'1 pago rechazado':rej+' pagos rechazados')+(pend?' y ':''):'')+(pend?(pend===1?'1 pago sin confirmar':pend+' pagos sin confirmar'):'')+'.';
+ const lines=L.map(x=>(x.rejected?(english?'REJECTED · ':'RECHAZADO · '):'')+x.name+' — '+money(x.amount)+(x.type==='adelanto'?(english?' advance':' de adelanto'):x.type==='cierre'?(english?' (pay period)':' (cierre)'):'')+(x.fixes&&!x.rejected?(english?' (corrects a rejected one)':' (corrige uno rechazado)'):'')+(x.method?' '+(english?'by ':'por ')+(MET[x.method]||x.method):'')+', '+(english?dayEn(x.date):dayEs(x.date))+', '+(x.days==null?'':(english?x.days+' '+plural(x.days,'day','days')+' pending':'hace '+x.days+' '+plural(x.days,'día','días')))+(x.rejected?(x.reason?(english?' — said: «':' — dijo: «')+x.reason+'»':(english?' — no reason given':' — no dejó motivo')):''));
+ return {short:(english?'':'Hay ')+short.charAt(0).toLowerCase()+short.slice(1),lines,items:L};
+}
+
+// ---------- 4) lo que yo le debo a la gente ----------
+const BILLS=/\b(?:de|del|de la|a|al|a la|en|en la|on|for|to)\s+(?:la |el |mi |the |my )?(?:luz|renta|agua|tarjeta|banco|impuestos|taxes|seguro|aseguranza|insurance|troca|carro|camioneta|casa|hipoteca|mortgage|telefono|celular|internet|home depot|lowes|proveedor|tienda|supplier|credit card|card|loan|prestamo|irs|gas|gasolina|materiales|material)\b/;
+const CREW_W='(?:a )?(?:los muchachos|la cuadrilla|el equipo|los trabajadores|la gente|los chavos|los empleados|los temporales|los eventuales|mis trabajadores|mi gente|mis muchachos|the crew|the guys|the team|my workers|my crew|everyone|todos|todo el mundo)';
+function oweIntent(text,ctx){
+ const raw=String(text||''),t=hear(raw);if(!t||t.length>220)return null;
+ const fresh=ctx&&ctx.topic==='owe'&&ctx.fresh;
+ // los clientes que ME deben van al otro lado
+ if(/\b(?:me|nos) (?:debe|deben)\b|\bowes? me\b|\bowe us\b/.test(t))return null;
+ if(BILLS.test(t)&&!new RegExp(CREW_W).test(t))return null;
+ const both=/\b(?:cuanto|how much)\b.*\b(?:debo|debemos|owe|se debe|tengo que pagar)\b.*\b(?:y )?(?:a quien(?:es)?|quienes|who|to whom)\b/.test(t)||/\b(?:a quien(?:es)?|quienes|who)\b.*\by (?:cuanto|how much)\b/.test(t);
+ if(both)return {feature:'owe',step:'both'};
+ if(new RegExp('^(?:y )?(?:cuanto|how much)(?: es lo que| es todo lo que)? (?:(?:le |les )?debo|(?:le |les )?debemos|se (?:le |les )?debe|do i owe|do we owe|i owe|we owe|tengo (?:que pagar|pendiente(?: de pagar)?|por pagar)|hay que pagar|(?:les )?tengo que pagar)(?: '+CREW_W+')?(?: en total| total| in total| de nomina| this week| esta semana| ahorita| ahora| right now| todavia| de horas)*(?: '+CREW_W+')?$').test(t))return {feature:'owe',step:'total'};
+ if(/^(?:y )?(?:de )?cuanto (?:es|va|esta|sale) (?:la nomina|el payroll|lo de la nomina|lo que se debe)(?: esta semana| ahorita)?$|^(?:how much is payroll|what'?s the payroll|what do i owe(?: everyone| the crew)?|what do we owe(?: everyone| the crew)?)$/.test(t))return {feature:'owe',step:'total'};
+ if(new RegExp('^(?:y )?(?:a quien(?:es)?|quienes|who|whom)(?: (?:le |les )?(?:debo|debemos|tengo que pagar|hay que pagar|se le debe|se les debe|do i owe|do we owe|i owe))(?: '+CREW_W+')?(?: todavia| ahorita| ahora| still)?$').test(t))return {feature:'owe',step:'list'};
+ if(/^(?:y )?(?:quienes son|quienes estan pendientes de pago|a quienes les falta su pago|a quien le falta su pago|quien(?:es)? (?:esta|estan) sin cobrar|who still needs to get paid|who hasn'?t been paid(?: yet)?|who do i still owe)$/.test(t))return {feature:'owe',step:'list'};
+ if(fresh&&/^(?:y )?(?:a quien|a quienes|quienes|quien|dime quienes|dime a quienes|cuales|who|to who|to whom|which ones|who are they|dime|la lista|dame la lista|ensename la lista|muestrame la lista|the list)$/.test(t))return {feature:'owe',step:'list'};
+ // una persona
+ const pm=/^(?:y )?(?:cuanto|how much)(?: es lo que)? (?:(?:le|les) )?(?:debo|debemos|se le debe|tengo que pagar|hay que pagarle|le toca|do i owe|do we owe|i owe)(?: a| al| a la| to)? (.+)$/.exec(t)||/^(?:y )?(?:cuanto)(?: dinero)? (?:le )?(?:debo|debemos) (?:yo )?(?:a|al) (.+)$/.exec(t);
+ if(pm&&!/^(?:todos|todas|everyone|the crew|los muchachos|la cuadrilla|el equipo|en total|total|ellos|ellas|nadie)$/.test(pm[1].trim()))return {feature:'owe',step:'person',who:pm[1].replace(/\b(?:en total|ahorita|ahora|todavia|right now|now)$/,'').trim()};
+ const dm=/^(?:y )?(?:muestrame|mostrame|ensename|ensenarme|dame|quiero ver|puedo ver|abreme|dime|pasame|show me|give me|pull up|i want to see|let me see)? ?(?:todos )?(?:los |las |el |la |the |his |her )?(?:detalles|datos|informacion|info|resumen|cuenta|details|info|information|summary|data)(?: completos| completa| de pago)? (?:de|del|de la|on|for|of|about) (.+)$/.exec(t)||/^(?:show me|pull up) ([a-z]+)'?s (?:details|info|account)$/.exec(t);
+ if(dm){const w=dm[1].trim();
+  if(/\b(?:cheque|check|zelle|cel|sel|cash|efectivo)\b/.test(w)&&!fresh)return null;            // "datos del cheque de Miguel": la hoja de pago
+  if(/^(?:cliente|clientes|la mudanza|la casa|el trabajo|la obra|hoy|ayer|la semana|el labor log|labor logs?|el grupo|la factura|el invoice)\b/.test(w))return null;
+  if(/^(?:cualquier|algun|alguno|un|una|un trabajador|cualquier trabajador|cualquiera|any|a worker|any worker|someone)\b/.test(w))return {feature:'owe',step:'pick'};
+  return {feature:'owe',step:'person',who:w};}
+ if(/^(?:muestrame|ensename|dame|quiero ver|show me)(?: los)? (?:detalles|datos|details)(?: de un trabajador| de alguien| de un empleado)?$/.test(t))return {feature:'owe',step:'pick'};
+ if(fresh){
+  const sw=/^(?:y )?(?:a |al |para |and |what about |how about )?([a-z][a-z' -]{1,30}?)(?: cuanto| cuanto le debo| how much| que| y)?$/.exec(t);
+  if(sw&&/^(?:y |and |what about |how about )/.test(t)&&!/^(?:y )?(?:que|eso|esto|ese|ok|bueno|nada|ya|si|no|luego|despues|tu|el|ella|ellos|that|this|what|then)$/.test(sw[1].trim()))return {feature:'owe',step:'person',who:sw[1].trim(),switched:true};
+  if(/^(?:no(?:,)? )?(?:mejor (?:despues|luego|al rato|manana|no)|despues|luego|al rato|ahorita no|olvidalo|dejalo|dejalo asi|no gracias|never mind|later|not now|forget it|cancela|cancelalo)$/.test(t))return {feature:'owe',step:'drop'};
+  if(/^(?:ok |va |bueno |si |sale |listo |pues )?(?:mandaselo|mandale|mandaselos|pagale|pagaselo|envialo|envialeselo|send it|pay him|pay her|send it to him|send it to her|hazle el pago)(?: ya| ahorita| por favor| porfa)?$/.test(t))return {feature:'owe',step:'cant_send'};
+  if(/^(?:y )?(?:lo que le debo|cuanto le debo|cuanto es|cuanto|how much|and how much|el saldo|su saldo|cuanto le toca)$/.test(t)&&ctx.person)return {feature:'owe',step:'person',who:'',same:true};
+ }
+ return null;
+}
+// paso 4 y 5 de la platica: plan de mandarle (datos de Zelle) o "ya se lo mande" (tarjeta). Solo con contexto fresco de una persona.
+function oweFollow(text,ctx,P){
+ if(!ctx||ctx.topic!=='owe'||!ctx.fresh||!ctx.person)return null;
+ const t=hear(text);if(!t||t.length>200)return null;
+ if(/[?¿]/.test(String(text))&&!/\b(?:zelle|cel|sel|numero|telefono|datos)\b/.test(t))return null;
+ const md=P&&P.methodDetail?P.methodDetail(t,{fuzzy:true}):{method:''};
+ const method=md.method&&md.method!=='ambiguous'?md.method:'';
+ // "pasame su zelle", "dame su numero", "le quiero hacer un envio por cel", "voy a mandarle por zelle"
+ const wantsData=/^(?:y )?(?:pasame|dame|dime|cual es|necesito|ensename|muestrame|give me|send me|what'?s|show me)(?: el| su| sus| la| los)? (?:zelle|cel|sel|numero|telefono|datos|nombre(?: completo)?|cuenta|info|number|phone|details)\b/.test(t);
+ const plan=/\b(?:quiero|voy a|vamos a|le voy a|te voy a|ahorita le|al rato le|i'?m going to|gonna|i want to|let me|deja (?:le|lo))\b.*\b(?:hacer|mandar|mandarle|enviar|enviarle|pagar|pagarle|depositar|depositarle|transferir|pasar|pasarle|send|pay|zelle|transfer)\b/.test(t)||/^(?:le |se lo )?(?:mando|envio|pago|deposito|transfiero)(?: ahorita| ya| hoy)?(?: por| en| con)? ?(?:zelle|cel|sel|cheque|efectivo|cash)?$/.test(t);
+ if((wantsData||plan)&&!/\b(?:ya|already)\b/.test(t)){
+  if(P&&P.findPeople&&ctx.people){const f=P.findPeople(t,ctx.people).filter(p=>p.key!==ctx.person.key);if(f.length)return null;}
+  return {step:'plan',method:method||ctx.method||'',field:wantsData?(/nombre|name/.test(t)?'name':'contact'):''};
+ }
+ // "ya se lo envie", "le mande por cel", "ya le pague", "le deje el pago", "le deje el cheque en la bodega", "ok listo, ya"
+ const done=/^(?:ok |okay |va |listo |bueno |sale |pues |ya esta |si |ok ya |ok listo )*(?:ya )?(?:se lo |se la |se los |le |les )?(?:envie|mande|pague|deposite|transferi|di|deje|hice|pase|entregue|zellee|sent|paid|gave|left|deposited|transferred|zelled|handed)\b/.test(t)
+  ||/^(?:ok |ya )?(?:listo|done|ya quedo|ya esta|ya salio|ya se fue|it'?s done|all set),? (?:ya )?(?:se lo |le )?(?:envie|mande|pague|deposite|sent|paid)\b/.test(t)
+  ||/^(?:i )?(?:already )?(?:sent|paid|zelled|gave|left|deposited) (?:it|him|her|the (?:money|payment|check))\b/.test(t);
+ if(!done)return null;
+ if(/\b(?:mensaje|foto|texto|labor log|reporte|ubicacion|direccion|message|photo|picture|link)\b/.test(t))return null;
+ // sin la lista de gente no se puede saber si nombro a OTRA persona: no se adivina
+ if(!P||!P.findPeople||!ctx.people)return null;
+ {const f=P.findPeople(t,ctx.people);if(f.some(p=>p.key!==ctx.person.key))return null;}
+ const amount=P&&P.amount?P.amount(t):NaN;
+ const kind=/\b(?:adelant\w*|advance)\b/.test(t)?'adelanto':'pago';
+ return {step:'done',method:method||(/\bcheque\b/.test(t)?'cheque':'')||ctx.method||'',amount:Number.isFinite(amount)&&amount>0?amount:null,kind};
+}
+// La misma cuenta de Pagos, por persona, con las rutinas VIVAS de la pagina (math = {payFor,payForCasual,teamGivenFrom,hoursBetween}).
+// crew:   payFor(horas sin pagar, tarifa, tarifa AMG).amount + gastos aprobados sin devolver - teamGivenFrom(pagos)[id]  (= lumiBasicBalance)
+// casual: payForCasual(horas, tarifa, tarifa AMG).paid + .owed - suma de casual_payments                              (= lumiPaySnapshot)
+function oweCompute(data,math){
+ const {people=[],entries=[],rates=[],kindRates=[],gastos=[],payments=null,casualWorkers=[],casualHours=[],casualRates=[],casualLedger=[]}=data;
+ const given=payments?math.teamGivenFrom(payments):null;
+ const rows=[];
+ for(const p of people){
+  const r={key:p.key,id:p.id,kind:p.kind,name:p.name,fullName:p.fullName||'',amount:null,companies:{},days:0,oldest:'',unconfirmed:[],open:0,flags:[],missingRate:[],gastos:0,given:0};
+  if(p.kind==='crew'){
+   const mine=entries.filter(e=>e.user_id===p.id&&!e.paid_at);
+   const rr=rates.filter(x=>x.user_id===p.id),kr=kindRates.filter(x=>x.user_id===p.id);
+   if(rr.length>1||kr.length>1)r.flags.push('tiene más de una tarifa guardada');
+   const rate=rr[0]?.rate==null?null:Number(rr[0].rate),mg=kr[0]?.rate==null?null:Number(kr[0].rate);
+   r.rates={restauracion:rate,mudanza:mg};
+   r.open=mine.filter(e=>!e.clock_out).length;
+   if(r.open)r.flags.push(r.open===1?'tiene un turno abierto (sin marcar la salida)':'tiene '+r.open+' turnos abiertos');
+   r.unconfirmed=mine.filter(e=>e.clock_out&&!e.confirmed).map(e=>({date:String(e.work_date||''),hours:r2((math.hoursBetween(e.clock_in,e.clock_out)||0)/60),kind:e.work_kind==='mudanza'?'mudanza':'restauracion'}));
+   const pay=math.payFor(mine,rate,mg);
+   for(const e of mine){const k=e.work_kind==='mudanza'?'mudanza':'restauracion',c=r.companies[k]=r.companies[k]||{mins:0,days:new Set(),amount:0,rate:k==='mudanza'?mg:rate};c.mins+=math.hoursBetween(e.clock_in,e.clock_out)||0;if(e.work_date)c.days.add(String(e.work_date));}
+   if(r.companies.restauracion)r.companies.restauracion.amount=pay.owedRest;if(r.companies.mudanza)r.companies.mudanza.amount=pay.owedMg;
+   if(pay.sinPrecio)for(const k of Object.keys(r.companies))if(r.companies[k].rate==null)r.missingRate.push(k);
+   r.gastos=r2(gastos.filter(g=>g.created_by===p.id).reduce((s,g)=>s+Number(g.amount||0),0));
+   if(gastos.some(g=>g.created_by===p.id&&!Number.isFinite(Number(g.amount))))r.flags.push('un gasto sin monto');
+   r.given=given?r2(given[p.id]||0):null;
+   if(given===null)r.flags.push('no pude leer sus pagos');
+   else if(!r.missingRate.length&&Number.isFinite(pay.amount)&&!(rate!==null&&!Number.isFinite(rate))&&!(mg!==null&&!Number.isFinite(mg)))r.amount=r2(pay.amount+r.gastos-r.given);
+   const ds=[...new Set(mine.map(e=>String(e.work_date||'')).filter(Boolean))].sort();r.days=ds.length;r.oldest=ds[0]||'';
+  }else{
+   const w=casualWorkers.find(x=>x.id===p.id)||{};
+   const hs=casualHours.filter(h=>h.casual_worker_id===p.id),cr=casualRates.filter(x=>x.casual_worker_id===p.id);
+   if(cr.length>1)r.flags.push('tiene más de una tarifa guardada');
+   const rate=w.rate==null?null:Number(w.rate),mg=cr[0]?.rate==null?null:Number(cr[0].rate);
+   r.rates={restauracion:rate,mudanza:mg};
+   const bad=hs.some(x=>x.reported_hours==null||!Number.isFinite(Number(x.reported_hours))||Number(x.reported_hours)<0||(x.paid_at&&(x.paid_amount==null||!Number.isFinite(Number(x.paid_amount)))));
+   if(bad)r.flags.push('faltan horas o importes verificables');
+   const earned=math.payForCasual(hs,rate,mg);
+   const open=hs.filter(h=>!h.paid_at);
+   for(const h of open){const k=h.work_kind==='mudanza'?'mudanza':'restauracion',rr=k==='mudanza'?mg:rate,c=r.companies[k]=r.companies[k]||{mins:0,days:new Set(),amount:0,rate:rr};c.mins+=Math.round((+h.reported_hours||0)*60);if(h.work_date)c.days.add(String(h.work_date));if(rr!=null)c.amount=r2(c.amount+Math.round((+h.reported_hours||0)*(+rr||0)*100)/100);}
+   if(earned.sinPrecio)for(const k of Object.keys(r.companies))if(r.companies[k].rate==null)r.missingRate.push(k);
+   const led=casualLedger.filter(x=>x.casual_worker_id===p.id);
+   if(led.some(x=>x.amount==null||!Number.isFinite(Number(x.amount))))r.flags.push('un pago sin monto');
+   r.given=r2(led.reduce((s,x)=>s+Number(x.amount||0),0));
+   if(!r.missingRate.length&&!bad&&!led.some(x=>!Number.isFinite(Number(x.amount))))r.amount=r2(earned.paid+earned.owed-r.given);
+   const ds=[...new Set(open.map(h=>String(h.work_date||'')).filter(Boolean))].sort();r.days=ds.length;r.oldest=ds[0]||'';
+  }
+  for(const k of Object.keys(r.companies)){const c=r.companies[k];c.days=c.days.size;c.hours=r2(c.mins/60);}
+  rows.push(r);
+ }
+ const owed=rows.filter(r=>r.amount!=null&&r.amount>0.004).sort((a,b)=>b.amount-a.amount);
+ const missing=rows.filter(r=>r.missingRate.length&&Object.keys(r.companies).length);
+ const unknown=rows.filter(r=>r.amount==null&&!r.missingRate.length&&Object.keys(r.companies).length);
+ return {rows,owed,missing,unknown,total:r2(owed.reduce((s,r)=>s+r.amount,0))};
+}
+const CO={restauracion:'AMG Restoration',mudanza:'AMG Moving'};
+function companyBits(r){return Object.keys(r.companies).sort().map(k=>{const c=r.companies[k];return CO[k]+' '+hrs(c.mins)+' h'+(c.days?' en '+c.days+' '+plural(c.days,'día','días'):'');}).join(' + ');}
+function first(n){return clean(n).split(' ')[0]||'esa persona';}
+function oweTotalSay(res){
+ const n=res.owed.length;
+ let s=n?'Debes '+money(res.total)+' a '+n+' '+plural(n,'persona','personas')+'.':'No le debes nada a nadie ahora.';
+ if(res.missing.length)s+=' Dejé fuera a '+res.missing.map(r=>first(r.name)).join(', ')+': '+plural(res.missing.length,'le falta su tarifa','les falta la tarifa')+'.';
+ if(res.unknown.length)s+=' Tampoco cuento a '+res.unknown.map(r=>first(r.name)).join(', ')+' ('+res.unknown.map(r=>r.flags[0]||'datos incompletos').join('; ')+').';
+ return s;
+}
+function oweListLines(res){
+ const L=res.owed.map(r=>({key:r.key,text:r.name+' — '+money(r.amount)+' · '+(companyBits(r)||'sin horas pendientes')+(r.gastos?' · gastos '+money(r.gastos):'')+(r.given>0.004?' · menos '+money(r.given)+' de adelantos':'')+(r.unconfirmed.length?' · '+r.unconfirmed.length+' '+plural(r.unconfirmed.length,'turno sin confirmar','turnos sin confirmar'):'')+(r.kind==='casual'?' · eventual':'')}));
+ for(const r of res.missing)L.push({key:r.key,text:r.name+' — falta su tarifa de '+r.missingRate.map(k=>CO[k]).join(' y ')+' · '+companyBits(r)+' · no va en el total'});
+ for(const r of res.unknown)L.push({key:r.key,text:r.name+' — sin total: '+(r.flags[0]||'datos incompletos')+' · '+companyBits(r)+' · no va en el total'});
+ return L;
+}
+// las diferencias del dia, con las palabras de la ficha (huDia: more/less/otra/mixto/notinlog/nolog/esperando/quizas/overlap)
+function dayIssue(v,paid){
+ if(!v)return null;const L=hrs(v.theirs),Y=hrs(v.mine),pd=' pagado '+short$(paid||0);
+ switch(v.estado){
+  case 'ok':case 'lider':return null;
+  case 'more':return 'labor log dice '+L+' h, su reloj '+Y+' h,'+pd+'.';
+  case 'less':return 'labor log dice '+L+' h, su reloj '+Y+' h (marcó menos),'+pd+'.';
+  case 'otra':return 'sale en el reporte de la otra empresa y su hora no se movió (labor log '+L+' h, reloj '+Y+' h).';
+  case 'mixto':return 'día mixto: sale en las dos empresas (labor log '+L+' h, reloj '+Y+' h).';
+  case 'notinlog':return 'hay labor log ese día pero no sale él; su reloj '+Y+' h.';
+  case 'quizas':return 'está en un labor log pero no casa su hora; su reloj '+Y+' h.';
+  case 'nolog':case 'esperando':return 'Esperando el labor log; su reloj '+Y+' h.';
+  case 'overlap':return 'tiene turnos encimados ese día; su reloj '+Y+' h.';
+  default:return null;
+ }
+}
+function personSay(r,{profile={},payments=[],issues=null,fallbackIssues='',today}={}){
+ const nm=first(r.name),lines=[];
+ let head;
+ if(r.amount==null)head=r.missingRate.length?'A '+nm+' no le puedo sacar el total: le falta su tarifa de '+r.missingRate.map(k=>CO[k]).join(' y ')+'.':'A '+nm+' no le puedo sacar el total: '+(r.flags[0]||'faltan datos')+'.';
+ else if(r.amount>0.004)head='A '+nm+' le debes '+money(r.amount)+'.';
+ else if(r.amount<-0.004)head='A '+nm+' no le debes nada: tiene a favor '+money(-r.amount)+'.';
+ else head='A '+nm+' no le debes nada; está al día.';
+ const bits=Object.keys(r.companies).sort().map(k=>{const c=r.companies[k];return CO[k]+': '+c.days+' '+plural(c.days,'día','días')+', '+hrs(c.mins)+' h'+(c.rate==null?' — falta su tarifa':' × '+money(c.rate)+' = '+money(c.amount));});
+ if(bits.length)lines.push('Sin pagar — '+bits.join(' · '));
+ if(r.gastos)lines.push('Gastos por devolver: '+money(r.gastos));
+ if(r.given>0.004)lines.push('Adelantos y pagos a cuenta: −'+money(r.given));
+ const d=[];
+ d.push((r.kind==='crew'?'Cuadrilla':'Eventual')+(profile.role&&profile.role!=='crew'?' ('+profile.role+')':''));
+ if(r.rates){if(r.rates.restauracion!=null)d.push('Restauración '+money(r.rates.restauracion)+'/h');if(r.rates.mudanza!=null)d.push('AMG Moving '+money(r.rates.mudanza)+'/h');}
+ if(r.fullName&&norm(r.fullName)!==norm(r.name))d.push('nombre completo '+clean(r.fullName));
+ d.push(profile.zelle?(/@/.test(profile.zelle)?'Zelle '+clean(profile.zelle):'Zelle/tel. '+clean(profile.zelle)):'sin Zelle guardado');
+ if(profile.lastMethod)d.push('último pago por '+(MET[profile.lastMethod]||profile.lastMethod));
+ if(profile.since)d.push('desde '+dayEsLong(profile.since)+' '+String(profile.since).slice(0,4));
+ lines.push('Datos: '+d.join(' · '));
+ if(r.unconfirmed.length)lines.push('Turnos sin confirmar: '+r.unconfirmed.map(u=>dayEs(u.date)+' '+String(u.hours).replace(/\.0+$/,'')+' h ('+CO[u.kind]+')').join('; ')+'. El saldo ya los cuenta.');
+ const recent=payments.slice().sort((a,b)=>String(b.paid_on||b.created_at||'').localeCompare(String(a.paid_on||a.created_at||''))).slice(0,4);
+ if(recent.length)lines.push('Últimos pagos: '+recent.map(p=>dayEs(String(p.paid_on||p.created_at||'').slice(0,10))+' '+(p.kind==='adelanto'?'adelanto ':p.settlement?'cierre ':'')+money(p.amount)+(p.metodo?' '+(MET[p.metodo]||p.metodo):'')+(p.accepted===false?' (rechazado)':p.accepted==null&&!p.auto_ok_at&&'accepted' in p?' (sin confirmar)':'')).join('; '));
+ if(issues){lines.push(issues.length?'No coincide: '+issues.map(i=>dayEs(i.date)+' ('+CO[i.kind]+'): '+i.text).join(' '):'Coincidencias: todo coincide.');}
+ else if(fallbackIssues)lines.push(fallbackIssues);
+ for(const f of r.flags)if(!/no pude leer/.test(f))lines.push('Ojo: '+f+'.');
+ const spoken=head+(r.unconfirmed.length?' Tiene '+r.unconfirmed.length+' '+plural(r.unconfirmed.length,'turno sin confirmar','turnos sin confirmar')+'.':'')+(issues&&issues.length?' Hay '+issues.length+' '+plural(issues.length,'día que no coincide','días que no coinciden')+'.':issues?' Todo coincide.':'');
+ return {head,lines,spoken};
+}
+const api={norm,hear,money,dayEs,daysBetween,clientsIntent,clientsOwed,clientsSay,reminderText,reminderReply,smsHref,waHref,mailHref,crewIntent,tidyBody,facts,sameFacts,groupKind,pickGroup,groupAnswer,unconfirmedIntent,unconfirmedList,unconfirmedSay,oweIntent,oweFollow,oweCompute,oweTotalSay,oweListLines,dayIssue,personSay,companyHint};
+if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiOfficeAsks=api;
+})(typeof globalThis!=='undefined'?globalThis:this);
+
+// La parte de la pagina: lee la base (solo lectura), pinta en el chat y arma las tarjetas.
+// Lo unico que escribe es el mensaje al grupo, y SOLO al confirmar su tarjeta (id fijo: un reintento no manda dos).
+// El pago de la platica de "cuanto debo" lo registra el bloque LUMI PAYMENT FOLLOWUP con su tarjeta de siempre.
+let LUMI_OF={ctx:null,offer:null,groupAsk:null};
+const lumiOfCore=()=>window.LumiOfficeAsks;
+const LUMI_OF_CTX_MS=600000;
+function lumiOfOwner(){return SES?.role==='manager'&&(typeof isManager!=='function'||isManager())&&!AS.sandbox?SES.user_id+'|'+SES.company_id:null;}
+function lumiOfGuard(owner){if(!owner||owner!==lumiOfOwner())throw Error('La sesión cambió. Vuelve a pedírmelo desde Manager.');}
+function lumiOfToday(){try{if(typeof todayStr==='function')return todayStr();}catch(e){}const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function lumiOfCtx(owner){const c=LUMI_OF.ctx;if(!c||c.owner!==owner||Date.now()-c.at>LUMI_OF_CTX_MS){LUMI_OF.ctx=null;return null;}return {...c,fresh:true};}
+function lumiOfSay(show,speak){asMostrarRespuesta(show);asHablar(speak===undefined?show:speak,asSeguirOyendo);try{asRecordarAccionMac('',String(speak||show).slice(0,400));}catch(e){}}
+function lumiOfBox(){const log=document.getElementById('asConversacion');if(!log)return null;const box=document.createElement('div');box.className='as-chat-docs lumi-of-box';box.style.cssText='display:flex;flex-direction:column;gap:8px;padding:6px 0 12px';log.appendChild(box);try{asChatFollow(log,true);}catch(e){}return box;}
+function lumiOfButton(box,label,fn){const b=document.createElement('button');b.type='button';b.textContent=label;b.style.cssText='min-height:44px;border-radius:14px;padding:8px 12px;color:inherit;background:transparent;border:1px solid currentColor;text-align:left;font:inherit;cursor:pointer';b.onclick=fn;box.appendChild(b);return b;}
+function lumiOfLink(box,label,href){if(!href)return;const a=document.createElement('a');a.textContent=label;a.href=href;a.target=/^https?:/.test(href)?'_blank':'_self';a.rel='noopener';a.style.cssText='display:block;min-height:44px;line-height:28px;border-radius:14px;padding:8px 12px;color:inherit;border:1px solid currentColor;text-decoration:none';box.appendChild(a);}
+function lumiOfOpenSheet(p){const navp={pantalla:'horas_de_persona',tipo:p.kind==='crew'?'crew':'casual',persona_id:p.id};try{if(window.__lumiMacChat&&typeof lumiMacEnviar==='function'){lumiMacEnviar({nav:navp},'Abrí la hoja de '+String(p.name||'').split(' ')[0]+' en mi ventana');return;}}catch(e){}asNavegar(navp);}
+async function lumiOfGetSafe(route,owner){try{return await lumiBasicGet(route,owner);}catch(e){if(lumiBasicOwner()!==owner)throw e;return null;}}
+async function lumiOfAllSafe(route,owner){try{return await lumiBasicAll(route,owner);}catch(e){if(lumiBasicOwner()!==owner)throw e;return null;}}
+
+// ---------- 1) clientes que me deben ----------
+async function lumiOfClients(intent,owner){
+ const C=lumiOfCore(),co='&company_id=eq.'+encodeURIComponent(SES.company_id);
+ const [invoices,payments,clients]=await Promise.all([
+  lumiBasicAll('/rest/v1/amg_invoices?select=id,number,client_name,client_phone,client_email,total,status,issue_date,paid_on'+co,owner),
+  lumiOfAllSafe('/rest/v1/client_payments?select=id,client,amount,kind,invoice_number,paid_on'+co+'&invoice_number=not.is.null',owner),
+  lumiOfGetSafe('/rest/v1/amg_clients?select=*&limit=1000',owner)]);
+ lumiOfGuard(owner);
+ const company=intent.company||(typeof SIDE!=='undefined'&&SIDE==='restauracion'?'restauracion':'');
+ const res=C.clientsOwed({invoices,payments:payments||[],clients:clients||[],today:lumiOfToday(),minDays:intent.minDays});
+ const say=C.clientsSay(res,{minDays:intent.minDays,company,english:intent.english});
+ const show=say.short+(say.lines.length?'\n'+say.lines.join('\n'):'')+(payments===null?'\n(No pude leer los abonos de los clientes; cuento cada invoice abierto completo.)':'')+(say.offer?'\n'+say.offer:'');
+ const speak=say.short+(say.lines.length?' '+say.lines.slice(0,3).map(l=>l.replace(/ \(#.*\)$/,'')).join('. ')+'.':'')+(say.offer?' '+say.offer:'');
+ LUMI_OF.offer=say.offer?{owner,list:res.list,client:say.offerClient,at:Date.now(),english:intent.english}:null;
+ lumiOfSay(show,speak);
+}
+function lumiOfReminderCard(e,owner,lang){
+ const C=lumiOfCore();let from='AMG Moving',email='Info@amgmoving.com';try{if(typeof INV_SETTINGS==='object'&&INV_SETTINGS){email=INV_SETTINGS.from_email||email;}}catch(x){}
+ const text=C.reminderText(e,{from,email,lang:lang||e.lang});
+ const to=[e.phone,e.email].filter(Boolean).join(' · ')||'sin teléfono ni correo guardados';
+ lumiOfSay('Recordatorio para '+e.client+' ('+to+'):\n«'+text+'»\nNo lo mando sola: tócale a un botón y lo envías tú desde ahí.','Aquí está el recordatorio para '+e.client+'. Revísalo y lo mandas tú con un toque; yo no lo envío sola.');
+ const box=lumiOfBox();if(!box)return;
+ const pre=document.createElement('div');pre.style.cssText='white-space:pre-wrap;border:1px solid currentColor;border-radius:14px;padding:10px 12px;opacity:.95';pre.textContent='Para: '+e.client+' — '+to+'\n\n'+text;box.appendChild(pre);
+ lumiOfButton(box,'Copiar el texto',async ev=>{try{lumiOfGuard(owner);await navigator.clipboard.writeText(text);ev.target.textContent='Copiado';}catch(x){ev.target.textContent='No se pudo copiar';}});
+ lumiOfLink(box,'Abrir Mensajes con el texto',C.smsHref(e.phone,text));
+ lumiOfLink(box,'Abrir WhatsApp con el texto',C.waHref(e.phone,text));
+ lumiOfLink(box,'Abrir correo con el texto',C.mailHref(e.email,(lang||e.lang)==='es'?'Recordatorio de factura - AMG Moving':'Invoice reminder - AMG Moving',text));
+}
+function lumiOfReminderReply(r,owner){
+ const o=LUMI_OF.offer;LUMI_OF.offer=null;
+ if(r.action==='no'){lumiOfSay('Va, no preparo nada.');return;}
+ let e=null;
+ if(r.action==='yes')e=o.list.find(x=>x.client===o.client);
+ else{const q=lumiOfCore().norm(r.client),hits=o.list.filter(x=>{const n=lumiOfCore().norm(x.client);return n===q||n.split(' ')[0]===q.split(' ')[0]||n.includes(q);});
+  if(hits.length>1){lumiOfSay('¿Cuál: '+hits.map(x=>x.client).join(' o ')+'?');LUMI_OF.offer={...o,at:Date.now()};return;}e=hits[0];
+  if(!e){lumiOfSay('No tengo invoices abiertos de '+r.client+'. Los que deben son: '+o.list.map(x=>x.client).join(', ')+'.');LUMI_OF.offer={...o,at:Date.now()};return;}}
+ if(!e){lumiOfSay('Ya no encuentro ese invoice abierto. Pregúntame otra vez quién te debe.');return;}
+ lumiOfReminderCard(e,owner,r.lang);
+}
+
+// ---------- 2) mensaje al grupo ----------
+async function lumiOfGroups(owner){
+ const rows=await lumiBasicGet('/rest/v1/mensajes_grupos?select=id,nombre,creado_por,mensajes_grupo_miembros(user_id,casual_id,nombre)&order=created_at.desc&limit=100',owner);
+ return rows.filter(g=>g&&g.id&&g.nombre);
+}
+async function lumiOfMsgId(company,groupId,text,nonce){
+ const b=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('lumi-crew-msg-v1|'+company+'|'+groupId+'|'+text+'|'+nonce)));
+ b[6]=(b[6]&15)|80;b[8]=(b[8]&63)|128;const s=Array.from(b.slice(0,16),x=>x.toString(16).padStart(2,'0')).join('');
+ return s.slice(0,8)+'-'+s.slice(8,12)+'-'+s.slice(12,16)+'-'+s.slice(16,20)+'-'+s.slice(20);
+}
+async function lumiOfCrewCard(draft,group,owner){
+ const C=lumiOfCore();
+ if(draft.bodyCompany==='mudanza'&&C.groupKind(group.nombre)==='restauracion'){LUMI_OF.groupAsk=null;lumiOfSay('Eso es de mudanza; no va al grupo de Restauración ('+group.nombre+'). No mandé nada. Si es para la cuadrilla de mudanza, dime "mándalo al grupo de mudanza".');return;}
+ let text=C.tidyBody(draft.body);
+ if(!C.sameFacts(draft.body,text)){text=String(draft.body).trim();text=text[0].toUpperCase()+text.slice(1);if(!/[.!?]$/.test(text))text+='.';}
+ const F=C.facts(text),label={hora:'Hora',dia:'Día',monto:'Monto'};
+ const factLine=F.length?F.map(f=>label[f.k]+': '+(f.k==='dia'?f.v.replace(/\bmanana\b/g,'mañana').replace(/\bmiercoles\b/g,'miércoles').replace(/\bsabado\b/g,'sábado'):f.v)).join(' · '):'';
+ const nonce=crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random();
+ const id=await lumiOfMsgId(SES.company_id,group.id,text,nonce);lumiOfGuard(owner);
+ const card={tipo:'grupo',resumen:'«'+text+'»',efecto:'Para el grupo '+group.nombre+(factLine?' · '+factLine:'')+' · sale solo si confirmas',lumiOficina:{kind:'crew',owner,company:SES.company_id,group:{id:group.id,nombre:group.nombre},text,id,at:Date.now()}};
+ LUMI_OF.groupAsk=null;
+ asMostrarRespuesta('Para el grupo '+group.nombre+':\n«'+text+'»'+(factLine?'\nRevisa: '+factLine+'.':'')+'\n¿Lo mando?');
+ asHablar('Para el grupo '+group.nombre+': '+text+' ¿Lo mando?',asSeguirOyendo);
+ asMostrarTarjeta(card);
+}
+async function lumiOfCrew(draft,owner){
+ const C=lumiOfCore(),groups=await lumiOfGroups(owner);lumiOfGuard(owner);
+ if(!draft.company&&!draft.groupQuery&&!draft.bodyCompany&&typeof SIDE!=='undefined'&&(SIDE==='mudanza'||SIDE==='restauracion'))draft.company=SIDE;
+ const pick=C.pickGroup(groups,draft);
+ if(pick.error==='moving_to_rd'){lumiOfSay('Eso es de mudanza; no va al grupo de Restauración ('+pick.group.nombre+'). No mandé nada.');return;}
+ if(pick.missing){lumiOfSay('No encontré un grupo de '+(pick.missing==='mudanza'?'mudanza':'Restauración')+' en Mensajes. No mandé nada.');return;}
+ if(pick.ask){
+  if(!pick.choices.length){lumiOfSay('No encontré grupos de mudanza ni de Restauración en Mensajes. No mandé nada.');return;}
+  LUMI_OF.groupAsk={owner,draft,choices:pick.choices,at:Date.now()};
+  lumiOfSay('¿A cuál grupo: '+pick.choices.map(g=>g.nombre).join(' o ')+'?');return;}
+ await lumiOfCrewCard(draft,pick.group,owner);
+}
+function lumiOfMsgMatches(row,want){return !!row&&!row.borrado_at&&row.id===want.id&&row.company_id===want.company_id&&row.de_user_id===want.de_user_id&&row.para_grupo_id===want.para_grupo_id&&!row.para_user_id&&!row.para_casual_id&&!row.para_todos&&row.texto===want.texto;}
+async function lumiOfConfirm(c){
+ const f=c.lumiOficina,owner=lumiOfOwner();if(!f||AS.enviando)return;
+ if(f.kind!=='crew')return;
+ AS.enviando=true;try{asPararOido();asCallar();}catch(e){}
+ try{
+  lumiOfGuard(f.owner);if(f.company!==SES.company_id)throw Error('La empresa cambió. No mandé nada.');
+  const row={id:f.id,company_id:f.company,de_user_id:SES.user_id,de_nombre:String(SES.full_name||SES.name||'Oficina'),para_user_id:null,para_casual_id:null,para_grupo_id:f.group.id,para_todos:false,para_nombre:f.group.nombre,casa:null,texto:f.text};
+  const route='/rest/v1/mensajes?select=id,company_id,de_user_id,para_user_id,para_casual_id,para_grupo_id,para_todos,texto,borrado_at&company_id=eq.'+encodeURIComponent(f.company)+'&id=eq.'+f.id;
+  const read=async()=>{const rows=await lumiBasicGet(route,owner);lumiOfGuard(owner);return rows[0];};
+  let saved=await read(),status=0;
+  if(!saved){
+   // Id fijo: un reintento, una respuesta perdida u otro aparato nunca mandan dos. Nunca se pisa uno que ya existe.
+   try{const r=await authFetch('/rest/v1/mensajes?on_conflict=id',{method:'POST',headers:{...cloudHeaders(),Prefer:'resolution=ignore-duplicates,return=representation'},body:JSON.stringify(row),signal:AbortSignal.timeout(15000)});status=r.status;}catch(e){}
+   saved=await read();
+  }
+  asQuitarTarjeta();
+  if(lumiOfMsgMatches(saved,row)){const d='Listo. Lo mandé al grupo '+f.group.nombre+' y comprobé que quedó.';asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);try{asRecordarAccionMac('Mensaje al grupo '+f.group.nombre,d);}catch(e){}}
+  else if(saved){const d='Ya había un mensaje con ese mismo id y no coincide; no lo pisé. Revisa el grupo '+f.group.nombre+' en Mensajes.';asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);}
+  else{const d=(status===401||status===403?'La nube no me dejó escribir en el grupo '+f.group.nombre+' (quizá no estás dentro del grupo).':'No pude comprobar que el mensaje llegó al grupo '+f.group.nombre+'.')+' Revisa Mensajes antes de repetirlo.';asMostrarRespuesta(d);asHablar(d,asSeguirOyendo);}
+ }catch(e){asQuitarTarjeta();asMostrarRespuesta(e.message);asHablar(e.message,asSeguirOyendo);}
+ finally{AS.enviando=false;}
+}
+
+// ---------- 3) pagos sin confirmar ----------
+async function lumiOfUnconfirmed(intent,owner){
+ const C=lumiOfCore(),co='&company_id=eq.'+encodeURIComponent(SES.company_id);
+ // todo el libro de la cuadrilla (paginado): la correccion de un rechazado se reconoce con la MISMA regla de la ficha (correccionesDe)
+ const [people,crew,casual]=await Promise.all([
+  lumiPayPeople(owner),
+  lumiBasicAll('/rest/v1/crew_payments?select=*'+co,owner),
+  lumiOfAllSafe('/rest/v1/casual_payments?select=*'+co+'&or=(accepted.is.null,accepted.eq.false)',owner)]);
+ lumiOfGuard(owner);
+ let corrected=null;
+ if(typeof correccionesDe==='function'){corrected=new Set();const by=new Map();for(const p of crew){if(!by.has(p.user_id))by.set(p.user_id,[]);by.get(p.user_id).push(p);}for(const list of by.values())for(const k of correccionesDe(list).keys())corrected.add(String(k));}
+ const list=C.unconfirmedList({crewPayments:crew,casualPayments:casual||[],people,today:lumiOfToday(),corrected});
+ const say=C.unconfirmedSay(list,{rejectedOnly:intent.rejectedOnly,english:intent.english});
+ const note=casual===null?'\n(No pude leer los pagos de los eventuales; esta lista es solo de la cuadrilla.)':'';
+ lumiOfSay(say.short+(say.lines.length?'\n'+say.lines.join('\n'):'')+note+(say.lines.length?'\nNo cambié nada.':''),say.short+(say.lines.length?' '+say.lines.slice(0,3).join('. ')+'.':''));
+ const box=say.items&&say.items.length?lumiOfBox():null;
+ if(box)for(const x of say.items.slice(0,12))lumiOfButton(box,'Abrir su hoja · '+x.name,()=>{try{lumiOfGuard(owner);lumiOfOpenSheet(x);}catch(e){}});
+}
+
+// ---------- 4) lo que le debo a la gente ----------
+const lumiOfMath=()=>({payFor,payForCasual,teamGivenFrom,hoursBetween});
+async function lumiOfOweData(owner,only){
+ const co=encodeURIComponent(SES.company_id),q='&company_id=eq.'+co;
+ const people=only?[only]:(await lumiPayPeople(owner)).filter(p=>p.active);
+ const crew=!only||only.kind==='crew',cas=!only||only.kind==='casual';
+ const uf=only&&only.kind==='crew'?'&user_id=eq.'+encodeURIComponent(only.id):'',cf=only&&only.kind==='casual'?'&casual_worker_id=eq.'+encodeURIComponent(only.id):'';
+ const [entries,rates,kindRates,gastos,payments,casualWorkers,casualHours,casualRates,casualLedger]=await Promise.all([
+  crew?lumiBasicAll('/rest/v1/time_entries?select=id,user_id,work_date,clock_in,clock_out,confirmed,paid_at,paid_amount,work_kind,corrected_at,original_clock_in,original_clock_out'+q+uf+'&paid_at=is.null',owner):[],
+  crew?lumiBasicGet('/rest/v1/crew_rates?select=user_id,rate'+q+uf+'&limit=5000',owner):[],
+  crew?lumiBasicGet('/rest/v1/crew_kind_rates?select=user_id,rate&work_kind=eq.mudanza'+uf+'&limit=5000',owner):[],
+  crew?lumiBasicAll('/rest/v1/expenses?select=id,amount,created_by'+q+(only&&only.kind==='crew'?'&created_by=eq.'+encodeURIComponent(only.id):'')+'&work_kind=eq.restauracion&approved_at=not.is.null&reimbursed_at=is.null',owner):[],
+  crew?crewPaymentsFor(q+uf):[],
+  cas?lumiBasicAll('/rest/v1/casual_workers?select=id,rate'+q+(only?'&id=eq.'+encodeURIComponent(only.id):''),owner):[],
+  cas?lumiBasicAll('/rest/v1/casual_hours?select=id,casual_worker_id,reported_hours,paid_at,paid_amount,work_kind,work_date'+q+cf,owner):[],
+  cas?lumiBasicGet('/rest/v1/casual_kind_rates?select=casual_worker_id,rate&work_kind=eq.mudanza'+cf+'&limit=5000',owner):[],
+  cas?lumiBasicAll('/rest/v1/casual_payments?select=*'+q+cf,owner):[]]);
+ lumiOfGuard(owner);
+ return {people,entries,rates,kindRates,gastos,payments:crew?payments:[],casualWorkers,casualHours,casualRates,casualLedger};
+}
+function lumiOfRemember(owner,person,amount,method,people){
+ const prev=LUMI_OF.ctx&&LUMI_OF.ctx.owner===owner?LUMI_OF.ctx:{};
+ LUMI_OF.ctx={...prev,owner,topic:'owe',person,amount,method:method||'',at:Date.now(),awaitingName:false,people:people||prev.people||null};
+ // el bloque de pagos entiende "le" con su propio contexto: se le pone SOLO en memoria (no se escribe nada)
+ try{LUMI_PAY_CONTEXT={owner:lumiPayOwner()||owner,key:person.key,method:method||'',methodLabel:'',stage:'info',amount:Number.isFinite(amount)?amount:null,reference:'',kind:'pago',at:Date.now(),routeStamp:lumiPayRouteStamp(lumiCurrentMessageContext(owner))};}catch(e){}
+}
+async function lumiOfOweAll(step,owner){
+ const C=lumiOfCore(),data=await lumiOfOweData(owner,null),res=C.oweCompute(data,lumiOfMath());
+ LUMI_OF.ctx={owner,topic:'owe',person:null,amount:null,method:'',at:Date.now(),people:data.people,res};
+ if(step==='total'){lumiOfSay(C.oweTotalSay(res));return;}
+ lumiOfOweList(res,owner,step==='both');
+}
+function lumiOfOweList(res,owner,withTotal){
+ const C=lumiOfCore(),lines=C.oweListLines(res),total=C.oweTotalSay(res);
+ if(!lines.length){lumiOfSay(total);return;}
+ const top=res.owed.slice(0,3).map(r=>r.name.split(' ')[0]+' '+C.money(r.amount)).join(', ');
+ lumiOfSay((withTotal?total+'\n':'Total '+C.money(res.total)+'.\n')+lines.map(l=>'• '+l.text).join('\n')+'\nToca un nombre para ver sus detalles.',(withTotal?total+' ':'')+(top?'Los que más: '+top+'. ':'')+'Toca un nombre para ver sus detalles.');
+ const box=lumiOfBox();if(!box)return;
+ for(const l of lines){const p=(LUMI_OF.ctx?.people||[]).find(x=>x.key===l.key);if(!p)continue;lumiOfButton(box,l.text,()=>{if(AS.enviando)return;void lumiOfRun(async()=>{lumiOfGuard(owner);await lumiOfPersonDetails(p,owner);},'Revisando la cuenta de '+p.name.split(' ')[0]+'…');});}
+}
+async function lumiOfIssues(person,data,owner){
+ if(typeof huMgrIndice!=='function'||typeof huDiaDe!=='function')return null;
+ const C=lumiOfCore(),rows=person.kind==='crew'?data.entries.filter(e=>e.user_id===person.id&&e.clock_out):data.casualHours.filter(h=>h.casual_worker_id===person.id&&!h.paid_at);
+ const days=[...new Set(rows.map(r=>String(r.work_date||'')).filter(Boolean))].sort();if(!days.length)return [];
+ let ix=null;try{ix=await huMgrIndice(days[0],days.at(-1));}catch(e){ix=null;}lumiOfGuard(owner);if(!ix)return null;
+ const out=[];
+ for(const d of days){const dayRows=rows.filter(r=>String(r.work_date)===d);let v=null;try{v=huDiaDe(ix,person.key,d,dayRows,{});}catch(e){return null;}
+  const text=C.dayIssue(v,0);if(text)out.push({date:d,kind:dayRows[0]&&dayRows[0].work_kind==='mudanza'?'mudanza':'restauracion',text});}
+ return out;
+}
+async function lumiOfPersonDetails(person,owner){
+ const C=lumiOfCore(),data=await lumiOfOweData(owner,person),res=C.oweCompute(data,lumiOfMath()),r=res.rows[0];
+ const table=person.kind==='crew'?'profiles':'casual_workers';
+ const [prof,ledger]=await Promise.all([
+  lumiOfGetSafe('/rest/v1/'+table+'?select=*&company_id=eq.'+encodeURIComponent(SES.company_id)+'&id=eq.'+encodeURIComponent(person.id),owner),
+  person.kind==='crew'?lumiOfAllSafe('/rest/v1/crew_payments?select=*&company_id=eq.'+encodeURIComponent(SES.company_id)+'&user_id=eq.'+encodeURIComponent(person.id),owner):Promise.resolve(data.casualLedger)]);
+ lumiOfGuard(owner);
+ const pr=(prof&&prof[0])||{},pays=(ledger||[]).filter(x=>Number(x.amount)>0);
+ const last=pays.slice().sort((a,b)=>String(b.paid_on||b.created_at||'').localeCompare(String(a.paid_on||a.created_at||'')))[0];
+ let issues=null,fallback='';
+ try{issues=await lumiOfIssues(person,data,owner);}catch(e){issues=null;}
+ if(issues===null&&person.kind==='crew'){try{fallback=await lumiPayHourWarnings(person,owner);}catch(e){fallback='No pude cotejar sus horas con los labor logs.';}if(!fallback)fallback='Coincidencias: todo coincide.';}
+ const say=C.personSay(r,{profile:{role:pr.role||'',zelle:person.zelle||pr.telefono||'',since:pr.created_at||'',lastMethod:last&&last.metodo||''},payments:pays,issues,fallbackIssues:fallback});
+ let people=LUMI_OF.ctx&&LUMI_OF.ctx.owner===owner&&LUMI_OF.ctx.people;if(!people){try{people=(await lumiPayPeople(owner)).filter(p=>p.active);}catch(e){people=null;}lumiOfGuard(owner);}
+ lumiOfRemember(owner,person,r.amount,'',people);
+ lumiOfSay(say.head+'\n'+say.lines.join('\n'),say.spoken);
+ const box=lumiOfBox();if(!box)return;
+ lumiOfButton(box,'Abrir su ficha · '+person.name,()=>{try{lumiOfGuard(owner);lumiOfOpenSheet(person);}catch(e){}});
+ if(person.zelle)lumiOfButton(box,'Copiar Zelle',async ev=>{try{await navigator.clipboard.writeText(person.zelle);ev.target.textContent='Copiado';}catch(x){ev.target.textContent='No se pudo copiar';}});
+}
+async function lumiOfResolvePerson(who,owner,ctx){
+ const P=lumiPayCore(),people=(ctx&&ctx.people)||(await lumiPayPeople(owner)).filter(p=>p.active);
+ const r=P.resolve('a '+who,people,null);
+ if(r.person)return {person:r.person,people};
+ return {error:/cu[aá]l persona/.test(r.error||'')?r.error:'No encontré a '+who+' en la cuadrilla ni en los eventuales. Dime su nombre como está en Pagos.',people};
+}
+async function lumiOfPlan(f,ctx,owner,texto){
+ const P=lumiPayCore(),payOwner=lumiPayOwner()||owner,people=await lumiPayPeople(payOwner),person=people.find(p=>p.key===ctx.person.key&&p.active);
+ if(!person){lumiOfSay('Esa persona ya no está activa en Pagos.');return;}
+ const md=P.methodDetail(P.norm(texto),{fuzzy:true}),method=md.method&&md.method!=='ambiguous'?md.method:f.method||'';
+ const order={action:'plan',method,methodLabel:md.method===method?md.label||'':'',kind:'pago',english:false,text:String(texto),field:f.field||''};
+ const snap=await lumiPaySnapshot(person,order,payOwner);lumiOfGuard(owner);
+ lumiOfRemember(owner,person,Number.isFinite(snap.balance)?snap.balance:ctx.amount,method,people.filter(p=>p.active));
+ let text=P.details(snap,order);
+ if(!person.zelle&&(method==='zelle'||f.field==='contact'))text+='\nNo tiene Zelle guardado. ¿Te abro su ficha para ponérselo?';
+ text+='\nCuando se lo mandes, dime «ya se lo mandé» y te preparo la tarjeta para anotarlo.';
+ lumiOfSay(text,person.zelle&&method==='zelle'?'Su Zelle es '+person.zelle+'. Cuando se lo mandes, dime ya se lo mandé.':(!person.zelle?'No tiene Zelle guardado. ¿Te abro su ficha?':'Ahí están sus datos. Cuando se lo mandes, dime ya se lo mandé.'));
+ const box=lumiOfBox();if(!box)return;
+ if(person.zelle)lumiOfButton(box,'Copiar Zelle',async ev=>{try{await navigator.clipboard.writeText(person.zelle);ev.target.textContent='Copiado';}catch(x){ev.target.textContent='No se pudo copiar';}});
+ if(person.fullName)lumiOfButton(box,'Copiar nombre',async ev=>{try{await navigator.clipboard.writeText(person.fullName);ev.target.textContent='Copiado';}catch(x){ev.target.textContent='No se pudo copiar';}});
+ lumiOfButton(box,'Abrir su ficha · '+person.name,()=>{try{lumiOfGuard(owner);lumiOfOpenSheet(person);}catch(e){}});
+}
+// "ya se lo mande": el pago lo prepara el bloque de pagos (su revision, su tarjeta, su confirmacion, su aviso)
+async function lumiOfPayDone(f,ctx,owner,texto){
+ const P=lumiPayCore(),payOwner=lumiPayOwner();
+ if(!payOwner){lumiOfSay('Abre Lumi desde Manager con la misma cuenta para anotar pagos.');return;}
+ const people=await lumiPayPeople(payOwner),person=people.find(p=>p.key===ctx.person.key&&p.active);
+ if(!person){lumiOfSay('Esa persona ya no está activa en Pagos. No anoté nada.');return;}
+ const md=P.methodDetail(P.norm(texto),{fuzzy:true});
+ const own=md.method&&md.method!=='ambiguous';
+ const order={action:'record',method:own?md.method:f.method||'',methodLabel:own?md.label||'':'',methodSub:own?md.sub||'':'',amount:Number.isFinite(f.amount)&&f.amount>0?f.amount:(Number.isFinite(ctx.amount)&&ctx.amount>0?ctx.amount:NaN),reference:P.reference(texto),kind:f.kind||'pago',english:false,text:String(texto)};
+ const fromOwed=!(Number.isFinite(f.amount)&&f.amount>0)&&Number.isFinite(order.amount);
+ const snapshot=await lumiPaySnapshot(person,order,payOwner);lumiOfGuard(owner);
+ if(fromOwed&&Number.isFinite(snapshot.balance)&&Math.round(snapshot.balance*100)!==Math.round(order.amount*100))order.amount=snapshot.balance>0?snapshot.balance:NaN;
+ lumiOfRemember(owner,person,snapshot.balance,order.method,people.filter(p=>p.active));
+ LUMI_PAY_PENDING={owner:payOwner,person,order,at:Date.now()};
+ const proposal=await lumiPayPrepare(snapshot,order,payOwner);lumiOfGuard(owner);
+ if(proposal.error){lumiOfSay(proposal.error);return;}
+ LUMI_PAY_PENDING=null;
+ const pre=fromOwed?'Puse lo que se le debe, '+P.money(order.amount)+'; si fue otro monto, dímelo. ':'';
+ lumiOfSay(pre+proposal.flow.review.summary+' ¿Lo registro?');asMostrarTarjeta(proposal.card);
+}
+async function lumiOfRun(fn,status){
+ AS.enviando=true;try{if(typeof asEstado==='function')asEstado('pensando',status||'Revisando…');await fn();}
+ catch(e){const m=e&&e.message?e.message:'No pude revisarlo.';try{asMostrarRespuesta(m);asHablar(m,asSeguirOyendo);}catch(x){}}
+ finally{AS.enviando=false;}
+}
+async function asOfficeAsks(texto){
+ const C=lumiOfCore();if(!C)return false;
+ const owner=lumiOfOwner();if(!owner)return false;
+ const start=s=>{asPararOido();asCallar();asTranscribir(texto);};
+ // la pregunta de "¿a cual grupo?"
+ if(LUMI_OF.groupAsk&&LUMI_OF.groupAsk.owner===owner&&Date.now()-LUMI_OF.groupAsk.at<180000){
+  const g=C.groupAnswer(texto,LUMI_OF.groupAsk.choices);
+  if(g){start();const draft=LUMI_OF.groupAsk.draft;LUMI_OF.groupAsk=null;if(g.cancel){lumiOfSay('Va, no mando nada.');return true;}await lumiOfRun(()=>lumiOfCrewCard(draft,g.group,owner),'Preparando el mensaje…');return true;}
+  LUMI_OF.groupAsk=null;
+ }else LUMI_OF.groupAsk=null;
+ // "¿le preparo un recordatorio?"
+ if(LUMI_OF.offer&&LUMI_OF.offer.owner===owner&&Date.now()-LUMI_OF.offer.at<300000){
+  const r=C.reminderReply(texto,LUMI_OF.offer);
+  if(r){start();lumiOfReminderReply(r,owner);return true;}
+  LUMI_OF.offer=null;
+ }else LUMI_OF.offer=null;
+ const ctx=lumiOfCtx(owner);
+ // la platica de "cuanto debo": datos para mandarle / "ya se lo mande"
+ if(ctx&&ctx.person){
+  let people=ctx.people;try{if(!people)people=LUMI_PAY_ROSTER&&LUMI_PAY_ROSTER.owner===(lumiPayOwner()||owner)?LUMI_PAY_ROSTER.people:null;}catch(e){}
+  const f=C.oweFollow(texto,{...ctx,people},lumiPayCore());
+  if(f){start();await lumiOfRun(()=>f.step==='plan'?lumiOfPlan(f,ctx,owner,texto):lumiOfPayDone(f,ctx,owner,texto),f.step==='plan'?'Buscando sus datos…':'Revisando los datos del pago…');return true;}
+ }
+ // nombre suelto despues de "¿de quien?"
+ if(ctx&&ctx.awaitingName&&/^[\p{L}'’ .-]{2,40}$/u.test(String(texto).trim())){
+  let people=ctx.people;if(!people){try{people=(await lumiPayPeople(owner)).filter(p=>p.active);}catch(e){people=[];}}
+  const found=lumiPayCore().findPeople(String(texto),people);
+  if(found.length===1){start();await lumiOfRun(()=>lumiOfPersonDetails(found[0],owner),'Revisando su cuenta…');return true;}
+  if(found.length>1){start();LUMI_OF.ctx={...LUMI_OF.ctx,at:Date.now(),people};lumiOfSay('¿Cuál: '+found.map(p=>p.name).join(' o ')+'?');return true;}
+  LUMI_OF.ctx={...LUMI_OF.ctx,awaitingName:false};
+ }
+ const owe=C.oweIntent(texto,ctx);
+ if(owe){start();
+  if(owe.step==='drop'){LUMI_OF.ctx=null;lumiOfSay('Va, lo dejamos para después.');return true;}
+  if(owe.step==='cant_send'){LUMI_OF.ctx={...LUMI_OF.ctx,at:Date.now()};lumiOfSay('Yo no muevo dinero. Cuando se lo mandes tú, dime «ya se lo mandé» y te preparo la tarjeta para anotarlo.');return true;}
+  if(owe.step==='pick'){LUMI_OF.ctx={...(ctx||{}),owner,topic:'owe',person:null,at:Date.now(),awaitingName:true};lumiOfSay('¿De quién? Dime el nombre.');return true;}
+  if(owe.step==='list'&&ctx&&ctx.res&&Date.now()-ctx.at<120000){LUMI_OF.ctx={...LUMI_OF.ctx,at:Date.now()};lumiOfOweList(ctx.res,owner,false);return true;}
+  await lumiOfRun(async()=>{
+   if(owe.step==='person'){
+    if(owe.same&&ctx&&ctx.person){await lumiOfPersonDetails(ctx.person,owner);return;}
+    const r=await lumiOfResolvePerson(owe.who,owner,ctx);
+    if(r.error){LUMI_OF.ctx={...(ctx||{}),owner,topic:'owe',person:null,at:Date.now(),awaitingName:true,people:r.people};lumiOfSay(r.error);return;}
+    await lumiOfPersonDetails(r.person,owner);return;}
+   await lumiOfOweAll(owe.step,owner);
+  },owe.step==='person'?'Revisando su cuenta…':'Sacando la cuenta de Pagos…');
+  return true;
+ }
+ const cl=C.clientsIntent(texto);
+ if(cl){start();LUMI_OF.ctx=null;await lumiOfRun(()=>lumiOfClients(cl,owner),'Revisando los invoices…');return true;}
+ const un=C.unconfirmedIntent(texto);
+ if(un){start();LUMI_OF.ctx=null;await lumiOfRun(()=>lumiOfUnconfirmed(un,owner),'Revisando los pagos…');return true;}
+ const cr=C.crewIntent(texto);
+ if(cr){start();LUMI_OF.ctx=null;await lumiOfRun(()=>lumiOfCrew(cr,owner),'Preparando el mensaje…');return true;}
+ if(ctx)LUMI_OF.ctx=null;   // otro tema: el contexto se suelta y no se cuelga de la frase siguiente
+ return false;
+}
+
+// END LUMI OFFICE ASKS
 
 let LUMI_MESSAGE_DRAFT=null,LUMI_MESSAGE_CONTEXT=null;
 async function asComposeMessage(command,texto){
@@ -80724,6 +81476,8 @@ function lumiIncompleteSpeechReply(text){
         if(command){await asComposeMessage(command,texto);return;}
       }
     }
+    // (18-nov-2026) LUMI OFFICE ASKS: quien me debe, mensaje a la cuadrilla, pagos sin confirmar, cuanto debo (solo manager).
+    if(!dictando&&!AS.conf&&!AS.pregunta&&typeof asOfficeAsks==='function'&&(await asOfficeAsks(texto)))return;
     // (13-nov-2026, su pedido) LUMI REVISA QUE LABOR LOGS Y HORAS COINCIDAN. Por ahora SOLO LEE y le cuenta: no manda
     // nada a nadie. Los mensajes para los encargados quedan preparados (window.__lumiRevision) para el paso siguiente.
     if(!dictando&&!AS.conf&&!AS.pregunta&&SES.role==='manager'&&isManager()&&!AS.sandbox){
@@ -81806,6 +82560,7 @@ function lumiIncompleteSpeechReply(text){
       asMostrarRespuesta(aviso); asHablar(aviso, asSeguirOyendo); return;
     }
     if(c.lumiPayment)return lumiPayConfirm(c);
+    if(c.lumiOficina)return lumiOfConfirm(c);
     try{ asGalTarjeta(null); }catch(e){}
     let escrito;
     if(c.escrito_requerido){
