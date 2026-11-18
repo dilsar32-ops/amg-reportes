@@ -20569,7 +20569,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-18-R495';
+  const APP_BUILD = '2026-11-18-R496';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -61459,6 +61459,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!lumi && cloudOn() && personPaymentsFor !== personKey && /^[0-9a-f-]{36}$/i.test(String(personKey))){ alert('No pude leer los adelantos de esta persona. No se marcó nada: revise su internet y abra su ficha otra vez.'); return; }
     const allOpen = personRows().filter(r => !r.paid_at);
     const gastosP = (personPaidView || typeof gastosDe !== 'function') ? [] : gastosDe(personKey).slice(), G = gastosP.length ? gastosSuma(personKey) : 0;
+    if(!allOpen.length && op && op.sinBorrar) return { ok: false, resultado: 'nada', ya: 0 };   // (18-nov, Lumi) cerrar con lo ya anotado: sin horas no se paga ningún gasto
     if(!allOpen.length){ if(G) await pagarSoloGastos(gastosP, G, lumi && Math.abs(G - lumiMonto) < 0.01); return; }
     const any  = teamRows.find(r => (r.user_id || nameOf(r)) === personKey);
     const rate = rateOf(personKey);
@@ -61493,6 +61494,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // sube lo que se le entrega hoy. El aviso tiene que decir esa cifra, no la
     // de las horas peladas - antes preguntaba "$500" y guardaba "$580".
     const extraCredit = partialPaid < -0.005 ? Math.round(-partialPaid*100)/100 : 0;
+    // (18-nov-2026, Lumi) CERRAR CON LO YA ANOTADO (op.sinBorrar): el pago ya está en la nube y cubre todo. Nada se pregunta: si falta
+    // dinero, hay un turno sin tarifa o uno sin salida (se cerraría en $0), no se toca nada y el chat dice por qué.
+    if(op && op.sinBorrar && (remaining > 0.005 || skipped || rows.some(r => !r.clock_out))) return { ok: false, resultado: 'cancelado', saldo: remaining, skipped, abierto: rows.some(r => !r.clock_out) };
     // Lumi: la tarjeta dijo este mismo total y ya se confirmó; si cambió algo (otro pago, otra hora), se pregunta como siempre
     if(!(lumi && Math.abs(remaining - lumiMonto) < 0.01 && !skipped) && !confirm((partialPaid > 0
           ? (G ? `Total de estas horas y sus gastos: ${money(debe)}.` : `Total de estas horas: ${money(debe)}.`) + '\nYa le dio ' + money(partialPaid) + ' en pagos parciales.\n\n'
@@ -61572,7 +61576,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         // valor de las horas. Un extra (negativo) siempre queda cubierto: sube
         // el monto entregado hoy. Antes esta condicion pedia "> 0", asi que un
         // extra sobrevivia al cierre y se volvia a cobrar en la pantalla.
-        const clearedOldPartials = Math.abs(partialPaid) > 0.005 && partialPaid <= debe + 0.005;
+        // (18-nov-2026, Lumi) sinBorrar: el pago recién anotado por Lumi todavía no lo contesta nadie; borrarlo aquí perdería el cheque
+        // (el caso de Aníbal). Se queda, y este recibo de $0 consume lo ya dado (credit_consumed = debe), como un pago de más.
+        const clearedOldPartials = !(op && op.sinBorrar) && Math.abs(partialPaid) > 0.005 && partialPaid <= debe + 0.005;
         const leftoverCredit = partialPaid > debe ? Math.round((partialPaid - debe)*100)/100 : 0;
         // How much of the OLD credit this settlement used up. clearPersonPayments
         // only deletes rows nobody has answered yet - an already-accepted row is
@@ -61604,7 +61610,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         // The hours above are already stamped paid at this point, so a lost
         // receipt here can't be recovered by just tapping the button again -
         // retry a couple times inline before giving up and saying so.
-        const reciboId = finUuid();
+        const reciboId = (op && op.reciboId) || finUuid();   // (18-nov, Lumi) id fijo: un reintento choca (409) y no hace otro recibo
         for(let attempt = 0; attempt < 3 && !receiptFailed; attempt++){
           try{
             if(attempt > 0) await new Promise(r => setTimeout(r, 800));
@@ -61644,7 +61650,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       salida = paro
         // (17-nov, G1) se paró: con algo estampado es "a medias" (con su recibo); sin nada, nada se tocó. empresa = el chat dice por qué
         ? { ok: false, resultado: hechas.length ? 'medias' : (paro === 'empresa' || paro === 'borrada') ? 'cancelado' : 'error', ya: already, empresa: paro === 'empresa', borrada: paro === 'borrada', hechas: hechas.length, de: rows.length, monto: remainingH, sinRecibo: receiptFailed }
-        : { ok: hechas.length > 0 && !receiptFailed, resultado: !hechas.length ? 'nada' : receiptFailed ? 'sinrecibo' : 'ok', ya: already };
+        : { ok: hechas.length > 0 && !receiptFailed, resultado: !hechas.length ? 'nada' : receiptFailed ? 'sinrecibo' : 'ok', ya: already,
+            horas: payH.hours, sinConfirmar: hechas.filter(r => !r.confirmed).map(r => r.work_date) };   // (18-nov, Lumi) lo que el chat dice
       if(gastoFallo) alert('⚠ El pago quedó, pero el gasto no se marcó como devuelto. Márquelo en Gastos recibidos → Ya se le devolvió, para no pagarlo dos veces.');
       // (Cajero, rev. 1) desde el chat (callado) no sale ningún aviso nativo: el chat lee salida y dice lo que pasó, con sus palabras
       if(!(op && op.callado)) alert(paro
@@ -78685,7 +78692,23 @@ function paymentReport(text,{roster}={}){
 }
 // para que la app traiga la lista de gente solo cuando la frase huele a dinero (no en cada frase)
 function looksLikePayment(text){const t=canon(norm(text));return moneySignal(t)||STRONG_DONE.test(t)||CHECKMARK.test(String(text||''))||SETTLED_RE.test(t)||!!stateName(t);}
-const api={paymentReport,looksLikePayment,findPeople,toPeople,otherRoute,methodDetail,moneyContext,recipient,place,noticeMoney,noticeText,norm,money,cents,method,amount,reference,intent,resolve,queryContinuation,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit};
+// (18-nov-2026, decision del dueno) UN PAGO QUE DEJA EL SALDO EN $0 CIERRA SUS HORAS, como "Marcar como pagado" de Pagos.
+// Solo un PAGO (nunca un adelanto) ya comprobado, y solo si el saldo fresco quedo en $0 exacto o a su favor. Un pago a medias no cierra nada.
+function closeDecision(order,fresh){if(!order||order.kind!=='pago')return false;const b=fresh&&fresh.balance;return typeof b==='number'&&Number.isFinite(b)&&cents(b)<=0;}
+const MES_CORTO=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function shortDate(d){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||''));return m?(+m[3])+' '+MES_CORTO[+m[2]-1]:String(d||'');}
+function hoursLabel(h){const x=Math.round((Number(h)||0)*100)/100;return String(x);}
+function joinY(list){return list.length<2?list.join(''):list.slice(0,-1).join(', ')+' y '+list[list.length-1];}
+// "Quedó en $0; cerré sus 127.5 h (incluye 1 turno sin confirmar: 9 nov)."  /  "Queda $53.00 a su favor; cerré sus 8 h."
+function closeText({balance,horas,sinConfirmar=[]}){
+ const n=(sinConfirmar||[]).length,dias=[...new Set((sinConfirmar||[]).map(String))].sort().map(shortDate);
+ return (cents(balance)<0?'Queda '+money(-balance)+' a su favor':'Quedó en $0')+'; cerré sus '+hoursLabel(horas)+' h'
+  +(n?' (incluye '+n+(n===1?' turno sin confirmar: ':' turnos sin confirmar: ')+joinY(dias)+')':'')+'.';
+}
+// El recibo del cierre lleva un id FIJO sacado del id del pago: un reintento encuentra el mismo y no hace otro. Igual en el servidor.
+function closeIdFromHex(h){h=String(h||'').toLowerCase();if(!/^[0-9a-f]{32,}$/.test(h))throw Error('hash');return h.slice(0,8)+'-'+h.slice(8,12)+'-5'+h.slice(13,16)+'-'+((parseInt(h[16],16)&3)|8).toString(16)+h.slice(17,20)+'-'+h.slice(20,32);}
+const CLOSE_SEED='cierre-horas|';
+const api={paymentReport,looksLikePayment,findPeople,toPeople,otherRoute,methodDetail,moneyContext,recipient,place,noticeMoney,noticeText,norm,money,cents,method,amount,reference,intent,resolve,queryContinuation,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit,closeDecision,closeText,shortDate,closeIdFromHex,CLOSE_SEED};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiPaymentFollowup=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
@@ -78914,6 +78937,59 @@ async function lumiPayPrepare(snapshot,order,owner){
  flow.review={...review,summary:preview};
  return {flow,card:{...card,resumen:preview,efecto:preview,lumiPayment:flow}};
 }
+// (18-nov-2026, decision del dueno) CERRAR LAS HORAS CON EL PAGO QUE LAS CUBRIO. Despues de comprobar la fila del pago, si el saldo
+// fresco quedo en $0 exacto (o a su favor) se cierran con LA MISMA rutina de Pagos: markPaid con sinBorrar (no borra el pago recien
+// anotado aunque nadie lo haya contestado; el recibo es de $0 y consume lo ya dado) y un id de recibo fijo. Temporales: casualCerrarDias
+// sin dinero. Si algo no cuadra (otro saldo, un turno sin salida, sin tarifa, otra empresa) no se toca nada y se dice.
+async function lumiPayCloseId(paymentId){const P=lumiPayCore(),b=await crypto.subtle.digest('SHA-1',new TextEncoder().encode(P.CLOSE_SEED+paymentId));return P.closeIdFromHex(Array.from(new Uint8Array(b),x=>x.toString(16).padStart(2,'0')).join(''));}
+async function lumiPayCloseHours(f,receipt,fresh,owner){
+ const P=lumiPayCore();if(!P.closeDecision(f.order,fresh)||!receipt||!receipt.id)return null;
+ lumiPayGuard(owner);
+ const falla=t=>({closed:false,text:' No cerré sus horas: '+t+' Ciérrelas en Pagos.'}),nota='Lumi · pago #'+String(receipt.id).slice(0,8);
+ const r2=x=>Math.round(Number(x)*100)/100;
+ if(f.person.kind==='crew'){
+  if(typeof markPaid!=='function'||typeof pagosConFicha!=='function'||typeof fichaSaldoCrew!=='function'||typeof personRows!=='function')return falla('esta pantalla no tiene Pagos.');
+  const id=await lumiPayCloseId(receipt.id);lumiPayGuard(owner);
+  const out=await pagosConFicha(f.person.id,async()=>{
+   lumiPayGuard(owner);
+   const open=personRows().filter(x=>!x.paid_at),ya=(personPayments||[]).some(x=>String(x.id)===id);
+   if(ya)return open.length?falla('una parte ya se cerró con este pago y quedan '+open.length+' turno(s) abiertos.'):{closed:true,already:true,text:'Sus horas ya estaban cerradas con este pago.'};
+   if(!open.length)return null;   // nada abierto: no hay horas que cerrar (el saldo a su favor se queda como está)
+   const s=fichaSaldoCrew();
+   if(open.some(x=>!x.clock_out))return falla('tiene un turno sin salida (no ha marcado la salida).');
+   if(s.sinCerrar)return falla(s.sinCerrar+' turno(s) de AMG no tienen tarifa.');
+   if(s.balance===null)return falla('falta su tarifa.');
+   if(P.cents(s.balance)!==P.cents(fresh.balance))return falla('el saldo en Pagos ('+P.money(s.balance)+') no es el que comprobé ('+P.money(fresh.balance)+').');
+   const horas=open.reduce((t,x)=>t+(hoursBetween(x.clock_in,x.clock_out)||0),0)/60,sin=open.filter(x=>!x.confirmed).map(x=>x.work_date);
+   const m=await markPaid({desdeLumi:true,monto:0,callado:true,sinBorrar:true,reciboId:id,nota});lumiPayGuard(owner);
+   const res=m&&m.resultado;
+   if(res==='ok')return {closed:true,text:P.closeText({balance:s.balance,horas:m.horas!=null?m.horas:horas,sinConfirmar:m.sinConfirmar||sin})+(m.ya>0?' '+m.ya+' turno(s) ya los había pagado alguien más; no se pagaron dos veces.':'')};
+   if(res==='sinrecibo')return {closed:true,text:'Cerré sus horas, pero el recibo del cierre no se guardó. Revise su tabla en Pagos.'};
+   if(res==='medias')return {closed:false,text:' Se cortó a la mitad: algunas horas quedaron cerradas y otras no. Revise su tabla en Pagos; no anote nada a mano.'};
+   if(res==='nada')return {closed:false,text:' Sus horas ya las había cerrado otro teléfono. Revise su tabla en Pagos.'};
+   if(m&&m.empresa)return falla('cambiaron de empresa mientras revisaba.');
+   if(m&&m.borrada)return falla('un turno ya no existe.');
+   if(m&&m.abierto)return falla('tiene un turno sin salida (no ha marcado la salida).');
+   return falla('Pagos no las dejó cerrar'+(m&&m.saldo>0.005?' (le faltan '+P.money(m.saldo)+')':'')+'.');
+  });
+  return out&&typeof out.text==='string'?out:out===null?null:falla('no pude leer su ficha en Pagos.');
+ }
+ if(typeof casualCerrarDias!=='function'||typeof pagosConTemporal!=='function'||typeof casualPersonRows!=='function'||typeof casualBalanceOf!=='function')return falla('esta pantalla no tiene Pagos.');
+ const out=await pagosConTemporal(f.person.id,async()=>{
+  lumiPayGuard(owner);
+  const id=f.person.id,rows=casualPersonRows().filter(x=>x.reported_hours!=null&&!x.paid_at);if(!rows.length)return null;
+  const rate=casualRateOf(id),mg=mgRateTemp(id);
+  if(rows.some(x=>(x.work_kind==='mudanza'?mg:rate)===null))return falla('un día no tiene tarifa (AMG o Restauración).');
+  const bal=casualBalanceOf(id).balance;if(P.cents(bal)!==P.cents(fresh.balance))return falla('el saldo en Pagos ('+P.money(bal)+') no es el que comprobé ('+P.money(fresh.balance)+').');
+  const horas=r2(rows.reduce((t,x)=>t+(Number(x.reported_hours)||0),0));
+  const c=await casualCerrarDias({desdeChat:true,cash:0,avisado:true,nota});lumiPayGuard(owner);
+  if(c&&c.ok)return {closed:true,text:P.closeText({balance:bal,horas})};
+  if(c&&c.empresa)return falla('un día cambió de empresa mientras revisaba.');
+  if(c&&(c.cancelado||c.sinDias))return falla('Pagos no los dejó cerrar.');
+  return {closed:false,text:' No se cerraron todos sus días. Revise su tabla en Pagos; no anote nada a mano.'};
+ });
+ return out&&typeof out.text==='string'?out:out===null?null:falla('no pude leer su ficha en Pagos.');
+}
 function lumiPayIO(owner,escrito){
  const P=lumiPayCore();
  return {
@@ -78939,10 +79015,12 @@ function lumiPayIO(owner,escrito){
     }else requestText=' Conservé el estado actual de la petición.';
    }else if(f.request)requestText=' La petición sigue pendiente por el resto.';
    const fresh=await lumiPaySnapshot(f.person,f.order,owner);
+   // (18-nov-2026) un PAGO que lo deja en $0 (o a su favor) cierra sus horas con la rutina de Pagos; nunca un adelanto ni un pago a medias
+   let cierre=null;try{cierre=await lumiPayCloseHours(f,receipt,fresh,owner);}catch(e){lumiPayGuard(owner);cierre={closed:false,text:' No pude cerrar sus horas: '+String(e&&e.message||'error').slice(0,120)+' Ciérrelas en Pagos.'};}
    let notice={state:'disabled',text:''};
    try{notice=await lumiPayNotify(f,receipt,owner);}catch{lumiPayGuard(owner);notice={state:'pending',text:' El pago quedó registrado; falta comprobar el aviso en su chat. Puede pedirme revisar ese pago para reintentar solo el aviso.'};}
    lumiPayGuard(owner);
-   return {notice:notice.state,noticeId:notice.id||null,state:'recorded',id:receipt.id,text:'Registré '+P.money(f.order.amount)+' para '+f.person.name+' por '+(f.order.methodLabel||f.order.method)+'. '+(fresh.balance===null?'Su saldo lo calculo cuando se confirmen sus horas.':fresh.balance>0?'Quedan '+P.money(fresh.balance)+' pendientes.':fresh.balance<0?'Queda '+P.money(-fresh.balance)+' a su favor.':'Quedó al día.')+requestText+notice.text};
+   return {notice:notice.state,noticeId:notice.id||null,state:'recorded',id:receipt.id,text:'Registré '+P.money(f.order.amount)+' para '+f.person.name+' por '+(f.order.methodLabel||f.order.method)+'. '+(cierre&&cierre.closed?cierre.text:(fresh.balance===null?'Su saldo lo calculo cuando se confirmen sus horas.':fresh.balance>0?'Quedan '+P.money(fresh.balance)+' pendientes.':fresh.balance<0?'Queda '+P.money(-fresh.balance)+' a su favor.':'Quedó al día.')+(cierre?cierre.text:''))+requestText+notice.text,cierre:cierre?{closed:!!cierre.closed,already:!!cierre.already}:null};
   }
  };
 }
