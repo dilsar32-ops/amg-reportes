@@ -20569,7 +20569,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-18-R496';
+  const APP_BUILD = '2026-11-18-R497';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -24919,16 +24919,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   async function loadCasualTeam(){
     const box = $('#casualTeamEntries'); if(!box) return;
     if(!cloudOn() || !isManager()) return;
+    let urlH = '', urlP = '';   // (18-nov) las URL sin limit, para las demás páginas
     try{
       const [wRes, hRes, pRes] = await Promise.all([
         authFetch('/rest/v1/casual_workers?select=id,name,status,rate,pin' + (PAGO_DATOS_READY ? ',nombre_completo,telefono' : '')
           + '&company_id=eq.' + SES.company_id + '&order=name.asc', { headers: cloudHeaders() }),
-        authFetch('/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount,work_kind,clock_in,clock_out'
+        authFetch((urlH = '/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount,work_kind,clock_in,clock_out'
           + (huColsCh() ? huCols() : '')
-          + '&company_id=eq.' + SES.company_id + '&order=work_date.desc&limit=5000', { headers: cloudHeaders() }),
-        authFetch('/rest/v1/casual_payments?select=id,casual_worker_id,paid_on,amount,kind,note,settle_key,created_at' + (PAGO_DATOS_READY ? ',metodo' : '')
+          + '&company_id=eq.' + SES.company_id + '&order=work_date.desc,id.desc') + '&limit=1000', { headers: cloudHeaders() }),   // (18-nov) en páginas de 1,000
+        authFetch((urlP = '/rest/v1/casual_payments?select=id,casual_worker_id,paid_on,amount,kind,note,settle_key,created_at' + (PAGO_DATOS_READY ? ',metodo' : '')
           + (CASUAL_CONFIRM_READY ? ',accepted,responded_at,response_note,balance_after,confirm_needed' + (AUTO_OK_READY ? ',auto_ok_at' : '') : '')
-          + '&company_id=eq.' + SES.company_id + '&order=paid_on.desc&limit=5000', { headers: cloudHeaders() })
+          + '&company_id=eq.' + SES.company_id + '&order=paid_on.desc,id.desc') + '&limit=1000', { headers: cloudHeaders() })
       ]);
       if(!wRes.ok){
         // Las columnas nuevas (supabase-datos-de-pago.sql) todavia no estan: se vuelve a pedir sin ellas.
@@ -24951,9 +24952,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         CASUAL_CONFIRM_READY = false; return loadCasualTeam();
       }
       CASUAL_PAY_READY = !!(pRes && pRes.ok);
-      casualPayments = CASUAL_PAY_READY ? await pRes.json() : [];
-      casualWorkers = await wRes.json();
-      casualHoursAll = hRes.ok ? await hRes.json() : [];
+      // (18-nov) todas las páginas; (revisor 2) y se guardan las tres juntas SOLO si llegaron todas: una página de horas que falla
+      // ya no deja los pagos nuevos con las horas de antes (el saldo saldría de dos momentos distintos)
+      const pagosN = CASUAL_PAY_READY ? await huMasPaginas(urlP, await pRes.json(), u => authFetch(u, { headers: cloudHeaders() })) : [];
+      const genteN = await wRes.json();
+      const horasN = hRes.ok ? await huMasPaginas(urlH, await hRes.json(), u => authFetch(u, { headers: cloudHeaders() })) : [];
+      casualPayments = pagosN; casualWorkers = genteN; casualHoursAll = horasN;
       // A removed worker drops off this list once they're fully paid up -
       // that's the point of removing them - but stays visible while they
       // still have an unpaid balance, so sacar someone never quietly loses
@@ -25365,11 +25369,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   async function loadCasualHoursAll(){
     if(!cloudOn() || !isManager()) return;
     try{
-      const res = await authFetch('/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount,work_kind,clock_in,clock_out'
+      const url = '/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount,work_kind,clock_in,clock_out'
         + (huColsCh() ? huCols() : '')
-        + '&company_id=eq.' + SES.company_id + '&order=work_date.desc', { headers: cloudHeaders() });
+        + '&company_id=eq.' + SES.company_id + '&order=work_date.desc,id.desc';   // (18-nov) en páginas de 1,000 (id: un orden fijo)
+      const res = await authFetch(url + '&limit=1000', { headers: cloudHeaders() });
       if(!res.ok && res.status === 400 && huColsCh()) return huSinColsOtraVez('t', res, () => loadCasualHoursAll());   // (16-nov) sin la SQL nueva: sin sus columnas
-      if(res.ok) casualHoursAll = await res.json();
+      if(res.ok) casualHoursAll = await huMasPaginas(url, await res.json(), u => authFetch(u, { headers: cloudHeaders() }));   // (18-nov) todas (una que falla: se queda la de antes)
     }catch(e){}
   }
 
@@ -57360,7 +57365,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "labor log de Anderson" / "reporte de Raúl" (la pastilla) y "el labor log de Anderson" / "el reporte de mudanza de Raúl" (la frase)
   function huFuenteChip(k, lid){ lid = lid || []; return k === 'mudanza' ? (lid.length ? 'reporte de ' + huEsc(huLista(lid)) : 'reporte de mudanza') : (lid.length ? 'labor log de ' + huEsc(huLista(lid)) : 'labor log'); }
   function huFuenteTxt(k, lid){ lid = lid || []; return k === 'mudanza' ? (lid.length ? 'el reporte de mudanza de ' + huEsc(huLista(lid)) : 'el reporte de mudanza') : 'el ' + huFuenteChip(k, lid); }
-  function huHorasDe(lista, de, a){ return (lista || []).filter(x => x && x[de] && x[a]).slice().sort((p, q) => String(p[de]).localeCompare(String(q[de]))); }
+  function huHorasDe(lista, de, a){ const k = x => String(x.log_date || '').slice(0, 10) + String(x[de]); return (lista || []).filter(x => x && x[de] && x[a]).slice().sort((p, q) => k(p).localeCompare(k(q))); }
   // Lo que dice el renglón de abajo de un día, para el TRABAJADOR (las palabras de la maqueta del 16-nov).
   // { chip, cls ('' rojo | 'soft' | 'ok'), why (html), txt (html), callado } o null (no se dice nada).
   // primera = es la primera fila de ese día en la lista (el aviso del día va una vez); op.sinCorregir = el temporal no tiene Corregir.
@@ -57466,6 +57471,78 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // (17-nov, ronda 2) el líder del labor log de Restauración es un pedazo con idx 0 y SIN horas: dice que salió ese día, no cuántas
   // horas. Nunca mueve una hora. Los reportes de mudanza no traen líder.
   function huEsLider(p){ return !!p && p.idx != null && p.idx !== '' && +p.idx === 0; }
+  // (18-nov) LOS PEDAZOS POR TRAMOS de 20 días, del más nuevo al más viejo, 3 a la vez. El servidor corta cada respuesta en 1,000
+  // renglones sin avisar (PostgREST); ~16 pedazos por día dan ~320 por tramo. Un tramo que llega lleno (1,000) se parte en dos y se
+  // vuelve a pedir; un solo día lleno cuenta como falla (nada a medias). pedir(x, y) -> {ok, data} | {falta} | {ok: false} (o tira).
+  // op.parte(pedazos, desde): cada vez que crece lo que ya llegó seguido desde el más nuevo (para pintar lo reciente primero).
+  // Contesta {ok: true, data, desde, parcial}: lo seguido desde el más nuevo y su primer día (un tramo viejo que falla corta ahí),
+  // o {falta: true} / {ok: false} si el tramo más nuevo no llegó.
+  async function huPorTramos(a, b, pedir, op){
+    op = op || {};
+    const tam = op.tam || 20, tope = op.tope || 1000, aLaVez = op.aLaVez || 3, T = [];
+    for(let y = b; a && y && y >= a; y = huMenosDias(y, tam)){ const x = huMenosDias(y, tam - 1); T.push([x > a ? x : a, y]); }
+    if(!T.length) return { ok: true, data: [], desde: a, parcial: false };
+    const traer = async (x, y) => {   // -> [pedazos] | {falta} | null (falló)
+      let r = null; try{ r = await pedir(x, y); }catch(e){ r = null; }
+      if(r && r.falta) return { falta: true };
+      if(!r || !r.ok) return null;
+      const d = Array.isArray(r.data) ? r.data : [];
+      if(d.length < tope) return d;
+      if(x >= y) return null;
+      const m = huMenosDias(x, -Math.floor(Math.round((Date.parse(y) - Date.parse(x)) / 864e5) / 2));
+      let p;
+      if(aLaVez > 1) p = await Promise.all([traer(huMenosDias(m, -1), y), traer(x, m)]);
+      else{ p = [await traer(huMenosDias(m, -1), y)]; p.push(Array.isArray(p[0]) ? await traer(x, m) : null); }   // uno a la vez (mueve horas), el más nuevo primero
+      return Array.isArray(p[0]) && Array.isArray(p[1]) ? p[1].concat(p[0]) : null;
+    };
+    const R = new Array(T.length), junto = n => [].concat(...R.slice(0, n).reverse());
+    let sig = 0, listos = 0, corte = T.length;
+    const obrero = async () => {
+      while(sig < corte){
+        const j = sig++, r = await traer(T[j][0], T[j][1]);
+        R[j] = r; if(!Array.isArray(r) && j < corte) corte = j;
+        const antes = listos; while(listos < corte && Array.isArray(R[listos])) listos++;
+        if(listos > antes && op.parte){ try{ op.parte(junto(listos), T[listos - 1][0]); }catch(e){} }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(aLaVez, T.length) }, obrero));
+    if(!listos) return R[0] && R[0].falta ? { falta: true } : { ok: false };
+    return { ok: true, data: junto(listos), desde: T[listos - 1][0], parcial: listos < T.length };
+  }
+  // (18-nov) LAS LISTAS DE PAGOS (horas y pagos de toda la empresa) también pasan de 1,000: la primera página se pide como siempre
+  // (con &limit=1000 y su manejo de errores) y aquí las demás, con &offset=, hasta una de menos de 1,000. url: sin limit, con un orden
+  // fijo (id al final). Una página que falla TIRA (como sin red: nada a medias, es dinero). Sin repetidos (por id) si algo entró en medio.
+  // (revisor 2) Si alguien paga o borra una fila entre dos páginas, las de abajo suben y una se brincaba. Por eso cada página empieza
+  // 100 renglones ANTES de donde acabó la otra y tiene que traer al menos una fila que ya se vio (el ancla): con el orden fijo, todo lo
+  // que sigue al ancla llega seguido. Sin ancla (la lista se movió más de 100) se lee otra vez desde el principio; dos veces sin ancla: tira.
+  async function huMasPaginas(url, primera, pedir, tam){
+    tam = tam || 1000;
+    const tras = Math.min(100, Math.floor(tam / 4)), idDe = x => x && x.id != null ? String(x.id) : null;
+    const leer = async off => {
+      const res = await pedir(url + '&limit=' + tam + '&offset=' + off);
+      if(!res || !res.ok) throw new Error('HTTP ' + (res ? res.status : 0));
+      const j = await res.json(); if(!Array.isArray(j)) throw new Error('respuesta rara');
+      return j;
+    };
+    let todo = Array.isArray(primera) ? primera.slice() : [];
+    for(let vuelta = 0; ; vuelta++){
+      const vistos = new Set(todo.map(idDe).filter(k => k !== null));
+      let anclada = true;
+      for(let off = 0, ult = todo.length; ult >= tam && off <= 200000; ){
+        off += tam - tras;
+        const j = await leer(off);
+        ult = j.length;
+        if(!j.some(x => { const k = idDe(x); return k !== null && vistos.has(k); })){ anclada = false; break; }
+        j.forEach(x => { const k = idDe(x); if(k !== null){ if(vistos.has(k)) return; vistos.add(k); } todo.push(x); });
+      }
+      if(anclada) return todo;
+      if(vuelta >= 1) throw new Error('la lista cambió mientras se leía');
+      todo = await leer(0);
+    }
+  }
+  // (revisor 2) una respuesta de horas_a_su_empresa con p_aplicar: ¿se movió (o regresó) algo? Una llena (1,000) también cuenta:
+  // lo que se movió pudo quedar en la parte que cortó el servidor. Entonces se vuelven a leer las listas.
+  function huMovioAlgo(q){ return !!(q && q.ok && Array.isArray(q.data) && (q.data.length >= 1000 || q.data.some(v => v && (v.accion === 'movido' || huRegreso(v))))); }
   // { turnos: 'c:id|dia' -> pedazos con dueño; dudas: 'c:id|dia' -> pedazos que el manager tiene que decidir; logs: dia -> [{work_kind, lideres}] }
   function huIndice(piezas){
     const ix = { turnos: new Map(), dudas: new Map(), logs: new Map(), lider: new Map(), desde: '' };
@@ -57489,11 +57566,50 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     });
     return ix;
   }
+  // (18-nov, Medianoche) LA NOCHE QUE PASA DE LAS 12. El líder parte la noche en dos labor logs (Aroldo: el del 15 dice 7:00 PM–12:00 AM
+  // y el del 16 sigue con 12:00–3:00 AM). Ese pedazo del 16 es del 15 para ESA persona, y se quita del 16 (no cuenta dos veces), si empieza
+  // entre las 12:00 y las 12:15 AM y además (a) ella tiene un pedazo del 15 que termina a las 12 (de 11:45 PM a 12:00 AM), o (b) ella ya
+  // tiene un pedazo en un labor log del 15, su propia fila del 15 pasa de las 12 y el pedazo empieza antes de su salida (+15 min). Sin un
+  // pedazo suyo del 15, su fila sola no trae el pedazo: así una noche que nadie apuntó el 15 nunca pasa sola a la otra empresa (revisor 2).
+  // Nunca si una fila suya del 16 se encima con ese pedazo (12:00 o 12:30 AM, da igual): lo partió igual que el líder. Un turno de 6:00 AM
+  // es un día nuevo. Lo mismo que ln_dias_firmes (sql/medianoche-BORRADOR-2026-11-18.sql).
+  function huReloj(t){ const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+  function huSigueDeNoche(p, antes, filasAntes, filasDia){
+    const s = huReloj(p && p.shift_from), n = p ? huMin(p.shift_from, p.shift_to) : null;
+    if(!p || huEsLider(p) || s === null || s > 15 || !(n > 0)) return false;
+    const fin = (a, m) => (a === null || !(m > 0)) ? null : a + m;   // minutos desde las 12 del día de antes (1440 = medianoche)
+    if((filasDia || []).some(f => { const a = huReloj(f && f.clock_in), e = fin(a, f ? huMin(f.clock_in, f.clock_out) : null); return e !== null && a < s + n && s < e; })) return false;
+    const suyos = (antes || []).filter(y => y && !huEsLider(y));   // sus pedazos (no de líder) de los labor logs del día de antes
+    if(suyos.some(y => { const e = fin(huReloj(y.shift_from), huMin(y.shift_from, y.shift_to)); return e !== null && e >= 1425 && e <= 1440; })) return true;
+    return suyos.length > 0 && (filasAntes || []).some(f => { const e = fin(huReloj(f && f.clock_in), f ? huMin(f.clock_in, f.clock_out) : null); return e !== null && e >= 1440 && s < e - 1440 + 15; });
+  }
+  // el día al que cuenta un pedazo: su log_date, o el de antes si es la noche que siguió. base(d) = sus pedazos del labor log de d; filasDe(d) = sus filas de d
+  function huDiaDelPedazo(p, base, filasDe){
+    const e = String((p && p.log_date) || '').slice(0, 10), d = huMenosDias(e, 1);
+    return d && huSigueDeNoche(p, base(d), filasDe(d), filasDe(e)) ? d : e;
+  }
+  function huNoche(base, dia, filasDe){
+    const sig = huMenosDias(dia, -1), aqui = p => huDiaDelPedazo(p, base, filasDe) === dia;
+    return base(dia).filter(aqui).concat(sig ? base(sig).filter(aqui) : []);
+  }
+  // sus pedazos de ESE día con la noche acomodada; todas = TODAS sus filas (sin ellas, como antes). Las dudas con dueño van con su pedazo.
+  function huTurnosDe(ix, clave, dia, todas){
+    if(ix && ix.desde && dia < ix.desde) return [];   // (18-nov) antes de lo que de veras llegó: no se sabe
+    const base = d => (ix && ix.turnos.get(clave + '|' + d)) || [];
+    return Array.isArray(todas) ? huNoche(base, dia, d => todas.filter(f => f && f.work_date === d)) : base(dia);
+  }
+  function huDudasDe(ix, clave, dia, todas){
+    if(ix && ix.desde && dia < ix.desde) return [];
+    const D = d => (ix && ix.dudas.get(clave + '|' + d)) || [];
+    if(!Array.isArray(todas)) return D(dia);
+    const T = huTurnosDe(ix, clave, dia, todas);
+    return D(dia).filter(p => !huConDueno(p) || T.indexOf(p) >= 0).concat(D(huMenosDias(dia, -1)).filter(p => huConDueno(p) && T.indexOf(p) >= 0));
+  }
   function huDiaDe(ix, clave, dia, filas, op){
     op = op || {};
     if(!ix || (ix.desde && dia < ix.desde)) return null;   // fuera de la ventana del servidor (120 días): no se dice nada
-    const dudas = ix.dudas.get(clave + '|' + dia) || [];
-    return huDia({ dia, filas, turnos: ix.turnos.get(clave + '|' + dia) || [], logs: ix.logs.get(dia) || [],
+    const dudas = huDudasDe(ix, clave, dia, op.todas);   // (18-nov) op.todas = todas sus filas: la noche que sigue en el labor log de mañana
+    return huDia({ dia, filas, turnos: huTurnosDe(ix, clave, dia, op.todas), logs: ix.logs.get(dia) || [],
       quizas: dudas.some(p => !huConDueno(p)), lider: !!(ix.lider && (ix.lider.get(clave + '|' + dia) || []).length), ahora: op.ahora, sinEncime: op.sinEncime });
   }
   function huMismoHorario(p, fila, v){
@@ -57583,17 +57699,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   // (17-nov, M2) LA VENTANITA DEL DÍA (la pastilla de la ficha la abre) con lo que encontró el SERVIDOR, las dos empresas: lo mismo
   // que dice la ficha. { texto, log (id para abrirlo, o null) } o null = fuera de la ventana del servidor: la de siempre.
-  function huVentanita(ix, clave, dia, nombre, hora){
+  function huVentanita(ix, clave, dia, nombre, hora, todas){
     if(!ix || !dia || (ix.desde && dia < ix.desde)) return null;
     const h = typeof hora === 'function' ? hora : (x => String(x || ''));
-    const T = huHorasDe(ix.turnos.get(clave + '|' + dia) || [], 'shift_from', 'shift_to'), D = ix.dudas.get(clave + '|' + dia) || [];
+    const T = huHorasDe(huTurnosDe(ix, clave, dia, todas), 'shift_from', 'shift_to'), D = huDudasDe(ix, clave, dia, todas);
     const Li = (ix.lider && ix.lider.get(clave + '|' + dia)) || [], L = ix.logs.get(dia) || [];
     const nomLog = k => k === 'mudanza' ? 'reporte de mudanza' : 'labor log';
     if(T.length){
       const ks = ['restauracion', 'mudanza'].filter(k => T.some(t => huKindDe(t.work_kind) === k));
       const parte = k => (k === 'mudanza' ? 'Reporte de mudanza del ' : 'Labor log del ') + dia + ':\n\n'
         + T.filter(t => huKindDe(t.work_kind) === k).map(t => '• ' + (t.crew_leader || (k === 'mudanza' ? 'manager' : 'líder')) + ': ' + h(t.shift_from) + ' a ' + h(t.shift_to)
-          + (t.escrito && t.escrito !== nombre ? ' («' + t.escrito + '»)' : '')).join('\n');
+          + (t.escrito && t.escrito !== nombre ? ' («' + t.escrito + '»)' : '') + (String(t.log_date || '').slice(0, 10) !== dia ? ' (' + nomLog(k) + ' del ' + String(t.log_date).slice(0, 10) + ')' : '')).join('\n');
       const min = T.reduce((x, t) => x + huMinTurno(t), 0);
       return { texto: ks.map(parte).join('\n\n') + '\n\nTotal: ' + (min / 60).toFixed(2) + ' hrs\n\n¿Ver el ' + nomLog(huKindDe(T[0].work_kind)) + ' completo?', log: T[0].log_id || null };
     }
@@ -57612,7 +57728,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const dias = filas.filter(f => !f.paid_at).map(f => f.work_date).filter((x, i, a) => x && a.indexOf(x) === i);
     dias.forEach(d => {
       const delDia = filas.filter(f => f.work_date === d);
-      const v = huDiaDe(o.ix, o.clave, d, delDia, { ahora: o.ahora });
+      const v = huDiaDe(o.ix, o.clave, d, delDia, { ahora: o.ahora, todas: filas });
       // (17-nov, ronda 3) un 'sin_respaldo' con a_kind ya regresó solo (huRegreso): no hay nada que decidir; sin a_kind es el aviso de siempre
       const detDe = id => (o.detalle || {})[id], aviso = f => !f.paid_at && (o.acciones || {})[f.id] === 'sin_respaldo' && !huRegreso(detDe(f.id));
       const sinResp = delDia.some(aviso);   // ya cuenta como "por decidir": no dos veces
@@ -57620,7 +57736,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(v.estado === 'more' || v.estado === 'overlap') r.mal++;
         else if(!sinResp && (v.estado === 'notinlog' || (v.estado === 'nolog' && !o.sinLogMudo))) r.sin++;
       }
-      const dudas = (o.ix && o.ix.dudas.get(o.clave + '|' + d)) || [];
+      const dudas = o.ix ? huDudasDe(o.ix, o.clave, d, filas) : [];
       if(dudas.length || (v && v.estado === 'mixto') || delDia.some(f => aviso(f) || (!f.paid_at && ['por_confirmar', 'mixto'].indexOf((o.acciones || {})[f.id]) >= 0))) r.decidir++;
       // (17-nov, ronda 3, T1a) se pasa, todavía no: "Pasa a AMG el <día>" (una vez por día)
       delDia.forEach(f => { const sm = !f.paid_at && huSeMueve(detDe(f.id), o.ahora); if(!sm) return; const L = sm.a === 'mudanza' ? r.pasaAmg : r.pasaRd; if(L.indexOf(sm.dia) < 0) L.push(sm.dia); });
@@ -57667,12 +57783,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     });
   }
   // Horas AMG: las horas del reporte de mudanza por persona y por día, con el dueño que puso el servidor
-  function huReporteDe(piezas){
-    const rep = {};
+  // (revisor 2) con la noche: el pedazo de las 12:00-3:00 AM del reporte del 16 cuenta el 15 (huDiaDelPedazo, la misma regla de la
+  // ficha). filas = {clave: [sus filas, las dos empresas, con work_date, clock_in, clock_out]} (sin ellas: solo la regla (a)).
+  function huReporteDe(piezas, filas){
+    const rep = {}, base = new Map(), clave = p => (p.owner_kind === 't' ? 't' : 'c') + ':' + p.owner_id;
+    (piezas || []).forEach(p => { if(!huConDueno(p) || huEsLider(p)) return;
+      const kk = clave(p) + '|' + String(p.log_date || '').slice(0, 10); if(!base.has(kk)) base.set(kk, []); base.get(kk).push(p); });
     (piezas || []).forEach(p => {
       if(!huConDueno(p) || huKindDe(p.work_kind) !== 'mudanza') return;
       const h = huMinTurno(p) / 60; if(!h) return;
-      const k = (p.owner_kind === 't' ? 't' : 'c') + ':' + p.owner_id, d = String(p.log_date || '').slice(0, 10);
+      const k = clave(p), F = (filas && filas[k]) || [];
+      const d = huDiaDelPedazo(p, x => base.get(k + '|' + x) || [], x => F.filter(f => f && String(f.work_date || '').slice(0, 10) === x));
       (rep[k] = rep[k] || {})[d] = (rep[k][d] || 0) + h;
     });
     return rep;
@@ -57936,20 +58057,27 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const vencio = venc.some(x => !yaVen[x]);
       if(s.movKey !== k || Date.now() - s.movAt > 300000 || vencio){   // al abrir sus horas (y no más de una vez cada 5 minutos)
         s.movKey = k; s.movAt = Date.now(); venc.forEach(x => { yaVen[x] = 1; });
-        const m = await huRpc('horas_a_su_empresa', { p_from: minD, p_to: maxD, p_aplicar: true });
+        // (revisor 2) POR TRAMOS y uno a la vez (mueve horas): al manager de las dos el servidor le contesta las horas de TODA la empresa
+        // y las corta en 1,000 (tramos de 20 días). A los demás les contesta solo las suyas (menos de 400 en 120 días): una sola llamada,
+        // como antes, y si llegara llena se parte sola. huMovioAlgo: 'movido', un regreso, o una respuesta llena.
+        let huboMov = false;
+        const m = await huPorTramos(minD > huMenosDias(maxD, 120) ? minD : huMenosDias(maxD, 120), maxD, async (x, y) => {
+          const q = await huRpc('horas_a_su_empresa', { p_from: x, p_to: y, p_aplicar: true });
+          if(huMovioAlgo(q)) huboMov = true;
+          return q; }, { aLaVez: 1, tam: isManagerTotal() ? 20 : 121 });
         if(m.falta){ huModo(false); return 'falta'; }
         if(m.ok && Array.isArray(m.data)){ s.misAcc = {}; s.misDet = {}; m.data.forEach(x => { if(x && x.fila_id){ s.misAcc[x.fila_id] = x.accion; s.misDet[x.fila_id] = x; } }); }   // (17-nov, M1) por qué se queda
         // (ronda 3) también si una hora regresó sola a su empresa de antes (huRegreso): su lista se vuelve a leer
-        if(m.ok && Array.isArray(m.data) && m.data.some(x => x && (x.accion === 'movido' || huRegreso(x)))) return 'movio';
+        if(huboMov) return 'movio';
       }
       // (17-nov, Brújula §20, M4) y sus regresos (rastro_horas), en la misma tanda: UNA vez cada que abre sus horas, con el rango que ve.
       // Solo si ya se sabe que la SQL nueva está (sin ella no se pide nada de más); sin la función (404): sin esa parte, nada más.
       const conRastro = s.rpc === true && !s.rastroFalta;
       const [t, d, ta, ra] = await Promise.all([
-        huRpc('mis_turnos_labor', { p_from: minD, p_to: maxD }),
-        huRpc('mis_dias_labor', { p_from: minD, p_to: maxD }),
+        huRpc('mis_turnos_labor', { p_from: huMenosDias(minD, 1), p_to: huMenosDias(maxD, -1) }),   // (18-nov) un día más a cada lado: la noche que sigue
+        huRpc('mis_dias_labor', { p_from: minD, p_to: huMenosDias(maxD, -1) }),   // (18-nov) hasta mañana también: los mismos 120 días que sus turnos
         huRpc('mi_tarifa', {}),
-        conRastro ? huRpc('rastro_horas', { p_from: minD, p_to: maxD }).catch(() => null) : Promise.resolve(null)
+        conRastro ? huPorTramos(minD > huMenosDias(maxD, 120) ? minD : huMenosDias(maxD, 120), maxD, (x, y) => huRpc('rastro_horas', { p_from: x, p_to: y })) : Promise.resolve(null)   // (18-nov) por tramos: el tope de 1,000
       ]);
       if(t.falta || d.falta || ta.falta){ huModo(false); return 'falta'; }
       if(!t.ok || !d.ok) return 'error';
@@ -57960,15 +58088,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       s.dias = Array.isArray(d.data) ? d.data : [];
       s.tarifa = {}; (ta.ok && Array.isArray(ta.data) ? ta.data : []).forEach(x => { if(x) s.tarifa[huKindDe(x.work_kind)] = x.tarifa; });
       // el aviso de los huecos al corregir sigue leyendo myLaborShifts: ahora con los turnos del servidor
-      myLaborShifts = s.turnos.map(x => ({ log_date: x.log_date, work_kind: huKindDe(x.work_kind), crew_leader: x.crew_leader, shift_from: x.shift_from, shift_to: x.shift_to }));
+      const base = d => s.turnos.filter(t => t.log_date === d), suyas = d => (myEntries || []).filter(e => e.work_date === d);
+      myLaborShifts = s.turnos.map(x => ({ log_date: huDiaDelPedazo(x, base, suyas), work_kind: huKindDe(x.work_kind), crew_leader: x.crew_leader, shift_from: x.shift_from, shift_to: x.shift_to }));
       return 'ok';
     }catch(e){ return 'error'; }
   }
   function huDiaMio(dia){
     const s = huS(); if(!dia || !s.turnos || !s.dias) return null;
-    const turnos = s.turnos.filter(t => t.log_date === dia), dd = s.dias.filter(x => x.log_date === dia);
+    const suyas = d => (myEntries || []).filter(e => e.work_date === d);
+    const turnos = huNoche(d => s.turnos.filter(t => t.log_date === d), dia, suyas), dd = s.dias.filter(x => x.log_date === dia);
     if(!turnos.length && !dd.length) return null;   // el servidor no dijo nada de ese día (fuera de su ventana): callado
-    return huDia({ dia, filas: (myEntries || []).filter(e => e.work_date === dia), turnos,
+    return huDia({ dia, filas: suyas(dia), turnos,
       logs: dd.filter(x => x.work_kind && +x.reportes > 0).map(x => ({ work_kind: x.work_kind, lideres: huLideresTxt(x.leaders) })),
       quizas: dd.some(x => x.quizas_usted), esperando: dd.length ? dd.some(x => x.esperando === true) : undefined,
       plazoMs: dd.length && dd[0].plazo ? Date.parse(dd[0].plazo) : null });
@@ -58033,12 +58163,23 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const ent = e;
     ent.va = (async () => {
       try{
-        const r = await huRpc('cuadre_nombres_labor', { p_from: a, p_to: b });
+        // (18-nov) POR TRAMOS (huPorTramos), del más nuevo al más viejo: el servidor corta cada respuesta en 1,000 renglones y con horas
+        // viejas sin pagar el rango pasaba de 1,000 pedazos (salen los más viejos primero): los días recientes salían "Sin labor log".
+        // Un día más a cada lado (la noche que sigue) y los mismos 120 días que contaba el servidor. Cada tramo que llega se pinta (Pagos);
+        // si falla uno viejo, lo reciente se queda y lo de antes va callado (como fuera de la ventana); si falla el más nuevo, como antes.
+        const ini = huMenosDias(a, 1) > huMenosDias(b, 119) ? huMenosDias(a, 1) : huMenosDias(b, 119);
+        // (revisor 2) el primer día que llegó no ve el labor log de su día de antes (la noche que sigue): a medias, o si es el día de
+        // antes del rango, se juzga desde el día siguiente. La orilla de los 120 días se queda como estaba.
+        const confia = d => (d > ini || d === huMenosDias(a, 1)) ? huMenosDias(d, -1) : d;
+        let ixVa = null;
+        const r = await huPorTramos(ini, huMenosDias(b, -1), (x, y) => huRpc('cuadre_nombres_labor', { p_from: x, p_to: y }), {
+          parte: (piezas, desde) => { huModo(true); ixVa = huIndice(piezas); ixVa.desde = confia(desde); ent.ix = ixVa; try{ huPagosLuego(); }catch(x){} } });
         if(r.falta){ huModo(false); return null; }
         if(!r.ok){ ent.fallo = Date.now(); return null; }
         huModo(true);
-        ent.piezas = Array.isArray(r.data) ? r.data : []; ent.fallo = 0;
-        ent.ix = huIndice(ent.piezas); ent.ix.desde = huMenosDias(b, 120); ent.at = Date.now();
+        ent.piezas = r.data; ent.fallo = 0;
+        if(!ixVa || ixVa.desde !== confia(r.desde)){ ixVa = huIndice(ent.piezas); ixVa.desde = confia(r.desde); }
+        ent.ix = ixVa; ent.at = Date.now();
         return ent.piezas;
       }catch(x){ ent.fallo = Date.now(); return null; }
       finally{ ent.va = null; }
@@ -58057,9 +58198,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const ent = { a, b, filas: null, reg: {}, va: null }; s.rastroMg = ent;
     ent.va = (async () => {
       try{
-        const r = await huRpc('rastro_horas', { p_from: a, p_to: b });
+        // (18-nov) por tramos, del más nuevo al más viejo (el tope de 1,000; salen en orden de día): si falla uno viejo, lo de antes va sin nota
+        const r = await huPorTramos(a > huMenosDias(b, 120) ? a : huMenosDias(b, 120), b, (x, y) => huRpc('rastro_horas', { p_from: x, p_to: y }));
         if(r.falta){ s.rastroFalta = true; return null; }
-        if(r.ok && Array.isArray(r.data)){ ent.filas = r.data; ent.reg = huRegresosDe(r.data); }
+        if(r.ok && Array.isArray(r.data)){ ent.filas = r.data; ent.reg = huRegresosDe(r.data); if(r.parcial) ent.a = r.desde; }
         else if(s.rastroMg === ent) s.rastroMg = null;   // (Lente R3-m2) 400/500: como sin rastro, y la próxima apertura lo pide otra vez
         return ent.filas;
       }catch(e){ if(s.rastroMg === ent) s.rastroMg = null; return null; }   // sin red: igual
@@ -58085,12 +58227,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // Raúl (manager de AMG solamente) ve y decide solo lo de su empresa (el servidor ya le manda solo esos reportes)
     if(!isManagerTotal() && mgrDe() !== 'todo' && k !== mgrDe()) return { viejo: null, revisar: false };
     const dia = r.work_date || '';
-    const v = huDiaDe(ix, clave, dia, filasPersona.filter(x => x.work_date === dia), { sinEncime: true });
+    const v = huDiaDe(ix, clave, dia, filasPersona.filter(x => x.work_date === dia), { sinEncime: true, todas: filasPersona });
     const primera = (lista || []).find(x => (x.work_date || '') === dia) === r;
     const nombre = clave.charAt(0) === 't' ? (((casualWorkers || []).find(w => w.id === clave.slice(2)) || {}).name || '') : ($('#personName') ? $('#personName').textContent : '');
     const pila = String(nombre || '').trim().split(/\s+/)[0] || '';
     const det = (huS().detalle || {})[r.id];   // (ronda 3) regresó sola / solo aviso (sin a_kind) / se pasa el <día>
-    return huNotaManager(v, r, primera, { dudas: (ix.dudas.get(clave + '|' + dia) || []), esTxt: pila ? (rdEn() ? "It's " + pila : 'Es ' + pila) : (rdEn() ? "It's him" : 'Es él'),
+    return huNotaManager(v, r, primera, { dudas: huDudasDe(ix, clave, dia, filasPersona), esTxt: pila ? (rdEn() ? "It's " + pila : 'Es ' + pila) : (rdEn() ? "It's him" : 'Es él'),
       sinLogMudo: !isManagerTotal(), sinDeshacer: !isManagerTotal(), sinRespaldo: (huS().acciones || {})[r.id] === 'sin_respaldo',
       soloAviso: (huS().acciones || {})[r.id] === 'sin_respaldo' && !(det && det.a_kind), regreso: huRegreso(det) || huRegresoMg(r.id), seMueve: huSeMueve(det),
       cerrado: huCerrado(det),   // (17-nov, Brújula §20/§21) más de 30 días: la nota gris
@@ -58098,7 +58240,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       sinBotones: clave.charAt(0) === 'c' && !r.user_id });   // (17-nov, menor 10) una fila sin cuenta (solo el nombre): el servidor no la puede confirmar
   }
   // Los turnos del servidor de esa fila (su empresa), para el aviso de los huecos (laborGapText)
-  function huTurnosFila(ix, clave, r){ return ((ix && ix.turnos.get(clave + '|' + (r.work_date || ''))) || []).filter(t => huKindDe(t.work_kind) === huKind(r)).map(t => ({ from: t.shift_from, to: t.shift_to })); }
+  function huTurnosFila(ix, clave, r){ return (ix ? huTurnosDe(ix, clave, r.work_date || '', huFilasDe(clave)) : []).filter(t => huKindDe(t.work_kind) === huKind(r)).map(t => ({ from: t.shift_from, to: t.shift_to })); }
+  // (18-nov, Medianoche) todas las filas de esa persona (crew o temporal), para la noche que sigue en el labor log del otro día
+  function huFilasDe(clave){ const id = String(clave || '').slice(2); return String(clave || '').charAt(0) === 't' ? (casualHoursAll || []).filter(r => r.casual_worker_id === id) : (teamRows || []).filter(r => r.user_id === id); }
   // La ficha del temporal se pinta sin esperar (renderCasualPerson): el índice llega después y se vuelve a pintar una vez
   function huTemporalPrep(rows){
     const s = huS(); if(s.rpc === false || casualPaidView) return;
@@ -58119,7 +58263,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // nunca diga "no aparece" junto a un "¿Es él?" o un "No coincide" del servidor. null = la línea con lo anotado, como sin reporte.
   function huLiveTemporal(r){
     const s = huS(); if(!s.fichaT || !s.fichaT.ix || s.fichaT.key.indexOf(casualPersonKey + '|') !== 0) return null;
-    const t = (s.fichaT.ix.turnos.get('t:' + r.casual_worker_id + '|' + (r.work_date || '')) || []).filter(p => huKindDe(p.work_kind) === huKind(r));
+    const t = huTurnosDe(s.fichaT.ix, 't:' + r.casual_worker_id, r.work_date || '', huFilasDe('t:' + r.casual_worker_id)).filter(p => huKindDe(p.work_kind) === huKind(r));
     if(!t.length) return null;
     return { estado: 'encontrado', hours: t.reduce((x, p) => x + huMinTurno(p), 0) / 60, leader: huLideres(t, huKind(r)).join(', '),
       times: huHorasDe(t, 'shift_from', 'shift_to').map(p => fmtTime12(p.shift_from) + ' - ' + fmtTime12(p.shift_to)).join(', ') };
@@ -58177,7 +58321,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // con un "sí", el manager de las dos empresas deja esa hora en su empresa de una vez; con un "no", solo se pregunta (en seco)
       // (17-nov, menor 5) y lo que contesta refresca "por decidir" / "falta la tarifa" de ese día sin esperar a abrir Pagos otra vez
       if(isManagerTotal() && b.dataset.huDia){
-        const ac = await huRpc('horas_a_su_empresa', { p_from: b.dataset.huDia, p_to: b.dataset.huDia, p_aplicar: es });
+        const ac = await huRpc('horas_a_su_empresa', { p_from: huMenosDias(b.dataset.huDia, 1), p_to: huMenosDias(b.dataset.huDia, -1), p_aplicar: es });   // (18-nov) y los días de al lado: la noche que sigue
         const s = huS(); if(ac.ok && Array.isArray(ac.data)) ac.data.forEach(x => { if(x && x.fila_id){ s.acciones[x.fila_id] = x.accion; (s.detalle = s.detalle || {})[x.fila_id] = x; } });
       }
       huMgrOlvidar();
@@ -58196,13 +58340,20 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   async function huPagosAcomodar(a, z){
     const s = huS();
     try{
-      const r = await huRpc('horas_a_su_empresa', { p_from: a, p_to: z, p_aplicar: true });
+      // (18-nov) POR TRAMOS (huPorTramos), del más nuevo al más viejo y UNO a la vez (cada tramo mueve horas): contesta un renglón por
+      // hora del rango (los días más viejos primero) y el servidor lo corta en 1,000: las etiquetas de los días recientes se perdían.
+      // Si falla un tramo viejo, lo reciente se queda; si falla el más nuevo, como antes. huboMov: también lo de una respuesta que se partió.
+      let huboMov = false;
+      const r = await huPorTramos(a > huMenosDias(z, 120) ? a : huMenosDias(z, 120), z, async (x, y) => {
+        const q = await huRpc('horas_a_su_empresa', { p_from: x, p_to: y, p_aplicar: true });
+        if(huMovioAlgo(q)) huboMov = true;   // (revisor 2) una llena (1,000) también: lo movido pudo quedar en lo que se cortó
+        return q; }, { aLaVez: 1 });
       if(r.falta){ huModo(false); return; }
       s.pagosMovido = a + '|' + z;
       if(!r.ok) return;
       huModo(true);
       s.acciones = {}; s.detalle = {}; (Array.isArray(r.data) ? r.data : []).forEach(x => { if(x && x.fila_id){ s.acciones[x.fila_id] = x.accion; s.detalle[x.fila_id] = x; } });
-      if((r.data || []).some(x => x && (x.accion === 'movido' || huRegreso(x)))){   // (ronda 3) o regresó sola a su empresa de antes
+      if(huboMov){   // (ronda 3) o regresó sola a su empresa de antes
         huMgrOlvidar();
         await Promise.all([loadTeamEntries(true), loadCasualTeam()]);
         try{ applyMgrHoursView(); }catch(x){}   // renderTeamList prende la lista del crew: se queda en la lista que estaba viendo
@@ -58294,14 +58445,25 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // (Lente R3-m5) si todavía no se sabe si está la SQL nueva, primero la prueba: sin ella no se piden los dos GET (se tirarían)
       const piezas = huMgrPiezas(desde, hoy);
       if(huS().rpc !== true && !(await piezas)) return null;
-      const [p, te, ch] = await Promise.all([piezas,
-        authFetch('/rest/v1/time_entries?select=user_id,work_date&company_id=eq.' + SES.company_id + '&work_date=gte.' + desde + '&limit=5000', H),
-        authFetch('/rest/v1/casual_hours?select=casual_worker_id,work_date&company_id=eq.' + SES.company_id + '&work_date=gte.' + desde + '&limit=5000', H)]);
-      if(!p) return null;
-      const mete = (k, d) => { if(!d) return; (marco[k] = marco[k] || new Set()).add(String(d).slice(0, 10)); };
-      if(te.ok) (await te.json()).forEach(e => mete('c:' + e.user_id, e.work_date));
-      if(ch.ok) (await ch.json()).forEach(h => mete('t:' + h.casual_worker_id, h.work_date));
-      return { rep: huReporteDe(p), desde };
+      // (18-nov) las horas de las dos empresas POR TRAMOS (huPorTramos), del más nuevo al más viejo y con orden: PostgREST corta cada
+      // respuesta en 1,000 y con 120 días de todo el equipo (sin orden) un día reciente podía salir como "no marcó". Si falla el tramo
+      // más nuevo de cualquiera de las dos: como antes de la SQL nueva (null). Si falla uno viejo: lo de antes de lo que llegó, como siempre.
+      const tabla = (t, quien) => (x, y) => authFetch('/rest/v1/' + t + '?select=' + quien + ',work_date,clock_in,clock_out&company_id=eq.' + SES.company_id + '&work_date=gte.' + x
+        + '&work_date=lte.' + y + '&order=work_date.desc,id.desc&limit=1000', H).then(async r => r.ok ? { ok: true, data: await r.json() } : { ok: false, status: r.status });
+      const [p, te, ch] = await Promise.all([piezas, huPorTramos(desde, hoy, tabla('time_entries', 'user_id')), huPorTramos(desde, hoy, tabla('casual_hours', 'casual_worker_id'))]);
+      if(!p || !te.ok || !ch.ok) return null;
+      const F = {}, mete = (k, r) => { const d = r && r.work_date; if(!d) return; (marco[k] = marco[k] || new Set()).add(String(d).slice(0, 10)); (F[k] = F[k] || []).push(r); };
+      te.data.forEach(e => mete('c:' + e.user_id, e));
+      ch.data.forEach(h => mete('t:' + h.casual_worker_id, h));
+      // desde: el primer día que de veras llegó de las tres (los pedazos cuentan 120 días desde mañana); lo de antes, como siempre.
+      // (revisor 2) Si las horas llegaron a medias, su primer día no ve las filas de su día de antes (la noche): se juzga desde el siguiente.
+      const ixR = (huS().mgr.get(desde + '|' + hoy) || {}).ix, conf = t => t.parcial ? huMenosDias(t.desde, -1) : t.desde;
+      const d0 = [(ixR && ixR.desde) || huMenosDias(hoy, 119), conf(te), conf(ch)].reduce((x, y) => x > y ? x : y);
+      // (revisor 2) cada pedazo en el día de su noche (huReporteDe con las filas), y solo de d0 a hoy: los pedazos llegan hasta mañana
+      // (la noche que sigue), pero un reporte de mañana todavía no cuenta (antes no se pedía).
+      const rep = huReporteDe(p, F);
+      Object.keys(rep).forEach(k => Object.keys(rep[k]).forEach(d => { if(d < d0 || d > hoy) delete rep[k][d]; }));
+      return { rep, desde: d0 };
     }catch(e){ return null; }
   }
 
@@ -58309,13 +58471,13 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   function huIxDeDia(dia){
     const s = huS(); if(s.rpc !== true || !dia) return null;
     let mejor = null;
-    s.mgr.forEach((e, k) => { const [a, b] = String(k).split('|'); if(e && e.ix && a <= dia && dia <= b && (!mejor || e.at > mejor.at)) mejor = e; });
+    s.mgr.forEach((e, k) => { const [a, b] = String(k).split('|'); if(e && e.ix && a <= dia && dia <= b && !(e.ix.desde && dia < e.ix.desde) && (!mejor || e.at > mejor.at)) mejor = e; });   // (18-nov) desde: lo que de veras llegó
     return mejor ? mejor.ix : null;
   }
   // La ventanita del día de la ficha (crew o temporal) con la regla nueva: true = ya se enseñó; false = la de siempre
   function huVentanitaAbrir(clave, dia, nombre){
     try{
-      const v = huVentanita(huIxDeDia(dia), clave, dia, nombre, fmtTime12); if(!v) return false;
+      const v = huVentanita(huIxDeDia(dia), clave, dia, nombre, fmtTime12, huFilasDe(clave)); if(!v) return false;
       if(v.log){ if(confirm(v.texto)) openLaborLogById(v.log); } else alert(v.texto);
       return true;
     }catch(e){ return false; }
@@ -58327,7 +58489,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(!huNuevo() || !id) return null;
       const todas = casualRowsFor(id), dias = [...new Set((rows || []).map(r => r.work_date).filter(Boolean))], mal = new Set();
       for(const d of dias){ const ix = huIxDeDia(d); if(!ix) return null;
-        const v = huDiaDe(ix, 't:' + id, d, todas.filter(r => r.work_date === d), {}); if(v && v.estado === 'more') mal.add(d); }
+        const v = huDiaDe(ix, 't:' + id, d, todas.filter(r => r.work_date === d), { todas }); if(v && v.estado === 'more') mal.add(d); }
       return mal;
     }catch(e){ return null; }
   }
@@ -58338,7 +58500,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const ix = await huMgrIndice(a, b); if(!ix) return null;
       const mal = [], falta = new Set();
       [...new Set(rows.map(r => r.work_date).filter(Boolean))].sort().forEach(d => {
-        const delDia = rows.filter(r => r.work_date === d), v = huDiaDe(ix, 'c:' + person.id, d, delDia, {}); if(!v) return;
+        const delDia = rows.filter(r => r.work_date === d), v = huDiaDe(ix, 'c:' + person.id, d, delDia, { todas: rows }); if(!v) return;
         if(v.estado === 'more'){
           let t = d + ': ' + (v.mine / 60).toFixed(2) + ' h registradas, ' + (v.theirs / 60).toFixed(2) + ' h en el Labor Log.';
           if(delDia.some(row => row.corrected_at && correctionMatchesOriginal(row))) t += ' Figura una corrección, pero el horario actual sigue igual al original.';
@@ -58354,7 +58516,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     try{
       if(!huNuevo() || !dia) return null;
       const ix = huIxDeDia(dia) || await huMgrIndice(dia, dia); if(!ix) return null;
-      const T = ix.turnos.get(clave + '|' + dia) || [], mia = huHorasDe(T.filter(t => huKindDe(t.work_kind) === kind), 'shift_from', 'shift_to');
+      const T = huTurnosDe(ix, clave, dia, huFilasDe(clave)), mia = huHorasDe(T.filter(t => huKindDe(t.work_kind) === kind), 'shift_from', 'shift_to');
       return { mins: mia.reduce((x, t) => x + huMinTurno(t), 0), turnos: mia.map(t => ({ leader: t.crew_leader, f: t.shift_from, o: t.shift_to })),
         otra: T.some(t => huKindDe(t.work_kind) !== kind) };
     }catch(e){ return null; }
@@ -58368,8 +58530,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // Sin la función (404): horas_movidas por REST, como en la ronda 3. (Lente R3-m2) Si falla (400, 500, sin red): lo mismo, como si no
       // hubiera rastro, sin aviso; la próxima vez que abra la lista se pide otra vez (solo el 404 se recuerda en la sesión).
       let movs = null; const s = huS();
-      if(!s.rastroFalta){ const hoy = todayStr(); let r = null; try{ r = await huRpc('rastro_horas', { p_from: huMenosDias(hoy, 30), p_to: hoy }); }catch(x){}
-        if(r && r.falta) s.rastroFalta = true; else if(r && r.ok && Array.isArray(r.data)) movs = r.data; }
+      if(!s.rastroFalta){ const hoy = todayStr(); let r = null; try{ r = await huPorTramos(huMenosDias(hoy, 30), hoy, (x, y) => huRpc('rastro_horas', { p_from: x, p_to: y })); }catch(x){}   // (18-nov) por tramos
+        if(r && r.falta) s.rastroFalta = true; else if(r && r.ok && !r.parcial && Array.isArray(r.data)) movs = r.data; }
       if(!movs){
         const desde = new Date(Date.now() - 14 * 86400000).toISOString();
         const res = await authFetch('/rest/v1/horas_movidas?select=fila_id,persona_kind,persona_id,de_kind,a_kind,minutos,motivo,movido_at&company_id=eq.' + SES.company_id
@@ -58498,8 +58660,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       }
       // (17-nov, Brújula §20, M4) y sus regresos (casual_rastro_horas), en la misma tanda; sin la función (404): sin esa parte
       const [t, d, ta, mv, ra] = await Promise.all([
-        huRpc('casual_mis_turnos_labor', Object.assign({}, cred, rango), true),
-        huRpc('casual_mis_dias_labor', Object.assign({}, cred, rango), true),
+        huRpc('casual_mis_turnos_labor', Object.assign({}, cred, { p_from: huMenosDias(r[0], 1), p_to: huMenosDias(r[1], -1) }), true),   // (18-nov) la noche que sigue
+        huRpc('casual_mis_dias_labor', Object.assign({}, cred, { p_from: r[0], p_to: huMenosDias(r[1], -1) }), true),   // (18-nov) los mismos 120 días que sus turnos
         huRpc('casual_mi_tarifa', cred, true),
         huRpc('casual_mis_movidas', Object.assign({}, cred, rango), true),
         C.rastroFalta ? Promise.resolve(null) : huRpc('casual_rastro_horas', Object.assign({}, cred, rango), true).catch(() => null)]);
@@ -58517,9 +58679,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     finally{ C.va = false; }
   }
   function huCasualNuevo(){ const C = huS().casual; return huNuevo() && !!C && C.modo === true; }
-  function huCasualDia(dia, filas){
+  function huCasualDia(dia, filas, todas){
     const C = huS().casual; if(!C || !C.turnos) return null;
-    const turnos = C.turnos.filter(t => t.log_date === dia), dd = (C.dias || []).filter(x => x.log_date === dia);
+    const base = d => C.turnos.filter(t => t.log_date === d);
+    const turnos = Array.isArray(todas) ? huNoche(base, dia, d => todas.filter(x => x.work_date === d)) : base(dia), dd = (C.dias || []).filter(x => x.log_date === dia);
     if(!turnos.length && !dd.length) return null;
     return huDia({ dia, filas, turnos,
       logs: dd.filter(x => x.work_kind && +x.reportes > 0).map(x => ({ work_kind: x.work_kind, lideres: huLideresTxt(x.leaders) })),
@@ -58535,7 +58698,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     casualPendHrs = mine; paintCasualTiles();
     if(pend.some(h => h.work_date && !(C.dias || []).some(x => x.log_date === h.work_date))) setTimeout(() => huCasualRefrescar(false), 0);   // un día nuevo: se revisa
     const fila = h => {
-      const dia = h.work_date || '', v = huCasualDia(dia, todas.filter(x => x.work_date === dia));
+      const dia = h.work_date || '', v = huCasualDia(dia, todas.filter(x => x.work_date === dia), todas);
       const primera = pend.find(x => (x.work_date || '') === dia) === h;
       const times = (h.clock_in && h.clock_out) ? '<br><span class="when">' + esc(fmtTime12(h.clock_in)) + ' - ' + esc(fmtTime12(h.clock_out)) + '</span>' : '';
       const del = (huKind(h) === sideKind() && !h.paid_at && h.id && CASUAL_SHIFT_READY) ? `<button type="button" class="minibtn cmDel" data-cmid="${esc(h.id)}">Borrar</button>` : '';
@@ -59668,10 +59831,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
                  + (CORRECTION_READY ? ',corrected_at,corrected_count,original_clock_in,original_clock_out' : '')
                  + (huColsTe() ? huCols() : '');   // (16-nov) kind_original: la hora que el servidor pasó de empresa
       const base = '/rest/v1/time_entries?select=' + cols
-                 + '&company_id=eq.' + SES.company_id + '&order=work_date.desc,person_name.asc';
+                 + '&company_id=eq.' + SES.company_id + '&order=work_date.desc,person_name.asc,id.desc';   // (18-nov) id: un orden fijo para las páginas
 
       const owedRes = await authFetch(
-        base + (PAID_READY ? '&paid_at=is.null' : '') + '&limit=2000',
+        base + (PAID_READY ? '&paid_at=is.null' : '') + '&limit=1000',   // (18-nov) el servidor corta en 1,000: las demás páginas abajo
         { headers: cloudHeaders() });
       if(!owedRes.ok){
         if(huColsTe() && owedRes.status === 400) return huSinColsOtraVez('c', owedRes, () => loadTeamEntries0());   // (16-nov) sin la SQL nueva: primero sin sus columnas
@@ -59679,12 +59842,13 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(PAID_READY && owedRes.status === 400){ PAID_READY = false; return loadTeamEntries0(); }
         throw new Error('HTTP '+owedRes.status);
       }
-      let filas = await owedRes.json();
+      let filas = await huMasPaginas(base + (PAID_READY ? '&paid_at=is.null' : ''), await owedRes.json(), u => authFetch(u, { headers: cloudHeaders() }));   // (18-nov) todas
 
       if(PAID_READY){
         const paidRes = await authFetch(base + '&paid_at=not.is.null&limit=1000',
                                         { headers: cloudHeaders() });
-        if(paidRes.ok) filas = filas.concat(await paidRes.json());
+        if(paidRes.ok){ const pagadas = await paidRes.json(), ya = new Set(pagadas.map(x => x && String(x.id)));   // (revisor 2) se pagó mientras se leía: vale la pagada
+          filas = filas.filter(x => !(x && ya.has(String(x.id)))).concat(pagadas); }
       }
       teamRows = filas;   // de una sola vez: dos escrituras a medias dejaban los pagados repetidos
       await loadRates();
@@ -78174,7 +78338,7 @@ function moneyContext(t){
 // {method:'cheque'|'zelle'|'efectivo'|'otro'|'ambiguous'|'', sub:'cheque'|'zelle'|'efectivo'|'cashapp'|'venmo'|'', label}
 function methodDetail(text,{fuzzy=null,done=false}={}){
  // cash app ANTES que cash: "cash ap", "caché app" son Cash App, no efectivo
- let t=norm(text).replace(/\b(?:la |el )?app de cash\b/g,' cashapp ').replace(/\b(?:en )?billetes\b/g,' efectivo ').replace(/\b(?:zell|zelled|zelleado|celle)\b/g,'zelle').replace(/\b(?:cash ?-?apped|cashapped|cash ?-?app|cash ?ap|cashe ?app|cache ?app|cashap|kashap|kash ?-?app|kash ?ap|cash aplicacion)\b/g,'cashapp').replace(/\b(?:venmo|venmoed|benmo|bemo|ven mo|bemmo|vemno)\b/g,'venmo').replace(/\b(?:efectibo|efetivo)\b/g,'efectivo').replace(/(?<!\b(?:tiene|tengo|tienen|tenia|traigo|trae) )\ben (?:la )?mano\b/g,' efectivo ')
+ let t=norm(text).replace(/\b(?:la |el )?app de cash\b/g,' cashapp ').replace(/\b(?:en )?billetes\b/g,' efectivo ').replace(/\b(?:zell|zelled|zelleado|celle)\b/g,'zelle').replace(/\b(?:cash ?-?apped|cashapped|cash ?-?app|cash ?ap|cashe ?app|cache ?app|cashap|kashap|kash ?-?app|kash ?ap|cash aplicacion)\b/g,'cashapp').replace(/\b(?:venmo|venmoed|benmo|bemo|ven mo|bemmo|vemno)\b/g,'venmo').replace(/\b(?:efectibo|efetivo)\b/g,'efectivo').replace(/(\b(?:tiene|tengo|tienen|tenia|traigo|trae) )?\ben (?:la )?mano\b/g,(m,p)=>p?m:' efectivo ')
   .replace(new RegExp('\\b((?:ya )?(?:le|les) hice (?:el|un)) (?:'+ZELLE_FUZZY+')(?=$|[,.;]|\\s+(?:a|al|de|por|para|\\$?\\d)\\b)','g'),'$1 zelle');
  t=t.replace(new RegExp('\\b(?:no (?:hay|tiene|tengo|es|por|fue por)|sin|not by|no)\\s+(?:el |un |por )?('+ZELLE_EXPL+'|'+CHEQUE_W+'|efectivo|cash|kesh|kash|cashapp|venmo)\\b','g'),'').replace(new RegExp('\\b(?:en vez de|instead of)\\s+(?:el |un )?('+ZELLE_EXPL+'|'+CHEQUE_W+'|efectivo|cash|kesh|kash|cashapp|venmo)\\b','g'),'');
  const kind=w=>new RegExp('^(?:'+ZELLE_EXPL+')$').test(w)?'zelle':new RegExp('^(?:'+CHEQUE_W+')$').test(w)?'cheque':w==='cashapp'?'cashapp':w==='venmo'?'venmo':'efectivo';
@@ -78229,7 +78393,7 @@ function reference(text){const m=norm(text).match(/\b(?:cheque|check)\s*(?:numer
 // "ya le hice el sell a Tavo" = "le hice el zelle": el dictado destroza la palabra pero el giro es el de siempre
 const canon=t=>strip(t).replace(new RegExp('\\b((?:ya )?(?:le|les) hice (?:el|un)) (?:'+ZELLE_FUZZY+')(?=$|[,.;]|\\s+(?:a|al|de|por|para|\\$?\\d)\\b)','g'),'$1 zelle').replace(/\bcash-app/g,'cash app').replace(/\bcash-apped\b/g,'cashapped');
 // (18-nov R2) LO QUE NUNCA ES "YA PAGUE": pregunta, cliente que me paga, pago que reboto, cosa vieja.
-const QUESTION_RE=/^(?:(?:y |pero )?(?:ya )?(?:le |les |se lo )?(?:pagaste|mandaste|enviaste|depositaste|transferiste|hiciste|diste|entregaste|dejaste|pasaste)\b|(?:did|do|does|have|has|had|should|can|could|would|will|is|was|are|were) (?:you|i|we|he|she|they|it)\b|(?:was|were|is|has|have|did|got) [a-z]+ (?:paid|sent|zelled)\b|(?:cuando|cuanto|como|donde|por que|porque|que|quien|cual|when|how|where|why|who|which|what)\b)|(?<!\bse )\ble pagaron\b|\b(?:pagaste|mandaste|enviaste|depositaste|transferiste|did you|have you|has he|has she|did he|did she|sabes si|sabe si|me dices si|dime si|revisa si|checa si|verifica si|no se si|a ver si|i don't know if|not sure if|whether)\b|(?:,| )(?:verdad|cierto|o no|right|correct|si o no|no es asi)$/;
+const QUESTION_RE=/^(?:(?:y |pero )?(?:ya )?(?:le |les |se lo )?(?:pagaste|mandaste|enviaste|depositaste|transferiste|hiciste|diste|entregaste|dejaste|pasaste)\b|(?:did|do|does|have|has|had|should|can|could|would|will|is|was|are|were) (?:you|i|we|he|she|they|it)\b|(?:was|were|is|has|have|did|got) [a-z]+ (?:paid|sent|zelled)\b|(?:cuando|cuanto|como|donde|por que|porque|que|quien|cual|when|how|where|why|who|which|what)\b)|(?:^ ?|[^\w ]|\W |(?:^|\W)(?!se )\w+ )le pagaron\b|\b(?:pagaste|mandaste|enviaste|depositaste|transferiste|did you|have you|has he|has she|did he|did she|sabes si|sabe si|me dices si|dime si|revisa si|checa si|verifica si|no se si|a ver si|i don't know if|not sure if|whether)\b|(?:,| )(?:verdad|cierto|o no|right|correct|si o no|no es asi)$/;
 const FAILED_RE=/\b(?:rebot\w*|bounc\w*|fallo|failed|declin\w*|rechaz\w*|no (?:le |me )?(?:llego|paso|entro|salio|cayo)|didn't go through|did not go through|didn't (?:arrive|land|clear)|got (?:canceled|cancelled|returned|reversed|declined|rejected)|was (?:canceled|cancelled|returned|reversed|declined|rejected)|(?:it|they) (?:canceled|cancelled|returned) it|se cancelo|lo cancel\w*|la cancel\w*|cancelaron|cancele|(?:me |se )?(?:lo|la|los|las) (?:regresaron|devolvieron|regreso|devolvio)|se regreso|se devolvio|reversed|reversaron)\b/;
 const PAST_RE=/\b(?:hace (?:como |unos |unas |mas de |ya |casi )?(?:un|una|dos|tres|cuatro|cinco|seis|varios|varias|muchos|\d+) (?:anos?|mes|meses)|hace (?:mucho|tiempo|anos|meses)|la vez pasada|la otra vez|la ultima vez|el ano pasado|el mes pasado|last time|last year|last month|years ago|months ago|a while ago|long time ago|back then|nunca me (?:lo|los|la|las) (?:devolvio|regreso|pago)|antes le (?:pagaba|mandaba|daba))\b|\b(?:pagaba|mandaba|enviaba|depositaba|le daba)\b/;
 const PAYS_ME_RE=/\b(?:me|nos)\s+(?:lo |la |los |las )?(?:pago|pagaron|mando|mandaron|envio|enviaron|deposito|depositaron|dio|dieron|transfirio|transfirieron|devolvio|devolvieron|regreso|regresaron|reembolso|abono|paso|pasaron|hizo (?:el|un) (?:pago|zelle|deposito))\b|\b(?:paid|sent|gave|zelled|venmoed|deposited|transferred|wired|returned|repaid|reimbursed) (?:me|us)\b|\b(?:paid|gave|sent) (?:it |the money |the \d+ )?back\b/;
@@ -78281,7 +78445,7 @@ function findPeople(text,people){
 // entregado, rebote, cliente/otro que le paga a el, tienda/recibo/compania, compra de material, prestamo, preferencia,
 // tarifa "20 la hora", "le debo", "me cobro"). La tarjeta igual pregunta antes de escribir nada.
 const MONEY_WORD=/\b(?:pago|pagos|lana|feria|dinero|money|lo suyo|lo de [a-z]+|su semana|la semana|su quincena|quincena|raya|su raya|cheque|cheques|check|billetes|sueldo|payment|pay|adelanto|advance|zelle)\b/;
-const STRONG_DONE=/\b(?:pague|pagado|pagada|pagados|pagadas|mande|mandado|mandada|envie|enviado|enviada|deposite|depositado|transferi|transferido|pase|entregue|entregado|deje|liquide|liquidado|salde|saldado|abone|abonie|abonado|solte|tire|avente|cai con|le cai|eche|le eche|cubri|le cubri|complete|le complete|adelante|le adelante|hice el pago|hice un pago|hice el deposito|hice el zelle|hice un zelle|escribi|firme|listo|lista|(?<!se )quedo|quedaron|quedamos|le cayo|le cayeron|recibio|paid|sent|gave|wired|zelled|venmoed|cashapped|deposited|transferred|covered|handed|dropped off|settled|done)\b|\bse (?:le|les) (?:pago|pagaron|deposito|depositaron|mando|mandaron|envio|enviaron|transfirio|dio|dieron|cubrio|abono)\b|\b(?:fue|fueron|was|were|got|has been|have been) (?:pagad[oa]s?|depositad[oa]s?|enviad[oa]s?|mandad[oa]s?|paid|sent)\b|\balready got\b|\b(?:le salio|le salieron|ya salieron|ya salio (?:el|su) (?:pago|zelle|cheque|deposito)|picked (?:it )?up|took it|has it now|ya lo tiene|ya la tiene|ya los tiene|lo recogio|lo agarro|se lo llevo|se la llevo|se los llevo)\b|\bgot \$?\d|\breceived \$?\d/;
+const STRONG_DONE=/\b(?:pague|pagado|pagada|pagados|pagadas|mande|mandado|mandada|envie|enviado|enviada|deposite|depositado|transferi|transferido|pase|entregue|entregado|deje|liquide|liquidado|salde|saldado|abone|abonie|abonado|solte|tire|avente|cai con|le cai|eche|le eche|cubri|le cubri|complete|le complete|adelante|le adelante|hice el pago|hice un pago|hice el deposito|hice el zelle|hice un zelle|escribi|firme|listo|lista|quedaron|quedamos|le cayo|le cayeron|recibio|paid|sent|gave|wired|zelled|venmoed|cashapped|deposited|transferred|covered|handed|dropped off|settled|done)\b|\bse (?:le|les) (?:pago|pagaron|deposito|depositaron|mando|mandaron|envio|enviaron|transfirio|dio|dieron|cubrio|abono)\b|\b(?:fue|fueron|was|were|got|has been|have been) (?:pagad[oa]s?|depositad[oa]s?|enviad[oa]s?|mandad[oa]s?|paid|sent)\b|\balready got\b|\b(?:le salio|le salieron|ya salieron|ya salio (?:el|su) (?:pago|zelle|cheque|deposito)|picked (?:it )?up|took it|has it now|ya lo tiene|ya la tiene|ya los tiene|lo recogio|lo agarro|se lo llevo|se la llevo|se los llevo)\b|\bgot \$?\d|\breceived \$?\d|(?:^|[^\w ]|^[\s\S]? |(?!se)[\s\S]{2} )quedo\b/;
 const SETTLED_RE=/\b(?:ya no (?:se )?le (?:debo|debemos|debe) nada|no (?:se )?le (?:debo|debemos|debe) nada|ya no le quedo debiendo|quedamos a mano|estamos a mano|ya estamos a mano|already got (?:his|her|their|the) (?:money|pay|check|zelle|cash)|recibio de mi parte|le llego su (?:dinero|pago|feria|lana|zelle|cheque|deposito|cash))\b/;
 const CHECKMARK=/[✅✔☑\u{1F44D}]/u;
 // verbo en pasado de primera persona con tilde ("eché", "cubrí", "completé"); no "José", "café", "aquí", "así"
@@ -78431,7 +78595,7 @@ function intentOne(text,opts={}){
 // opts.people = la lista de gente activa (la app la pasa; el examen la pasa con paymentReport(text,{roster})).
 function intent(text,opts={}){
  if(opts.roster&&!opts.people)opts={...opts,people:toPeople(opts.roster)};
- const parts=String(text||'').split(/(?<=[.!?;])\s+|\n+/).map(x=>x.trim()).filter(Boolean);
+ const parts=String(text||'').replace(/([.!?;])\s+/g,'$1\n').split(/\n+/).map(x=>x.trim()).filter(Boolean);
  if(parts.length<2)return intentOne(text,opts);
  const whoOf=x=>{const t=canon(norm(x));if(opts.people){const f=findPeople(t,opts.people);if(f.length)return f.map(p=>p.key).sort().join('|');return directName(t);}return recipient(t);};
  const outs=parts.map(x=>({s:x,o:intentOne(x,opts),who:whoOf(x)}));
