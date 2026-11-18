@@ -20569,7 +20569,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-18-R491';
+  const APP_BUILD = '2026-11-18-R492';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -78095,11 +78095,91 @@ const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLo
 const money=x=>'$'+(Math.abs(Number(x))<0.005?0:Number(x)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const cents=x=>Math.round(Number(x)*100);
 const clean=x=>String(x||'').replace(/[\r\n<>]/g,' ').trim();
-function method(text){
- let t=norm(text).replace(/\bzell\b/g,'zelle').replace(/(?:no (?:hay|tiene|tengo|es|por)|sin|not by|no)\s+(?:el )?(zelle|cheque|check|efectivo|cash)/g,'').replace(/(?:en vez de|instead of)\s+(zelle|cheque|check|efectivo|cash)/g,'');
- const found=[...t.matchAll(/\b(zelle|cheque|cheke|check|efectivo|cash)\b/g)].map(m=>/cheque|cheke|check/.test(m[1])?'cheque':/cash|efectivo/.test(m[1])?'efectivo':'zelle');
- const unique=[...new Set(found)];return unique.length===1?unique[0]:unique.length>1?'ambiguous':'';
+// (18-nov-2026) EL METODO AUNQUE EL DICTADO LO DESTROCE. El dice "Zelle" y el telefono escribe "cell", "cele",
+// "sel", "el sel"... Lo explicito (zelle, cheque, chek, cash, kesh, venmo, cash app) vale siempre. Lo que suena a
+// Zelle pero tambien es otra cosa ("cel" = telefono) vale SOLO en el lugar del metodo ("por el cel", "by cell") y
+// SOLO si la frase es de dinero: verbo de pago + monto, persona o "su pago". "te marco al cel" no es nada.
+const ZELLE_EXPL='zelle|zell|zel|zele|zeli|zelli|zellee|zelled|zelleado';
+const ZELLE_FUZZY='cell|cel|cele|celi|sel|sele|seli|sell|sale|cielo|se le|z';
+const CHEQUE_W='cheque|cheques|cheke|chek|chec|cheq|check|checke|chequecito';
+const STRONG_VERB=/\b(?:pague|pagado|pagamos|deposite|depositado|depositamos|transferi|transferido|transferimos|hice un (?:envio|pago|deposito)|le hice un (?:envio|pago|deposito)|paid|deposited|transferred|wired|zellee|le zellee|zelled|venmoed|cashapped|cash apped|(?:ya )?(?:le )?hice (?:el|un) (?:zelle|cashapp|venmo)|acabo de (?:pagar|depositar|transferir)(?:le|les)?|le acabo de (?:pagar|depositar|transferir)|liquide|liquidado|salde|saldado|abone|abonie|abonado|se le pago|se les pago|se le pagaron)\b/;
+const WEAK_VERB=/\b(?:envie|enviado|enviamos|mande|mandado|mandamos|sent|le di|di|gave|entregue|entregado|pase|le pase|les pase|pasado|acabo de (?:mandar|enviar|pasar)(?:le|les)?|le acabo de (?:mandar|enviar|pasar)|cai con|le cai|solte|le solte|tire|le tire|avente|le avente|le cayo|le cayeron)\b/;
+const MONEY_NOUN=/\b(?:su pago|el pago|un pago|sus pagos|pago|dinero|lana|feria|money|payment|his pay|her pay|adelanto|advance|sueldo|su semana|lo de la semana|lo de su semana|la semana de|su quincena|his week|her week|his check|her check|la feria|su feria|la lana|su lana|lo que le debia|lo que le debo|his money|her money)\b/;
+const NOT_MONEY_OBJ=/\b(?:foto|fotos|mensaje|mensajes|mensajito|texto|ubicacion|direccion|numero|video|audio|correo|email|link|enlace|archivo|documento|factura|picture|photo|message|text|location|address|number|reporte|labor log)\b/;
+const BILL_OBJ=/\b(?:pague|paid)\s+(?:el|la|mi|the|my)\s+(?:cel|cell|telefono|phone|renta|rent|luz|agua|seguro|bill|factura|internet|carro|troca|tarjeta|card|gasolina|gas)\b/;
+const NAME_STOP=new Set('la el los las su sus mi mis un una unos unas the my his her their him them me te ti usted ustedes ellos ellas nosotros todos todas alguien nadie casa oficina bodega banco cuenta mano tiempo cheque zelle cash efectivo venmo cel cell nombre hora horas dia dias manana hoy ayer semana rato ratito final momento toque mes ano cliente customer client compania cuenta luz renta internet tarjeta seguro aseguranza que quien lo le les se por con para de del al y o pago su_pago tu tus nuestro nuestra'.split(' '));
+const EXPL_METHOD_RE=new RegExp('\\b(?:'+ZELLE_EXPL+'|'+CHEQUE_W+'|efectivo|efectibo|efetivo|cash|kesh|kash|venmo|venmoed|benmo|bemo|cashapp|cashapped|cash ?apped|cash ?app|cash ?ap|cashe app|cache app|cashap|kashap|kash ?app)\\b');
+// (18-nov R2) muletillas al principio: "um", "este", "eh", "listo"... no tapan la frase
+const FILLER_RE=/^(?:(?:oye|este|ok|okay|bueno|a ver|lumi|hey|tambien|also|um+|uh+|umm+|eh+|ah+|mm+|pues|mira|listo|entonces|so|well|y|and|ya ves|oiga)[, ]+)+/;
+const strip=t=>t.replace(FILLER_RE,'');
+// (18-nov R3) TIENDAS, RECIBOS Y COMPANIAS no son trabajadores: "le pague 300 a Home Depot", "la luz", "con la tarjeta"
+const COMPANY_RE=/\b(?:home ?depot|the home depot|lowe'?s|walmart|costco|sam'?s club|target|amazon|menards|sherwin(?:[ -]williams)?|benjamin moore|ace hardware|harbor freight|autozone|o'?reilly|advance auto|u-?haul|sunbelt(?: rentals)?|united rentals|ferguson|grainger|floor (?:and|&) decor|at ?& ?t|at and t|att|verizon|t-?mobile|sprint|comcast|xfinity|spectrum|fpl|duke energy|geico|progressive|state farm|allstate|irs|shell|chevron|exxon|wawa|racetrac|publix|gasolinera|la luz|el agua|la renta|el internet|la aseguranza|el seguro|la tienda|el banco|la compania|el proveedor|supplier|vendor|landlord|el casero|la casera|[a-z&'-]+ (?:inc|llc|corp|company|supply|supplies|rentals?|depot|hardware|store|market|bank|insurance|electric|motors|lumber))\b/g;
+const CARD_RE=/\b(?:con (?:la |mi |una )?tarjeta|with (?:the |my |a )?(?:credit |debit |company )?card|on (?:the |my )?(?:credit |debit )?card)\b/;
+// "Tavo quiere que le paguen por zelle", "Barry wants to get paid by zelle": preferencia, no pago
+const PREF_RE=/\b(?:quiere|quieren|prefiere|prefieren|pide|pidio|pidieron|le gusta|les gusta|gustaria|ojala|wants?|wanted|prefers?|preferred|would (?:like|rather)|asks?|asked|likes?)\b.*\b(?:que (?:le |les |se lo |se la )?(?:pague|paguen|pagara|paguemos|mande|manden|envie|deposite|den)|to (?:get |be )?paid|(?:get|be|being) paid)\b/;
+const LOAN_RE=/\b(?:preste|prestado|prestamo|prestamos|lent|loaned|loan|fiado)\b/;
+// el trabajador como sujeto: "Tavo ya quedo pagado", "Tavo got paid", "Tavo: 300 por zelle", "lo de Tavo ya quedo"
+const NAME_W="([a-z][a-z'-]{1,30})";
+const MONEY_AFTER="(?:\\$?\\d|mil\\b|cien\\b|[a-z]*cientos\\b|su pago|sus pagos|su feria|la feria|su lana|la lana|su dinero|el dinero|su semana|su quincena|su cheque|el cheque|el zelle|su zelle)";
+const STATE_RES=[
+ new RegExp('^'+NAME_W+' ya (?:quedo|esta|estan|quedaron|anda) (?:(?:pagad|saldad|liquidad|cubiert)[oa]s?|al dia)\\b'),
+ new RegExp('^'+NAME_W+' ya cobro(?:$|[ ,.]+(?:sus?|lo suyo|\\$?\\d|por|en|con|mil|cien|[a-z]*cientos))'),
+ new RegExp('^'+NAME_W+' ya tiene (?:su|sus) '+MONEY_AFTER.replace('(?:','(?:feria|lana|dinero|pago|semana|cheque|quincena|')),
+ new RegExp('^'+NAME_W+' ya (?:recibio|agarro) (?:sus? )?'+MONEY_AFTER),
+ new RegExp('\\bya le cayo (?:el|la|su) (?:zelle|feria|lana|dinero|pago|cheque|deposito) a '+NAME_W),
+ new RegExp('\\ble (?:cayeron|cayo) \\$?\\d[\\d,.]* a '+NAME_W),
+ new RegExp('^'+NAME_W+' (?:got paid|is paid|has been paid|was paid|got (?:his|her) (?:money|pay|check|zelle))(?! (?:by the hour|per hour|hourly|weekly|every))'),
+ new RegExp('^lo de '+NAME_W+' ya (?:quedo|esta|se pago|se le pago)'),
+ new RegExp('^'+NAME_W+'\\s*:\\s*\\$?\\d[\\d,.]*\\s*(?:dolares |dollars )?(?:(?:por|en|by|in|on|con) )?(?:el |la )?(?:'+'zelle|zell|zel|cheque|check|chek|efectivo|cash|kesh|venmo|cashapp|cash app|cel|cell'+')\\b'),
+];
+const COMMON_W=new Set('ya si no le se yo todo toda todos nada eso esto esta este bien listo gracias perfecto entonces oye mira ok okay get got the i we he she they it this that there hoy ayer manana tambien pero y o lumi bueno pues hey alguien nadie cliente customer client sotano casa trabajo piso agua luz everything everyone nothing job work house compania'.split(' '));
+const nameish=w=>!!w&&!NAME_STOP.has(w)&&!COMMON_W.has(w)&&!/^\d/.test(w)&&!EXPL_METHOD_RE.test(w)&&!/(?:amos|emos|imos|ando|iendo|aron|ieron|aste|iste|ing)$/.test(w);
+// cada clausula: "terminamos el sotano, Tavo ya cobro sus 400"
+function stateName(t){const parts=[strip(t)].concat(strip(t).split(/\s*[,;]\s*/).slice(1).map(strip));for(const c of parts)for(const re of STATE_RES){const m=re.exec(c);if(m&&nameish(m[1]))return m[1];}return '';}
+function recipient(t){
+ t=strip(t).replace(COMPANY_RE,' compania ');const good=w=>w&&!NAME_STOP.has(w)&&!/^\d/.test(w)&&!EXPL_METHOD_RE.test(w)&&w!=='get';
+ const acct=/\bcuenta de\s+([a-z][a-z'-]{1,30})\b/.exec(t);if(acct&&good(acct[1]))return acct[1];
+ // (18-nov R2) "al Tavo", "a la Yesenia", "a don Tavo": el articulo o el titulo no es el nombre
+ const m=/\b(?:a|to|para|al)\s+(?:(?:la|el)\s+)?(?:(?:don|dona|senor|senora|mr|mrs|ms|miss)\s+)?([a-z][a-z'-]{1,30})\b/g;let x;
+ while((x=m.exec(t))){if(good(x[1]))return x[1];}
+ // (18-nov R3) "lo de Tavo", "el cheque de Tavo", "la semana de Tavo"; el trabajador como sujeto
+ const of=/\b(?:lo|el cheque|el pago|la semana|la feria|la lana|el zelle|el dinero|la quincena) de\s+([a-z][a-z'-]{1,30})\b/.exec(t);if(of&&nameish(of[1]))return of[1];
+ const st=stateName(t);if(st)return st;
+ const ya=/^([a-z][a-z'-]{1,30}) ya(?: [a-z]+)?, (?:ya )?(?:le|les|se lo|se la|se los|se las|lo|\$?\d)/.exec(t)||/^([a-z][a-z'-]{1,30}) ya,/.exec(t);if(ya&&nameish(ya[1]))return ya[1];
+ // nombre primero: "Minor ya tiene sus 380", "Tavo, ya le mande..."; lista: "pagado: Tavo 200"
+ const first=/^([a-z][a-z'-]{1,30})(?:,? ya tiene (?:su|sus)\b|, (?:ya )?(?:le|se lo|se la|se los|se las)\b)/.exec(t);
+ if(first&&nameish(first[1]))return first[1];
+ const list=/\b(?:pagado|pagados|paid|pague)\s*[:-]\s*([a-z][a-z'-]{1,30})\b/.exec(t);if(list&&good(list[1]))return list[1];
+ const e=/\b(?:sent|paid|gave|send|pay|zelled|venmoed|cashapped|apped|wrote|written)\s+([a-z][a-z'-]{1,30})\b/.exec(t);
+ if(e&&!NAME_STOP.has(e[1])&&!['him','her','them','it','my','the','his','for','by','with','via','back','cash','zelle','up','off','out','me','you','us'].includes(e[1])&&!EXPL_METHOD_RE.test(e[1]))return e[1];
+ return '';
 }
+function moneyContext(t){
+ if(BILL_OBJ.test(t))return false;
+ const amt=amount(t),hasAmount=Number.isFinite(amt)&&amt>0,who=!!recipient(t)||/\b(?:le|les)\s+(?:\w+\s+){0,2}(?:pague|envie|mande|deposite|transferi|di|entregue|hice)\b/.test(t);
+ const money=MONEY_NOUN.test(t),expl=EXPL_METHOD_RE.test(t);
+ if(STRONG_VERB.test(t))return hasAmount||who||money||expl;
+ if(WEAK_VERB.test(t)&&!NOT_MONEY_OBJ.test(t))return hasAmount||money||(who&&expl);
+ return false;
+}
+// {method:'cheque'|'zelle'|'efectivo'|'otro'|'ambiguous'|'', sub:'cheque'|'zelle'|'efectivo'|'cashapp'|'venmo'|'', label}
+function methodDetail(text,{fuzzy=null}={}){
+ // cash app ANTES que cash: "cash ap", "caché app" son Cash App, no efectivo
+ let t=norm(text).replace(/\b(?:zell|zelled|zelleado)\b/g,'zelle').replace(/\b(?:cash ?-?apped|cashapped|cash ?-?app|cash ?ap|cashe ?app|cache ?app|cashap|kashap|kash ?-?app|kash ?ap|cash aplicacion)\b/g,'cashapp').replace(/\b(?:venmo|venmoed|benmo|bemo|ven mo|bemmo|vemno)\b/g,'venmo').replace(/\b(?:efectibo|efetivo)\b/g,'efectivo').replace(/\ben (?:la )?mano\b/g,' efectivo ')
+  .replace(new RegExp('\\b((?:ya )?(?:le|les) hice (?:el|un)) (?:'+ZELLE_FUZZY+')(?=$|[,.;]|\\s+(?:a|al|de|por|para|\\$?\\d)\\b)','g'),'$1 zelle');
+ t=t.replace(new RegExp('\\b(?:no (?:hay|tiene|tengo|es|por|fue por)|sin|not by|no)\\s+(?:el |un |por )?('+ZELLE_EXPL+'|'+CHEQUE_W+'|efectivo|cash|kesh|kash|cashapp|venmo)\\b','g'),'').replace(new RegExp('\\b(?:en vez de|instead of)\\s+(?:el |un )?('+ZELLE_EXPL+'|'+CHEQUE_W+'|efectivo|cash|kesh|kash|cashapp|venmo)\\b','g'),'');
+ const kind=w=>new RegExp('^(?:'+ZELLE_EXPL+')$').test(w)?'zelle':new RegExp('^(?:'+CHEQUE_W+')$').test(w)?'cheque':w==='cashapp'?'cashapp':w==='venmo'?'venmo':'efectivo';
+ const found=[...t.matchAll(new RegExp('\\b('+ZELLE_EXPL+'|'+CHEQUE_W+'|efectivo|cash|kesh|kash|cashapp|venmo)\\b','g'))].map(m=>kind(m[1]));
+ const useFuzzy=fuzzy===null?moneyContext(t):fuzzy;
+ // contestando "¿por cual metodo?" (fuzzy:true): la palabra sola tambien vale ("cell", "el sel")
+ if(fuzzy===true&&new RegExp('^(?:el |la |un )?(?:'+ZELLE_FUZZY+')$').test(t.trim()))found.push('zelle');
+ if(useFuzzy){for(const m of t.matchAll(new RegExp('\\b(?:por|by|via|thru|through|con|using|usando|mediante|en|on)\\s+(?:el |la |un |the |a )?('+ZELLE_FUZZY+')(?=$|[\\s,.;])','g')))found.push('zelle');}
+ const unique=[...new Set(found)];
+ if(unique.length>1)return {method:'ambiguous',sub:'',label:''};
+ const sub=unique[0]||'';
+ return {method:sub==='cashapp'||sub==='venmo'?'otro':sub,sub,label:{cashapp:'Cash App',venmo:'Venmo'}[sub]||''};
+}
+function method(text,opts){return methodDetail(text,opts).method;}
 // Convert explicit spoken money only. Other words, dates and worker names remain intact.
 function spokenAmounts(text){
  const units={cero:0,uno:1,un:1,dos:2,tres:3,cuatro:4,cinco:5,seis:6,siete:7,ocho:8,nueve:9,diez:10,once:11,doce:12,trece:13,catorce:14,quince:15,dieciseis:16,diecisiete:17,dieciocho:18,diecinueve:19,veinte:20,veintiuno:21,veintidos:22,veintitres:23,veinticuatro:24,veinticinco:25,veintiseis:26,veintisiete:27,veintiocho:28,veintinueve:29,treinta:30,cuarenta:40,cincuenta:50,sesenta:60,setenta:70,ochenta:80,noventa:90,cien:100,ciento:100,doscientos:200,trescientos:300,cuatrocientos:400,quinientos:500,seiscientos:600,setecientos:700,ochocientos:800,novecientos:900,zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,sixteen:16,seventeen:17,eighteen:18,nineteen:19,twenty:20,thirty:30,forty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90};
@@ -78107,8 +78187,18 @@ function spokenAmounts(text){
  const re=new RegExp('\\b('+words+')(?:[ -]+(?:'+words+'))*\\s+(?:dolares|dollars|bucks)\\b','g');
  return text.replace(re,part=>{const tokens=part.replace(/ (dolares|dollars|bucks)$/,'').split(/[ -]+/);let total=0,group=0;for(const x of tokens){if(x==='y'||x==='and')continue;if(x==='hundred')group=(group||1)*100;else if(x==='mil'||x==='thousand'){total+=(group||1)*1000;group=0;}else group+=units[x];}return '$'+(total+group);});
 }
+// "le pague trescientos a Pedro": numero dicho con palabras SIN "dolares". Solo si vale 20 o mas (o lleva cientos/mil)
+// y no va antes de horas, dias, personas, cheques... ("veinte horas" sigue siendo horas).
+function bareSpokenAmounts(t){
+ const U={uno:1,un:1,dos:2,tres:3,cuatro:4,cinco:5,seis:6,siete:7,ocho:8,nueve:9,diez:10,once:11,doce:12,trece:13,catorce:14,quince:15,dieciseis:16,diecisiete:17,dieciocho:18,diecinueve:19,veinte:20,veintiuno:21,veintidos:22,veintitres:23,veinticuatro:24,veinticinco:25,veintiseis:26,veintisiete:27,veintiocho:28,veintinueve:29,treinta:30,cuarenta:40,cincuenta:50,sesenta:60,setenta:70,ochenta:80,noventa:90,cien:100,ciento:100,doscientos:200,trescientos:300,cuatrocientos:400,quinientos:500,seiscientos:600,setecientos:700,ochocientos:800,novecientos:900,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,sixteen:16,seventeen:17,eighteen:18,nineteen:19,twenty:20,thirty:30,forty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90};
+ const W=Object.keys(U).concat(['mil','hundred','thousand']).join('|');
+ const re=new RegExp('\\b(?:'+W+')(?:(?:[ -]+(?:y|and)[ -]+|[ -]+)(?:'+W+'))*\\b','g');
+ const unit=/^\s*(?:horas?|hours?|dias?|days?|minutos?|minutes?|personas?|people|cheques?|checks?|veces|times|semanas?|weeks?|anos?|years?|cuartos?|rooms?|cajas?|boxes|mas|de la manana|de la tarde)\b/;
+ return t.replace(re,(part,off,all)=>{const toks=part.split(/[ -]+/).filter(x=>x!=='y'&&x!=='and');let total=0,g=0;for(const x of toks){if(x==='hundred')g=(g||1)*100;else if(x==='mil'||x==='thousand'){total+=(g||1)*1000;g=0;}else g+=U[x];}
+  const v=total+g;if(!(v>=20||/cient|mil|hundred|thousand/.test(part)))return part;if(unit.test(all.slice(off+part.length)))return part;return '$'+v;});
+}
 function amount(text){
- const t=spokenAmounts(norm(text)).replace(/\b\d{4}-\d{2}-\d{2}\b/g,'').replace(/(?:cheque|check)\s*(?:numero|number|no\.?|#)\s*\d+/g,'');
+ const t=bareSpokenAmounts(spokenAmounts(norm(text))).replace(/\b\d{4}-\d{2}-\d{2}\b/g,'').replace(/(?:cheque|check)\s*(?:numero|number|no\.?|#)\s*\d+/g,'');
  if(/(?:-\s*\$?\s*\d|menos \d|negative \d)/.test(t))return NaN;
  // Consume the entire money token before validation: regex backtracking must
  // never turn 1,081.50. into 1, or an invalid decimal into a smaller payment.
@@ -78120,29 +78210,100 @@ function amount(text){
  const unique=[...new Set(values)];return unique.length===1?unique[0]:unique.length>1?NaN:null;
 }
 function reference(text){const m=norm(text).match(/\b(?:cheque|check)\s*(?:numero|number|no\.?|#)\s*(\d{1,12})\b/);return m?m[1]:'';}
-function intent(text){
- const t=norm(text).replace(/^(?:(?:oye|este|ok|okay|bueno|a ver|lumi|hey|tambien|also)[, ]+)+/,'');
+// "ya le hice el sell a Tavo" = "le hice el zelle": el dictado destroza la palabra pero el giro es el de siempre
+const canon=t=>strip(t).replace(new RegExp('\\b((?:ya )?(?:le|les) hice (?:el|un)) (?:'+ZELLE_FUZZY+')(?=$|[,.;]|\\s+(?:a|al|de|por|para|\\$?\\d)\\b)','g'),'$1 zelle').replace(/\bcash-app/g,'cash app').replace(/\bcash-apped\b/g,'cashapped');
+// (18-nov R2) LO QUE NUNCA ES "YA PAGUE": pregunta, cliente que me paga, pago que reboto, cosa vieja.
+const QUESTION_RE=/^(?:(?:y |pero )?(?:ya )?(?:le |les |se lo )?(?:pagaste|mandaste|enviaste|depositaste|transferiste|hiciste|diste|entregaste|dejaste|pasaste)\b|(?:did|do|does|have|has|had|should|can|could|would|will|is|was|are|were) (?:you|i|we|he|she|they|it)\b|(?:was|were|is|has|have|did|got) [a-z]+ (?:paid|sent|zelled)\b|(?:cuando|cuanto|como|donde|por que|porque|que|quien|cual|when|how|where|why|who|which|what)\b)|\b(?:pagaste|mandaste|enviaste|depositaste|transferiste|le pagaron|did you|have you|has he|has she|did he|did she|sabes si|sabe si|me dices si|dime si|revisa si|checa si|verifica si|no se si|a ver si|i don't know if|not sure if|whether)\b|(?:,| )(?:verdad|cierto|o no|right|correct|si o no|no es asi)$/;
+const FAILED_RE=/\b(?:rebot\w*|bounc\w*|fallo|failed|declin\w*|rechaz\w*|no (?:le |me )?(?:llego|paso|entro|salio|cayo)|didn't go through|did not go through|didn't (?:arrive|land|clear)|got (?:canceled|cancelled|returned|reversed|declined|rejected)|was (?:canceled|cancelled|returned|reversed|declined|rejected)|(?:it|they) (?:canceled|cancelled|returned) it|se cancelo|lo cancel\w*|la cancel\w*|cancelaron|cancele|(?:me |se )?(?:lo|la|los|las) (?:regresaron|devolvieron|regreso|devolvio)|se regreso|se devolvio|reversed|reversaron)\b/;
+const PAST_RE=/\b(?:hace (?:como |unos |unas |mas de |ya |casi )?(?:un|una|dos|tres|cuatro|cinco|seis|varios|varias|muchos|\d+) (?:anos?|mes|meses)|hace (?:mucho|tiempo|anos|meses)|la vez pasada|la otra vez|la ultima vez|el ano pasado|el mes pasado|last time|last year|last month|years ago|months ago|a while ago|long time ago|back then|nunca me (?:lo|los|la|las) (?:devolvio|regreso|pago)|antes le (?:pagaba|mandaba|daba))\b|\b(?:pagaba|mandaba|enviaba|depositaba|le daba)\b/;
+const PAYS_ME_RE=/\b(?:me|nos)\s+(?:lo |la |los |las )?(?:pago|pagaron|mando|mandaron|envio|enviaron|deposito|depositaron|dio|dieron|transfirio|transfirieron|hizo (?:el|un) (?:pago|zelle|deposito))\b|\b(?:paid|sent|gave|zelled|venmoed|deposited|transferred|wired) (?:me|us)\b/;
+const CLIENT_RE=/\b(?:cliente|clienta|clientes|customer|customers|client|clients|homeowner|la aseguranza|el seguro|aseguradora|insurance|el dueno de la casa|la duena de la casa)\b/;
+const OWN_PAY_RE=/\b(?:le|les)\s+(?:\w+\s+){0,2}(?:pague|mande|envie|deposite|transferi|di|pase|hice|entregue)\b|\bi (?:\w+ )?(?:paid|sent|gave|zelled|deposited|transferred)\b/;
+function intentRaw(text){
+ const raw=String(text||''),t=canon(norm(text));
  if(t.length>1000)return null;
  if(/^(?:si[, ]+)?(?:registralo|anotalo|registra ese pago|confirma el registro|guardar pago|yes record it|record it|confirm the record)[. ]*$/.test(t))return {action:'confirm'};
  if(/^(?:no[, ]+)?(?:cancelalo|cancela|no lo registres|todavia no|espera|cancel|don't record it|do not record it)[. ]*$/.test(t))return {action:'cancel'};
  if(/^(?:dile|respondele|contestale|mandale|enviale|escribele|tell|reply|send|text)\b/.test(t))return null; // normal messaging owns this command
- if(!/\b(?:cheque|cheke|check|zelle|zell|pago|pagar|pague|pagado|pagare|adelanto|adelante|advance|payment|pay|paid|saldo|debo|debemos|owe|efectivo|cash)\b/.test(t))return null;
+ // un cliente (o quien sea) que ME paga no es un pago a un trabajador: otra ruta
+ if(PAYS_ME_RE.test(t)&&(CLIENT_RE.test(t)||!OWN_PAY_RE.test(t)))return null;
+ if(CLIENT_RE.test(t)&&/\b(?:pago|pagaron|paid|pays)\b/.test(t)&&!OWN_PAY_RE.test(t))return null;
+ // tienda / recibo / compania / tarjeta: no es un pago a un trabajador
+ if(CARD_RE.test(t))return null;
+ if(new RegExp(COMPANY_RE.source).test(t)&&!recipient(t))return null;
+ const moneyCtx=moneyContext(t);
+ if(BILL_OBJ.test(t)&&!/\b(?:a|to|para)\s+[a-z]/.test(t.replace(BILL_OBJ,'')))return null;   // "pague el cel" = su recibo, no un trabajador
+ if(!moneyCtx&&!EXPL_METHOD_RE.test(t)&&!stateName(t)&&!/\b(?:pago|pagar|pague|pagado|pagare|adelanto|adelante|advance|payment|pay|paid|saldo|debo|debemos|owe|liquide|salde|abone)\b/.test(t))return null;
  if(/\b(?:dijo|dice|me dijo|el dice|ella dice|he said|she said|message says|mensaje dice|si le|if i|ejemplo|por ejemplo|for example|suppose|supongamos)\b/.test(t))return {action:'clarify',reason:'quoted'};
- if(/\b(?:no|nunca|not|never|todavia no)\s+(?:(?:le|lo|he|se|i|have|aun|he)\s+){0,3}(?:pague|pagado|deje|entregue|mande|escribi|paid|sent|left|delivered|written)\b/.test(t))return {action:'not_done'};
+ if(NOT_DONE_RE.test(t))return {action:'not_done'};
+ // ingles: "I haven't paid him yet", "didn't send", "not yet"
+ if(/\b(?:haven't|havent|hasn't|hasnt|didn't|didnt|did not|have not|has not|hadn't|hadnt|not yet|aun no|todavia no)\b/.test(t))return {action:'not_done'};
+ if(FAILED_RE.test(t))return {action:'not_done',reason:'failed'};
  const en=/\b(?:i |what|which|pay|paid|check|payment|advance|owe|show|give|how much)\b/.test(t)&&!/[ñ¿]|\b(?:cheque|le|cuanto|debo)\b/.test(t);
- const base={method:method(t),amount:amount(t),reference:reference(t),kind:/\b(?:adelant\w*|advanc\w*|anticip\w*)\b/.test(t)?'adelanto':'pago',english:en,text:String(text)};
+ const md=methodDetail(t);
+ const q=/[?¿]/.test(raw)||QUESTION_RE.test(t),old=PAST_RE.test(t);
+ const base={method:md.method,methodLabel:md.label,methodSub:md.sub,amount:amount(t),reference:reference(t),kind:/\b(?:adelant\w*|advanc\w*|anticip\w*)\b/.test(t)?'adelanto':'pago',english:en,text:String(text)};
+ // pregunta o recuerdo viejo: solo informacion, nunca la tarjeta de registrar
+ if(q||old)return {...base,action:'info',reason:q?'question':'past'};
+ if(PREF_RE.test(t))return {...base,action:'info',reason:'preference'};
+ if(LOAN_RE.test(t))return {...base,action:'info',reason:'loan'};
  if(/^(?:(?:y |ahora |oye )?)(?:cuanto|cuantos|dame|datos|nombre|numero|telefono|correo|muestrame|revisa|verifica|saldo|que|debo|debemos|how much|details|full name|phone|owe|show|give me)\b/.test(t))return {...base,action:'info'};
- const planText=t.replace(/\b(?:quiero|necesito|i want|i need)\b(?=\s+(?:que (?:quede|lo registres|lo anotes)|to (?:record|log)))/g,'');
- if(/\b(?:voy a|vamos a|le voy|voy hacer|voy pagarle|hare|haremos|dejare|manana|despues|pronto|will|going to|gonna|tomorrow|later|quiero|necesito|i need|i want)\b/.test(planText))return {...base,action:'plan'};
+ const planText=t.replace(/\b(?:quiero|necesito|i want|i need)\b(?=\s+(?:que (?:quede|lo registres|lo anotes)|to (?:record|log)))/g,'').replace(/\b(?:en la|esta|de la|por la|hoy en la|ayer en la) manana\b/g,' ').replace(/\bdespues de(?:l)?\b/g,' ');
+ // (18-nov R3) "ya le pague 250 a Tavo y le dije que manana lo vemos": lo que va DESPUES del pago hecho (otra frase
+ // u otra clausula) no lo convierte en plan. Lo que va antes si cuenta ("manana le pago, ya le dije").
+ const done=/\b(?:pague|pagado|mande|envie|deposite|transferi|di|pase|entregue|deje|liquide|salde|abone|abonie|solte|tire|avente|cai|hice|escribi|firme|paid|sent|gave|zelled|venmoed|cashapped|deposited|transferred|wrote|handed|left)\b/.exec(planText);
+ let planScope=planText;if(done){const after=planText.slice(done.index+done[0].length),cut=/(?:,|;|\s+(?:y|pero|and|but|luego)\s+)/.exec(after);if(cut)planScope=planText.slice(0,done.index+done[0].length+cut.index);}
+ if(/\b(?:voy a|vamos a|le voy|voy hacer|voy pagarle|hare|haremos|dejare|manana|despues|pronto|will|going to|gonna|tomorrow|later|quiero|necesito|i need|i want|tengo que|tenemos que|hay que|tiene que|le toca|have to|has to|need to|needs to)\b/.test(planScope))return {...base,action:'plan'};
+ if(stateName(t))return {...base,action:'record'};
  // An explicit request to record the physical handover can accompany present tense.
  // A future promise still matches the plan rule above; saying it alone never writes.
  if(/\b(?:anota(?:lo)?|apunta(?:lo)?|registra(?:lo)?|registrar|guarda(?:lo)?|marcalo|record|log|mark)\b/.test(t)&&/\b(?:pagad[oa]|entregad[oa]|paid|delivered)\b/.test(t))return {...base,action:'record'};
  if(/\b(?:estoy (?:dejando|entregando|haciendo)|le estoy|i am (?:leaving|writing)|i'm (?:leaving|writing))\b/.test(t))return {...base,action:'prepared'};
- if(/\b(?:ya )?(?:le )?(?:escribi|prepare|hice|llene|escrito|preparado|written|wrote|prepared)\b/.test(t)&&base.method==='cheque')return {...base,action:'prepared'};
+ // (5-nov, decision del dueno) "le hice / le escribi / le firme un cheque de 3,000" = YA lo pague: se registra.
+ // "le prepare / le llene el cheque" sigue siendo preparado (falta entregarlo).
+ if(/\b(?:ya )?(?:le )?(?:prepare|llene|preparado|prepared)\b/.test(t)&&base.method==='cheque'&&!/\b(?:hice|escribi|firme|wrote|signed|made)\b/.test(t))return {...base,action:'prepared'};
+ if(/\b(?:hice|escribi|firme|escrito|firmado|wrote|written|signed|made)\b/.test(t)&&base.method==='cheque')return {...base,action:'record'};
  if(/\b(?:pague|pagado|ya mande|ya le mande|ya envie|ya le envie|transferi|deposite|deje|entregue|entregado|le di|paid|sent|delivered|left|dropped off|handed|gave)\b/.test(t))return {...base,action:'record'};
+ // (18-nov-2026) "le envie 300 a Pedro", "hice un envio a Minor", "deposited": cuentan solo si la frase es de dinero
+ if(moneyCtx&&(STRONG_VERB.test(t)||WEAK_VERB.test(t)))return {...base,action:'record'};
  if(/\b(?:registra|registrar|anota|anotar|record|log)\b/.test(t))return {...base,action:'record'};
  return {...base,action:'info'};
 }
+function evidence(t,o){return Number.isFinite(o.amount)&&o.amount>0||!!recipient(t)||MONEY_NOUN.test(t)||EXPL_METHOD_RE.test(t)||/\b(?:le|les|se lo|se los|se la|se las)\b/.test(t);}
+const NOT_DONE_RE=/\b(?:no|nunca|not|never|todavia no|aun no)\s+(?:(?:le|lo|he|se|i|have|aun|he)\s+){0,3}(?:pague|pagado|deje|entregue|entregado|mande|mandado|envie|enviado|deposite|depositado|transferi|transferido|escribi|hecho|pase|pasado|dado|di|doy|entrego|paid|sent|left|delivered|written|transferred|deposited|given|handed|gave)\b/;
+function intentOne(text){
+ const o=intentRaw(text);if(!o||o.action!=='record')return o;
+ return evidence(canon(bareSpokenAmounts(spokenAmounts(norm(text)))),o)?o:{...o,action:'info',reason:'no_evidence'};
+}
+// (18-nov R3) EL PAGO ENTRE PLATICA DE TRABAJO: se lee frase por frase. Una frase de pago hecho manda; "pero no se
+// lo he dado" de la misma persona (o sin nombre) lo cancela; dos personas distintas pagadas -> no se adivina (info).
+// order.sentence = la(s) frase(s) del pago: la app busca a la persona SOLO ahi.
+function intent(text){
+ const parts=String(text||'').split(/(?<=[.!?;])\s+|\n+/).map(x=>x.trim()).filter(Boolean);
+ if(parts.length<2)return intentOne(text);
+ const outs=parts.map(x=>({s:x,o:intentOne(x),who:recipient(canon(norm(x)))}));
+ const rec=outs.filter(x=>x.o&&x.o.action==='record');
+ // sin frase de pago completa: el texto entero solo vale si una frase ya iba de este pago ("Le estoy dejando su cheque
+ // de 300. Anotalo como pagado."); si no, juntar pedazos de platica nunca arma un pago
+ if(!rec.length){const w=intentOne(text);const tied=outs.some(x=>x.o&&(x.o.action==='prepared'||x.o.reason==='no_evidence'));return w&&w.action==='record'&&!tied?{...w,action:'info',reason:'split'}:w;}
+ const whos=[...new Set(rec.map(x=>x.who).filter(Boolean))];
+ if(whos.length>1)return {...rec[0].o,action:'info',reason:'several',text:String(text)};
+ const who=whos[0]||'';
+ // "...el cheque a Tavo. Pero no se lo he dado.": la frase suelta de negacion tambien cancela
+ const stop=outs.find(x=>(x.o&&['not_done','clarify'].includes(x.o.action)||!x.o&&NOT_DONE_RE.test(canon(norm(x.s))))&&(!x.who||x.who===who));
+ if(stop)return {...(stop.o||{action:'not_done'}),text:String(text)};
+ const vals=k=>[...new Set(rec.map(x=>x.o[k]).filter(v=>v!==null&&v!==undefined&&v!==''&&!(typeof v==='number'&&!Number.isFinite(v))))];
+ let am=vals('amount'),me=vals('method');
+ // "Ya le pague a Tavo. Fueron 300 por zelle.": la frase siguiente sin otro nombre completa lo que falte
+ const i=outs.indexOf(rec[rec.length-1]),next=outs[i+1];
+ if(next&&!next.who&&(!next.o||!['plan','not_done','clarify'].includes(next.o.action)&&next.o.reason!=='question')&&!/[?¿]/.test(next.s)){
+  const nt=canon(norm(next.s));if(!am.length){const v=amount(nt);if(Number.isFinite(v)&&v>0)am=[v];}
+  if(!me.length){const d=methodDetail(nt,{fuzzy:false});if(d.method&&d.method!=='ambiguous'){me=[d.method];rec.push({o:{method:d.method,methodLabel:d.label,methodSub:d.sub}});}}}
+ const m=me.length>1?{method:'ambiguous',methodLabel:'',methodSub:''}:me.length?rec.find(x=>x.o.method===me[0]).o:rec[0].o;
+ return {...rec[0].o,amount:am.length===1?am[0]:am.length>1?NaN:rec[0].o.amount,method:m.method,methodLabel:m.methodLabel,methodSub:m.methodSub,sentence:rec.map(x=>x.s).join(' '),text:String(text)};
+}
+// Rutas que el flujo en vivo deja a otros (bandeja de peticiones, preguntas de todos): mismas reglas aqui y en la app.
+function otherRoute(text){return /\b(?:peticiones|solicitudes|quien|quienes|todos|todas|everyone|all workers|how many|requests)\b/i.test(norm(text));}
 function resolve(text,people,context){
  const original=norm(text),t=' '+original.replace(/([a-z])['’]s\b/g,'$1').replace(/[.,:;]/g,' ')+' ';
  const candidates=people.filter(p=>p&&p.key&&p.name&&p.active!==false);
@@ -78193,13 +78354,13 @@ function continuation(text,context){
 function amendment(text,previous){
  const t=norm(text).replace(/^(no|perdon|sorry),/,'$1 ').replace(/[.!?]+$/,'').replace(/\s+/g,' ').trim();
  const monetary=/^(?:(?:no|perdon|sorry|mejor) )?(?:(?:son|fueron|era|eran|it's|it was|make it|solo|only) )?\$?\d[\d,.]*(?: dolares| dollars)?$/.test(t)||/^(?:cambia|corrige|change|correct) (?:el )?(?:monto|amount)(?: a| to)? \$?\d[\d,.]*$/.test(t);
- const paymentMethod=/^(?:(?:no|mejor|actually|better|rather) )?(?:(?:por|en|by|in|que sea por) )?(?:cheque|cheke|check|zelle|efectivo|cash)$/.test(t);
+ const paymentMethod=new RegExp('^(?:(?:no|mejor|actually|better|rather|fue|era|es) )?(?:(?:por|en|by|in|que sea por|con|via) )?(?:el |la |un )?(?:'+ZELLE_EXPL+'|'+ZELLE_FUZZY+'|'+CHEQUE_W+'|efectivo|cash|kesh|kash|venmo|benmo|cash ?app|cashap|kashap|otro|otra cosa|other)$').test(t);
  const kind=/^(?:(?:no|mejor|es|era|it's|it is) )?(?:un |an? )?(?:adelanto|advance|pago|payment)$/.test(t);
  const check=/^(?:el )?(?:cheque|check) (?:numero|number|no|#) \d{1,12}$/.test(t);
  if(!monetary&&!paymentMethod&&!kind&&!check)return null;
  const out={...previous,action:'record'};
  if(monetary)out.amount=amount(text);
- if(paymentMethod)out.method=method(text);
+ if(paymentMethod){if(/^(?:.* )?(?:otro|otra cosa|other)$/.test(t)){out.method='';out.methodAsk='otro';}else{const d=methodDetail(text,{fuzzy:true});out.method=d.method;out.methodLabel=d.label;out.methodSub=d.sub;}}
  if(kind)out.kind=/adelanto|advance/.test(t)?'adelanto':'pago';
  if(check)out.reference=reference(text);
  return out;
@@ -78226,13 +78387,16 @@ function details(snapshot,order){
   lines.push(p.zelle?'Zelle: '+clean(p.zelle)+'.':(en?'No Zelle phone or email is recorded.':'No hay teléfono ni correo de Zelle registrado.'));
   if(p.fullName)lines.push((en?'Registered name: ':'Nombre registrado: ')+clean(p.fullName)+'.');
   lines.push(en?'Verify that Zelle shows the correct recipient before paying.':'Comprueba que Zelle muestre al destinatario correcto antes de pagar.');
+ }else if(order.method==='otro'&&order.methodLabel){
+  lines.push((en?'Registered name: ':'Nombre registrado: ')+(clean(p.fullName)||clean(p.name))+'.');
+  lines.push((en?'Payment method: ':'Método: ')+order.methodLabel+'.');
  }else if(order.method==='efectivo'){
   lines.push((en?'Registered name: ':'Nombre registrado: ')+(clean(p.fullName)||clean(p.name))+'.');
   lines.push(en?'Payment method: cash.':'Método: efectivo.');
  }else{
   lines.push((en?'Full name: ':'Nombre completo: ')+(clean(p.fullName)||(en?'missing':'sin registrar'))+'.');
   lines.push('Zelle: '+(clean(p.zelle)||(en?'not recorded':'sin registrar'))+'.');
-  lines.push(en?'Will it be by check, Zelle, or cash?':'¿Será por cheque, Zelle o efectivo?');
+  lines.push(en?'Will it be by check, Zelle, cash, or other (Cash App, Venmo)?':'¿Será por cheque, Zelle o efectivo, u otro (Cash App, Venmo)?');
  }
  if(s.areas?.length>1)lines.push(en?'The balance includes both Moving and Restoration.':'El saldo incluye Mudanzas y Restauración; conserva las tarifas de cada área.');
  if(order.action==='prepared')lines.push(en?'Prepared is not delivered. Tell me when you have handed it over and the exact amount.':'Preparado todavía no significa entregado. Dime cuando lo hayas entregado y el monto exacto.');
@@ -78240,6 +78404,9 @@ function details(snapshot,order){
  if(s.warning)lines.push(s.warning);
  return lines.join('\n');
 }
+// (18-nov-2026) Si no se entiende el metodo se PREGUNTA, nunca se adivina. "otro" = Cash App o Venmo (en la base: metodo 'otro').
+function okMethod(o){return ['cheque','zelle','efectivo'].includes(o.method)||(o.method==='otro'&&!!o.methodLabel);}
+function askMethod(o){return o.methodAsk==='otro'?'¿Cuál otro: Cash App o Venmo?':o.method==='ambiguous'?'Escuché dos métodos. ¿Fue por Zelle, cheque, efectivo u otro (Cash App, Venmo)?':'¿Lo entregaste por cheque, Zelle o efectivo, u otro (Cash App, Venmo)?';}
 function review(snapshot,order){
  const s=snapshot,p=s.person;
  // (12-nov-2026, decision del dueno) UN ADELANTO SE ANOTA AUNQUE FALTE CONFIRMAR HORAS. Dijo "le
@@ -78251,7 +78418,7 @@ function review(snapshot,order){
   if(s.warning&&s.warning!==s.hourWarning)return {error:s.warning+' Revisa esa diferencia antes de registrar.'};
   if(!Number.isFinite(order.amount)||order.amount<=0)return {error:'¿De cuánto fue el adelanto? Necesito el monto entregado.'};
   if(order.amount>20000)return {error:'Ese monto debe registrarse desde Pagos.'};
-  if(!['cheque','zelle','efectivo'].includes(order.method))return {error:'¿Lo entregaste por cheque, Zelle o efectivo?'};
+  if(!okMethod(order))return {error:askMethod(order)};
   if(order.method==='cheque'&&!p.fullName)return {error:'Falta verificar el nombre completo del beneficiario del cheque.'};
   const closes=!!s.request&&Number.isFinite(s.request.amount)&&s.request.amount>0&&cents(order.amount)+cents(s.request.paid||0)>=cents(s.request.amount);
   return {amount:order.amount,after:null,closes,summary:'Registrar '+money(order.amount)+' como adelanto de '+p.name+' por '+order.method+'. Su saldo todavía no lo puedo calcular: '+s.saldoPendiente+'. El adelanto queda anotado igual.'+(s.request?(closes?' La petición quedará enviada, esperando su confirmación.':' La petición seguirá pendiente por el resto.'):' No hay una petición abierta que cerrar.')};
@@ -78260,7 +78427,7 @@ function review(snapshot,order){
  if(s.warning&&s.warning!==s.hourWarning)return {error:s.warning+' Revisa esa diferencia antes de registrar.'};
  if(!Number.isFinite(order.amount)||order.amount<=0)return {error:'¿De cuánto fue el pago? Necesito el monto entregado; no usaré el saldo como si ya lo hubieras pagado.'};
  if(order.amount>20000)return {error:'Ese monto debe registrarse desde Pagos.'};
- if(!['cheque','zelle','efectivo'].includes(order.method))return {error:'¿Lo entregaste por cheque, Zelle o efectivo?'};
+ if(!okMethod(order))return {error:askMethod(order)};
  if(order.method==='cheque'&&!p.fullName)return {error:'Falta verificar el nombre completo del beneficiario del cheque.'};
  if(order.kind==='pago'&&cents(order.amount)>Math.max(0,cents(s.balance)))return {error:'Ese monto supera el saldo. Confirma si la diferencia es un adelanto; no lo descontaré como un pago normal.'};
  const after=(cents(s.balance)-cents(order.amount))/100;
@@ -78269,7 +78436,7 @@ function review(snapshot,order){
  // sin confirmar y Lumi no le dejaba ni ver el saldo. El saldo los cuenta (igual que el cerebro del
  // servidor); la tarjeta lo dice y el lo pasa con un toque si quiere pagar igual.
  const unconf=s.unconfirmedNote?'Ojo: '+s.unconfirmedNote+' El saldo ya las cuenta; si confirmas, se registra igual. ':'';
- return {amount:order.amount,after,closes,summary:unconf+(s.hourWarning?'Hay una diferencia pendiente en las horas. Registrar este pago no modifica esas horas ni el Labor Log. ':'')+'Registrar '+money(order.amount)+' como '+order.kind+' de '+p.name+' por '+order.method+'. '+(after>0?'Quedarán '+money(after)+' pendientes.':after<0?'Quedará '+money(-after)+' a su favor.':'Quedará al día.')+(s.request?(closes?' La petición quedará enviada, esperando su confirmación.':' La petición seguirá pendiente por el resto.'):' No hay una petición abierta que cerrar.')};
+ return {amount:order.amount,after,closes,summary:unconf+(s.hourWarning?'Hay una diferencia pendiente en las horas. Registrar este pago no modifica esas horas ni el Labor Log. ':'')+'Registrar '+money(order.amount)+' como '+order.kind+' de '+p.name+' por '+(order.methodLabel||order.method)+'. '+(after>0?'Quedarán '+money(after)+' pendientes.':after<0?'Quedará '+money(-after)+' a su favor.':'Quedará al día.')+(s.request?(closes?' La petición quedará enviada, esperando su confirmación.':' La petición seguirá pendiente por el resto.'):' No hay una petición abierta que cerrar.')};
 }
 function fingerprint(s){return JSON.stringify([s.person.key,s.person.fullName,s.person.zelle,cents(s.balance),s.request?.id,s.request?.state,s.request?.amount,s.request?.paid,s.warning||'',(s.ledgerIds||[]).slice().sort()]);}
 function verifyReceipt(receipt,flow){return !!receipt&&receipt.personKey===flow.person.key&&receipt.company===flow.company&&receipt.id===flow.id&&cents(receipt.amount)===cents(flow.order.amount)&&receipt.method===flow.order.method&&receipt.kind===flow.order.kind;}
@@ -78334,7 +78501,20 @@ function noticeText({kind,method,amount,where}){
  const noun=kind==='adelanto'?'Su adelanto de '+m+({cheque:' en cheque',efectivo:' en efectivo',zelle:' por Zelle'})[method]:({cheque:'Su cheque de '+m,efectivo:'Su pago de '+m+' en efectivo',zelle:'Su pago de '+m+' por Zelle'})[method];
  return noun+(where&&method!=='zelle'?' está en '+clean(where)+'.':' ya quedó registrado.')+' Por favor confirme cuando lo reciba.';
 }
-const api={place,noticeMoney,noticeText,norm,money,cents,method,amount,reference,intent,resolve,queryContinuation,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit};
+// (18-nov-2026) PARA CALIFICAR UN EXAMEN SIN LA APP: lo que Lumi entiende de una frase, sin gente ni red.
+// es_pago = el dice que YA pago (se abriria la tarjeta de registrar); metodo = zelle|cheque|efectivo|cashapp|venmo|null;
+// persona = el nombre como lo dijo (null si no dijo o dijo "alguien"); monto = numero o null.
+// es_pago es EXACTAMENTE la decision del flujo en vivo (asPaymentFollowup): intent().action==='record' y no es de otra ruta.
+function paymentReport(text){
+ const o=intent(text),src=o&&o.sentence||text,t=canon(bareSpokenAmounts(spokenAmounts(norm(src))));
+ const es=!!o&&o.action==='record'&&!otherRoute(text);
+ const who=recipient(t),orig=String(src||'');
+ let persona=null;if(who&&who!=='alguien'){const m=new RegExp('(^|[^\\p{L}])('+who.split('').map(ch=>'['+ch+ch.toUpperCase()+'À-ÿ]').join('')+')(?![\\p{L}])','u').exec(orig.normalize('NFC'));const w=m?m[2]:who;persona=w.charAt(0).toUpperCase()+w.slice(1);}
+ const sub=o&&o.methodSub?o.methodSub:'';
+ if(!es)return {es_pago:false,metodo:null,persona:null,monto:null,accion:o?o.action:null};
+ return {es_pago:true,metodo:sub||null,persona,monto:Number.isFinite(o.amount)&&o.amount>0?o.amount:null,accion:o.action};
+}
+const api={paymentReport,otherRoute,methodDetail,moneyContext,recipient,place,noticeMoney,noticeText,norm,money,cents,method,amount,reference,intent,resolve,queryContinuation,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiPaymentFollowup=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
@@ -78374,7 +78554,7 @@ async function lumiPayContext(owner){
  return null;
 }
 async function lumiPayRemember(owner,person,order){
- const ctx={owner,key:person.key,method:order.method||'',stage:order.action,amount:Number.isFinite(order.amount)?order.amount:null,reference:order.reference||'',kind:order.kind||'pago',at:Date.now(),routeStamp:lumiPayRouteStamp(lumiCurrentMessageContext(owner))};
+ const ctx={owner,key:person.key,method:order.method||'',methodLabel:order.methodLabel||'',stage:order.action,amount:Number.isFinite(order.amount)?order.amount:null,reference:order.reference||'',kind:order.kind||'pago',at:Date.now(),routeStamp:lumiPayRouteStamp(lumiCurrentMessageContext(owner))};
  LUMI_PAY_CONTEXT=ctx;await lumiPaySetting(owner,'lumi_payment_context_'+SES.user_id,ctx);
 }
 async function lumiPayHourWarnings(person,owner){
@@ -78553,8 +78733,8 @@ async function lumiPayPrepare(snapshot,order,owner){
  // Keep the original audit evidence in the private review; do not feed it back as a new instruction.
  const flow={notice:lumiPayNoticePlan(order),hourWarning:snapshot.hourWarning||'',owner,user:SES.user_id,company:SES.company_id,person:snapshot.person,order,date,fingerprint:P.fingerprint(snapshot),request:snapshot.request,review,at:Date.now()};
  const dicha=lumiPayNota(order.text);
- const note=['Lumi',dicha,snapshot.hourWarning?'Revisión de horas pendiente':'',order.reference?'Cheque #'+order.reference:'',snapshot.request?'Petición #'+snapshot.request.id:''].filter(Boolean).join(' · ');
- const prompt='Registra un '+order.kind+' de $'+order.amount.toFixed(2)+' a '+snapshot.person.name+' por '+order.method+' con fecha '+flow.date+'. Nota: '+note+'. Solo esa persona; no hagas una lista.';
+ const note=['Lumi',order.method==='otro'?order.methodLabel:'',dicha,snapshot.hourWarning?'Revisión de horas pendiente':'',order.reference?'Cheque #'+order.reference:'',snapshot.request?'Petición #'+snapshot.request.id:''].filter(Boolean).join(' · ');
+ const prompt='Registra un '+order.kind+' de $'+order.amount.toFixed(2)+' a '+snapshot.person.name+' por '+(order.method==='otro'?'otro medio ('+order.methodLabel+')':order.method)+' con fecha '+flow.date+'. Nota: '+note+'. Solo esa persona; no hagas una lista.';
  const r=await asLlamar({texto:prompt,historial:[],sandbox:false,area:null});lumiPayGuard(owner);
  const card=r.json?.confirmacion;if(!r.ok||!r.json?.ok||!card)throw Error(r.json?.texto||'No pude preparar el registro. No cambié ningún pago.');
  Object.assign(flow,P.issuedAction(card,flow));flow.token=card.token;
@@ -78591,7 +78771,7 @@ function lumiPayIO(owner,escrito){
    let notice={state:'disabled',text:''};
    try{notice=await lumiPayNotify(f,receipt,owner);}catch{lumiPayGuard(owner);notice={state:'pending',text:' El pago quedó registrado; falta comprobar el aviso en su chat. Puede pedirme revisar ese pago para reintentar solo el aviso.'};}
    lumiPayGuard(owner);
-   return {notice:notice.state,noticeId:notice.id||null,state:'recorded',id:receipt.id,text:'Registré '+P.money(f.order.amount)+' para '+f.person.name+' por '+f.order.method+'. '+(fresh.balance===null?'Su saldo lo calculo cuando se confirmen sus horas.':fresh.balance>0?'Quedan '+P.money(fresh.balance)+' pendientes.':fresh.balance<0?'Queda '+P.money(-fresh.balance)+' a su favor.':'Quedó al día.')+requestText+notice.text};
+   return {notice:notice.state,noticeId:notice.id||null,state:'recorded',id:receipt.id,text:'Registré '+P.money(f.order.amount)+' para '+f.person.name+' por '+(f.order.methodLabel||f.order.method)+'. '+(fresh.balance===null?'Su saldo lo calculo cuando se confirmen sus horas.':fresh.balance>0?'Quedan '+P.money(fresh.balance)+' pendientes.':fresh.balance<0?'Queda '+P.money(-fresh.balance)+' a su favor.':'Quedó al día.')+requestText+notice.text};
   }
  };
 }
@@ -78639,7 +78819,7 @@ async function asPaymentFollowup(texto){
  if(!order)return false;
  if(['confirm','cancel'].includes(order.action)){if(!pending)return false;LUMI_PAY_PENDING=null;lumiPaySay(order.action==='cancel'?'De acuerdo. No registré un pago.':'Faltan datos del pago; revisa el monto y el método.');return true;}
  // General company balances and payment-request inbox queries retain their existing routes.
- if(/\b(?:peticiones|solicitudes|quien|quienes|todos|todas|everyone|all workers|how many|requests)\b/i.test(P.norm(texto)))return false;
+ if(P.otherRoute?P.otherRoute(texto):/\b(?:peticiones|solicitudes|quien|quienes|todos|todas|everyone|all workers|how many|requests)\b/i.test(P.norm(texto)))return false;
  if(order.action==='info'&&!order.contextual&&!pending&&!/\b(?:cheque|check|zelle|efectivo|cash)\b/.test(P.norm(texto))&&!/(?:\ba\b|\bto\b|\bde\b)\s+[\p{L}]/u.test(P.norm(texto)))return false;
  asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;
  if(typeof asEstado==='function')asEstado('pensando','Revisando los datos del pago…');
@@ -78648,12 +78828,13 @@ async function asPaymentFollowup(texto){
   if(order.action==='clarify'){lumiPaySay('¿Me estás confirmando un pago que tú hiciste, o contando lo que dijo otra persona?');return true;}
   if(order.action==='not_done'){LUMI_PAY_PENDING=null;lumiPaySay('Entendido: todavía no se pagó. El saldo y la petición siguen igual.');return true;}
   const people=await lumiPayPeople(owner),context=continuationContext||await lumiPayContext(owner);
-  const resolved=P.resolve(texto,people,pending?{key:pending.person.key}:context);if(resolved.error){
+  // (18-nov R3) si el pago venia entre platica de trabajo, la persona se busca SOLO en la frase del pago
+  const resolved=P.resolve(order.sentence||texto,people,pending?{key:pending.person.key}:context);if(resolved.error){
    if(['info','plan'].includes(order.action))LUMI_PAY_SELECTION={owner,order,people,at:Date.now(),routeStamp:lumiPayRouteStamp(lumiCurrentMessageContext(owner))};
    lumiPaySay(resolved.error);return true;
   }
   const person=resolved.person;
-  if(!order.method&&context?.key===person.key)order.method=context.method||'';
+  if(!order.method&&context?.key===person.key){order.method=context.method||'';order.methodLabel=context.methodLabel||'';}
   const snapshot=await lumiPaySnapshot(person,order,owner);
   await lumiPayRemember(owner,person,order);
   if(order.action!=='record'){
