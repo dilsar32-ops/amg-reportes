@@ -6408,6 +6408,8 @@ body.rd-fpv-edit .rdv-borrar::after{content:""; position:absolute; inset:calc((4
 body.rd-fpv-edit .rdv-borrar:active{transform:translate(-50%, calc(-100% - calc(14*var(--rdu)))) scale(.96);}
 body.rd-fpv-edit #fpNameMenu{display:none !important;}
 .rdv-nom-ops, .rdv-nom-ed{display:none;}
+/* (19-nov-2026, Plano) en el editor los nombres del plano no son texto que se escoge: sostener en el iPhone sacaba Copy · Look Up en vez de moverlo */
+body.rd-fpv-edit #floorplanSvgWrap, body.rd-fpv-edit #floorplanSvgWrap *{-webkit-user-select:none; user-select:none; -webkit-touch-callout:none;}
 body.rd-fpv-edit .rdv-nom-ops:not([hidden]){display:inline-flex; gap:calc(6*var(--rdu)); position:absolute; z-index:24; transform:translate(-50%, calc(-100% - calc(14*var(--rdu))));}
 body.rd-fpv-edit .rdv-nom-ops button{position:relative; display:inline-flex; align-items:center; gap:calc(6*var(--rdu)); box-sizing:border-box; height:calc(32*var(--rdu)); margin:0; padding:0 calc(13*var(--rdu)); border-radius:999px; font:700 calc(13.75*var(--rdu))/1 "Avenir Next", var(--sf); white-space:nowrap; cursor:pointer; -webkit-tap-highlight-color:transparent; box-shadow:0 calc(4*var(--rdu)) calc(12*var(--rdu)) rgba(0,0,0,.28);}
 body.rd-fpv-edit .rdv-nom-ops button::after{content:""; position:absolute; inset:calc((44px - 100%) / -2) calc(-3*var(--rdu));}
@@ -20569,7 +20571,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-18-R498';
+  const APP_BUILD = '2026-11-19-R499';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -39304,7 +39306,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(!d0 || d0.id !== e.pointerId || !document.body.classList.contains('rd-fpv-edit')) return;
       if(Math.hypot(e.clientX - d0.x, e.clientY - d0.y) > 10 || Date.now() - d0.t > 400){ RDVB.ultimo = null; return; }   // fue arrastrar, no un toque
       let herr = 'select'; try{ herr = fpActiveTool; }catch(_){}
-      const nn = herr === 'select' && !bajo(e.clientX, e.clientY) ? nombreBajo(e.clientX, e.clientY) : null;
+      // (19-nov-2026, Plano) con la herramienta Nombres también: dos toques en un nombre que ya está = Editar · Borrar
+      const nn = (herr === 'select' || herr === 'name') && !bajo(e.clientX, e.clientY) ? nombreBajo(e.clientX, e.clientY) : null;
       if(nn){ const llaveN = 'name|' + nombreSel(nn), ahoraN = Date.now();
         if(RDVB.ultimo && RDVB.ultimo.llave === llaveN && ahoraN - RDVB.ultimo.t < 500){ RDVB.ultimo = null; const x = e.clientX, y = e.clientY, sel = nombreSel(nn); setTimeout(() => rdvNomMostrar(x, y, sel), 0); }
         else RDVB.ultimo = { llave: llaveN, t: ahoraN };
@@ -39381,7 +39384,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     st.addEventListener('pointerdown', e => {
       clearTimeout(sostener && sostener.t); sostener = null;
       let herramienta = 'select'; try{ herramienta = fpActiveTool; }catch(_){}
-      if(!document.body.classList.contains('rd-fpv-edit') || herramienta !== 'select' || fpLabelDrag || fpToolDrag) return;
+      if(!document.body.classList.contains('rd-fpv-edit') || (herramienta !== 'select' && herramienta !== 'name') || fpLabelDrag || fpToolDrag) return;   // (19-nov-2026, Plano) y con Nombres
       if(!e.isPrimary || fpPointers.size || RDVB.arr) return;   // (12-nov-2026, Palma) de UN dedo, como el de la pared (arriba)
       if(e.target.closest && e.target.closest('.rdv-ab-punto, .fp-obj-agarre, .fp-corner-handle, .fp-wall-grab')) return;
       const n = nombreBajo(e.clientX, e.clientY); if(!n) return;
@@ -42147,6 +42150,23 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     };
     fpPendingWallStart = null;
     fpRemoveGhost();
+    // (19-nov-2026, Plano) PRIMERO, ¿parte un cuarto? Una pared pegada en sus dos puntas que cruza por DENTRO de un cuarto y lo parte
+    // bien (fpPartirConParedSolida, con sus candados) es una división, no la continuación de la pared de otro cuarto. Antes, de la pared
+    // de arriba a la esquina de la escalera (cuarto que la app dedujo) ALARGABA la pared de la escalera por en medio del Dining Room:
+    // el Dining Room no se partía y 2.2 sq ft salían contados dos veces. Si no parte, sigue lo de siempre (alargar, agregar).
+    if(!jog && startSnap && snap && floorplanData.merged !== false){
+      const m0 = { x: (a.x+bx)/2, y: (a.y+by)/2 }, multi0 = floorplanLevels(floorplanData).length > 1;
+      const ri0 = (floorplanData.rooms||[]).findIndex(r => { if(!r || r.deleted || !(r.walls||[]).length) return false;
+        if(multi0 && (r.level||1) !== floorplanSelectedLevel) return false;
+        let pg = null; try{ pg = fpOrderedRoomPolygon(r); }catch(e){ pg = null; }
+        return !!(pg && pg.length >= 3 && fpPointInPolygon(m0, pg) && fpDistToPolygon(m0, pg) > 0.5); });
+      if(ri0 >= 0){
+        const vx0 = Math.abs(bx-a.x) < 1e-9, hy0 = Math.abs(by-a.y) < 1e-9;
+        const e0 = { id: fpNewId(), start: { x: a.x, y: a.y }, end: { x: vx0 ? a.x : bx, y: hy0 ? a.y : by }, lengthFt: Math.round(len*100)/100, _added: true };
+        const h0 = fpAltoParaParedNueva(floorplanData.rooms[ri0]); if(h0) e0.heightFt = h0;
+        if(fpPartirConParedSolida(ri0, e0)) return;
+      }
+    }
     if(!jog && tryExtend(startSnap, bx, by, snap)) return;
     if(!jog && snap && snap.endKey && tryExtend(snap, a.x, a.y, startSnap)) return;
     // Owning room: the one containing the midpoint (merged), or this
@@ -46253,6 +46273,16 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         return;
       }
       if(svgEl && fpActiveTool === 'name'){
+        // (19-nov-2026, Plano) un toque SOBRE un nombre que ya está no agrega otro encima: da Editar · Borrar de ese nombre (en el
+        // piso vacío sigue siendo Agregar nombre, su regla). Antes abría «Nombre de este lugar» y no había cómo cambiar ni borrar.
+        const nTocado = rdEnPantalla() && typeof rdvNomMostrar === 'function' && e.target && e.target.closest ? e.target.closest('.fp-roomlabel, .fp-spacelabel, .fp-subarea') : null;
+        if(nTocado){
+          const sel = nTocado.classList.contains('fp-roomlabel') ? '.fp-roomlabel[data-room-idx="' + nTocado.dataset.roomIdx + '"]'
+            : nTocado.classList.contains('fp-spacelabel') ? '.fp-spacelabel[data-space-idx="' + nTocado.dataset.spaceIdx + '"]'
+            : '.fp-subarea[data-room-idx="' + nTocado.dataset.roomIdx + '"][data-sub-idx="' + nTocado.dataset.subIdx + '"]';
+          rdvNomMostrar(e.clientX, e.clientY, sel);
+          return;
+        }
         fpPlaceName(svgEl, e.clientX, e.clientY);
         return;
       }
@@ -51310,6 +51340,15 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const A = [s.q].concat(medio, [e.q], arco(e, s)), B = [e.q].concat(medio.slice().reverse(), [s.q], arco(s, e));
     return { A, B };
   }
+  // (19-nov-2026, Plano) ¿El puente b es un lado del contorno (sus dos puntas seguidas en poly, a 0.05 ft)? Si no, el contorno no
+  // pasa por él (lo rodea por paredes de otro cuarto o lo dejó fuera) y no es un hueco de la orilla.
+  function fpInvPuenteEnOrilla(poly, b){
+    if(!poly || !b || !b.a || !b.b) return true;
+    const N = poly.length, cerca = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 0.05;
+    for(let i = 0; i < N; i++){ const p = poly[i], q = poly[(i + 1) % N];
+      if((cerca(p, b.a) && cerca(q, b.b)) || (cerca(p, b.b) && cerca(q, b.a))) return true; }
+    return false;
+  }
   // PARTIR UN CUARTO POR UN CAMINO, en memoria (no toca el plano). camino = [p0, ..., pn] en pies: p0 y pn en la orilla del cuarto,
   // los de en medio adentro. Devuelve { roomA, roomB, par, pA, pB, largo } o { error } (en español, para el aviso).
   function fpInvCandidatos(room, camino, opts){
@@ -51319,10 +51358,13 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!poly || poly.length < 3 || gi.roto) return { error: 'el cuarto no tiene un contorno cerrado que partir' };
     // (12-nov-2026, Molde) opts.hueco (la pared sólida, fpPartirConParedSolida): un hueco abierto a más de 1 ft de la línea no
     // estorba (real_plan: el Living Room abierto 4.06 ft al pasillo, lejos de la pared nueva); se queda en su lado tal cual y los
-    // candados igual revisan que los dos cierren y que el piso no cambie. La pared invisible sigue pidiendo cerrarlo primero.
+    // candados igual revisan que los dos cierren y que el piso no cambie. (19-nov-2026, Plano) la pared invisible también lo usa.
     const lejosDeLaLinea = b => !!(opts && opts.hueco && b.a && b.b) && camino.every((p, k) => { const q = camino[k + 1]; if(!q) return true;
       return !fpInvCruce(p, q, b.a, b.b) && Math.min(fpDistSeg(b.a, p, q), fpDistSeg(b.b, p, q), fpDistSeg(p, b.a, b.b), fpDistSeg(q, b.a, b.b)) >= 1; });
-    if((gi.bridgeSegs || []).some(b => b && b.d > 4 && !lejosDeLaLinea(b))) return { error: 'el cuarto tiene un hueco abierto en su orilla; ciérrelo primero' };
+    // (19-nov-2026, Plano) solo es hueco el puente que de verdad va en la orilla: uno que el contorno RODEA por las paredes de otro
+    // cuarto (gapInfo.rodeos: el Pantry inferido metido en el Dining Room escaneado) o que quedó fuera del contorno (un muñón suelto
+    // que el contorno ya apartó) no abre nada. La pared que sale de la esquina de ese cuarto (el Hallway del dueño) se negaba.
+    if((gi.bridgeSegs || []).some(b => b && b.d > 4 && fpInvPuenteEnOrilla(poly, b) && !lejosDeLaLinea(b))) return { error: 'el cuarto tiene un hueco abierto en su orilla; ciérrelo primero' };
     const pts = camino.map(p => ({ x: p.x, y: p.y }));
     const s = fpInvProyectar(poly, pts[0]), e = fpInvProyectar(poly, pts[pts.length - 1]);
     if(!s || !e || s.d > FP_INV_PUNTA_FT || e.d > FP_INV_PUNTA_FT) return { error: 'las dos puntas tienen que tocar la orilla del cuarto' };
@@ -51445,8 +51487,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // dos espacios después, y TODOS los demás cuartos del nivel antes y después. Si un vecino se mueve, no se parte.
   const FP_INV_TOL = 0.1, FP_INV_TOL_VECINO = 0.05;
   function fpInvMedir(r){ const m = fpRoomMeasurements(r, { entero: true });
-    const a = fpPolygonAreaSqFt(fpOrderedRoomPolygon(r));
-    return { m, ok: !!m.outlineOk, g: a > 1 ? a : fpRoomGrossAreaSqFt(r), p: m.perimeterFt || 0, bb: m.baseboardFt || 0, gu: m.guessedFt || 0,
+    const gi = {}, pg = fpOrderedRoomPolygon(r, gi), a = fpPolygonAreaSqFt(pg);
+    // (19-nov-2026, Plano) gr: lo de los puentes que NO van en la orilla (rodeados por paredes de otro cuarto, o fuera del contorno):
+    // su largo depende de dónde empiece la línea y no es tramo que la app cierre sola
+    const gr = r && r._inferido ? 0 : (gi.bridgeSegs || []).reduce((t, b) => t + (b && b.d > 1 && !fpInvPuenteEnOrilla(pg, b) ? b.d : 0), 0);
+    return { m, ok: !!m.outlineOk, g: a > 1 ? a : fpRoomGrossAreaSqFt(r), p: m.perimeterFt || 0, bb: m.baseboardFt || 0, gu: m.guessedFt || 0, gr,
              gw: m.outlineOk ? (m.grossWallSqFt || 0) : 0, nw: m.outlineOk ? (m.netWallSqFt || 0) : 0 }; }
   // (revisión 2) Lo que IMPRIME la hoja de un cuarto: su renglón y los de sus clósets aparte, en décimas (como salen), y lo que
   // aporta al total del nivel (las mismas llaves que fpPlanMeasurements: sin contorno, solo el piso).
@@ -51462,6 +51507,23 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   const FP_INV_REDONDEO = 'los números redondeados de los dos espacios no suman lo de antes';
   const FP_INV_TOTAL = 'el total del nivel cambiaría';
+  // (19-nov-2026, Plano) EL MUÑÓN: una punta del camino en la punta SUELTA de una pared corta del cuarto cuya otra punta está en la
+  // orilla (el pedazo que el dueño dibujó colgando de la pared de arriba). El camino sigue esa pared hasta la orilla: así "empieza en
+  // la pared". Antes: «las dos puntas tienen que tocar la orilla del cuarto» y no había Hallway.
+  function fpInvAlargarPorMunon(room, camino){
+    if(!room || !Array.isArray(camino) || camino.length < 2) return camino;
+    let poly = null; try{ poly = fpOrderedRoomPolygon(room); }catch(e){ poly = null; }
+    if(!poly || poly.length < 3) return camino;
+    const pegado = p => fpDistToPolygon(p, poly) <= 0.05, out = camino.map(p => ({ x: p.x, y: p.y }));
+    const munon = p => { if(fpDistToPolygon(p, poly) <= FP_INV_PUNTA_FT) return null;
+      for(const w of (room.walls || [])){ if(!w || !w.start || !w.end || w._invisible || w._removed) continue;
+        for(const [suelta, otra] of [[w.start, w.end], [w.end, w.start]]){
+          if(Math.hypot(suelta.x - p.x, suelta.y - p.y) <= 0.05 && pegado(otra) && Math.hypot(otra.x - p.x, otra.y - p.y) >= 0.5) return { x: otra.x, y: otra.y }; } }
+      return null; };
+    const a = munon(out[0]); if(a) out.unshift(a);
+    const b = munon(out[out.length - 1]); if(b) out.push(b);
+    return out;
+  }
   function fpInvCandados(room, cand, data, opts){
     const fail = [], n1 = v => (Math.round(v * 10) / 10).toFixed(1), rapido = !!(opts && opts.rapido);
     const d = (data && Array.isArray(data.rooms) && data.rooms.indexOf(room) >= 0) ? data : fpPlanoDe(room, data);
@@ -51488,7 +51550,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const tolPared = FP_INV_TOL * Math.max(1, m0.m.wallHeightFt || 0) + 0.01;
     if(mA.ok && mB.ok && (Math.abs(mA.gw + mB.gw - m0.gw) > tolPared || Math.abs(mA.nw + mB.nw - m0.nw) > tolPared)) fail.push('la pared no se conserva: ' + n1(m0.gw) + ' → ' + n1(mA.gw + mB.gw) + ' SF');
     // ni más ni menos tramo que la app cerró sola (la † de antes se queda donde estaba)
-    if(Math.abs(mA.gu + mB.gu - m0.gu) > FP_INV_TOL) fail.push('un espacio quedaría con un tramo que la app cerraría sola');
+    // (19-nov-2026, Plano) sin contar los puentes que no van en la orilla (fpInvMedir.gr): su largo depende de en qué punta empiece la
+    // línea (la pared del Hallway que sale de la esquina del Pantry inferido corría el puente 0.6 ft y la partición se negaba)
+    if(Math.abs((mA.gu - mA.gr) + (mB.gu - mB.gr) - (m0.gu - m0.gr)) > FP_INV_TOL) fail.push('un espacio quedaría con un tramo que la app cerraría sola');
     // los clósets aparte: los mismos renglones antes y después (cada uno con el espacio que lo tiene)
     if((cand.cortados || []).length) fail.push('la línea corta el clóset; pásela por fuera de él');
     else { const ordena = l => l.slice().sort((x, y) => x - y).join(',');
@@ -51520,6 +51584,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // (revisión 2) Si lo ÚNICO que falla es el redondeo (una décima que se va de un lado al otro), la línea se corre a lo más
   // 0.05 ft (media pulgada) hasta que los números impresos cuadren. Devuelve { cand, san } (el primero que pase, o el de origen).
   function fpInvPartirAjustado(room, camino, data, opts){
+    camino = fpInvAlargarPorMunon(room, camino);   // (19-nov-2026, Plano)
     let cand = fpInvCandidatos(room, camino, opts);
     if(cand.error) return { cand, san: null };
     let san = fpInvCandados(room, cand, data);
@@ -51546,15 +51611,24 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!floorplanData) return false;
     const room = (floorplanData.rooms || [])[roomIdx];
     if(!room) return false;
-    const { cand, san } = fpInvPartirAjustado(room, camino, floorplanData);
+    // (19-nov-2026, Plano) como la pared sólida: un hueco a más de 1 ft de la línea no estorba (los candados igual revisan que los dos
+    // espacios cierren y que el piso no cambie). El dueño no podía hacer su Hallway: el Dining Room trae un muñón suelto lejos de la línea.
+    const { cand, san } = fpInvPartirAjustado(room, camino, floorplanData, { hueco: true });
     if(cand.error){ alert('No se puede partir por ahí: ' + cand.error + '.'); return false; }
     if(!san.ok){ alert('No se puede partir por ahí: ' + san.fail[0] + '.'); return false; }
     const level = room.level || 1, nombre0 = room.roomName || ('Room ' + (roomIdx + 1));
     const n1 = v => (Math.round(v * 10) / 10).toFixed(1);
     let nombre = dado && dado.nombre ? dado.nombre : null;
+    // (19-nov-2026, Plano) los sq ft de la pregunta, medidos con las dos mitades DENTRO del plano (como quedan al partir). Fuera del
+    // plano la pregunta decía «95.2 sq ft. Dining Room queda con 241.0» y al partir quedaban 95.2 y 229.1.
+    let pieA = fpRoomDisplayAreaSqFt(cand.roomA), pieB = fpRoomDisplayAreaSqFt(cand.roomB);
+    if(!nombre){ const d0 = floorplanData;
+      d0.rooms[roomIdx] = cand.roomA; d0.rooms.push(cand.roomB);
+      try{ fpUsarContextoDePlano(d0); pieA = fpRoomDisplayAreaSqFt(cand.roomA); pieB = fpRoomDisplayAreaSqFt(cand.roomB); }catch(e){}
+      finally { d0.rooms.pop(); d0.rooms[roomIdx] = room; fpUsarContextoDePlano(d0); } }
     // (R135) en RD el nombre se pide con la pregunta de la app; al escribirlo se vuelve a partir con ese nombre (Cancelar = nada cambia)
     if(!nombre && rdEnPantalla()) return rdNombreDelPlano({ titulo: r135('Nombre del espacio nuevo', 'Name of the new space'),
-        texto: r135(`${n1(fpRoomDisplayAreaSqFt(cand.roomB))} sq ft. ${nombre0} queda con ${n1(fpRoomDisplayAreaSqFt(cand.roomA))} sq ft.`, `${n1(fpRoomDisplayAreaSqFt(cand.roomB))} sq ft. ${nombre0} keeps ${n1(fpRoomDisplayAreaSqFt(cand.roomA))} sq ft.`),
+        texto: r135(`${n1(pieB)} sq ft. ${nombre0} queda con ${n1(pieA)} sq ft.`, `${n1(pieB)} sq ft. ${nombre0} keeps ${n1(pieA)} sq ft.`),
         si: r135('Partir el cuarto', 'Split the room') }, level).then(t => t ? fpPartirConParedInvisible(roomIdx, camino, { nombre: t }) : false);
     if(!nombre) for(;;){
       const v = prompt('Nombre del espacio nuevo (' + n1(fpRoomDisplayAreaSqFt(cand.roomB)) + ' sq ft). ' + nombre0 + ' queda con ' + n1(fpRoomDisplayAreaSqFt(cand.roomA)) + ' sq ft.', '');
