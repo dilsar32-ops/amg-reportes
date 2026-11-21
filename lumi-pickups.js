@@ -73,16 +73,67 @@
     cliente: /^(?:abre|vuelve a|ve con|vamos con|pasemos con|sigue con|regresa a|revisa) (.+)$/,
     consulta: /^(?:por que (.+?) (?:quedo|esta) fuera|(?:que paso con|y) (.+))$/
   };
+  const palette={rojo:'#b82136',azul:'#125cab',amarillo:'#d79700'};
+  const evidenceImage=v=>typeof v==='string'&&/^data:image\/jpeg;base64,[a-z0-9+/=]+$/i.test(v);
+  function validatePair(pair,p){
+    if(!pair)return;
+    if(pair.proyecto!==p.id||pair.modelo!==p.modelo||!Array.isArray(pair.marcas))throw Error('La pareja de planos pertenece a otro trabajo.');
+    for(const side of ['companycam','matterport']){
+      const panel=pair[side];if(!panel)continue;
+      if(!evidenceImage(panel.imagen)||!panel.nivel||typeof panel.nivel!=='string')throw Error('Falta imagen o nivel del plano.');
+    }
+    for(const m of pair.marcas){
+      if(!['companycam','matterport'].includes(m.lado)||!pair[m.lado]||!Object.hasOwn(palette,m.color)||!m.texto||!Array.isArray(m.caja)||m.caja.length!==4||!m.caja.every(Number.isFinite))throw Error('Marca visual inválida.');
+      const [x,y,w,h]=m.caja;if(x<0||y<0||w<=0||h<=0||x+w>1.001||y+h>1.001)throw Error('Marca fuera de la imagen.');
+    }
+  }
+  function visual(p){
+    const v=p.visual;
+    if(v?.companycam&&v?.matterport)return {project:p,pair:v,msg:(v.marcas.length?'Comparación anotada de ':'Planos lado a lado de ')+p.nombre+'. '+(v.verificacion||'Revisar correspondencia en 3D.')};
+    if(p.comparacion)return {project:p,image:p.comparacion,msg:'Comparación anotada de '+p.nombre+' guardada en la revisión.'};
+    const missing=['companycam','matterport'].filter(k=>!v?.[k]).map(k=>k==='companycam'?'CompanyCam':'Matterport').join(' y ');
+    return {project:p,pair:v,msg:'Pendiente de comparación: falta la captura de '+missing+'. Verifica el mismo nivel y las puertas en las fuentes del perfil.'};
+  }
+  function renderPair(block,pair){
+    const el=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
+    const area=el('div');area.style.cssText='overflow:auto;max-width:100%;background:#fff;color:#153647;padding:8px';block.append(area);
+    const grid=el('div');grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:12px;min-width:560px';area.append(grid);
+    for(const [key,title] of [['companycam','CompanyCam'],['matterport','Matterport']]){
+      const panel=pair[key],column=el('section');grid.append(column);column.append(el('strong',title+(panel?' · '+panel.nivel:'')));
+      if(!panel){column.append(el('p','Captura pendiente'));continue;}
+      const frame=el('div');frame.style.cssText='position:relative;line-height:0;margin:8px 0';column.append(frame);
+      const img=el('img');img.src=panel.imagen;img.alt=title+' · '+panel.nivel;img.style.width='100%';frame.append(img);
+      for(const [i,m] of pair.marcas.entries()){
+        if(m.lado!==key)continue;
+        const [x,y,w,h]=m.caja.map(n=>n*100);const box=el('span');box.style.cssText='position:absolute;box-sizing:border-box;pointer-events:none;border:3px solid '+palette[m.color]+';left:'+x+'%;top:'+y+'%;width:'+w+'%;height:'+h+'%';frame.append(box);
+        const badge=el('b',String(i+1));badge.style.cssText='position:absolute;top:0;left:0;background:'+palette[m.color]+';color:white;font: bold 13px sans-serif;padding:2px';box.append(badge);
+      }
+      const zoom=el('button','Ampliar / reducir');zoom.type='button';zoom.onclick=()=>{grid.style.minWidth=grid.style.minWidth==='1400px'?'560px':'1400px';};column.append(zoom);
+    }
+    for(const [i,m] of pair.marcas.entries()){const row=el('p',(i+1)+'. '+m.texto);row.style.cssText='border-left:5px solid '+palette[m.color]+';padding-left:8px';block.append(row);}
+  }
+  function privateRule(q,d){
+    for(const rule of d.manual?.situaciones||[]){
+      if(rule.frases.some(f=>normal(f)===q))return rule.accion;
+    }
+    if(!/^(consulta|busca|explica|lee) (?:en )?(?:la |el )?(?:guia|manual|skill)\b/.test(q))return null;
+    const words=q.split(/\b(?:guia|manual|skill)\b/).pop().split(' ').filter(w=>w.length>3&& !['sobre','para','como'].includes(w));
+    if(!words.length)return 'Puedes consultar el manual sobre orientación, muros, medidas, autoría, etiquetas, pickup o exclusiones.';
+    const candidates=Object.values(d.manual?.referencias||{}).flatMap(t=>t.split('\n')).filter(l=>l.trim().length>30).map(l=>({l,score:words.filter(w=>normal(l).includes(w)).length})).filter(r=>r.score>0).sort((a,b)=>b.score-a.score);
+    return candidates.length?candidates.slice(0,2).map(r=>r.l.replace(/^[-*# ]+/,'')).join('\n'):'El manual cargado no contiene una regla específica para esa consulta.';
+  }
+
   function validate(d){
     if(d?.version!==1 || typeof d.lote!=='string'||!Array.isArray(d.perfiles)||!d.perfiles.length)throw Error('Lote incompatible.');
     const ids=new Set();
     for(const p of d.perfiles){
       if(typeof p.id!=='string'||typeof p.nota!=='string'||!/^\d+$/.test(p.id)||ids.has(p.id)||typeof p.nombre!=='string'||!p.nombre.trim()||p.pickup!=='confirmado'||!/^\d{4}-\d{2}-\d{2}$/.test(p.fecha))throw Error('Perfil duplicado o retiro sin confirmar.');
-      ids.add(p.id);
+      ids.add(p.id);validatePair(p.visual,p);
       for(const k of ['plano','humedad','equipos','medidas'])if(!Array.isArray(p.hojas?.[k])||p.hojas[k].some(x=>!/^\d+$/.test(x)))throw Error('Referencia de hoja inválida.');
       if(p.comparacion&&!/^data:image\/jpeg;base64,[a-z0-9+/=]+$/i.test(p.comparacion))throw Error('Imagen de comparación inválida.');
     }
     if(!ids.has(d.ultimo)||!Array.isArray(d.fuera)||d.fuera.some(p=>!p||!/^\d+$/.test(p.id)||ids.has(p.id)||typeof p.nombre!=='string'||typeof p.nota!=='string'))throw Error('Revisa el último perfil y las exclusiones.');
+    if(d.manual&&(!Array.isArray(d.manual.situaciones)||!d.manual.situaciones.every(r=>typeof r.accion==='string'&&Array.isArray(r.frases)&&r.frases.every(f=>typeof f==='string'))||!Object.values(d.manual.referencias||{}).every(t=>typeof t==='string')))throw Error('Manual de revisión inválido.');
     return d;
   }
   function route(text,d,s){
@@ -96,12 +147,17 @@
     if(!d)return resume?{action:'sinLote',msg:'Dime «importa el lote de pickups» para cargar la lista acordada.'}:null;
     const entries=d.perfiles;let index=entries.findIndex(p=>p.id===(s?.id||d.ultimo));if(index<0)index=0;
     const p=entries[index], result=(msg,extra={})=>({action:'respuesta',msg,state:{...s,id:p.id,active:true},...extra});
-    const select=(item,extra={})=>result(item.nombre+'. '+item.nota,{state:{...s,active:true,id:item.id,view:'perfil',...extra},project:item});
+    const select=(item,extra={})=>result(item.nombre+'. '+item.nota,{...visual(item),msg:item.nombre+'. '+item.nota+' '+visual(item).msg,state:{...s,active:true,id:item.id,view:'perfil',...extra}});
     if(resume)return select(p);
+    const rule=privateRule(q,d);if(rule)return result(rule);
+    if(/^(?:autoevalua|autoevaluate|juzga|verifica|comprueba|revisa) (?:tu trabajo|la comparacion|si ya quedo|la evidencia)$/.test(q)){
+      const a=visual(p);const pendientes=p.visual?.marcas?.filter(m=>m.color==='amarillo').map(m=>m.texto)||[];return result('',{...a,msg:[a.msg,p.nota,...pendientes].join(' ')});
+    }
+    if(/^(?:pon|ponme|muestra|muestrame|ensena|ensename|compara|marca|senala|quiero ver)\b/.test(q)&&/lado a lado|a la par|una (?:foto )?(?:al lado|junto) de la otra|rojo.*azul|diferencias|discrepancias|cuadros de colores/.test(q)&&!/(?:envia|manda|borra|elimina|publica)/.test(q))return result('',visual(p));
     if(patterns.salir.test(q))return result('Revisión cerrada. Conservé tu posición.',{state:{...s,active:false}});
     if(/^(?:ya |todavia )?(?:se (?:hizo|confirmo) el pickup|retiraron (?:todo|los equipos)|recogieron (?:las maquinas|todo))$/.test(q))return result(p.nombre+': retiro final confirmado en el registro del '+p.fecha+'.');
     if(patterns.pendiente.test(q)||['que nos quedo por verificar','que nos falta aqui','que le hace falta','dime como quedo este trabajo'].includes(q))return result(p.nombre+'. '+p.nota);
-    if(patterns.imagen.test(q)||/^(?:ponme|pon|ensename|muestrame|quiero ver) (?:ambos|los dos) (?:mapas|planos)(?: juntos| a la par| lado a lado| uno junto al otro| con los errores)?$/.test(q))return result(p.comparacion?'Comparación anotada de '+p.nombre+'.':'Todavía falta una comparación anotada de '+p.nombre+'.',{project:p,image:p.comparacion});
+    if(patterns.imagen.test(q)||/^(?:ponme|pon|ensename|muestrame|quiero ver) (?:ambos|los dos) (?:mapas|planos)(?: juntos| a la par| lado a lado| uno junto al otro| con los errores)?$/.test(q))return result('',visual(p));
     const doc=/^(?:abre|muestrame|ensename|ver|quiero ver) (?:el |la |las |los )?(equipment count|conteo de equipos|hoja de equipos|medidas|measurements|moisture map|mapa de humedad|plano|floor plan)$/.exec(q);
     let kind=doc&&({medidas:'medidas',measurements:'medidas',plano:'plano','floor plan':'plano','moisture map':'humedad','mapa de humedad':'humedad'}[doc[1]]||'equipos');
     const skip=patterns.saltar.test(q), next=patterns.avanzar.test(q)||['dale con el que sigue','vamos al que sigue','continua con el proximo','pasemos al otro cliente','avanza un cliente','otra pagina','la siguiente hoja'].includes(q);
@@ -124,5 +180,5 @@
     }
     return null;
   }
-  window.LumiPickups={route,validate};
+  window.LumiPickups={route,validate,renderPair};
 })();
