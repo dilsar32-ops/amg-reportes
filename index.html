@@ -20649,7 +20649,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-20-R505';
+  const APP_BUILD = '2026-11-20-R506';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -34970,6 +34970,23 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   //   o:      { yo, marca (version con la que quedo en paz), abierto (en pantalla),
   //             borradoMs (cuando lo borro este dueno aqui) }
   // Devuelve 'nada' | 'subir' | 'bajar' | 'borrarLocal' | 'borrarNube' | 'conflicto'.
+  // (20-nov-2026, Aparte) Guarda lo editado aqui en un plano NUEVO (id nuevo) y saca el viejo de este telefono.
+  // El plano vigente es el de la nube: se baja solo en la siguiente vuelta. Nada se pierde: la copia nueva sube.
+  async function nubeSacarAparte(id, yo, e){
+    if(!fpDisco()) return false;
+    const origen = e.enDisco ? await fpLeerPlano(id) : e;
+    if(!origen || !origen.data) return false;
+    const nuevo = 'fp' + Date.now() + Math.floor(Math.random() * 1000);
+    const job = origen.job || e.job || {};
+    const entrada = { id: nuevo, at: Date.now(), _v: ++fpVersion.n, job, owner: yo, data: JSON.parse(JSON.stringify(origen.data)) };
+    const peso = await fpEscribirPlano(entrada);
+    const lista = fpListRaw().filter(x => x && x.id !== nuevo);
+    lista.unshift({ id: nuevo, at: entrada.at, _v: entrada._v, job, owner: yo, enDisco: true, peso, perdido: false, data: fpResumenDe(entrada.data) });
+    if(!fpListSave(lista)) return false;
+    if(floorplanId === id) floorplanId = nuevo;
+    fpDeleteSaved(id, { desdeNube: true });
+    return true;
+  }
   function nubeDecidir(local, remoto, o){
     o = o || {};
     const yo = o.yo;
@@ -34988,7 +35005,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // se hizo despues en otro telefono.
       const dMs = +remoto.deleted_ms || Date.parse(remoto.deleted_at) || 0;
       // Lo cambio aqui DESPUES de que lo borraran: sigue trabajando en esa casa.
-      if(lAt > dMs) return sano ? 'subir' : 'nada';
+      // (20-nov-2026, Aparte) Lo editado DESPUES del borrado no vuelve a subir con el mismo id (eso revivia
+      // el plano borrado y el de la nube no llegaba al telefono): se guarda aparte, con id nuevo.
+      if(lAt > dMs) return sano ? 'aparte' : 'nada';
       if(remoto.deleted_reason === 'autor') return o.abierto ? 'nada' : 'borrarLocal';
       return 'nada';                     // lo borro el manager: aqui se queda
     }
@@ -35512,6 +35531,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
             try{ if(await nubeBajarPlano(id, yo)) cambio = true; }catch(err){ console.error('[nube] bajar ' + id + ': ' + (err && err.message)); }
           } else if(que === 'conflicto'){
             try{ await nubeResolverConflicto('planos', id, yo); cambio = true; }catch(err){}
+          } else if(que === 'aparte'){
+            try{ if(await nubeSacarAparte(id, yo, e)) cambio = true; }catch(err){ console.error('[nube] aparte ' + id + ': ' + (err && err.message)); }
           } else if(que === 'borrarLocal'){
             fpDeleteSaved(id, { desdeNube: true }); cambio = true;
           } else if(que === 'borrarNube'){
