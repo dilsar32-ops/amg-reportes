@@ -20683,7 +20683,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-21-R514';
+  const APP_BUILD = '2026-11-21-R515';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -79224,6 +79224,9 @@ function methodDetail(text,{fuzzy=null,done=false}={}){
  let t=norm(text).replace(/\b(?:la |el )?app de cash\b/g,' cashapp ').replace(/\b(?:en )?billetes\b/g,' efectivo ').replace(/\b(?:zell|zelled|zelleado|celle)\b/g,'zelle').replace(/\b(?:cash ?-?apped|cashapped|cash ?-?app|cash ?ap|cashe ?app|cache ?app|cashap|kashap|kash ?-?app|kash ?ap|cash aplicacion)\b/g,'cashapp').replace(/\b(?:venmo|venmoed|benmo|bemo|ven mo|bemmo|vemno)\b/g,'venmo').replace(/\b(?:efectibo|efetivo)\b/g,'efectivo').replace(/(\b(?:tiene|tengo|tienen|tenia|traigo|trae) )?\ben (?:la )?mano\b/g,(m,p)=>p?m:' efectivo ')
   .replace(new RegExp('\\b((?:ya )?(?:le|les) hice (?:el|un)) (?:'+ZELLE_FUZZY+')(?=$|[,.;]|\\s+(?:a|al|de|por|para|\\$?\\d)\\b)','g'),'$1 zelle');
  t=t.replace(new RegExp('\\b(?:no (?:hay|tiene|tengo|es|por|fue por)|sin|not by|no)\\s+(?:el |un |por )?('+ZELLE_EXPL+'|'+CHEQUE_W+'|efectivo|cash|kesh|kash|cashapp|venmo)\\b','g'),'').replace(new RegExp('\\b(?:en vez de|instead of)\\s+(?:el |un )?('+ZELLE_EXPL+'|'+CHEQUE_W+'|efectivo|cash|kesh|kash|cashapp|venmo)\\b','g'),'');
+ // (21-nov, Seguimiento 2) "por cheque digo por sel", "zelle no perdon cash": vale el ULTIMO metodo, el que va despues de la correccion
+ {const cues=[...t.matchAll(/\b(?:digo|mejor dicho|quise decir|o sea|perdon|perdona|no espera|corrijo)\b/g)],c=cues[cues.length-1];
+  if(c&&t.slice(0,c.index).trim()&&t.slice(c.index+c[0].length).trim()){const d=methodDetail(t.slice(c.index+c[0].length),{fuzzy:fuzzy===null?(moneyContext(t)||done):fuzzy,done});if(d.method&&d.method!=='ambiguous')return d;}}
  const kind=w=>new RegExp('^(?:'+ZELLE_EXPL+')$').test(w)?'zelle':new RegExp('^(?:'+CHEQUE_W+')$').test(w)?'cheque':w==='cashapp'?'cashapp':w==='venmo'?'venmo':'efectivo';
  const found=[...t.matchAll(new RegExp('\\b('+ZELLE_EXPL+'|'+CHEQUE_W+'|efectivo|cash|kesh|kash|cashapp|venmo)\\b','g'))].map(m=>kind(m[1]));
  const useFuzzy=fuzzy===null?moneyContext(t)||done:fuzzy;
@@ -79409,6 +79412,9 @@ function intentRaw(text,opts={}){
  // (21-nov R5xx) "y a baltasar 150 por cel anotalo", "ya se lo envie por cel anotalo": la orden del dueno con dinero o con un
  // hecho tambien es de pagos (antes caia al modelo porque "cel" solo no es metodo explicito y "anotalo" no es "anota")
  const ordered=ORDER_RE.test(t);
+ // (21-nov, Seguimiento 2) "a florentino el viernes le doy": una promesa (verbo en presente + cuando) es plan, nunca un pago ni una tarjeta
+ if(!ordered&&!/[?¿]/.test(raw)&&/\b(?:le|les|se lo|se la|se los) (?:doy|pago|mando|deposito|paso|envio|caigo|hago el (?:pago|zelle|deposito))\b/.test(t)&&/\b(?:lunes|martes|miercoles|jueves|viernes|sabado|domingo|manana|la otra semana|la proxima semana|al rato|luego|despues|en la tarde|en la noche|ahorita)\b/.test(t))
+  return {method:'',methodLabel:'',methodSub:'',amount:amount(t),reference:'',kind:/\badelant\w*/.test(t)?'adelanto':'pago',english:false,text:String(text),action:'plan'};
  if(!moneyCtx&&!EXPL_METHOD_RE.test(t)&&!stateName(t)&&!(moneySig&&doneLv)&&!(ordered&&(moneySig||doneLv))&&!SETTLED_RE.test(t)&&!telegram(t,opts.people)&&!/\b(?:pago|pagar|pague|pagado|pagare|adelanto|adelante|advance|payment|pay|paid|saldo|debo|debemos|owe|liquide|salde|abone)\b/.test(t))return null;
  {const qm=/\b(?:dijo|dice|me dijo|el dice|ella dice|he said|she said|message says|mensaje dice|si le|if i|ejemplo|por ejemplo|for example|suppose|supongamos)\b/.exec(t);
   const own=/\b(?:le |les )?(?:pague|mande|envie|deposite|transferi|di|pase|entregue|eche|adelante|paid|sent|gave|zelled)\b/.exec(t);
@@ -79612,6 +79618,61 @@ function correction(text,done){
  if(from!==null&&cents(from)!==cents(old))return null;   // corrige OTRO monto: no es este pago
  if(!(nu>0)||cents(nu)===cents(old)||nu>100000)return null;
  return {amount:nu,from:old};
+}
+// (21-nov, Seguimiento 2) "le iba a dar 60 a cirilo pero mejor no, olvidalo": lo retiro antes de anotarlo. Nunca se anota.
+const RETRACT_RE=/\b(?:olvidalo|olvidala|olvidalos|olvidate|olvida eso|no lo anotes|no la anotes|no anotes nada|no lo registres|cancela eso|dejalo asi|forget it|never ?mind|scratch that)\b|\bmejor no(?: le (?:des|pagues|mandes|anotes))?$|\bmejor no (?:olvid\w*|nada)\b/;
+function retracted(text){const t=canon(norm(text)).replace(/[.!,;:]+/g,' ').replace(/\s+/g,' ').trim();return !!t&&t.split(' ').length<=18&&!/[?¿]/.test(String(text||''))&&RETRACT_RE.test(t)&&!ORDER_RE.test(t.replace(/\bno (?:lo |la )?(?:anotes|registres)\b/g,' '));}
+// (21-nov, Seguimiento 2) "no no ese de fabian fue cash no por cel" justo despues de anotarlo: el METODO del pago recien anotado.
+const NEG_METHOD_RE=new RegExp('\\b(?:no|y no|en vez de|en lugar de|instead of)\\s+(?:(?:fue|era|es) )?(?:(?:por|en|con|by|via) )?(?:el |la |un )?(?:'+ZELLE_EXPL+'|'+ZELLE_FUZZY+'|'+CHEQUE_W+'|efectivo|cash|kesh|kash|cash ?app|cashapp|venmo)\\b','g');
+function methodCorrection(text,done){
+ if(!done||!done.method)return null;
+ const raw=String(text||'');if(/[?¿]/.test(raw))return null;
+ const t=canon(norm(raw)).replace(/[.!,;:]+/g,' ').replace(/\s+/g,' ').trim();
+ if(!t||t.split(' ').length>14)return null;
+ if(!/^(?:no\b|mejor\b|perdon\b|perdona\b|espera\b|fue\b|era\b|corrige|cambia|me equivoque)/.test(t)&&!/\b(?:no (?:fue )?(?:por|en|con)\b|en vez de|en lugar de)/.test(t))return null;
+ if(NOT_DONE_RE.test(t)||FAILED_RE.test(t)||ORDER_RE.test(t))return null;
+ if(/\b(?:ayer|antier|anteayer|lunes|martes|miercoles|jueves|viernes|sabado|domingo|pasada|pasado|horas?|tarifa)\b/.test(t))return null;
+ const a=amount(t);if(Number.isFinite(a)&&a>0&&cents(a)!==cents(done.amount))return null;
+ // "no no fue cash no por zelle": el "no" del principio es de corrección cuando lo negado después es el método anotado
+ const sinNo=t.replace(/^(?:no[ ,]+)+/,''),negado=[...sinNo.matchAll(NEG_METHOD_RE)].map(m=>methodDetail(m[0].replace(/^(?:no|y no|en vez de|en lugar de|instead of)\s+/,''),{fuzzy:true}).method);
+ const base=sinNo!==t&&negado.includes(done.method)?sinNo:t;
+ const d=methodDetail(base.replace(NEG_METHOD_RE,' '),{fuzzy:true});
+ if(!d.method||d.method==='ambiguous'||d.method==='otro'&&!d.label)return null;
+ if(d.method===done.method&&(d.label||'')===(done.methodLabel||''))return null;
+ return {method:d.method,methodLabel:d.label};
+}
+// (21-nov, Seguimiento 2) "no espera ese adelanto de ayer fue de 120 no de 100": un pago de OTRO dia. No se toca desde el chat:
+// la app busca ese pago y lo explica. {back:dias atras|null (dia de la semana), weekday, amount, from, kind}
+const WEEKDAY=['domingo','lunes','martes','miercoles','jueves','viernes','sabado'];
+function otherDayCorrection(text){
+ const raw=String(text||'');if(/[?¿]/.test(raw))return null;
+ const t=canon(norm(raw)).replace(/\$\s*/g,'').replace(/[.!,;:]+/g,' ').replace(/\s+/g,' ').trim();
+ if(!t||t.split(' ').length>20||!CORR_CUE.test(t))return null;
+ const m=/\b(ayer|antier|anteayer|antes de ayer|(?:el )?(?:domingo|lunes|martes|miercoles|jueves|viernes|sabado)(?: pasado)?)\b/.exec(t);if(!m)return null;
+ if(!/\b(?:adelanto|pago|abono|cheque|zelle|efectivo|cash)\b/.test(t)||NOT_DONE_RE.test(t)||FAILED_RE.test(t)||ORDER_RE.test(t))return null;
+ if(/\b(?:horas?|hrs?|tarifa|la hora|por hora)\b/.test(t))return null;
+ const nums=[...t.matchAll(/(?:^|\s)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?=\s|$)/g)].map(x=>({v:Number(x[1].replace(/,/g,'')+(x[2]?'.'+x[2]:'')),i:x.index}));
+ if(!nums.length||nums.length>2)return null;
+ let amt=nums[0].v,from=null;
+ if(nums.length===2){const marked=nums.map(n=>/(?:^|\s)(?:no|no de|y no|y no de|no eran|no son|no era|no fue|en vez de|en lugar de)$/.test(t.slice(0,n.i).trim()));
+  if(marked[0]===marked[1])return null;from=nums[marked[0]?0:1].v;amt=nums[marked[0]?1:0].v;}
+ const w=m[1].replace(/^el /,'').replace(/ pasado$/,'');
+ return {back:w==='ayer'?1:/^(?:antier|anteayer|antes de ayer)$/.test(w)?2:null,weekday:WEEKDAY.indexOf(w),amount:amt,from,kind:/\badelanto\b/.test(t)?'adelanto':/\bpago\b/.test(t)?'pago':''};
+}
+// (21-nov, Seguimiento 2) "melquiades pidio algo", "que me pidio wilmer", "wilmer pidio un adelanto": sus peticiones pendientes
+function requestQuery(text){
+ const t=norm(text).replace(/[.!,;:]+/g,' ').replace(/\s+/g,' ').trim();
+ if(!t||t.split(' ').length>8)return false;
+ return /^(?:(?:y|oye|lumi) )?(?:que (?:me |nos )?(?:pidio|pide|anda pidiendo|esta pidiendo) [a-z]|(?:y )?[a-z][a-z'-]+(?: [a-z][a-z'-]+)? (?:me |nos )?(?:pidio|pide|anda pidiendo|esta pidiendo)(?: algo| un adelanto| adelanto| un pago| dinero| lana| feria)?$)/.test(t);
+}
+// (21-nov, Seguimiento 2) "dile que ya le mande los 150 por cel" justo despues de anotarlo: el aviso ya salio con el pago.
+function noticeRepeat(text,done){
+ if(!done)return false;
+ const t=canon(norm(text)).replace(/[.!,;:]+/g,' ').replace(/\s+/g,' ').trim();
+ if(!/^(?:y )?(?:dile|digale|avisale|avisele|mandale (?:un )?(?:mensaje|aviso|texto)|escribele|hazle saber|let him know|tell him)\b/.test(t))return false;
+ if(!/\b(?:ya (?:se )?(?:lo |los |la |las )?(?:le )?(?:mande|envie|pague|di|deposite|transferi|pase)|(?:su|el|tu) (?:pago|adelanto|dinero|zelle)|(?:sent|paid))\b/.test(t))return false;
+ if(/[?¿]/.test(String(text||''))||/\b(?:manana|luego|despues|el lunes|el viernes|tomorrow)\b/.test(t))return false;
+ const a=amount(t);return !(Number.isFinite(a)&&a>0)||cents(a)===cents(done.amount);
 }
 function queryContinuation(text,context){
  if(!context||!context.stage||!context.key)return null;
@@ -79870,7 +79931,7 @@ function honestNotWritten(pendingOrder){
  const ask=pendingOrder?missingAsk(pendingOrder):'';
  return 'Todavía no lo anoté: no hay ningún pago guardado.'+(ask?' '+ask:' Dime a quién, cuánto y cómo se lo diste (cheque, Zelle o efectivo) y lo anoto.');
 }
-const api={choiceText,pickChoice,correction,paymentReport,looksLikePayment,findPeople,toPeople,otherRoute,methodDetail,moneyContext,recipient,place,noticeMoney,noticeText,norm,money,cents,method,amount,reference,intent,resolve,queryContinuation,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit,closeDecision,closeText,shortDate,closeIdFromHex,CLOSE_SEED,ordersWrite,answerPending,missingAsk,bareConfirm,falseWriteClaim,honestNotWritten,okMethod,askMethod,soundOf};
+const api={retracted,methodCorrection,otherDayCorrection,requestQuery,noticeRepeat,choiceText,pickChoice,correction,paymentReport,looksLikePayment,findPeople,toPeople,otherRoute,methodDetail,moneyContext,recipient,place,noticeMoney,noticeText,norm,money,cents,method,amount,reference,intent,resolve,queryContinuation,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit,closeDecision,closeText,shortDate,closeIdFromHex,CLOSE_SEED,ordersWrite,answerPending,missingAsk,bareConfirm,falseWriteClaim,honestNotWritten,okMethod,askMethod,soundOf};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiPaymentFollowup=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
@@ -80097,7 +80158,9 @@ async function lumiPayPrepare(snapshot,order,owner){
  // (21-nov) dos que se llaman igual: al servidor va el nombre completo (el token igual se comprueba por persona_id)
  const quien=order.homonym&&snapshot.person.fullName?snapshot.person.fullName:snapshot.person.name;
  const prompt='Registra un '+order.kind+' de $'+order.amount.toFixed(2)+' a '+quien+' por '+(order.method==='otro'?'otro medio ('+order.methodLabel+')':order.method)+' con fecha '+flow.date+'. Nota: '+note+'. Solo esa persona; no hagas una lista.';
- const r=await asLlamar({texto:prompt,historial:[],sandbox:false,area:null});lumiPayGuard(owner);
+ // (21-nov) pago_directo: la función nueva firma el token con estos datos sin pasar por el modelo; una función vieja lo ignora y usa la frase de siempre
+ const directo={persona_id:snapshot.person.id,clase:order.kind,monto:Math.round(order.amount*100)/100,metodo:order.method,metodo_etiqueta:order.method==='otro'?String(order.methodLabel||''):'',fecha:flow.date,nota:note};
+ const r=await asLlamar({texto:prompt,pago_directo:directo,historial:[],sandbox:false,area:null});lumiPayGuard(owner);
  const card=r.json?.confirmacion;if(!r.ok||!r.json?.ok||!card)throw Error(r.json?.texto||'No pude preparar el registro. No cambié ningún pago.');
  Object.assign(flow,P.issuedAction(card,flow));flow.token=card.token;
  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(flow.company+'|'+flow.person.key+'|'+flow.fingerprint));flow.claimKey='lumi_payment_claim_'+Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
@@ -80241,16 +80304,78 @@ async function lumiPayCorrectDone(done,corr,owner){
 }
 // (21-nov-2026) "ya se lo envié por cel, anótalo" sin nombre ni monto: si hay UNA petición de pago/adelanto pendiente (o una de
 // la persona de la que se hablaba hace poco), es esa: su persona, su monto y su clase. Varias: se pregunta cuál. Ninguna: null.
-async function lumiPayRequestFor(owner,people,context){
+async function lumiPayRequestFor(owner,people,context,amount){
  lumiPayGuard(owner);
  const rows=await lumiBasicGet('/rest/v1/mensajes?select=id,de_user_id,de_casual_id,de_nombre,peticion,monto,estado,created_at&company_id=eq.'+encodeURIComponent(SES.company_id)+'&tipo=eq.peticion&peticion=in.(pago,adelanto)&borrado_at=is.null&or=(estado.is.null,estado.in.(pendiente,en_espera,no_recibida))&order=created_at.desc&limit=20',owner);
  lumiPayGuard(owner);
  const list=rows.map(m=>{const key=m.de_user_id?'c:'+m.de_user_id:m.de_casual_id?'t:'+m.de_casual_id:'';const person=people.find(p=>p.key===key&&p.active!==false);return person&&Number(m.monto)>0?{person,amount:Number(m.monto),kind:m.peticion==='adelanto'?'adelanto':'pago',id:m.id}:null;}).filter(Boolean);
  const recent=context&&context.key&&Date.now()-(context.at||0)<900000?context.key:'';
+ // (21-nov, Seguimiento 2) con monto ("ya se lo envié por cel los 150 anótalo", "dale los 50 cash anótalo"): la petición de ESE monto.
+ // La de la persona de la que se hablaba; si de ella no hay, la única de ese monto, salvo que se estuviera hablando de otra persona.
+ if(Number.isFinite(amount)&&amount>0){const P=lumiPayCore(),same=list.filter(x=>P.cents(x.amount)===P.cents(amount));
+  if(recent){const mine=same.filter(x=>x.person.key===recent);if(mine.length===1)return mine[0];if(context.stage!=='record')return null;}
+  if(same.length===1)return same[0];
+  if(same.length>1)return {ask:'Hay '+same.length+' peticiones de '+P.money(amount)+': '+same.slice(0,4).map(x=>x.person.name+' ('+x.kind+')').join(', ')+'. ¿A quién se lo mandaste?'};
+  return null;}
  if(recent){const mine=list.filter(x=>x.person.key===recent);return mine.length===1?mine[0]:null;}
  if(list.length===1)return list[0];
  if(list.length>1)return {ask:'Hay '+list.length+' peticiones pendientes: '+list.slice(0,4).map(x=>x.person.name+' '+lumiPayCore().money(x.amount)+' ('+x.kind+')').join(', ')+'. ¿A quién y cuánto le mandaste?'};
  return null;
+}
+// (21-nov, Seguimiento 2) "no no, fue cash, no por cel" justo después de anotarlo: se corrige el MÉTODO de ese pago (PATCH
+// condicionado al método y monto de antes), se lee de vuelta y solo entonces dice "Corregí". Cheque/Zelle/efectivo; otro en Pagos.
+const LUMI_PAY_METODO={zelle:'por Zelle',efectivo:'en efectivo',cheque:'con cheque',otro:'por otro medio'};
+async function lumiPayCorrectDoneMethod(done,mc,owner){
+ const P=lumiPayCore();lumiPayGuard(owner);
+ if(done.closed)return 'No lo corregí: ese pago ya cerró sus horas. Corrígelo en Pagos para que el cierre cuadre.';
+ if(mc.method==='otro'||done.method==='otro')return 'No lo corregí: cambiar a otro medio (Cash App, Venmo) se hace en Pagos.';
+ const table=String(done.person||'').startsWith('t:')?'casual_payments':'crew_payments';
+ const route='/rest/v1/'+table+'?company_id=eq.'+encodeURIComponent(SES.company_id)+'&id=eq.'+encodeURIComponent(done.id);
+ const x=(await lumiBasicGet(route+'&select=*',owner))[0];lumiPayGuard(owner);
+ if(!x)return 'No lo corregí: no encontré ese pago. Revísalo en Pagos.';
+ if(x.settlement||P.cents(x.amount)!==P.cents(done.amount)||x.metodo!==done.method)return 'No lo corregí: ese pago ya no es el que anoté. Revísalo en Pagos.';
+ if(x.accepted===true||x.accepted===false)return 'No lo corregí: '+done.name+' ya contestó ese pago. Corrígelo en Pagos.';
+ let r;try{r=await authFetch(route+'&metodo=eq.'+encodeURIComponent(String(x.metodo))+'&amount=eq.'+encodeURIComponent(String(x.amount)),{method:'PATCH',headers:{...cloudHeaders(),Prefer:'return=representation'},body:JSON.stringify({metodo:mc.method}),signal:AbortSignal.timeout(15000)});}catch(e){r=null;}
+ lumiPayGuard(owner);
+ const back=(await lumiBasicGet(route+'&select=id,amount,metodo',owner))[0];lumiPayGuard(owner);
+ if(!back||back.metodo!==mc.method)return (r&&r.ok?'No puedo decir que quedó corregido: al leerlo de vuelta sigue ':'No lo corregí: sigue ')+(back?(LUMI_PAY_METODO[back.metodo]||back.metodo):'sin registro')+'. Revísalo en Pagos.';
+ const antes=done.method;LUMI_PAY_DONE={...done,method:mc.method,methodLabel:'',at:Date.now()};
+ return 'Corregí el pago de '+done.name+': ahora es '+P.money(done.amount)+' '+LUMI_PAY_METODO[mc.method]+' (antes '+(LUMI_PAY_METODO[antes]||antes)+').'+(done.noticed?' El aviso que le mandé decía '+(LUMI_PAY_METODO[antes]||antes)+'.':'');
+}
+// (21-nov, Seguimiento 2) "no espera ese adelanto de ayer fue de 120 no de 100": un pago de OTRO día no se cambia desde el chat
+// (ya cuenta en su saldo y quizá en un cierre). Se busca y se explica claro; nada se escribe.
+async function lumiPayOtherDay(owner,od,texto){
+ const P=lumiPayCore(),people=await lumiPayPeople(owner),act=people.filter(p=>p.active!==false);lumiPayGuard(owner);
+ const named=P.findPeople(texto,act);if(named.length>1)return '¿De quién es ese '+(od.kind||'pago')+'? No cambié nada.';
+ const d=new Date();if(od.back)d.setDate(d.getDate()-od.back);else if(od.weekday>=0){do{d.setDate(d.getDate()-1);}while(d.getDay()!==od.weekday);}
+ const day=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+ const dias=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'],cuando=od.back===1?'de ayer':od.back===2?'de antier':'del '+dias[d.getDay()];
+ const q='&company_id=eq.'+encodeURIComponent(SES.company_id);
+ const [crew,cas]=await Promise.all([lumiBasicAll('/rest/v1/crew_payments?select=*'+q,owner),lumiBasicAll('/rest/v1/casual_payments?select=*'+q,owner)]);
+ lumiPayGuard(owner);
+ let rows=(crew||[]).map(x=>({...x,key:'c:'+x.user_id})).concat((cas||[]).map(x=>({...x,key:'t:'+x.casual_worker_id}))).filter(x=>lumiPayDia(x)===day&&!x.settlement&&Number(x.amount)>0&&(!od.kind||x.kind===od.kind)&&(od.from===null||P.cents(x.amount)===P.cents(od.from)));
+ if(named.length===1)rows=rows.filter(x=>x.key===named[0].key);
+ else{let ctx=null;try{ctx=await lumiPayContext(owner);}catch(e){ctx=null;}lumiPayGuard(owner);if(ctx&&ctx.key&&Date.now()-(ctx.at||0)<900000&&rows.some(x=>x.key===ctx.key))rows=rows.filter(x=>x.key===ctx.key);}
+ const que=od.kind==='adelanto'?'un adelanto':'un pago';
+ if(!rows.length)return 'No encontré '+que+(od.from!==null?' de '+P.money(od.from):'')+' '+cuando+(named.length?' de '+named[0].name:'')+'. No cambié nada.';
+ const nameOf=x=>(people.find(p=>p.key===x.key)||{}).name||'esa persona';
+ if(rows.length>1)return 'Hay '+rows.length+' '+(od.kind==='adelanto'?'adelantos':'pagos')+' '+cuando+(od.from!==null?' de '+P.money(od.from):'')+': '+rows.slice(0,4).map(nameOf).join(', ')+'. ¿De quién es? No cambié nada.';
+ const x=rows[0],name=nameOf(x);
+ return (x.kind==='adelanto'?'El adelanto ':'El pago ')+cuando+' de '+name+' fue de '+P.money(x.amount)+' '+(LUMI_PAY_METODO[x.metodo]||'')+'. Es de otro día y ya cuenta en su saldo, así que no lo cambié desde aquí. '+(od.amount&&P.cents(od.amount)!==P.cents(x.amount)?'Si fue de '+P.money(od.amount)+', corrígelo':'Corrígelo')+' en Pagos › '+(x.key.startsWith('c:')?'Crew':'Temporales')+' › '+name+' para que su cuenta y su aviso cuadren.';
+}
+// (21-nov, Seguimiento 2) "melquiades pidió algo", "qué me pidió Wilmer": sus peticiones pendientes de Mensajes (solo leer)
+async function lumiPayRequestsOf(owner,texto){
+ const P=lumiPayCore(),roster=await lumiPayRoster(owner),f=P.findPeople(texto,roster.filter(p=>p.active!==false));
+ if(f.length!==1)return null;
+ const person=roster.find(p=>p.key===f[0].key)||f[0];if(!person.id)return null;
+ lumiPayGuard(owner);
+ const rows=await lumiBasicGet('/rest/v1/mensajes?select=id,peticion,monto,estado,texto,created_at&company_id=eq.'+encodeURIComponent(SES.company_id)+'&tipo=eq.peticion&'+(person.kind==='crew'?'de_user_id':'de_casual_id')+'=eq.'+encodeURIComponent(person.id)+'&borrado_at=is.null&or=(estado.is.null,estado.in.(pendiente,en_espera,no_recibida))&order=created_at.desc&limit=5',owner);
+ lumiPayGuard(owner);
+ if(!rows.length)return {person,text:'No veo ninguna petición pendiente de '+person.name+' en Mensajes.'};
+ const one=x=>(x.peticion==='adelanto'?'un adelanto':x.peticion==='pago'?'su pago':'«'+String(x.peticion||'algo')+'»')+(Number(x.monto)>0?' de '+P.money(Number(x.monto)):'');
+ const r0=rows[0],dice=String(r0.texto||'').replace(/[\r\n<>]/g,' ').trim().slice(0,120);
+ if(['pago','adelanto'].includes(r0.peticion)&&Number(r0.monto)>0)await lumiPayRemember(owner,person,{action:'info',kind:r0.peticion,amount:Number(r0.monto),method:''});
+ return {person,text:person.name+' te pidió '+rows.map(one).join(' y ')+(rows.length>1?' (pendientes).':' (pendiente).')+(dice?' Dice: «'+dice+'».':'')};
 }
 async function lumiPayReconcile(owner){
  const last=await lumiPaySetting(owner,'lumi_payment_last_'+SES.user_id);
@@ -80280,6 +80405,16 @@ async function asPaymentFollowup(texto){
  // pasa a intent() igual que el examen se la pasa a paymentReport(text,{roster}).
  let roster=null;if(owner&&P.looksLikePayment&&P.looksLikePayment(texto)){try{roster=await lumiPayRoster(owner);}catch(e){roster=null;}}
  let order=P.intent(texto,roster?{people:roster}:{}),continuationContext=null;
+ // (21-nov, Seguimiento 2) "dile que ya le mandé los 150": el aviso salió con el pago recién anotado; no se manda otro igual
+ {const d=LUMI_PAY_DONE?.owner===owner&&Date.now()-LUMI_PAY_DONE.at<600000?LUMI_PAY_DONE:null;
+  if(d&&d.noticed&&P.noticeRepeat&&P.noticeRepeat(texto,d)){let ro=roster;if(!ro){try{ro=await lumiPayRoster(owner);}catch(e){ro=null;}}
+   if(ro&&P.findPeople(texto,ro.filter(p=>p.active!==false)).every(p=>p.key===d.person)){asPararOido();asCallar();asTranscribir(texto);lumiPaySay('Ya se lo avisé a '+d.name+' por su chat privado de Workspace cuando lo anoté. No le mandé otro mensaje.');return true;}}}
+ // (21-nov, Seguimiento 2) "le iba a dar 60 a cirilo pero mejor no, olvídalo": se retiró. No se anota, no se pregunta el método.
+ {const pend=LUMI_PAY_PENDING?.owner===owner&&Date.now()-LUMI_PAY_PENDING.at<300000;
+  if(P.retracted&&!AS.conf&&P.retracted(texto)&&(pend||P.looksLikePayment(texto))){asPararOido();asCallar();asTranscribir(texto);LUMI_PAY_PENDING=null;lumiPaySay('Está bien, no anoté nada.');return true;}}
+ // (21-nov, Seguimiento 2) "melquiades pidió algo": sus peticiones pendientes (y queda como la persona de la plática)
+ if(owner&&P.requestQuery&&P.requestQuery(texto)){let rq=null;try{rq=await lumiPayRequestsOf(owner,texto);}catch(e){rq=null;}
+  if(rq){asPararOido();asCallar();asTranscribir(texto);lumiPaySay(rq.text);return true;}}
  const route=lumiCurrentMessageContext(owner),offered=route?.choices||[route].filter(Boolean);
  const onlyNotices=offered.length>0&&offered.every(r=>r.source==='notice'&&!r.reviewedAt);
  const selection=LUMI_PAY_SELECTION?.owner===owner&&Date.now()-LUMI_PAY_SELECTION.at<180000&&(onlyNotices||LUMI_PAY_SELECTION.routeStamp===lumiPayRouteStamp(route))?LUMI_PAY_SELECTION:null;
@@ -80302,8 +80437,17 @@ async function asPaymentFollowup(texto){
  if(!order&&owner&&/^(?:ya |i |lo |se lo |y |ahora |and |now |su |el nombre|el numero|nombre|numero|telefono|correo|saldo|full name|phone number|his |her |no ese|no era|no es|me referia|cuanto le toca|cuanto queda|how much)/.test(P.norm(texto))){continuationContext=await lumiPayContext(owner);order=P.continuation(texto,continuationContext)||P.queryContinuation(texto,continuationContext);}
  if(/^(?:revisa ese pago|verifica ese pago|comprueba ese pago|revisa si quedo registrado|verifica si quedo registrado|check that payment|verify that payment|did that payment go through)[.!? ]*$/.test(P.norm(texto))){asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;try{lumiPayGuard(owner);const text=await lumiPayReconcile(owner);lumiPayGuard(owner);lumiPaySay(text);}catch(e){if(owner===lumiPayOwner()||!owner)lumiPaySay(e.message);}finally{AS.enviando=false;}return true;}
  const pending=LUMI_PAY_PENDING?.owner===owner&&Date.now()-LUMI_PAY_PENDING.at<300000?LUMI_PAY_PENDING:null;
- if(pending){const corrected=P.amendment(texto,pending.order);if(corrected)order=corrected;
+ // (21-nov, Seguimiento 2) una frase que nombra a OTRA persona no corrige el pago pendiente de esta
+ const otraPersona=pending&&roster?P.findPeople(texto,roster.filter(p=>p.active!==false)).some(p=>p.key!==pending.person.key):false;
+ if(pending&&!otraPersona){const corrected=P.amendment(texto,pending.order);if(corrected)order=corrected;
   else if(P.correction&&!(order&&order.action==='record'&&Number.isFinite(order.amount)&&order.amount>0)){const c=P.correction(texto,{amount:Number.isFinite(pending.order.amount)&&pending.order.amount>0?pending.order.amount:0.01});if(c)order={...pending.order,action:'record',amount:c.amount};}}
+ // (21-nov, Seguimiento 2) un pago de OTRO día ("el adelanto de ayer fue de 120 no de 100"): se explica, no se cambia
+ if(!pending&&P.otherDayCorrection){const od=P.otherDayCorrection(texto);
+  if(od){asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;
+   try{lumiPayGuard(owner);const dicho=await lumiPayOtherDay(owner,od,texto);lumiPayGuard(owner);lumiPaySay(dicho);}
+   catch(e){if(owner===lumiPayOwner()||!owner)lumiPaySay('No pude revisar ese pago: '+String(e&&e.message||'error')+' No cambié nada.');}
+   finally{AS.enviando=false;}
+   return true;}}
  // (21-nov) "no espera son 250" DESPUÉS de anotar: se corrige ese pago, no se anota otro (10 min, misma persona)
  const lastDone=!pending&&LUMI_PAY_DONE?.owner===owner&&Date.now()-LUMI_PAY_DONE.at<600000?LUMI_PAY_DONE:null;
  if(lastDone&&P.correction){const c=P.correction(texto,{amount:lastDone.amount});
@@ -80314,6 +80458,13 @@ async function asPaymentFollowup(texto){
    if(wrong&&otros2.every(p=>p.key===lastDone.person)){asPararOido();asCallar();asTranscribir(texto);lumiPaySay('El último pago de '+lastDone.name+' fue de '+P.money(lastDone.amount)+', no de '+P.money(wrong)+'. No cambié nada.');return true;}}
   if(c&&otros.every(p=>p.key===lastDone.person)){asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;
    try{lumiPayGuard(owner);const dicho=await lumiPayCorrectDone(lastDone,c,owner);lumiPayGuard(owner);lumiPaySay(dicho);}
+   catch(e){if(owner===lumiPayOwner()||!owner)lumiPaySay('No sé si quedó corregido: '+String(e&&e.message||'error')+' Revísalo en Pagos antes de repetirlo.');}
+   finally{AS.enviando=false;}
+   return true;}}
+ // (21-nov, Seguimiento 2) "no no, fue cash no por cel" DESPUÉS de anotar: el método de ese pago (misma persona, 10 min)
+ if(lastDone&&P.methodCorrection){const mc=P.methodCorrection(texto,lastDone);
+  if(mc&&(!roster||P.findPeople(texto,roster.filter(p=>p.active!==false)).every(p=>p.key===lastDone.person))){asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;
+   try{lumiPayGuard(owner);const dicho=await lumiPayCorrectDoneMethod(lastDone,mc,owner);lumiPayGuard(owner);lumiPaySay(dicho);}
    catch(e){if(owner===lumiPayOwner()||!owner)lumiPaySay('No sé si quedó corregido: '+String(e&&e.message||'error')+' Revísalo en Pagos antes de repetirlo.');}
    finally{AS.enviando=false;}
    return true;}}
@@ -80340,8 +80491,10 @@ async function asPaymentFollowup(texto){
   if(order.action==='not_done'){LUMI_PAY_PENDING=null;lumiPaySay('Entendido: todavía no se pagó. El saldo y la petición siguen igual.');return true;}
   const people=await lumiPayPeople(owner),context=continuationContext||await lumiPayContext(owner);
   // (21-nov) "ya se lo envié por cel, anótalo" sin nombre ni monto: la petición pendiente (una sola, o la de la persona de hace poco)
-  if(!picked&&!pending&&!continuationContext&&order.ordered&&!order.contextual&&order.action==='record'&&!(Number.isFinite(order.amount)&&order.amount>0)&&!P.findPeople(order.sentence||texto,people.filter(p=>p.active!==false)).length){
-   const req=await lumiPayRequestFor(owner,people,context);
+  // (21-nov, Seguimiento 2) también con monto y sin nombre ("ya se lo envié por cel los 150 anótalo"): la petición de ese monto
+  if(!picked&&!pending&&!continuationContext&&order.ordered&&!order.contextual&&order.action==='record'&&!P.findPeople(order.sentence||texto,people.filter(p=>p.active!==false)).length){
+   const conMonto=Number.isFinite(order.amount)&&order.amount>0;
+   const req=await lumiPayRequestFor(owner,people,context,conMonto?order.amount:null);
    if(req&&req.ask){lumiPaySay(req.ask);return true;}
    if(req&&req.person){picked=req.person;order={...order,amount:req.amount,kind:req.kind,fromRequest:true};
     if(!P.okMethod(order)){const d=P.methodDetail(P.norm(texto),{fuzzy:true});if(['cheque','zelle','efectivo'].includes(d.method)){order.method=d.method;order.methodLabel=d.label;order.methodSub=d.sub;}}}
