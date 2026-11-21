@@ -20649,7 +20649,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-20-R507';
+  const APP_BUILD = '2026-11-20-R508';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -80193,6 +80193,285 @@ async function asPaymentFollowup(texto){
 }
 
 // END LUMI PAYMENT FOLLOWUP
+// BEGIN LUMI PAGOS RESUELTOS
+// "¿YA RESOLVISTE ESTO?" (21-nov-2026, pedido del dueño). La revisión diaria de la Mac (pagos-chat-sin-anotar.mjs) le avisa
+// de pagos dichos en el chat que no están anotados. Él los resuelve de muchas formas (cierre en Pagos, un pago que le pidió a
+// Lumi, un pago a otra persona…), así que cada aviso ahora PREGUNTA: "¿Ya resolviste esto?".
+//   - "sí" / "ok" / "ya" / "ya está" / "resuelto" / "ya lo resolví"  -> esos pagos quedan RESUELTOS y no vuelven a avisar.
+//   - "no" / "anótalo"                                               -> Lumi lo anota ella misma (orden del dueño: escribe,
+//                                                                       lee de vuelta y solo entonces dice "Anoté").
+//   - varios en un aviso: "sí a todos", "el de Gerson sí, el de X no", o uno por uno. Si no se entiende: UNA pregunta corta.
+// La resolución se guarda en asistente_ajustes, clave lumi_pagos_resueltos_<uid del dueño> = { resueltos: { <id>: {...} } }
+// (la misma tabla de las novedades, solo del dueño). La web la escribe y la LEE DE VUELTA antes de decir "Listo";
+// la Mac la lee en cada revisión y se salta lo resuelto.
+// Aquí solo hay reglas puras: sin red, sin pantalla. Sin lookbehind (la app acepta iOS 16.0).
+(function(root){
+'use strict';
+const CLAVE_PREFIJO='lumi_pagos_resueltos_',MAX_RESUELTOS=400;
+function clave(uid){return CLAVE_PREFIJO+String(uid||'');}
+function norm(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[¡!¿?"'«»“”()\[\]]/g,' ').replace(/\s+/g,' ').trim();}
+function idsDe(item){return [item&&item.id].concat(item&&Array.isArray(item.ids)?item.ids:[]).filter(Boolean).map(String);}
+function resueltosDe(valor){return valor&&typeof valor==='object'&&valor.resueltos&&typeof valor.resueltos==='object'?valor.resueltos:{};}
+function estaResuelto(valor,item){const r=resueltosDe(valor);return idsDe(item).some(id=>!!r[id]);}
+function pendientes(valor,items){return (items||[]).filter(it=>it&&!estaResuelto(valor,it));}
+// mezcla (no pisa lo que otro aparato ya guardó); se queda con los últimos MAX_RESUELTOS
+function marcar(valor,items,como,extra,ahora){
+ const r={...resueltosDe(valor)},at=new Date(ahora==null?Date.now():ahora).toISOString();
+ for(const it of items||[])for(const id of idsDe(it))r[id]={at,como:String(como||'resuelto'),nombre:String(it.nombre||'').slice(0,80),monto:Number(it.monto)||0,fecha:it.fecha||null,...(extra&&extra[id]?extra[id]:extra&&!Array.isArray(extra)&&extra.todos?extra.todos:{})};
+ const ks=Object.keys(r).sort((a,b)=>String(r[a].at).localeCompare(String(r[b].at)));
+ for(const k of ks.slice(0,Math.max(0,ks.length-MAX_RESUELTOS)))delete r[k];
+ return {...(valor&&typeof valor==='object'?valor:{}),resueltos:r};
+}
+
+// ---------------------------------------------------------------- LAS PALABRAS
+// "sí" dictado sale como "si", "sii", "sí."; "ok" como "okey", "oki"; "ya está" como "ya esta", "ya ta", "yaesta"
+const SI=new Set(['si','sii','sip','simon','ok','okey','oki','okay','oka','ya','yaesta','listo','lista','listos','resuelto','resuelta','resueltos','resueltas','resolvi','resolvio','resolvimos','resolviste','arregle','arreglo','arreglado','arreglados','quedo','correcto','claro','dale','va','sale','yes','yep','yeah','done','hecho','hechos','sipi','afirmativo','exacto','eso','hice']);
+const SI_FUERTE=new Set(['si','sii','sip','simon','ok','okey','oki','okay','oka','ya','yaesta','listo','lista','listos','resuelto','resuelta','resueltos','resueltas','resolvi','resolvio','resolvimos','arregle','arreglado','arreglados','correcto','claro','dale','yes','yep','yeah','done','hecho','hechos','sipi','afirmativo','exacto']);
+const NO=new Set(['no','nop','nel','nope','todavia','aun','falta','pendiente','nada']);
+const ANOTA=new Set(['anotalo','anotala','anotalos','anotalas','anota','anotame','anotamelo','anotamelos','anotale','apuntalo','apuntala','apuntalos','apunta','apuntame','registralo','registrala','registralos','registra','guardalo','guardalos','anotarlo','anotarlos','apuntarlo','registrarlo','anotes']);
+const PLURAL_ANOTA=new Set(['anotalos','anotalas','anotamelos','apuntalos','registralos','guardalos','anotarlos']);
+const RELLENO=new Set(['lo','la','los','las','le','les','se','me','te','ya','esta','ta','eso','esto','ese','esa','esos','esas','todo','por','favor','porfa','plis','please','a','de','del','que','el','tambien','bien','pues','oye','lumi','amiga','mija','gracias','tu','ella','he','has','ha','hemos','resuelvo','resuelto','resolvido','con','eso','asi','si','quedo','queda','quedado','todo','bueno','pero','y','e','mismo','ahorita','hace','rato','pago','pagos','adelanto','adelantos','uno','una','primero','todas','walkie','radio','app','aplicacion','ahi','alli','cuenta','cierre','cerre','cerrado','en','para','mi','su','otra','otro','persona']);
+// "ya le pagué los 40": dice que pagó, no que ya está resuelto en la app -> se pregunta
+const DUDOSO=new Set(['pague','pagamos','pagaste','pagado','di','dimos','mande','mandamos','deje','dejamos','envie','enviamos','entregue']);
+const TODOS=new Set(['todos','todas','ambos','ambas']);
+const ORDINAL={primero:0,primer:0,primera:0,segundo:1,segunda:1,tercero:2,tercer:2,tercera:2,cuarto:3,cuarta:3,quinto:4,quinta:4};
+const RESTO_RE=/\b(?:los demas|las demas|el resto|los otros|las otras|el otro|la otra|los que quedan)\b/;
+function lev(a,b){if(Math.abs(a.length-b.length)>1)return 9;const d=[];for(let i=0;i<=a.length;i++){d[i]=[i];for(let j=1;j<=b.length;j++)d[i][j]=i?Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1)):j;}return d[a.length][b.length];}
+// "Gerson" dictado como "Jerson", "Gerzon": mismo nombre si difiere en una letra (nombres de 5 o más)
+function tokNombre(item){return norm(item&&item.nombre).split(' ').filter(w=>w.length>=3);}
+function mismoNombre(w,n){if(w===n)return true;const s=x=>x.replace(/^j/,'g').replace(/z/g,'s').replace(/v/g,'b').replace(/y/g,'i').replace(/h/g,'');if(s(w)===s(n)&&w.length>=4)return true;return w.length>=5&&n.length>=5&&lev(w,n)<=1;}
+function numeros(t){return (t.match(/\d[\d,]*(?:\.\d+)?/g)||[]).map(x=>Number(x.replace(/,/g,''))).filter(Number.isFinite);}
+
+// a qué pagos de la lista se refiere un pedazo de frase
+function menciona(seg,items){
+ seg=String(seg).replace(/[.,;:|]+/g,' ').replace(/\s+/g,' ').trim();
+ const ws=seg.split(' ').filter(Boolean),out=new Set(),usadas=new Set();
+ items.forEach((it,i)=>{const ns=tokNombre(it);ws.forEach((w,k)=>{if(ns.some(n=>mismoNombre(w,n))){out.add(i);usadas.add(k);}});});
+ // "el de 40", "el de $1,500"
+ const nums=numeros(seg);items.forEach((it,i)=>{if(nums.some(x=>Math.abs(x-Number(it.monto))<=1))out.add(i);});
+ ws.forEach((w,k)=>{if(w in ORDINAL&&ORDINAL[w]<items.length){out.add(ORDINAL[w]);usadas.add(k);}if(w==='ultimo'||w==='ultima'){out.add(items.length-1);usadas.add(k);}});
+ ws.forEach((w,k)=>{if(/^\d/.test(w))usadas.add(k);});
+ return {idx:[...out],usadas};
+}
+// el veredicto de un pedazo: 'si' | 'anotar' | 'duda' | null (no dice nada), y cuántas palabras raras trae
+function veredicto(seg,usadas){
+ seg=String(seg).replace(/[.,;:|]+/g,' ').replace(/\s+/g,' ').trim();
+ const ws=seg.split(' ').filter(Boolean);let si=0,fuerte=0,no=0,anota=0,raras=0,plural=false,resolvi=false,todos=false,dudoso=false;
+ ws.forEach((w,k)=>{if(usadas&&usadas.has(k))return;
+  if(ANOTA.has(w)){anota++;if(PLURAL_ANOTA.has(w))plural=true;return;}
+  if(NO.has(w)){no++;return;}
+  if(TODOS.has(w)){todos=true;return;}
+  if(/^(?:resuelt|resolvi|arregl)/.test(w))resolvi=true;
+  if(DUDOSO.has(w)){dudoso=true;return;}
+  if(SI_FUERTE.has(w)){fuerte++;si++;return;}
+  if(SI.has(w)){si++;return;}
+  if(RELLENO.has(w)||/^\$?\d/.test(w))return;
+  raras++;});
+ // "no lo he resuelto", "aún no lo resuelvo", "todavía no": NO gana aunque diga "resuelto"
+ const negResuelto=no&&/\b(?:no|todavia|aun)\b(?: (?!ya\b)\w+){0,3} (?:resuelt\w*|resuelvo|resolvi\w*|arregl\w*)/.test(seg);
+ let v=null;
+ if(anota&&!resolvi)v='anotar';
+ else if(negResuelto||(no&&!fuerte))v='anotar';
+ else if(dudoso&&!resolvi)v='duda';
+ else if(fuerte&&!no&&!anota)v='si';
+ else if(fuerte||no||anota)v='duda';
+ return {v,raras,plural,todos,palabras:ws.length};
+}
+// La respuesta del dueño. items = los pagos que se le preguntaron (en orden). foco = índice por el que se le preguntó
+// uno por uno (o null). todosPregunta = se le preguntó "¿todos?".
+// Devuelve null (no es respuesta: sigue su camino), {duda:true}, o {si:[i], anotar:[i], resto:[i]}.
+function respuesta(texto,items,{foco=null,todosPregunta=false}={}){
+ const raw=String(texto||'');if(!raw.trim()||!items||!items.length)return null;
+ const t=norm(raw).replace(/\b(?:los|las) (?:dos|tres|cuatro|cinco)\b/g,'todos');if(!t)return null;
+ if(/[?¿]/.test(raw)||/^(?:cuanto|cuando|quien|cual|como|donde|que|por que|porque)\b/.test(t))return null;
+ const n=items.length,todosIdx=items.map((_,i)=>i);
+ const segs=t.replace(/\b(?:pero|y|e|tambien)\b/g,' | ').split(/[|,;.:]+/).map(s=>s.trim()).filter(Boolean);
+ const partes=segs.map(s=>{const m=menciona(s,items),r=RESTO_RE.test(s);return {s,idx:m.idx,resto:r,...veredicto(s,m.usadas)};});
+ const hayMencion=partes.some(p=>p.idx.length||p.resto);
+ // sin nombres: la frase entera es un sí, un no o nada
+ if(!hayMencion){
+  const g=veredicto(t,null),todos=g.todos||partes.some(p=>p.todos);
+  if(!g.v)return null;
+  // una frase con un "ya" y otras palabras ("ya voy para allá") no es la respuesta: sigue su camino
+  if(g.raras>1||g.palabras>12)return null;
+  if(g.v==='duda')return {duda:true};
+  // "¿Los 2 ya están resueltos?" -> "no": se pregunta uno por uno
+  if(todosPregunta&&g.v==='anotar'&&!g.plural&&foco==null)return {unoPorUno:true};
+  const a=foco!=null&&foco<n?[foco]:n===1||todos||(g.v==='si'&&todosPregunta)||(g.v==='anotar'&&g.plural)?todosIdx:null;
+  if(!a)return {duda:true,todos:g.v==='si'};
+  return g.v==='si'?{si:a,anotar:[],resto:todosIdx.filter(i=>!a.includes(i))}:{si:[],anotar:a,resto:todosIdx.filter(i=>!a.includes(i))};
+ }
+ // con nombres pero sin un sí/no/anótalo en ningún lado ("dile a Ramiro que venga"): no es la respuesta
+ if(!partes.some(p=>p.v))return null;
+ // con nombres: cada pedazo con su veredicto; "el de Gerson, sí" -> el veredicto viene en el pedazo siguiente
+ const dec=new Map();let pendiente=null,restoV=null,duda=false;
+ for(const p of partes){
+  if(p.raras>4){duda=true;continue;}
+  if(p.idx.length||p.resto){
+   if(p.v==='duda')duda=true;
+   if(p.v&&p.v!=='duda'){if(p.resto)restoV=p.v;for(const i of p.idx){if(dec.has(i)&&dec.get(i)!==p.v)duda=true;dec.set(i,p.v);}pendiente=null;}
+   else pendiente=p;
+  }else if(p.v){
+   if(p.v==='duda'){duda=true;continue;}
+   if(pendiente){if(pendiente.resto)restoV=p.v;for(const i of pendiente.idx)dec.set(i,p.v);pendiente=null;}
+   else if(p.todos){for(const i of todosIdx)if(!dec.has(i))dec.set(i,p.v);}
+   else duda=true;   // "sí" suelto antes del nombre y sin a quién
+  }
+ }
+ if(pendiente)duda=true;
+ if(restoV)for(const i of todosIdx)if(!dec.has(i))dec.set(i,restoV);
+ if(duda||!dec.size)return {duda:true};
+ const si=[],anotar=[];for(const [i,v] of [...dec.entries()].sort((a,b)=>a[0]-b[0]))(v==='si'?si:anotar).push(i);
+ return {si,anotar,resto:todosIdx.filter(i=>!dec.has(i))};
+}
+
+// ---------------------------------------------------------------- LO QUE ELLA DICE
+const MES=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function diaCorto(f){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(f||''));return m?(+m[3])+'-'+MES[+m[2]-1]:'';}
+function montoTxt(x){const c=Math.round(Number(x)*100);return '$'+(c%100===0?(c/100).toLocaleString('en-US'):(c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}));}
+function primerNombre(it){return String(it&&it.nombre||'').trim().split(/\s+/)[0]||'?';}
+function corto(it){return 'el de '+primerNombre(it)+' ('+montoTxt(it.monto)+(it.fecha?', '+diaCorto(it.fecha):'')+')';}
+function pregunta(items){
+ if(!items||!items.length)return '';
+ if(items.length===1)return '¿Ya resolviste esto? Si ya, dime «sí» y no te lo vuelvo a avisar. Si no, dime «anótalo» y lo anoto yo.';
+ const a=primerNombre(items[0]),b=primerNombre(items[1]);
+ return '¿Ya resolviste esto? Dime «sí a todos», uno por uno («el de '+a+' sí, el de '+b+' no»), o «anótalos» y los anoto yo.';
+}
+function preguntaDuda(items,{todos=false}={}){
+ if(items.length===1)return 'No te entendí. ¿Ya resolviste '+corto(items[0])+'? Dime «sí» o «anótalo».';
+ if(todos)return '¿Los '+items.length+' ya están resueltos?';
+ return 'No te entendí. ¿Ya los resolviste todos? Dime «sí a todos», «anótalos», o uno por uno: «el de '+primerNombre(items[0])+' sí».';
+}
+function preguntaUno(it){return '¿Y '+corto(it)+'? ¿Ya lo resolviste?';}
+function textoResueltos(items){
+ if(!items.length)return '';
+ return 'Listo, lo tomo como resuelto: '+items.map(it=>primerNombre(it)+' '+montoTxt(it.monto)).join(', ')+'. No te '+(items.length===1?'lo':'los')+' vuelvo a avisar.';
+}
+// la orden que se le pasa al flujo de pagos (el MISMO de "anota": escribe directo y lee de vuelta). La fecha va en ISO
+// (lumiPayDate la toma) y el método solo si se sabe; si no, el flujo pregunta "¿cheque, Zelle o efectivo?".
+const METODO={efectivo:'en efectivo',zelle:'por Zelle',cheque:'en cheque'};
+function ordenAnotar(it){
+ const f=/^\d{4}-\d{2}-\d{2}$/.test(String(it.fecha||''))?String(it.fecha):'';
+ return 'Anota el '+(it.tipo==='adelanto'?'adelanto':'pago')+' de '+String(it.nombre||'').trim()+', '+String(Math.round(Number(it.monto)*100)/100)+(it.metodo&&METODO[it.metodo]?' '+METODO[it.metodo]:'')+(f?', del '+f:'');
+}
+// la persona del aviso (llaves de la Mac: u:<perfil> / c:<temporal>) en la lista de pagos de la web (c:<perfil> / t:<temporal>)
+function llaveWeb(it){const m=/^([uc]):(.+)$/.exec(String(it&&it.persona||''));return m?(m[1]==='u'?'c:':'t:')+m[2]:null;}
+
+const api={CLAVE_PREFIJO,clave,norm,idsDe,resueltosDe,estaResuelto,pendientes,marcar,respuesta,pregunta,preguntaDuda,preguntaUno,textoResueltos,ordenAnotar,llaveWeb,montoTxt,diaCorto,primerNombre,corto};
+if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiPagosResueltos=api;
+})(typeof globalThis!=='undefined'?globalThis:this);
+// "¿YA RESOLVISTE ESTO?" EN LA PLÁTICA (21-nov-2026). Va en la web, junto al flujo de pagos (mismo alcance que
+// asPaymentFollowup). Las reglas puras están en pagos-resueltos.js (window.LumiPagosResueltos).
+// 1. lumiPrAviso(): la novedad "pagos-chat:<fecha>" de la Mac trae sus pagos (n.pagos). Se quitan los que ya se
+//    resolvieron (en este u otro aparato) y se arma lo que ella dice, terminando en "¿Ya lo resolviste?".
+// 2. lumiPrPreguntar(): cuando ella YA lo dijo, queda la pregunta abierta en este aparato (15 min).
+// 3. asPagosResueltosTurno(texto): su respuesta. Cualquier otra cosa cierra la pregunta y sigue su camino normal.
+//    "sí" -> guarda, LEE DE VUELTA y solo entonces "Listo, lo tomo como resuelto". "no"/"anótalo" -> lo anota ella con
+//    el MISMO camino de la orden "anota" (sin tarjeta: escribe, lee de vuelta, "Anoté"), y queda resuelto como "anotado".
+let LUMI_PR=null;
+const LUMI_PR_VIGENCIA=15*60000;
+function lumiPrCore(){return typeof window!=='undefined'&&window.LumiPagosResueltos?window.LumiPagosResueltos:(typeof LumiPagosResueltos!=='undefined'?LumiPagosResueltos:null);}
+async function lumiPrLeer(owner){const v=await lumiPaySetting(owner,lumiPrCore().clave(SES.user_id));return v&&typeof v==='object'?v:{};}
+// guarda (mezclando con lo que ya hay) y LEE DE VUELTA: true solo si todos quedaron
+async function lumiPrGuardar(owner,items,como,extra){
+ const R=lumiPrCore(),k=R.clave(SES.user_id);
+ const antes=await lumiPrLeer(owner);
+ await lumiPaySetting(owner,k,R.marcar(antes,items,como,extra));
+ const despues=await lumiPrLeer(owner);
+ return items.every(it=>R.estaResuelto(despues,it));
+}
+async function lumiPrAviso(novedades){
+ const R=lumiPrCore(),owner=lumiPayOwner();if(!R||!owner)return null;
+ const items=[];for(const n of novedades||[])for(const it of (n&&Array.isArray(n.pagos)?n.pagos:[]))if(it&&it.id&&!items.some(x=>x.id===it.id))items.push(it);
+ if(!items.length)return null;
+ let valor={};try{valor=await lumiPrLeer(owner);}catch(e){valor={};}
+ const pend=R.pendientes(valor,items);
+ if(!pend.length)return {vacio:true};
+ const lineas=pend.map(it=>String(it.linea||('El '+R.diaCorto(it.fecha)+' se dijo un pago de '+R.montoTxt(it.monto)+' para '+it.nombre+' que no está anotado.')));
+ const uno=pend.length===1;
+ return {
+  dicho:'Amílcar, '+(uno?lineas[0].replace(/^El /,'el ')+' ¿Ya lo resolviste?':'hay '+pend.length+' pagos dichos en el chat que no están anotados. Ahí te los dejo escritos. ¿Ya los resolviste?'),
+  texto:'PAGOS DICHOS EN EL CHAT QUE NO ESTÁN ANOTADOS:\n'+lineas.map(l=>'• '+l).join('\n')+'\n'+R.pregunta(pend),
+  pagos:pend
+ };
+}
+function lumiPrPreguntar(items){const owner=lumiPayOwner();LUMI_PR=owner&&items&&items.length?{owner,at:Date.now(),items:items.slice(),foco:null,todosPregunta:false,dudas:0,cola:[],esperando:null}:null;}
+// ANOTAR UNO: la orden "anota" de siempre (P.intent + lumiPayPrepare + lumiPayDirect). Si falta el método, pregunta.
+async function lumiPrAnotar(it,owner,ordenLista){
+ const P=lumiPayCore(),R=lumiPrCore(),quien=R.primerNombre(it);
+ try{
+  lumiPayGuard(owner);
+  const people=await lumiPayPeople(owner),key=R.llaveWeb(it),person=people.find(p=>p.key===key);
+  if(!person)return {texto:'No encontré a '+it.nombre+' en la lista de la gente; no anoté su pago.'};
+  const text=R.ordenAnotar(it);
+  let order=ordenLista||P.intent(text,{people});
+  if(!order||order.action!=='record'||!(Number.isFinite(order.amount)&&order.amount>0))return {texto:'No pude armar el pago de '+quien+'; no lo anoté. Dímelo así: «'+text+'».'};
+  order={...order,ordered:true,text:order.text||text};
+  const falta=P.missingAsk(order);
+  if(falta){LUMI_PAY_PENDING={owner,person,order,at:Date.now()};return {texto:'Para anotar '+R.corto(it)+': '+falta,esperando:true,order};}
+  const snapshot=await lumiPaySnapshot(person,order,owner);await lumiPayRemember(owner,person,order);
+  const proposal=await lumiPayPrepare(snapshot,order,owner);lumiPayGuard(owner);
+  if(proposal.error)return {texto:proposal.error,ok:!!proposal.already,como:'ya_anotado'};
+  const antes=LUMI_PAY_DONE,dicho=await lumiPayDirect(proposal.card,owner);lumiPayGuard(owner);
+  const hecho=LUMI_PAY_DONE&&LUMI_PAY_DONE!==antes&&LUMI_PAY_DONE.owner===owner&&LUMI_PAY_DONE.person===person.key&&/^Anoté/.test(dicho)?LUMI_PAY_DONE:null;
+  return {texto:dicho,ok:!!hecho,como:'anotado',id:hecho?hecho.id:null};
+ }catch(e){return {texto:'No anoté el de '+quien+': '+String(e&&e.message||'error')};}
+}
+// lo que sigue: anotar la cola; luego, si quedan pagos sin respuesta, preguntar por el siguiente (uno por uno)
+async function lumiPrSeguir(owner,partes,{preguntar=true}={}){
+ const R=lumiPrCore(),st=LUMI_PR;
+ while(st&&st.cola.length&&!st.esperando){
+  const it=st.cola.shift(),r=await lumiPrAnotar(it,owner,null);partes.push(r.texto);
+  if(r.esperando){st.esperando={it,order:r.order};break;}
+  if(r.ok){let ok=false;try{ok=await lumiPrGuardar(owner,[it],r.como,{todos:{pago_id:r.id||null}});}catch(e){ok=false;}
+   if(!ok)partes.push('(Quedó anotado, pero no pude guardar la marca de resuelto.)');}
+ }
+ if(st&&!st.esperando){if(st.items.length&&preguntar){st.foco=0;st.todosPregunta=false;st.dudas=0;st.at=Date.now();partes.push(R.preguntaUno(st.items[0]));}else if(!st.items.length)LUMI_PR=null;}
+ if(st)st.at=Date.now();
+ lumiPaySay(partes.filter(Boolean).join(' '));
+}
+async function asPagosResueltosTurno(texto){
+ const R=lumiPrCore(),P=lumiPayCore(),st=LUMI_PR;if(!R||!P||!st)return false;
+ const owner=lumiPayOwner();
+ if(!owner||st.owner!==owner||Date.now()-st.at>LUMI_PR_VIGENCIA){LUMI_PR=null;return false;}
+ // contestando "¿cheque, Zelle o efectivo?" del pago que se está anotando
+ if(st.esperando){
+  const e=st.esperando,ans=P.answerPending(texto,e.order);
+  if(!ans||!(Number.isFinite(ans.amount)&&ans.amount>0)||!P.okMethod(ans)){LUMI_PR=null;return false;}   // otra cosa: el flujo de pagos lo ve (su pendiente sigue)
+  st.esperando=null;LUMI_PAY_PENDING=null;
+  asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;
+  const partes=[];
+  try{
+   if(typeof asEstado==='function')asEstado('pensando','Anotando el pago…');
+   const r=await lumiPrAnotar(e.it,owner,ans);partes.push(r.texto);
+   if(r.esperando)st.esperando={it:e.it,order:r.order};
+   else if(r.ok){let ok=false;try{ok=await lumiPrGuardar(owner,[e.it],r.como,{todos:{pago_id:r.id||null}});}catch(x){ok=false;}if(!ok)partes.push('(Quedó anotado, pero no pude guardar que ya está resuelto.)');}
+   await lumiPrSeguir(owner,partes);
+  }finally{AS.enviando=false;}
+  return true;
+ }
+ const r=R.respuesta(texto,st.items,{foco:st.foco,todosPregunta:st.todosPregunta});
+ if(!r){LUMI_PR=null;return false;}
+ asPararOido();asCallar();asTranscribir(texto);
+ if(r.unoPorUno){st.foco=0;st.todosPregunta=false;st.at=Date.now();lumiPaySay(R.preguntaUno(st.items[0]));return true;}
+ if(r.duda){
+  // UNA pregunta corta; si tampoco se entiende, no se marca nada
+  if(st.dudas>=1){LUMI_PR=null;lumiPaySay('No te entendí, así que no marqué nada como resuelto ni anoté nada.');return true;}
+  st.dudas++;st.todosPregunta=!!r.todos&&st.items.length>1;st.at=Date.now();lumiPaySay(R.preguntaDuda(st.items,{todos:st.todosPregunta}));return true;
+ }
+ const si=r.si.map(i=>st.items[i]),anotar=r.anotar.map(i=>st.items[i]),resto=r.resto.map(i=>st.items[i]);
+ const partes=[];AS.enviando=true;
+ try{
+  if(typeof asEstado==='function')asEstado('pensando',si.length?'Guardando…':'Anotando el pago…');
+  st.items=resto;st.foco=null;st.todosPregunta=false;st.dudas=0;st.cola=anotar.slice();st.at=Date.now();
+  if(si.length){let ok=false;try{lumiPayGuard(owner);ok=await lumiPrGuardar(owner,si,'resuelto',{todos:{fuente:'dueño en la plática'}});}catch(e){ok=false;}
+   partes.push(ok?R.textoResueltos(si):'No pude guardar que ya está resuelto; no lo marqué. Inténtalo otra vez en un rato.');
+   if(!ok)st.items=si.concat(st.items);}
+  await lumiPrSeguir(owner,partes,{preguntar:!partes.length||/^Listo/.test(partes[0])});
+ }finally{AS.enviando=false;}
+ return true;
+}
+// END LUMI PAGOS RESUELTOS
 // BEGIN LUMI OFFICE ASKS
 // LUMI OFFICE ASKS (18-nov-2026): cuatro preguntas del manager, solo lectura salvo el mensaje al grupo (con tarjeta).
 // 1) "¿quién me debe?"           -> invoices de clientes sin pagar (amg_invoices + client_payments), recordatorio con su texto.
@@ -82606,6 +82885,7 @@ function lumiIncompleteSpeechReply(text){
     void asDeviceClaim(); // User input chooses the reply device; warming here delayed short replies.
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando&&!AS.conf&&!AS.pregunta&&typeof asPagosResueltosTurno==='function'&&(await asPagosResueltosTurno(texto)))return;   // (21-nov) pagos del chat: "¿Ya resolviste esto?"
     if(!dictando&&asReportesTurno(texto))return;   // (18-nov) reportes al grupo: la pregunta de palabra
     if(!dictando&&!AS.conf&&!AS.pregunta){const incomplete=lumiIncompleteSpeechReply(texto);if(incomplete){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(incomplete);asHablar(incomplete,asSeguirOyendo);return;}}
     // (12-nov-2026) EL OIDO DE OBRA: "leibols", "labels", "lavor logs" -> labor logs; "por cel" -> por
@@ -85402,9 +85682,10 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   function lumiRevisionAvisar(){
     try{
       const a = window.__lumiRevisionAviso; if(!a) return;
+      if(a.pagos && (AS.conf || AS.pregunta)) return;   // (21-nov) la pregunta de pagos no va encima de una tarjeta
       if(!AS.abierto || AS.enviando || !['esperando','escuchando'].includes(AS.estado) || (AS.estado === 'escuchando' && AS.texto && AS.texto.trim()) || Date.now() - (window.__lumiUltimoTurno || 0) < 25000) return;
       window.__lumiRevisionAviso = null;
-      asCallar(); asMostrarRespuesta(a.texto); asHablar(a.dicho, asSeguirOyendo);
+      asCallar(); asMostrarRespuesta(a.texto); if(a.pagos && typeof lumiPrPreguntar === 'function') lumiPrPreguntar(a.pagos); asHablar(a.dicho, asSeguirOyendo);
       if(window.__lumiRevision && window.__lumiRevision.porMandar) void lumiRevisionPrevia(window.__lumiRevision.porMandar);
     }catch(e){}
   }
@@ -85418,6 +85699,16 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       let dichas = []; try{ dichas = JSON.parse(localStorage.getItem('lumi_rev_novedades_dichas') || '[]'); }catch(e){}
       const nuevas = lista.filter(function(n){ return n && n.id && n.texto && !dichas.includes(n.id) && Date.now() - Date.parse(n.at || 0) < 3 * 86400000; }).slice(-5);
       if(!nuevas.length) return;
+      // (21-nov-2026, pedido del dueño) PAGOS DICHOS EN EL CHAT: "¿Ya resolviste esto?". Van solos y con su pregunta; lo que ya
+      // se resolvió (en este u otro aparato) no se dice. Sin sesión de manager en Lumi todavía: se espera a la siguiente vuelta.
+      const pagosN = nuevas.filter(function(n){ return /^pagos-chat:/.test(String(n.id)) && Array.isArray(n.pagos) && n.pagos.length; });
+      if(pagosN.length && typeof lumiPrAviso === 'function'){
+        const pa = await lumiPrAviso(pagosN);
+        if(!pa || window.__lumiRevisionAviso) return;
+        try{ localStorage.setItem('lumi_rev_novedades_dichas', JSON.stringify(dichas.concat(pagosN.map(function(n){ return n.id; })).slice(-200))); }catch(e){}
+        if(!pa.vacio) window.__lumiRevisionAviso = { dicho: pa.dicho, texto: pa.texto, pagos: pa.pagos };
+        return;
+      }
       try{ localStorage.setItem('lumi_rev_novedades_dichas', JSON.stringify(dichas.concat(nuevas.map(function(n){ return n.id; })).slice(-200))); }catch(e){}
       // (16-nov-2026) El ensayo diario de eventuales de la Mac deja aquí su resumen (id "ensayo-rastro:AAAA-MM-DD"): va con su propio título y completo.
       const ensayo = nuevas.filter(function(n){ return /^ensayo-rastro:/.test(String(n.id)); }), otras = nuevas.filter(function(n){ return !/^ensayo-rastro:/.test(String(n.id)); });
