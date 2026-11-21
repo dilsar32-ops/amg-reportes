@@ -149,6 +149,10 @@
     const p=entries[index], result=(msg,extra={})=>({action:'respuesta',msg,state:{...s,id:p.id,active:true},...extra});
     const select=(item,extra={})=>result(item.nombre+'. '+item.nota,{...visual(item),msg:item.nombre+'. '+item.nota+' '+visual(item).msg,state:{...s,active:true,id:item.id,view:'perfil',...extra}});
     if(resume)return select(p);
+    const commands={'abre las fuentes':'fuentes','abre companycam y matterport':'fuentes','lee el label seleccionado':'leer'};
+    const rename=/^cambia el label seleccionado de (.+?) a (.+)$/i.exec(text.trim());
+    if(commands[q]||rename)return result('Conectando con el editor…',{editor:{action:rename?'renombrar':commands[q],project:p.id,model:p.modelo,...(rename?{before:rename[1],after:rename[2]}:{})}});
+
     const rule=privateRule(q,d);if(rule)return result(rule);
     if(/^(?:autoevalua|autoevaluate|juzga|verifica|comprueba|revisa) (?:tu trabajo|la comparacion|si ya quedo|la evidencia)$/.test(q)){
       const a=visual(p);const pendientes=p.visual?.marcas?.filter(m=>m.color==='amarillo').map(m=>m.texto)||[];return result('',{...a,msg:[a.msg,p.nota,...pendientes].join(' ')});
