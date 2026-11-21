@@ -12274,6 +12274,7 @@ html body.rdms-pagos main{overflow-x:hidden;}
 html body.rdms-pagos #personCard, html body.rdms-pagos #casualPersonCard, html body.rdms-pagos #teamCard, html body.rdms-pagos #casualTeamCard{min-width:0; max-width:100%;}
 html body.rdms-pagos #personEntries .entryrow .when, html body.rdms-pagos #casualPersonEntries .entryrow .when{overflow-wrap:anywhere;}
 </style>
+<script defer src="lumi-pickups.js"></script>
 </head>
 <body>
 
@@ -20649,7 +20650,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-21-R509';
+  const APP_BUILD = '2026-11-21-R510';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -82888,6 +82889,51 @@ function lumiIncompleteSpeechReply(text){
     void asDeviceClaim(); // User input chooses the reply device; warming here delayed short replies.
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando && !AS.conf && !AS.pregunta && !AS_GAL.p && !AS_PREV.spec && SES?.role==='manager' && isManager() && (!SES.manager_de||['todo','restauracion'].includes(SES.manager_de)) && window.LumiPickups){
+      const owner=String(SES.company_id)+'/'+String(SES.user_id);
+      const key='lumi.pickups.v1.'+owner, stateKey=key+'.turno';
+      let lote=null, turno=null;
+      try{lote=JSON.parse(localStorage.getItem(key));turno=JSON.parse(sessionStorage.getItem(stateKey));if(!turno && lote){const id=localStorage.getItem(stateKey+'.ultimo');if(lote.perfiles.some(p=>p.id===id))turno={id,active:false,view:'perfil'};}}catch(e){}
+      const decision=LumiPickups.route(texto,lote,turno);
+      if(decision){
+        asPararOido();asCallar();asTranscribir(texto);
+        const reply=msg=>{asMostrarRespuesta(msg);asHablar(msg,asSeguirOyendo);};
+        const old=document.getElementById('lumiPickupEvidence');if(old)old.remove();
+        const host=document.getElementById('asRespuesta');
+        if(decision.action==='importar'){
+          reply('Selecciona el archivo JSON de la lista acordada.');
+          const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.id='lumiPickupEvidence';input.setAttribute('aria-label','Importar lote de pickups');
+          host.after(input);
+          input.onchange=async()=>{
+            try{
+              const file=input.files[0];if(!file)return;
+              const data=LumiPickups.validate(JSON.parse(await file.text()));
+              if(!isManager()||String(SES.company_id)+'/'+String(SES.user_id)!==owner)return;
+              const previous=JSON.parse(localStorage.getItem(key));
+              localStorage.setItem(key,JSON.stringify(data));
+              if(previous?.lote!==data.lote||!data.perfiles.some(p=>p.id===turno?.id)){
+                localStorage.setItem(stateKey+'.ultimo',data.ultimo);
+                sessionStorage.setItem(stateKey,JSON.stringify({id:data.ultimo,active:true,view:'perfil'}));
+              }
+              input.remove();reply('Lista cargada con '+data.perfiles.length+' pickups confirmados. Puedes decir «retoma los pickups».');
+            }catch(e){reply('No pude cargar la lista: '+e.message);}
+          };
+          input.click();return;
+        }
+        if(decision.state){sessionStorage.setItem(stateKey,JSON.stringify(decision.state));localStorage.setItem(stateKey+'.ultimo',decision.state.id);}
+        reply(decision.msg);
+        if(decision.project||decision.url){
+          const block=document.createElement('div');block.id='lumiPickupEvidence';host.after(block);
+          function link(label,url){const a=document.createElement('a');a.textContent=label;a.href=url;a.target='_blank';a.rel='noopener noreferrer';block.append(a,document.createTextNode(' '));}
+          if(decision.image){const img=document.createElement('img');img.src=decision.image;img.alt='Planos comparados de '+decision.project.nombre;img.style.maxWidth='100%';block.appendChild(img);}
+          if(decision.project){link('Ver perfil en CompanyCam','https://app.companycam.com/projects/'+decision.project.id);if(/^[a-zA-Z0-9]{11}$/.test(decision.project.modelo))link('Ver Matterport','https://my.matterport.com/show/?m='+decision.project.modelo);}
+          if(decision.url)link('Ver hoja en CompanyCam',decision.url);
+        }
+        return;
+      }
+      if(turno?.active){sessionStorage.setItem(stateKey,JSON.stringify({...turno,active:false}));document.getElementById('lumiPickupEvidence')?.remove();}
+    }
+
     if(!dictando&&!AS.conf&&!AS.pregunta&&typeof asPagosResueltosTurno==='function'&&(await asPagosResueltosTurno(texto)))return;   // (21-nov) pagos del chat: "¿Ya resolviste esto?"
     if(!dictando&&asReportesTurno(texto))return;   // (18-nov) reportes al grupo: la pregunta de palabra
     if(!dictando&&!AS.conf&&!AS.pregunta){const incomplete=lumiIncompleteSpeechReply(texto);if(incomplete){asPararOido();asCallar();asTranscribir(texto);asMostrarRespuesta(incomplete);asHablar(incomplete,asSeguirOyendo);return;}}
