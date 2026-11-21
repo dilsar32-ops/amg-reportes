@@ -20649,7 +20649,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-20-R506';
+  const APP_BUILD = '2026-11-20-R507';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -34974,7 +34974,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // El plano vigente es el de la nube: se baja solo en la siguiente vuelta. Nada se pierde: la copia nueva sube.
   async function nubeSacarAparte(id, yo, e){
     if(!fpDisco()) return false;
-    const origen = e.enDisco ? await fpLeerPlano(id) : e;
+    const abierto = floorplanId === id && floorplanData;
+    const origen = abierto ? { job: floorplanData.job || e.job || {}, data: fpParaGuardar(floorplanData) } : (e.enDisco ? await fpLeerPlano(id) : e);
     if(!origen || !origen.data) return false;
     const nuevo = 'fp' + Date.now() + Math.floor(Math.random() * 1000);
     const job = origen.job || e.job || {};
@@ -34984,6 +34985,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     lista.unshift({ id: nuevo, at: entrada.at, _v: entrada._v, job, owner: yo, enDisco: true, peso, perdido: false, data: fpResumenDe(entrada.data) });
     if(!fpListSave(lista)) return false;
     if(floorplanId === id) floorplanId = nuevo;
+    try{ nubeCancelar('planos', id); }catch(err){}
     fpDeleteSaved(id, { desdeNube: true });
     return true;
   }
@@ -35007,7 +35009,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // Lo cambio aqui DESPUES de que lo borraran: sigue trabajando en esa casa.
       // (20-nov-2026, Aparte) Lo editado DESPUES del borrado no vuelve a subir con el mismo id (eso revivia
       // el plano borrado y el de la nube no llegaba al telefono): se guarda aparte, con id nuevo.
-      if(lAt > dMs) return sano ? 'aparte' : 'nada';
+      if(lAt > dMs) return sano ? (o.tipo === 'planos' ? 'aparte' : 'subir') : 'nada';
       if(remoto.deleted_reason === 'autor') return o.abierto ? 'nada' : 'borrarLocal';
       return 'nada';                     // lo borro el manager: aqui se queda
     }
@@ -35519,7 +35521,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           const local = e ? { at: e.at, owner: e.owner, perdido: e.perdido, demo: !!(e.data && e.data._demo) } : null;
           const que = nubeDecidir(local, r, { yo, marca,
             abierto: floorplanId === id && (!e || marca !== +e.at),
-            borradoMs: nubeBorradoMs('planos', id, yo) });
+            borradoMs: nubeBorradoMs('planos', id, yo), tipo: 'planos' });
           if(que === 'subir'){
             let entera = e;
             if(floorplanId === id && floorplanData) entera = { id, at: e.at, job: floorplanData.job || e.job || {}, owner: e.owner, data: fpParaGuardar(floorplanData) };
@@ -56604,6 +56606,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       out += `<rect x="1" y="1" width="${svgW-2}" height="${svgH-2}" fill="none" stroke="#dfe4ea" stroke-width="1"/>`;
       out += buildFloorplanRoomContent(room, idx, X, Y, scale);
       (room._subAreas||[]).forEach((sa, si) => {
+        if(sa._quitado) return;
         const sx = X(sa.cx), sy = Y(sa.cy);
         out += `<g class="fp-subarea" data-room-idx="${idx}" data-sub-idx="${si}" style="cursor:pointer;">`
           + `<text x="${sx}" y="${sy-9}" font-size="17" font-weight="700" letter-spacing="0.4" font-family="'IBM Plex Sans',sans-serif" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${esc(sa.name).toUpperCase()}</text>`
