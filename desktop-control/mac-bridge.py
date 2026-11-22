@@ -40,10 +40,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(400)
             data = json.loads(self.rfile.read(length))
             action, name = data['action'], data['app']
-            if action not in ('open','point','click') or not isinstance(name,str) or not 0 < len(name) <= 100:
+            if action not in ('open','point','click','digit') or not isinstance(name,str) or not 0 < len(name) <= 100:
                 return self.reply(400)
             args = [str(EXEC), action, name]
-            if action != 'open':
+            if action == 'digit':
+                digit = data.get('digit')
+                if name != 'Calculadora' or not isinstance(digit,str) or digit not in tuple('0123456789'):
+                    return self.reply(400)
+                args = [str(Path(__file__).with_name('named-key')), digit]
+            elif action != 'open':
                 for key in ('x','y'):
                     if type(data[key]) is not int or abs(data[key]) > 65535:
                         return self.reply(400)
