@@ -94,7 +94,7 @@
     const missing=['companycam','matterport'].filter(k=>!v?.[k]).map(k=>k==='companycam'?'CompanyCam':'Matterport').join(' y ');
     return {project:p,pair:v,msg:'Pendiente de comparación: falta la captura de '+missing+'. Verifica el mismo nivel y las puertas en las fuentes del perfil.'};
   }
-  function renderPair(block,pair){
+  function renderPair(block,pair,overlay=false){
     const el=(tag,text)=>{const e=document.createElement(tag);if(text)e.textContent=text;return e;};
     const area=el('div');area.style.cssText='overflow:auto;max-width:100%;background:#fff;color:#153647;padding:8px';block.append(area);
     const grid=el('div');grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:12px;min-width:560px';area.append(grid);
@@ -109,6 +109,22 @@
         const badge=el('b',String(i+1));badge.style.cssText='position:absolute;top:0;left:0;background:'+palette[m.color]+';color:white;font: bold 13px sans-serif;padding:2px';box.append(badge);
       }
       const zoom=el('button','Ampliar / reducir');zoom.type='button';zoom.onclick=()=>{grid.style.minWidth=grid.style.minWidth==='1400px'?'560px':'1400px';};column.append(zoom);
+    }
+    if(overlay && pair.companycam && pair.matterport){
+      const view=el('div');view.style.cssText='position:relative;height:440px;overflow:hidden;background:white';area.append(el('strong','Superposición · referencias pendientes de verificar'),view);
+      const layers=[];
+      for(const key of ['matterport','companycam']){
+        const img=el('img');img.alt=key;img.src=pair[key].imagen;img.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain';view.append(img);layers.push(img);
+        const label=el('label','Usar captura actual de '+key+' '),input=el('input');input.type='file';input.accept='image/png,image/jpeg,image/webp';label.append(input);area.append(label);
+        input.onchange=()=>{const file=input.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{img.src=reader.result;};reader.readAsDataURL(file);};
+      }
+      const controls={};
+      const update=()=>{const v=k=>Number(controls[k].value);layers[1].style.opacity=v('Opacidad')/100;layers[1].style.transform='translate('+v('Horizontal')+'%, '+v('Vertical')+'%) rotate('+v('Giro')+'deg) scale('+v('Escala')/100+') scaleX('+(flip.checked?-1:1)+')';};
+      const flip=el('input');flip.type='checkbox';const reflection=el('label','Reflejar copia ');reflection.append(flip);area.append(reflection);flip.onchange=update;
+      for(const [name,min,max,value] of [['Opacidad',0,100,45],['Horizontal',-100,100,0],['Vertical',-100,100,0],['Giro',-180,270,0],['Escala',10,300,100]]){
+        const label=el('label',name+' '),input=el('input');label.style.display='block';input.type='range';input.min=min;input.max=max;input.value=value;controls[name]=input;input.oninput=update;label.append(input);area.append(label);
+      }
+      update();
     }
     for(const [i,m] of pair.marcas.entries()){const row=el('p',(i+1)+'. '+m.texto);row.style.cssText='border-left:5px solid '+palette[m.color]+';padding-left:8px';block.append(row);}
   }
@@ -143,6 +159,13 @@
     const resume=patterns.retomar.test(q)||['continuamos con los clientes y aplicando el json y el sql','retoma la auditoria de recogidas','volvamos a los perfiles con retiro','continua con la lista acordada de pickups'].includes(q);
     const lesson=lessons.find(item=>item.preguntas.some(question=>normal(question)===q));
     if(lesson)return {action:'leccion',msg:lesson.accion};
+    const compare=/^(?:abre el comparador|superpon los planos) de (.+)$/.exec(q);
+    if(compare){
+      const matches=(d?.perfiles||[]).filter(item=>normal(item.nombre)===compare[1]||normal(item.nombre).startsWith(compare[1]+' '));
+      if(matches.length!==1)return {action:'respuesta',msg:'Comprueba el lote cargado y el nombre completo del cliente.'};
+      const item=matches[0];
+      return {...visual(item),action:'respuesta',overlay:true,state:{active:true,id:item.id,view:'perfil'},msg:'Comparador de '+item.nombre+'. Fuentes iniciales del lote. Comprueba las capturas actuales y verifica puerta, pasillo y escalera antes de editar.'};
+    }
     if(!resume&&!s?.active)return null;
     if(!d)return resume?{action:'sinLote',msg:'Dime «importa el lote de pickups» para cargar la lista acordada.'}:null;
     const entries=d.perfiles;let index=entries.findIndex(p=>p.id===(s?.id||d.ultimo));if(index<0)index=0;
