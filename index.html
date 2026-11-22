@@ -20684,7 +20684,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-22-R517';
+  const APP_BUILD = '2026-11-22-R518';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -79945,7 +79945,62 @@ function honestNotWritten(pendingOrder){
  const ask=pendingOrder?missingAsk(pendingOrder):'';
  return 'Todavía no lo anoté: no hay ningún pago guardado.'+(ask?' '+ask:' Dime a quién, cuánto y cómo se lo diste (cheque, Zelle o efectivo) y lo anoto.');
 }
-const api={retracted,methodCorrection,otherDayCorrection,requestQuery,noticeRepeat,choiceText,pickChoice,correction,paymentReport,looksLikePayment,findPeople,toPeople,otherRoute,methodDetail,moneyContext,recipient,place,noticeMoney,noticeText,norm,money,cents,method,amount,reference,intent,resolve,queryContinuation,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit,closeDecision,closeText,shortDate,closeIdFromHex,CLOSE_SEED,ordersWrite,answerPending,missingAsk,bareConfirm,falseWriteClaim,honestNotWritten,okMethod,askMethod,soundOf};
+// ================================================================ (22-nov-2026, Seguimiento 4, decisión del dueño) DOS PAGOS EN UNA FRASE
+// «anota que le di 300 a wilmer y 250 a ezequiel»: se anotan LOS DOS, cada uno con su escritura y su lectura de vuelta (la app).
+// Aquí solo se parte la frase: un pedazo por persona, con su monto y su método. Solo con la orden (anota/apunta/registra…), dos o
+// más personas de la lista y ningún veto (pregunta, plan, negación, retiro, corrección). Si algo no cuadra (un nombre sin monto,
+// dos montos para uno, más montos que personas) devuelve {error}: la app no anota NADA y lo dice.
+const MULTI_CADA=/\b(?:a cada uno|a cada una|cada uno|cada una|cada quien|a cada quien|each|apiece|a los dos|a las dos|los dos|las dos)\b/;
+function multiOrder(text,people){
+ const raw=String(text||'');if(!people||!people.length||raw.length>320||/[?¿]/.test(raw))return null;
+ let t=canon(bareSpokenAmounts(spokenAmounts(fixNums(norm(text))))).replace(/[.!;:]+/g,' , ').replace(/\s+/g,' ').trim();
+ if(!ORDER_RE.test(t))return null;
+ if(NOT_DONE_RE.test(t)||FAILED_RE.test(t)||RETRACT_RE.test(t)||CORR_CUE.test(t.replace(/\b(?:son|fue|fueron|era|eran)\b/g,' '))&&/\b(?:no espera|perdon|me equivoque|mejor|corrige|cambia|en vez de|en lugar de)\b/.test(t))return null;
+ if(/\b(?:voy a|vamos a|le voy|les voy|manana|al rato|luego|despues|la otra semana|el (?:lunes|martes|miercoles|jueves|viernes|sabado|domingo) les?)\b/.test(t))return null;
+ const act=people.filter(p=>p&&p.active!==false),all=findPeople(t,act);
+ if(all.length<2)return null;
+ // dos que se llaman igual («anota 100 a fabian») no son dos pagos: sigue el camino de uno solo (pregunta cuál)
+ if(new Set(all.map(p=>norm(p.name).split(' ')[0])).size<2)return null;
+ // los pedazos: "anota que le di 300 a wilmer" | "250 a ezequiel" (corta en coma, y, e, and, tambien, ademas)
+ const segs=t.split(/\s*,\s*|\s+(?:y|e|and|tambien|ademas|mas)\s+/).map(x=>x.trim()).filter(Boolean);
+ const groups=[];let cur=null;
+ for(const s of segs){const f=findPeople(s,act);
+  if(f.length>1)return null;   // un pedazo con dos personas (o dos tocayos): no se parte, sigue el camino de uno solo
+  if(f.length===1){if(cur&&cur.person&&cur.person.key!==f[0].key){groups.push(cur);cur=null;}
+   if(!cur)cur={person:f[0],parts:[]};else if(!cur.person)cur.person=f[0];cur.parts.push(s);}
+  else{if(!cur)cur={person:null,parts:[]};cur.parts.push(s);}}
+ if(cur)groups.push(cur);
+ // un pedazo inicial sin persona ("anota que le di") va con el primero que la tenga; uno final sin persona ("los dos en cash") es de todos
+ for(let i=0;i<groups.length;i++)if(!groups[i].person){if(i+1<groups.length){groups[i+1].parts=groups[i].parts.concat(groups[i+1].parts);groups.splice(i,1);i--;}}
+ let tail=null;if(groups.length&&!groups[groups.length-1].person)tail=groups.pop();
+ if(groups.length<2||groups.some(g=>!g.person)||new Set(groups.map(g=>g.person.key)).size!==groups.length)return {error:'unclear',people:all};
+ const tailText=tail?tail.parts.join(' '):'';
+ const amountOf=s=>{const v=amount(stripPeople(s,act).replace(MULTI_CADA,' '));return Number.isFinite(v)&&v>0?v:v===null?null:NaN;};
+ const cada=MULTI_CADA.test(t);
+ const tailAmt=tailText?amountOf(tailText):null;
+ const mdOf=s=>methodDetail(stripPeople(s,act),{fuzzy:true,done:true});
+ const tailMd=tailText?mdOf(tailText):{method:''};
+ const globalMd=mdOf(t);
+ const kindAll=/\b(?:adelant\w*|advanc\w*|anticip\w*)\b/.test(t)?'adelanto':'pago';
+ const dateW=(/\b(?:ayer|yesterday)\b/.exec(t)||[''])[0];
+ const out=[];
+ for(const g of groups){
+  const s=g.parts.join(' ');let a=amountOf(s);
+  if(a===null&&cada&&Number.isFinite(tailAmt)&&tailAmt>0)a=tailAmt;
+  if(a===null&&cada){const v=amountOf(t);if(Number.isFinite(v)&&v>0)a=v;}
+  if(!(Number.isFinite(a)&&a>0))return {error:'amount',people:groups.map(x=>x.person)};
+  let md=mdOf(s);
+  if(!md.method||md.method==='ambiguous'&&!/\b(?:digo|perdon)\b/.test(s)){md=tailMd.method?tailMd:(globalMd.method&&globalMd.method!=='ambiguous'?globalMd:{method:md.method==='ambiguous'?'ambiguous':'',label:'',sub:''});}
+  const kind=/\b(?:adelant\w*|advanc\w*|anticip\w*)\b/.test(s)?'adelanto':/\b(?:pago|su pago|su semana)\b/.test(s)?'pago':kindAll;
+  const sub=(dateW&&!new RegExp('\\b'+dateW+'\\b').test(s)?dateW+' ':'')+s;
+  out.push({person:g.person,order:{method:md.method||'',methodLabel:md.label||'',methodSub:md.sub||'',amount:a,reference:'',kind,english:false,text:sub,sentence:sub,action:'record',ordered:true,multi:true}});
+ }
+ // más montos que personas ("300 a wilmer 250 y a ezequiel") no se adivinan
+ const nums=(t.replace(/\b\d{1,2}:\d{2}\b/g,' ').match(/\$?\b\d+(?:\.\d{1,2})?\b/g)||[]).length;
+ if(!cada&&nums>out.length)return {error:'amount',people:groups.map(x=>x.person)};
+ return {parts:out};
+}
+const api={multiOrder,retracted,methodCorrection,otherDayCorrection,requestQuery,noticeRepeat,choiceText,pickChoice,correction,paymentReport,looksLikePayment,findPeople,toPeople,otherRoute,methodDetail,moneyContext,recipient,place,noticeMoney,noticeText,norm,money,cents,method,amount,reference,intent,resolve,queryContinuation,continuation,amendment,request,details,review,fingerprint,verifyReceipt,issuedAction,commit,closeDecision,closeText,shortDate,closeIdFromHex,CLOSE_SEED,ordersWrite,answerPending,missingAsk,bareConfirm,falseWriteClaim,honestNotWritten,okMethod,askMethod,soundOf};
 if(typeof module==='object'&&module.exports)module.exports=api;else root.LumiPaymentFollowup=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
 
@@ -80412,12 +80467,71 @@ async function lumiPayRoster(owner){
  if(LUMI_PAY_ROSTER&&LUMI_PAY_ROSTER.owner===owner&&Date.now()-LUMI_PAY_ROSTER.at<60000)return LUMI_PAY_ROSTER.people;
  const people=await lumiPayPeople(owner);LUMI_PAY_ROSTER={owner,at:Date.now(),people};return people;
 }
+// (22-nov-2026, Seguimiento 4, decisión del dueño) DOS PAGOS EN UNA FRASE: «anota que le di 300 a wilmer y 250 a ezequiel» anota
+// LOS DOS. Cada uno pasa por lo mismo que uno solo (lumiPaySnapshot → lumiPayPrepare con su revisión de repetido → lumiPayDirect:
+// reserva, firma, escritura y LECTURA DE VUELTA). «Anoté» solo de los que se leyeron de vuelta; el que falla se dice claro.
+// Si a alguno le falta el método se pregunta UNA vez antes de escribir nada. Sin tarjeta. Nunca dos veces el mismo pago.
+let LUMI_PAY_MULTI=null;
+function lumiPayMultiNombres(list){const n=list.map(x=>x.person.name);return n.length<2?n.join(''):n.slice(0,-1).join(', ')+' y '+n[n.length-1];}
+async function lumiPayMulti(owner,parts){
+ const P=lumiPayCore(),people=await lumiPayPeople(owner);lumiPayGuard(owner);
+ // la persona de la lista de pagos (con su id), no la del roster corto
+ const items=[];
+ for(const x of parts){const r={person:people.find(p=>p.key===x.person.key&&p.active!==false)||null};
+  if(!r.person)return 'No anoté nada: no identifiqué bien a '+x.person.name+'. Dímelo con su nombre completo.';
+  items.push({person:r.person,order:{...x.order}});}
+ if(new Set(items.map(x=>x.person.key)).size!==items.length)return 'No anoté nada: escuché a la misma persona dos veces. Dímelo otra vez, uno por uno.';
+ const sinMetodo=items.filter(x=>!P.okMethod(x.order));
+ if(sinMetodo.length){LUMI_PAY_MULTI={owner,items,at:Date.now()};return 'Todavía no anoté nada. ¿Cómo se '+(sinMetodo.length===items.length?'los diste':'lo diste a '+lumiPayMultiNombres(sinMetodo))+': cheque, Zelle o efectivo?';}
+ LUMI_PAY_MULTI=null;
+ const ok=[],mal=[];
+ for(const x of items){
+  try{
+   const snapshot=await lumiPaySnapshot(x.person,x.order,owner);
+   const proposal=await lumiPayPrepare(snapshot,x.order,owner);lumiPayGuard(owner);
+   if(proposal.error){mal.push({x,why:proposal.already?'ya estaba anotado de hoy; no lo anoté otra vez':String(proposal.error).replace(/\.?\s*$/,'')});continue;}
+   const dicho=await lumiPayDirect(proposal.card,owner);lumiPayGuard(owner);
+   if(/^Anoté /.test(dicho)&&LUMI_PAY_DONE&&LUMI_PAY_DONE.person===x.person.key)ok.push({x,dicho});else mal.push({x,why:String(dicho).replace(/\.?\s*$/,'')});
+  }catch(e){if(owner!==lumiPayOwner())throw e;mal.push({x,why:'No lo anoté: '+String(e&&e.message||'error').replace(/\.?\s*$/,'')});}
+ }
+ // con varios pagos no hay UNO «recién anotado» para corregir: la corrección se hace en Pagos
+ LUMI_PAY_DONE=null;LUMI_PAY_PENDING=null;
+ const mon=x=>P.money(x.order.amount)+' a '+x.person.name;
+ const partes=[];
+ if(ok.length)partes.push('Anoté '+(ok.length===1?mon(ok[0].x):ok.slice(0,-1).map(o=>mon(o.x)).join(', ')+' y '+mon(ok[ok.length-1].x))+'.');
+ for(const m of mal)partes.push('El de '+m.x.person.name+' ('+P.money(m.x.order.amount)+') no: '+m.why.replace(/^No lo anoté: /,'').replace(/^Ya está anotado: /,'ya estaba anotado: ')+'.');
+ for(const o of ok){const resto=String(o.dicho).replace(/^Anoté [^.]*\.\s*/,'').trim();if(resto)partes.push(o.x.person.name+': '+resto);}
+ if(ok.length)asRecordarAccionMac('Anoté '+ok.length+' pagos',partes.join(' '));
+ return partes.join('\n');
+}
 async function asPaymentFollowup(texto){
  const P=lumiPayCore();if(!P)return false;
  const owner=lumiPayOwner();
  // (18-nov R4) la persona sale de la lista de gente: se trae (60 s de cache) solo si la frase huele a dinero, y se le
  // pasa a intent() igual que el examen se la pasa a paymentReport(text,{roster}).
  let roster=null;if(owner&&P.looksLikePayment&&P.looksLikePayment(texto)){try{roster=await lumiPayRoster(owner);}catch(e){roster=null;}}
+ // (22-nov, Seguimiento 4) dos o más pagos con la orden «anota»: todos, uno por uno, leídos de vuelta
+ {const mp=LUMI_PAY_MULTI&&LUMI_PAY_MULTI.owner===owner&&Date.now()-LUMI_PAY_MULTI.at<300000?LUMI_PAY_MULTI:null;
+  if(mp&&P.retracted&&P.retracted(texto)){LUMI_PAY_MULTI=null;asPararOido();asCallar();asTranscribir(texto);lumiPaySay('Está bien, no anoté nada.');return true;}
+  if(mp){const t0=P.norm(texto).replace(/[.!,;:]+/g,' ').replace(/\s+/g,' ').trim(),d=P.methodDetail(t0,{fuzzy:true});
+   if(t0.split(' ').length<=12&&!/[?¿]/.test(texto)&&(['cheque','zelle','efectivo'].includes(d.method)||d.method==='otro'&&d.label)){
+    const parts=mp.items.map(x=>P.okMethod(x.order)?x:{...x,order:{...x.order,method:d.method,methodLabel:d.label,methodSub:d.sub}});
+    asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;LUMI_PAY_MULTI=null;
+    try{lumiPayGuard(owner);const dicho=await lumiPayMulti(owner,parts);lumiPayGuard(owner);lumiPaySay(dicho);}
+    catch(e){if(owner===lumiPayOwner()||!owner)lumiPaySay('No sé si quedaron anotados: '+String(e&&e.message||'error')+' Revísalos en Pagos antes de repetirlo.');}
+    finally{AS.enviando=false;}
+    return true;}
+   LUMI_PAY_MULTI=null;}}
+ if(owner&&P.multiOrder){let ro=roster;if(!ro&&P.ordersWrite&&P.ordersWrite(texto)){try{ro=await lumiPayRoster(owner);}catch(e){ro=null;}}
+  const mo=ro?P.multiOrder(texto,ro.filter(p=>p.active!==false)):null;
+  if(mo&&mo.error){asPararOido();asCallar();asTranscribir(texto);LUMI_PAY_PENDING=null;
+   lumiPaySay('No anoté nada: escuché a '+(mo.people||[]).map(p=>p.name).join(' y ')+', pero no entendí '+(mo.error==='amount'?'cuánto le diste a cada uno':'a quién va cada monto')+'. Dímelo así: «anota 300 a '+((mo.people||[])[0]||{name:'Wilmer'}).name+' y 250 a '+((mo.people||[])[1]||{name:'Ezequiel'}).name+' en efectivo».');return true;}
+  if(mo&&mo.parts&&mo.parts.length>1){asPararOido();asCallar();asTranscribir(texto);AS.enviando=true;
+   if(typeof asEstado==='function')asEstado('pensando','Anotando los pagos…');
+   try{lumiPayGuard(owner);const dicho=await lumiPayMulti(owner,mo.parts);lumiPayGuard(owner);lumiPaySay(dicho);}
+   catch(e){if(owner===lumiPayOwner()||!owner)lumiPaySay('No sé si quedaron anotados: '+String(e&&e.message||'error')+' Revísalos en Pagos antes de repetirlo; no los anoto otra vez.');}
+   finally{AS.enviando=false;}
+   return true;}}
  let order=P.intent(texto,roster?{people:roster}:{}),continuationContext=null;
  // (21-nov, Seguimiento 2) "dile que ya le mandé los 150": el aviso salió con el pago recién anotado; no se manda otro igual
  {const d=LUMI_PAY_DONE?.owner===owner&&Date.now()-LUMI_PAY_DONE.at<600000?LUMI_PAY_DONE:null;
@@ -83151,10 +83265,110 @@ function lumiLaborSendIntent(input) {
 
 
 // (21-nov, Seguimiento 3) GASTOS DE RESTAURACION: leer y decir, nunca cambiar. Ver notas/AVISO_R517_lumi_gastos_horas_tarjetas_2026-11-22.md
+
+// (22-nov-2026, Seguimiento 4, decisión del dueño) «¿QUIÉN TRABAJÓ HOY/AYER?» = LAS HORAS DEL RELOJ aunque haya labor logs ese día.
+// Los labor logs solo si los pide (labor log / reporte / hoja). En vivo, el entendedor de la Mac (lumi_entender) volvía «quien trabajo hoy»
+// en «muestrame los labor logs hoy» y contestaba «No hay ningún labor log ahorita». «y ayer» enseguida (3 min) sigue en el reloj.
+function lumiS4Reloj(texto){
+ const t=String(texto||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[¿?¡!.,;:]/g,' ').replace(/\s+/g,' ').trim();
+ if(!t||/\b(?:labor|labour|label|leibor|leiber|reportes?|hojas?|logs?)\b/.test(t))return false;
+ if(/\b(?:quien|quienes|who)\b.*\b(?:trabaj\w*|vino|vinieron|worked|came|marco|marcaron)\b|\b(?:horas|hours|tiempo)\b/.test(t)){window.__lumiS4Reloj=Date.now();return true;}
+ if(Date.now()-(window.__lumiS4Reloj||0)<180000&&t.split(' ').length<=5&&/^(?:y |and |e )?(?:ayer|hoy|antier|anteayer|antes de ayer|el (?:lunes|martes|miercoles|jueves|viernes|sabado|domingo)|yesterday|today)\b/.test(t)){window.__lumiS4Reloj=Date.now();return true;}
+ return false;
+}
+// (22-nov-2026, Seguimiento 4, decisión del dueño) «YA LE REEMBOLSÉ EL GASTO DE X, ANÓTALO»: con «anota» se marca reembolsado ESE
+// gasto de Restauración aprobado y sin reembolsar, con la MISMA escritura que la pantalla de Gastos (grmDevuelto: reimbursed_at +
+// reimbursed_by, condicionada a que siga aprobado y sin reembolsar), se LEE DE VUELTA y solo entonces dice «Listo, marqué
+// reembolsado…». Sin «anota» solo pregunta «¿Lo marco reembolsado?». Si hay varios de X, pregunta cuál. Nunca crea pagos, nunca
+// aprueba. Lo que espera respuesta («sí», «el de 45», «los dos») vive 3 min en LUMI_GASTO_PEND.
+let LUMI_GASTO_PEND=null;
+function lumiGastoReembolsoOrden(t){
+ if(!/\b(?:reembolse|reembolsamos|le reembolse|ya le reembolse|se lo reembolse|ya se lo reembolse|devolvi|le devolvi|ya le devolvi|se lo devolvi|ya se lo devolvi|le pague el gasto|ya le pague el gasto|le pague lo del gasto|ya esta reembolsado|ya quedo reembolsado|ya se le reembolso|ya se le devolvio)\b/.test(t))return null;
+ if(!/\b(?:gastos?|reembols\w*|peajes?|gasolina|lo de|lo que gasto|recibo|materiales?|comida)\b/.test(t))return null;
+ if(/\b(?:verdad|cierto|o no|right)\s*$/.test(t)||/^(?:y )?(?:ya )?(?:le |se lo )?(?:reembolsaste|devolviste|pagaste)\b/.test(t))return null;
+ if(/\b(?:no|todavia no|aun no|nunca)\s+(?:(?:le|lo|se|he|ya)\s+){0,3}(?:reembolse|devolvi|pague)\b/.test(t))return null;
+ return {tipo:'reembolso',t,orden:/\b(?:anota|anotalo|anotala|anotale|anotamelo|apunta|apuntalo|apuntale|registra|registralo|marca|marcalo|marcala|marcale|marcamelo|ponlo|ponle)\b/.test(t)};
+}
+function lumiGastoNorm(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[¿?¡!.,;:«»"]/g,' ').replace(/\s+/g,' ').trim();}
+function lumiGastoDinero(n){return '$'+Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');}
+function lumiGastoLinea(x){return lumiGastoDinero(x.amount)+(x.note?' ('+x.note+')':'');}
+function lumiGastoDecir(texto,dicho){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,dicho);asMostrarRespuesta(dicho);asEstado('esperando','');asHablar(dicho,asSeguirOyendo);return true;}
+// la escritura de Gastos y su lectura de vuelta: true solo si la fila quedó reembolsada por él
+async function lumiGastoMarcar(x){
+ try{
+  const r=await authFetch('/rest/v1/expenses?id=eq.'+encodeURIComponent(x.id)+'&work_kind=eq.restauracion&approved_at=not.is.null&reimbursed_at=is.null',{method:'PATCH',headers:Object.assign(cloudHeaders(),{'Prefer':'return=minimal'}),body:JSON.stringify({reimbursed_at:new Date().toISOString(),reimbursed_by:SES.user_id}),signal:AbortSignal.timeout(15000)});
+  if(!r.ok)return false;
+  const b=await authFetch('/rest/v1/expenses?select=id,reimbursed_at,reimbursed_by&id=eq.'+encodeURIComponent(x.id),{headers:cloudHeaders(),signal:AbortSignal.timeout(15000)});
+  const rows=b.ok?await b.json():[];
+  return Array.isArray(rows)&&rows.length===1&&!!rows[0].reimbursed_at&&String(rows[0].reimbursed_by||'')===String(SES.user_id);
+ }catch(e){return false;}
+}
+async function lumiGastoMarcarVarios(lista,nombre,en){
+ const bien=[],mal=[];
+ for(const x of lista){if(await lumiGastoMarcar(x))bien.push(x);else mal.push(x);}
+ let d='';
+ const lsS4=bien.map(lumiGastoLinea),ljS4=lsS4.length>1?lsS4.slice(0,-1).join(', ')+(en?' and ':' y ')+lsS4[lsS4.length-1]:lsS4[0];   // el monto antes del nombre: no se lee como «lo que se le debe»
+ if(bien.length)d=en?'Done, I marked the '+ljS4+' expense'+(bien.length>1?'s':'')+' of '+nombre+' reimbursed.':'Listo, marqué reembolsado'+(bien.length>1?'s los gastos':' el gasto')+' de '+ljS4+' de '+nombre+'.';
+ if(mal.length)d+=(d?' ':'')+(en?'I could not mark '+mal.map(lumiGastoLinea).join('; ')+'; nothing changed there. Check it in Expenses.':'No pude marcar '+mal.map(lumiGastoLinea).join('; ')+'; ahí no cambió nada. Revísalo en Gastos.');
+ return d;
+}
+// «sí» a «¿Lo marco reembolsado?», o «el de 45», «el de gasolina», «el primero», «los dos» a «¿Cuál marco?»
+function lumiGastoEscoge(texto,pend){
+ const t=lumiGastoNorm(texto).replace(/^(?:oye |lumi |ok |okay |bueno )+/,'');
+ if(/^(?:no|nel|nop|todavia no|aun no|mejor no|dejalo|dejalo asi|no lo marques|ninguno|nada|cancela)\b/.test(t))return 'no';
+ const si=/^(?:si|sip|simon|ok|okay|dale|claro|correcto|hazlo|marcalo|marcalos|anotalo|anotalos|si marcalo|si anotalo|si porfa|si por favor|yes|sure|eso)(?: (?:si|por favor|porfa|please|marcalo|anotalo|marcalos|dale))?$/.test(t);
+ if(!pend.cual)return si?pend.rows:null;
+ if(/\b(?:los dos|las dos|ambos|todos|todas|los tres|both|all)\b/.test(t))return pend.rows;
+ const ord=['primero','segundo','tercero','cuarto'].findIndex(w=>new RegExp('\\b'+w+'\\b').test(t));if(ord>=0&&ord<pend.rows.length)return [pend.rows[ord]];
+ const nums=(t.match(/\d+(?:\.\d{1,2})?/g)||[]).map(Number);
+ if(nums.length){const m=pend.rows.filter(x=>nums.some(n=>Math.abs(Number(x.amount)-n)<0.005||Math.floor(Number(x.amount))===n));if(m.length===1)return m;}
+ const pal=t.split(' ').filter(w=>w.length>=4&&!/^(?:marca|marcalo|anotalo|gasto|reembolsado|ese|este)$/.test(w));
+ const m2=pend.rows.filter(x=>{const n=lumiGastoNorm(x.note+' '+(x.what||''));return pal.some(w=>n.includes(w));});
+ if(m2.length===1)return m2;
+ return null;
+}
+async function lumiGastoReembolso(o,texto){
+ const en=asEn(),owner=SES.user_id+'|'+SES.company_id;
+ let rows;
+ try{const r=await authFetch('/rest/v1/expenses?select=id,spent_on,amount,what,note,receipt_path,paid_by_name,paid_by_kind,approved_at,reimbursed_at,work_kind&work_kind=eq.restauracion&company_id=eq.'+encodeURIComponent(SES.company_id)+'&order=spent_on.desc&limit=500',{headers:cloudHeaders(),signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('HTTP '+r.status);rows=await r.json();}
+ catch(e){return lumiGastoDecir(texto,en?'I could not read the expenses right now. I did not mark anything.':'No pude leer los gastos ahorita. No marqué nada.');}
+ rows=(Array.isArray(rows)?rows:[]).filter(x=>x&&x.paid_by_kind!=='e');
+ const nombres=[...new Set(rows.map(x=>String(x.paid_by_name||'').trim()).filter(Boolean))],palabras=o.t.split(' ');
+ const quien=nombres.filter(n=>{const f=lumiGastoNorm(n).split(/\s+/)[0];return f.length>=3&&palabras.some(w=>w===f||(w.length>=4&&f.length>=4&&w.slice(0,4)===f.slice(0,4)&&Math.abs(w.length-f.length)<=1));});
+ if(quien.length!==1)return lumiGastoDecir(texto,en?'Whose expense did you reimburse? I did not mark anything.':'¿De quién es el gasto que le reembolsaste? No marqué nada.');
+ const n=quien[0].split(/\s+/)[0],suyos=rows.filter(x=>String(x.paid_by_name||'').trim()===quien[0]);
+ let listos=suyos.filter(x=>x.approved_at&&!x.reimbursed_at);
+ const nums=(o.t.replace(/\b\d{1,2}:\d{2}\b/g,' ').match(/\d+(?:\.\d{1,2})?/g)||[]).map(Number).filter(v=>v>0);
+ if(nums.length&&listos.length){const m=listos.filter(x=>nums.some(v=>Math.abs(Number(x.amount)-v)<0.005));if(m.length)listos=m;else return lumiGastoDecir(texto,(en?n+' has no approved unreimbursed expense of ':n+' no tiene un gasto aprobado sin reembolsar de ')+lumiGastoDinero(nums[0])+(en?'. Pending: ':'. Tiene: ')+listos.map(lumiGastoLinea).join('; ')+(en?'. I did not mark anything.':'. No marqué nada.'));}
+ if(!listos.length){
+  const sinAprobar=suyos.filter(x=>!x.approved_at&&!x.reimbursed_at),hechos=suyos.filter(x=>x.reimbursed_at);
+  const d=sinAprobar.length?(en?n+'\'s expense '+sinAprobar.map(lumiGastoLinea).join('; ')+' is not approved yet, so I did not mark it reimbursed. Approve it first in Expenses.':'El gasto de '+n+' '+sinAprobar.map(lumiGastoLinea).join('; ')+' todavía no está aprobado, así que no lo marqué reembolsado. Apruébalo primero en Gastos.')
+   :hechos.length?(en?n+' has nothing left to reimburse: '+hechos.slice(0,3).map(lumiGastoLinea).join('; ')+' is already reimbursed.':n+' no tiene gastos por reembolsar: '+hechos.slice(0,3).map(lumiGastoLinea).join('; ')+' ya está reembolsado. No marqué nada.')
+   :(en?n+' has no recorded expenses. I did not mark anything.':n+' no tiene gastos registrados. No marqué nada.');
+  return lumiGastoDecir(texto,d);
+ }
+ if(listos.length>1){LUMI_GASTO_PEND={owner,rows:listos,nombre:n,cual:true,at:Date.now()};
+  return lumiGastoDecir(texto,(en?n+' has '+listos.length+' approved expenses not reimbursed: ':n+' tiene '+listos.length+' gastos aprobados sin reembolsar: ')+listos.slice(0,6).map(lumiGastoLinea).join('; ')+(en?'. Which one should I mark reimbursed?':'. ¿Cuál marco reembolsado?'));}
+ if(!o.orden){LUMI_GASTO_PEND={owner,rows:listos,nombre:n,cual:false,at:Date.now()};
+  return lumiGastoDecir(texto,(en?n+' has 1 approved expense not reimbursed: ':n+' tiene 1 gasto aprobado sin reembolsar: ')+lumiGastoLinea(listos[0])+(en?'. Should I mark it reimbursed?':'. ¿Lo marco reembolsado?'));}
+ LUMI_GASTO_PEND=null;
+ asEstado('pensando',en?'Marking it…':'Marcándolo…');
+ return lumiGastoDecir(texto,await lumiGastoMarcarVarios(listos,n,en));
+}
+async function lumiGastoPendiente(texto){
+ const owner=SES.user_id+'|'+SES.company_id,pend=LUMI_GASTO_PEND&&LUMI_GASTO_PEND.owner===owner&&Date.now()-LUMI_GASTO_PEND.at<180000?LUMI_GASTO_PEND:null;
+ if(!pend){LUMI_GASTO_PEND=null;return false;}
+ const pick=lumiGastoEscoge(texto,pend);LUMI_GASTO_PEND=null;
+ if(!pick)return false;   // otra cosa: se olvida la pregunta y sigue su camino
+ if(pick==='no')return lumiGastoDecir(texto,asEn()?'Okay, I did not mark anything.':'Está bien, no marqué nada.');
+ asEstado('pensando','Marcándolo…');
+ return lumiGastoDecir(texto,await lumiGastoMarcarVarios(pick,pend.nombre,asEn()));
+}
 function lumiGastosOrden(texto){
  const t=String(texto||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[¿?¡!.,]/g,' ').replace(/\s+/g,' ').trim();
  if(!t||t.length>220)return null;
  if(/\b(?:amg|mudanza|mudanzas|moving)\b/.test(t))return null;   // los de AMG van por su camino
+ {const rb=typeof lumiGastoReembolsoOrden==='function'?lumiGastoReembolsoOrden(t):null;if(rb)return rb;}   // (22-nov, Seguimiento 4) «ya le reembolsé…»
  if(/^(?:anota|anotale|apunta|registra|aprueba|apruebale|aprobar|marca|marcale|marcalo|reembolsale|paga|pagale|manda|mandale|mandalos|envia|enviale|pasale|pasa)\b/.test(t))return null;   // una orden: no es leer
  if(/\b(?:al grupo|a los muchachos|a la cuadrilla)\b/.test(t))return null;
  const gastoW=/\b(?:gastos?|reembols\w*|peajes?|gasolina)\b/;
@@ -83167,7 +83381,9 @@ function lumiGastosOrden(texto){
 }
 async function asGastosLeer(texto){
  if(SES.role!=='manager')return false;
+ if(typeof lumiGastoPendiente==='function'&&(await lumiGastoPendiente(texto)))return true;   // (22-nov, Seguimiento 4) su respuesta a «¿Lo marco reembolsado?» / «¿Cuál?»
  const o=lumiGastosOrden(texto);if(!o)return false;
+ if(o.tipo==='reembolso')return await lumiGastoReembolso(o,texto);   // nunca cae a Pagos: no crea pagos
  const en=asEn(),money=n=>'$'+Number(n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');
  const nrm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
  let rows;
@@ -83238,12 +83454,11 @@ async function asLaborRead(texto) {
   // suelto caiga aqui si veniamos hablando de labor logs, y se anota cuando le toca a el.
   const _tema=(typeof LumiInboxDialogue!=='undefined'&&LumiInboxDialogue.temaAhora)?LumiInboxDialogue.temaAhora():null;
   const query=LUMI_LABOR_READ.parse(texto,today,asAreaActual(),_tema);if(!query)return false;
+  if(typeof lumiS4Reloj==='function'&&lumiS4Reloj(texto))return false;   // (22-nov-2026, Seguimiento 4) quién trabajó / horas / «y ayer»: el reloj
   // (21-nov, Seguimiento 3) pregunta de HORAS sin decir labor log: va a las horas del reloj, no a la lista de labor logs
   {const t0=String(texto||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
   if(/\b(?:quien|quienes|who)\b.*\b(?:trabaj\w*|vino|vinieron|worked|came)\b|\b(?:horas|hours|tiempo)\b/.test(t0)&&!/\b(?:labor|labour|label|leibor|leiber|reportes?|hojas?|logs?)\b/.test(t0)){
-    if(query.error||/\b(?:horas|hours|tiempo)\b/.test(t0))return false;
-    let rows0;try{rows0=await LUMI_LABOR_READ.readAll(async path=>{const r=await authFetch(path,{headers:cloudHeaders(),signal:AbortSignal.timeout(15000)});if(!r.ok)throw Error('labor logs '+r.status);return r.json();},SES.company_id);}catch(e){return false;}
-    if(!LUMI_LABOR_READ.select(rows0,query).length)return false;
+    return false;   // (22-nov-2026, Seguimiento 4, decisión del dueño) «quién trabajó hoy/ayer»: las horas del reloj aunque haya labor logs; los labor logs solo si los pide
   }}
   try{LumiInboxDialogue.marcarTema('labor');}catch(e){}
   const owner=SES.user_id+'|'+SES.company_id,company=SES.company_id;
@@ -83301,7 +83516,7 @@ function lumiIncompleteSpeechReply(text){
       // mensajes"): se le presta su texto a asTranscribir mientras corre la puerta escogida.
       const _trans=asTranscribir; let hecho=false;
       try{ asTranscribir=function(x,...resto){return _trans(x===frase?texto:x,...resto);};
-        hecho=/labor logs/.test(frase)?!!(await asLaborRead(frase)):!!(await asInboxDialogue(frase)); }
+        hecho=/labor logs/.test(frase)?((typeof lumiS4Reloj==='function'&&lumiS4Reloj(texto))?false:!!(await asLaborRead(frase))):!!(await asInboxDialogue(frase)); }   // (22-nov-2026, Seguimiento 4)
       finally{ asTranscribir=_trans; }
       return hecho;
     }catch(e){return false;}
@@ -86275,6 +86490,14 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   function lumiRevisionAvisar(){
     try{
       const a = window.__lumiRevisionAviso; if(!a) return;
+      // (22-nov-2026, Seguimiento 4, decisión del dueño) EXCEPCIÓN a R516: el pago dicho en un chat y no anotado SÍ se dice, como antes
+      if(Array.isArray(a.pagos) && a.pagos.length){
+        if(AS.conf || AS.pregunta) return;
+        if(!AS.abierto || AS.enviando || !['esperando','escuchando'].includes(AS.estado) || (AS.estado === 'escuchando' && AS.texto && AS.texto.trim()) || Date.now() - (window.__lumiUltimoTurno || 0) < 25000) return;
+        window.__lumiRevisionAviso = null;
+        asCallar(); asMostrarRespuesta(a.texto); if(typeof lumiPrPreguntar === 'function') lumiPrPreguntar(a.pagos); asHablar(a.dicho, asSeguirOyendo);
+        return;
+      }
       window.__lumiRevisionAviso = null; lumiAvisoGuardar(a);
     }catch(e){}
   }
