@@ -146,6 +146,7 @@
       if(typeof p.id!=='string'||typeof p.nota!=='string'||!/^\d+$/.test(p.id)||ids.has(p.id)||typeof p.nombre!=='string'||!p.nombre.trim()||p.pickup!=='confirmado'||!/^\d{4}-\d{2}-\d{2}$/.test(p.fecha))throw Error('Perfil duplicado o retiro sin confirmar.');
       ids.add(p.id);validatePair(p.visual,p);
       for(const k of ['plano','humedad','equipos','medidas'])if(!Array.isArray(p.hojas?.[k])||p.hojas[k].some(x=>!/^\d+$/.test(x)))throw Error('Referencia de hoja inválida.');
+      if(p.murosParaRetirar!==undefined&&(!Array.isArray(p.murosParaRetirar)||!p.murosParaRetirar.every(m=>m&&typeof m.id==='string'&&/^[a-z0-9_-]{1,48}$/i.test(m.id)&&p.hojas.plano.includes(m.hoja))))throw Error('Muro para retirar sin identificador u hoja del perfil.');
       if(p.comparacion&&!/^data:image\/jpeg;base64,[a-z0-9+/=]+$/i.test(p.comparacion))throw Error('Imagen de comparación inválida.');
     }
     if(!ids.has(d.ultimo)||!Array.isArray(d.fuera)||d.fuera.some(p=>!p||!/^\d+$/.test(p.id)||ids.has(p.id)||typeof p.nombre!=='string'||typeof p.nota!=='string'))throw Error('Revisa el último perfil y las exclusiones.');
@@ -166,7 +167,7 @@
     const current=profiles.find(p=>p.id===s?.id&&s?.active);
     const p=named.length===1?named[0]:named.length?null:current;
     if(!p||!p.modelo)return {action:'respuesta',msg:'Necesito el perfil y modelo del lote privado. Abre el perfil correspondiente en la revisión y vuelve a la lavandería.'};
-    const result=(msg,extra={})=>({action:'respuesta',msg,state:{active:true,id:p.id,view:'trazadoLaundry'},...extra});
+    const result=(msg,extra={})=>({action:'respuesta',msg,state:{active:true,id:p.id,view:'trazadoLaundry',laundryOnly:true},...extra});
     const editor={project:p.id,model:p.modelo};
     if(wall){
       if(s?.id!==p.id||s?.view!=='trazadoLaundry'||!s.trazado?.ref)return result('Inspecciona el trazado de la lavandería antes de activar la herramienta de muro.');
@@ -180,6 +181,38 @@
     }
     return result('Inspeccionando el editor.',{editor:{...editor,action:'inspeccionarTrazado'},drawingScope:'Reconstruir únicamente la lavandería omitida. Ubicar sus accesos en la hoja de campo del perfil y cotejarlos con las fotos. Confirmar la puerta del baño, el giro del pasillo y el descanso en el recorrido. Reutilizar muros compartidos. Tras cerrar el recinto, guardar Laundry Room y verificarlo al reabrir.'});
   }
+  function wallRoute(text,q,d,s){
+    const inspect=q==='inspecciona el muro en el editor';
+    const activate=q==='activa seleccion de muros';
+    const select=/^selecciona muro ([a-z0-9_-]{1,48}) en (\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?) con hoja (\d+)$/i.exec(text.trim());
+    const move=/^mueve el muro seleccionado ([a-z0-9_-]{1,48}) hasta (\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?) con operaci[oó]n ([a-z0-9_-]{1,48})$/i.exec(text.trim());
+    const remove=/^elimina el muro seleccionado ([a-z0-9_-]{1,48}) con operaci[oó]n ([a-z0-9_-]{1,48}) y hoja (\d+)$/i.exec(text.trim());
+    if(!inspect&&!activate&&!select&&!move&&!remove)return null;
+    const answer=msg=>({action:'respuesta',msg});
+    const p=s?.active&&d?.perfiles?.find(p=>p.id===s.id);
+    if(!p?.modelo)return answer('Selecciona el perfil y su modelo en la revisión para inspeccionar un muro.');
+    if(s.view==='trazadoLaundry'||s.laundryOnly)return answer('El alcance actual es reconstruir la lavandería con sus muros nuevos. Los demás muros están fuera de ese ajuste.');
+    const wall=s.view==='ajusteMuro'?s.muro:null;
+    const result=(msg,action,params={},selected=null)=>({
+      action:'respuesta',msg,state:{active:true,id:p.id,view:'ajusteMuro',muro:selected?{selected}:{}},
+      editor:{project:p.id,model:p.modelo,action,...params}
+    });
+    if(inspect)return result('Inspeccionando el muro.', 'inspeccionarTrazado',{},wall?.selected);
+    if(!wall?.ref)return answer('Inspecciona el muro en el editor para cotejar la vista actual.');
+    if(activate)return result('Activando la herramienta de selección.','activarSeleccion',{ref:wall.ref});
+    if(select){
+      if(!p.hojas.plano.includes(select[4]))return answer('Selecciona una hoja de plano del perfil actual.');
+      return result('Seleccionando el muro indicado.','seleccionarMuro',{ref:wall.ref,operationId:select[1],x:Number(select[2]),y:Number(select[3]),evidencia:'https://app.companycam.com/projects/'+p.id+'/photos/'+select[4]+'/photo'});
+    }
+    const selected=wall.selected;
+    if(!selected||selected.id!==(move||remove)[1])return answer('La selección del editor debe coincidir con el muro identificado. Selecciónalo y vuelve a inspeccionarlo.');
+    const common={ref:wall.ref,seleccionId:selected.id,x:selected.x,y:selected.y,evidencia:selected.evidencia};
+    if(move)return result('Moviendo el muro seleccionado.','moverMuro',{...common,operationId:move[4],hastaX:Number(move[2]),hastaY:Number(move[3])});
+    // Autorizar únicamente el tramo respaldado por el expediente privado importado.
+    if(!p.murosParaRetirar?.some?.(m=>m.id===selected.id&&m.hoja===remove[3])||!p.hojas.plano.includes(remove[3])||
+       selected.evidencia!=='https://app.companycam.com/projects/'+p.id+'/photos/'+remove[3]+'/photo')return answer('El expediente debe identificar este muro y esta hoja entre los tramos autorizados para retirar.');
+    return result('Retirando el muro individual autorizado.','eliminarMuro',{...common,operationId:remove[2],confirmacion:'eliminar muro seleccionado'});
+  }
   function route(text,d,s){
     const q=normal(text).replace(/^(?:(?:oye lumi|lumi|por favor|ok|bueno|entonces|ahora|porfa) )+/,'').replace(/ (?:por favor|porfa)$/,'').replace(/^el (siguiente|proximo)( cliente| perfil)?$/,'$1$2').replace(/^la siguiente (pagina|hoja)$/,'siguiente $1');
     if (/^(?:no |nunca )/.test(q)) return null;
@@ -192,6 +225,7 @@
       const p=candidates[0];
       return {action:'respuesta',state:{active:true,id:p.id,view:'diagnosticoEditor'},msg:'Comprobando la conexión al editor.',editor:{action:'diagnosticarConexion',project:p.id,model:p.modelo}};
     }
+    const wall=wallRoute(text,q,d,s);if(wall)return wall;
     const laundry=laundryRoute(text,q,d,s);if(laundry)return laundry;
     if(patterns.importar.test(q))return {action:'importar'};
     const resume=patterns.retomar.test(q)||['continuamos con los clientes y aplicando el json y el sql','retoma la auditoria de recogidas','volvamos a los perfiles con retiro','continua con la lista acordada de pickups'].includes(q);

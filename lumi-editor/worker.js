@@ -39,10 +39,12 @@ async function layoutFrame(model, request) {
   }
   if (request.action === 'sondearEditor') return {ok:true};
   const wall = walls[0];
-  if (request.action === 'activarMuro') {
-    if (wall.disabled || wall.getAttribute('aria-disabled') === 'true') return fail('Wall está deshabilitado.');
-    wall.click();
-    return {ok:true,message:'Lumi pulsó Wall. Comprueba la herramienta y el plano antes de dibujar.'};
+  const select = controls.find(el => visible(el) && name(el) === 'Select');
+  if (request.action === 'activarMuro' || request.action === 'activarSeleccion') {
+    const tool = request.action === 'activarMuro' ? wall : select;
+    if (!tool || tool.disabled || tool.getAttribute('aria-disabled') === 'true') return fail('La herramienta está deshabilitada.');
+    tool.click();
+    return {ok:true,message:'Lumi pulsó '+name(tool)+'. Comprueba la herramienta y el plano antes de seguir.'};
   }
 
   // Read pixels to bind the confirmed point to this exact view, including camera and zoom.
@@ -82,37 +84,107 @@ async function layoutFrame(model, request) {
     return {ok:true,ref,bounds,viewport,message:'Vista de trazado identificada en el marco del editor.'};
   }
   if (request.ref !== ref) return fail('Cambió la vista del editor. Vuelve a cotejar antes del siguiente punto.');
-  if (!(wall.matches('[aria-pressed=true],[aria-selected=true],[data-state=on],[data-state=active]') ||
-        Array.from(wall.classList).some(cl => /^(?:active|selected|is-active|is-selected)$/.test(cl)))) {
-    return fail('No pude confirmar que Wall esté seleccionada en el editor.');
-  }
+  const drawing = request.action === 'trazarVertice';
+  const tool = drawing ? wall : select;
+  const active = tool && (tool.matches('[aria-pressed=true],[aria-selected=true],[data-state=on],[data-state=active]') ||
+    Array.from(tool.classList).some(cl => /^(?:active|selected|is-active|is-selected)$/.test(cl)));
+  if (!active) return fail('No pude confirmar la herramienta activa en el editor.');
   const {x,y,operationId} = request;
-  if (x <= box.left || y <= box.top || x >= box.right || y >= box.bottom ||
-      x >= innerWidth || y >= innerHeight || document.elementFromPoint(x,y) !== canvas) {
-    return fail('El vértice está fuera del lienzo visible o hay un control sobre él.');
-  }
+  const onSurface = (px,py) => px > box.left && py > box.top && px < box.right && py < box.bottom &&
+    px < innerWidth && py < innerHeight && document.elementFromPoint(px,py) === canvas;
+  if (!onSurface(x,y)) return fail('El punto está fuera del lienzo visible o hay un control sobre él.');
   const key = 'lumi.trazo.'+model+'.'+operationId;
-  if (sessionStorage.getItem(key)) return fail('Este vértice ya se intentó. Revisa el resultado antes de continuar.');
-  sessionStorage.setItem(key,'intentado');
-  const init = {clientX:x,clientY:y,bubbles:true,cancelable:true,view:window,button:0};
-  for (const [type,buttons] of [['pointermove',0],['mousemove',0],['pointerdown',1],['mousedown',1],['pointerup',0],['mouseup',0],['click',0]]) {
+  if (sessionStorage.getItem(key)) return fail('La operación ya se intentó. Revisa el plano antes de continuar.');
+  const dispatch = (type,px,py,buttons) => {
     const pointer = type.startsWith('pointer');
     const Ctor = pointer ? PointerEvent : MouseEvent;
-    canvas.dispatchEvent(new Ctor(type,{...init,buttons,...(pointer?{pointerId:1,pointerType:'mouse',isPrimary:true}:{})}));
+    canvas.dispatchEvent(new Ctor(type,{clientX:px,clientY:py,bubbles:true,cancelable:true,view:window,
+      button:0,buttons,...(pointer?{pointerId:1,pointerType:'mouse',isPrimary:true}:{})}));
+  };
+  const pair = (suffix,px,py,buttons) => {
+    dispatch('pointer'+suffix,px,py,buttons);
+    dispatch('mouse'+suffix,px,py,buttons);
+  };
+  const tap = () => { pair('move',x,y,0); pair('down',x,y,1); pair('up',x,y,0); dispatch('click',x,y,0); };
+  if (drawing) {
+    sessionStorage.setItem(key,'intentado');
+    tap();
+    return {ok:true,estado:'gesto_enviado',operationId,message:'Gesto enviado. Comprueba el vértice. Si el visor ignora eventos sintéticos, no lo repitas sin verificar.'};
   }
-  return {ok:true,estado:'gesto_enviado',operationId,message:'Gesto enviado. Verifica el vértice en el plano antes del siguiente; falta comprobar el guardado.'};
+  // Only accept an actual wall-properties panel, never the Wall toolbar button.
+  const panel = () => {
+    const candidates = Array.from(document.querySelectorAll('h1,h2,h3,h4,[role=heading],label,legend'))
+      .filter(el => visible(el) && !el.closest('button,[role="button"]') &&
+        /^(wall|wall properties|wall type)$/i.test(el.textContent.trim()));
+    return candidates.length ? candidates[0] : null;
+  };
+  // Per-document isolated-world state dies with the editor. Trusted user gestures
+  // cancel a pending selection even if the new wall happens to have the same dimensions.
+  const memoryKey = Symbol.for('lumi.layout.wall-selection');
+  if (!globalThis[memoryKey]) {
+    const memory = {wall:null,revision:0};
+    const invalidate = () => { memory.wall=null; memory.revision++; };
+    for (const evt of ['pointerdown','keydown','wheel']) document.addEventListener(evt,e=>{if(e.isTrusted) invalidate();},true);
+    window.addEventListener('resize',invalidate);
+    globalThis[memoryKey]=memory;
+  }
+  const memory = globalThis[memoryKey];
+  if (request.action === 'seleccionarMuro') {
+    memory.wall = null;
+    if (panel()) return fail('Ya existe una selección de muro. Deselecciónala antes de identificar otro muro.');
+    const revision = memory.revision;
+    sessionStorage.setItem(key,'intentado');
+    tap();
+    for (let i=0; i<10 && !panel(); i++) await new Promise(resolve=>setTimeout(resolve,60));
+    const selected = panel();
+    if (!selected || memory.revision!==revision) return fail('El gesto no produjo un panel Wall verificable; Matterport puede ignorar los eventos sintéticos.');
+    memory.wall = {id:operationId,x,y,model,project:request.project,evidencia:request.evidencia,panel:selected};
+    return {ok:true,estado:'muro_seleccionado',seleccionId:operationId,message:'El editor mostró el panel de muro después de la selección. Coteja el segmento resaltado.'};
+  }
+  const current = memory.wall;
+  if (!current || current.id !== request.seleccionId || current.x !== x || current.y !== y ||
+      current.model !== model || current.project !== request.project || current.evidencia !== request.evidencia ||
+      current.panel !== panel()) return fail('La selección de muro ya no es verificable. Revisa el tramo resaltado.');
+  if (request.action === 'eliminarMuro') {
+    const buttons = controls.filter(el=>visible(el)&&name(el)==='Delete'&&!el.disabled&&el.getAttribute('aria-disabled')!=='true');
+    if (buttons.length!==1 || request.confirmacion!=='eliminar muro seleccionado') return fail('El editor no confirma un único control Delete habilitado para el muro.');
+    memory.wall=null;
+    sessionStorage.setItem(key,'intentado');
+    buttons[0].click();
+    return {ok:true,estado:'gesto_enviado',operationId,message:'Lumi pulsó Delete para el muro seleccionado. Verifica su retirada, las paredes contiguas y el guardado.'};
+  }
+  const {hastaX,hastaY}=request;
+  const steps=12;
+  const path=Array.from({length:steps},(_,i)=>[x+(hastaX-x)*(i+1)/steps,y+(hastaY-y)*(i+1)/steps]);
+  if (!path.every(([px,py])=>onSurface(px,py))) return fail('El recorrido sale del lienzo o atraviesa un control.');
+  memory.wall=null;
+  sessionStorage.setItem(key,'intentado');
+  pair('move',x,y,0); pair('down',x,y,1);
+  let last=[x,y];
+  try {
+    for(const [px,py] of path) {
+      pair('move',px,py,1);
+      last=[px,py];
+    }
+  } finally { pair('up',last[0],last[1],0); }
+  return {ok:true,estado:'gesto_enviado',operationId,message:'Arrastre enviado. Verifica el tramo, sus vecinos y el guardado; Matterport puede ignorar eventos sintéticos.'};
 }
 async function routeDrawing(request) {
-  if (request.action === 'trazarVertice') {
+  const needsPoint = ['trazarVertice','seleccionarMuro','moverMuro','eliminarMuro'].includes(request.action);
+  if (needsPoint) {
     let source;
     try { source = new URL(request.evidencia); } catch { throw Error('Se necesita el enlace de evidencia en CompanyCam.'); }
     const parts = source.pathname.split('/');
     if (source.origin !== 'https://app.companycam.com' || parts[1] !== 'projects' || parts[2] !== request.project ||
         parts[3] !== 'photos' || !/^\d+$/.test(parts[4] || '')) throw Error('La evidencia debe ser una foto del proyecto activo.');
   }
-  if (request.action === 'trazarVertice' && (!Number.isFinite(request.x) || !Number.isFinite(request.y) ||
+  if (needsPoint && (!Number.isFinite(request.x) || !Number.isFinite(request.y) ||
       !/^[a-f0-9]{64}$/.test(request.ref||'') || !/^[a-zA-Z0-9_-]{1,80}$/.test(request.operationId||'') ||
       typeof request.evidencia !== 'string' || !request.evidencia.trim())) throw Error('Faltan referencia visual, punto confirmado, evidencia o identificador del vértice.');
+  if (['moverMuro','eliminarMuro'].includes(request.action) && !/^[a-zA-Z0-9_-]{1,80}$/.test(request.seleccionId||'')) throw Error('Falta la selección verificada del muro.');
+  if (request.action==='eliminarMuro' && request.confirmacion!=='eliminar muro seleccionado') throw Error('Falta la confirmación explícita para retirar este muro.');
+  if (request.action==='moverMuro' && (!Number.isFinite(request.hastaX) || !Number.isFinite(request.hastaY) ||
+      (request.x===request.hastaX && request.y===request.hastaY))) throw Error('Falta un destino distinto y verificado en el lienzo.');
   const tabs = (await chrome.tabs.query({url:'https://my.matterport.com/*'})).filter(tab => matchesModel(tab.url,request.model));
   const found = [];
   const blockers = [];
@@ -172,7 +244,7 @@ chrome.runtime.onMessage.addListener((request,sender,respond) => {
     const {project,model,action} = request;
     if (action === 'diagnosticarConexion') return diagnoseConnection(request);
     if (!/^\d+$/.test(project) || !/^[a-zA-Z0-9]{11}$/.test(model)) throw Error('Identificadores de proyecto incompletos.');
-    if (['inspeccionarTrazado','activarMuro','trazarVertice'].includes(action)) return routeDrawing(request);
+    if (['inspeccionarTrazado','activarMuro','activarSeleccion','trazarVertice','seleccionarMuro','moverMuro','eliminarMuro'].includes(action)) return routeDrawing(request);
     if (action==='fuentes') {
       const tabs=await chrome.tabs.query({});
       for(const [match,url] of [
