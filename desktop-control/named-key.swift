@@ -67,7 +67,7 @@ for i in 0...80 {
 guard let same=locate(), CFEqual(button,same), center(same)==destination else {stop("La tecla cambió de posición.")}
 let click=Process()
 click.executableURL=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/LumiMouse.app/Contents/MacOS/LumiMouse")
-click.arguments=["click","Calculator",String(destination.x),String(destination.y)]
+click.arguments=["click","Calculator",String(Double(destination.x)),String(Double(destination.y))]
 try click.run()
 while click.isRunning {display(destination)}
 guard click.terminationStatus == 0 else {exit(click.terminationStatus)}
