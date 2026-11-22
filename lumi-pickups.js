@@ -152,9 +152,38 @@
     if(d.manual&&(!Array.isArray(d.manual.situaciones)||!d.manual.situaciones.every(r=>typeof r.accion==='string'&&Array.isArray(r.frases)&&r.frases.every(f=>typeof f==='string'))||!Object.values(d.manual.referencias||{}).every(t=>typeof t==='string')))throw Error('Manual de revisión inválido.');
     return d;
   }
+  // El expediente privado identifica el modelo. Nunca conservar una coordenada de otro cuarto o sesión.
+  function laundryRoute(text,q,d,s){
+    const inspect=q==='inspecciona el trazado de la lavanderia';
+    const wall=q==='activa la herramienta de muro para la lavanderia';
+    const point=/^traza v[eé]rtice ([a-z0-9_-]{1,48}) en (\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?) con hoja (\d+)$/i.exec(text.trim());
+    const drawing=/\b(?:dibuja(?:r|le)?|recrea(?:r|le)?|reconstru(?:ye|ir)|traza(?:r)?|constru(?:ye|ir))\b/.test(q);
+    const tour=/\b(?:entra|abre|recorre|verifica)\b/.test(q)&&/\b(?:3d|recorrido|tour)\b/.test(q);
+    if(!point&&!inspect&&!wall&&(!/\b(?:lavanderia|laundry)\b/.test(q)||!(drawing||tour)))return null;
+    if(/\b(?:no|nunca) (?:lo |la |le )?(?:dibuj|trac|traz|constru|recre|entr|abr)/.test(q))return {action:'respuesta',msg:'La orden excluye ese paso. Conservé el plano.'};
+    const profiles=d?.perfiles||[];
+    const named=profiles.filter(p=>{const name=normal(p.nombre);return [name,name.split(' ')[0]].some(n=>n.length>=3&&(' '+q+' ').includes(' '+n+' '));});
+    const current=profiles.find(p=>p.id===s?.id&&s?.active);
+    const p=named.length===1?named[0]:named.length?null:current;
+    if(!p||!p.modelo)return {action:'respuesta',msg:'Necesito el perfil y modelo del lote privado. Abre el perfil correspondiente en la revisión y vuelve a la lavandería.'};
+    const result=(msg,extra={})=>({action:'respuesta',msg,state:{active:true,id:p.id,view:'trazadoLaundry'},...extra});
+    const editor={project:p.id,model:p.modelo};
+    if(wall){
+      if(s?.id!==p.id||s?.view!=='trazadoLaundry'||!s.trazado?.ref)return result('Inspecciona el trazado de la lavandería antes de activar la herramienta de muro.');
+      return result('Seleccionando la herramienta de muro.',{editor:{...editor,action:'activarMuro',ref:s.trazado.ref}});
+    }
+    if(point){
+      const ref=s?.id===p.id&&s?.view==='trazadoLaundry'&&s.trazado?.ref;
+      if(!ref)return result('Inspecciona el trazado de la lavandería para obtener la vista actual antes de enviar el vértice.');
+      if(!p.hojas.plano.includes(point[4]))return result('La hoja indicada debe ser un plano de este perfil. Revisa la fuente y vuelve a inspeccionar el trazado.');
+      return result('Aplicando un vértice cotejado.',{editor:{...editor,action:'trazarVertice',operationId:point[1],x:Number(point[2]),y:Number(point[3]),ref,evidencia:'https://app.companycam.com/projects/'+p.id+'/photos/'+point[4]+'/photo'}});
+    }
+    return result('Inspeccionando el editor.',{editor:{...editor,action:'inspeccionarTrazado'},drawingScope:'Reconstruir únicamente la lavandería omitida. Ubicar sus accesos en la hoja de campo del perfil y cotejarlos con las fotos. Confirmar la puerta del baño, el giro del pasillo y el descanso en el recorrido. Reutilizar muros compartidos. Tras cerrar el recinto, guardar Laundry Room y verificarlo al reabrir.'});
+  }
   function route(text,d,s){
     const q=normal(text).replace(/^(?:(?:oye lumi|lumi|por favor|ok|bueno|entonces|ahora|porfa) )+/,'').replace(/ (?:por favor|porfa)$/,'').replace(/^el (siguiente|proximo)( cliente| perfil)?$/,'$1$2').replace(/^la siguiente (pagina|hoja)$/,'siguiente $1');
     if (/^(?:no |nunca )/.test(q)) return null;
+    const laundry=laundryRoute(text,q,d,s);if(laundry)return laundry;
     if(patterns.importar.test(q))return {action:'importar'};
     const resume=patterns.retomar.test(q)||['continuamos con los clientes y aplicando el json y el sql','retoma la auditoria de recogidas','volvamos a los perfiles con retiro','continua con la lista acordada de pickups'].includes(q);
     const lesson=lessons.find(item=>item.preguntas.some(question=>normal(question)===q));
