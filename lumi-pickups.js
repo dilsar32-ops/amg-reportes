@@ -216,6 +216,49 @@
   function route(text,d,s){
     const q=normal(text).replace(/^(?:(?:oye lumi|lumi|por favor|ok|bueno|entonces|ahora|porfa) )+/,'').replace(/ (?:por favor|porfa)$/,'').replace(/^el (siguiente|proximo)( cliente| perfil)?$/,'$1$2').replace(/^la siguiente (pagina|hoja)$/,'siguiente $1');
     if (/^(?:no |nunca )/.test(q)) return null;
+    const safari=/^(?:abre|abrir) (companycam|matterport|el recorrido 3d|el editor de matterport|las fuentes)(?: de (.+?))? en safari$/.exec(q);
+    const website=/^abre (https:\/\/[^\s]+) en safari$/i.exec(text.trim());
+    const scrollSafari=/^(?:desplaza|mueve) (?:la pagina|la vista) (?:hacia )?(arriba|abajo) en safari$/.exec(q);
+    if(safari||website||scrollSafari){
+      const profiles=d?.perfiles||[];
+      const name=safari?.[2];
+      const matches=name?profiles.filter(p=>normal(p.nombre)===name||normal(p.nombre).startsWith(name+' ')):profiles.filter(p=>p.id===(s?.id||d?.ultimo));
+      if(matches.length!==1||!matches[0].modelo)return {action:'respuesta',msg:'Abre el perfil de la revisión o indica su nombre para iniciar la sesión de Safari.'};
+      const p=matches[0],editor={project:p.id,model:p.modelo,action:'abrirSafari'};
+      if(website){editor.source='website';editor.url=website[1];}
+      else if(scrollSafari){editor.action='desplazarSafari';editor.direction=scrollSafari[1]==='arriba'?'up':'down';}
+      else editor.source=({'companycam':'companycam','matterport':'tour','el recorrido 3d':'tour','el editor de matterport':'editor','las fuentes':'both'})[safari[1]];
+      return {action:'respuesta',msg:'Conectando con Safari.',state:{...s,active:true,id:p.id,view:s?.view||'perfil'},editor};
+    }
+    const pairSafari=/^(?:muestra|compara) (?:los |ambos )?planos lado a lado en safari(?: con hoja (\d+))?$/.exec(q);
+    if(pairSafari||q==='reabre el plano en safari para verificar el guardado'){
+      const p=s?.active&&d?.perfiles?.find(p=>p.id===s.id);
+      if(!p?.modelo)return {action:'respuesta',msg:'Selecciona el perfil para cotejar el plano en Safari.'};
+      const photo=pairSafari&&(pairSafari[1]||(p.hojas.plano.length===1?p.hojas.plano[0]:null));
+      if(pairSafari&&!p.hojas.plano.includes(photo))return {action:'respuesta',msg:'Indica la hoja de plano de este nivel.'};
+      return {action:'respuesta',safariOnly:true,state:{...s},msg:'Consultando las vistas actuales.',editor:{project:p.id,model:p.modelo,action:pairSafari?'compararSafari':'reabrirSafari',photo}};
+    }
+    const gesture=/^(mueve el puntero|haz clic|arrastra) en safari (?:a |en |desde )?(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)(?: hasta (\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?))? con hoja (\d+) y operaci[oó]n ([a-z0-9_-]{1,48})$/i.exec(text.trim());
+    const labelSafari=/^en safari cambia el label de (.+?) a (.+?) con hoja (\d+)$/i.exec(text.trim());
+    if(gesture||labelSafari){
+      const profile=s?.active&&d?.perfiles?.find(p=>p.id===s.id);
+      const ref=s?.trazado?.ref||s?.muro?.ref;
+      if(!profile||!ref)return {action:'respuesta',msg:'Inspecciona el trazado en Safari para identificar el modelo y la vista actual.'};
+      const sheet=gesture?gesture[6]:labelSafari[3];
+      if(!profile.hojas.plano.includes(sheet))return {action:'respuesta',msg:'La hoja de respaldo debe pertenecer al proyecto seleccionado.'};
+      const editor={project:profile.id,model:profile.modelo,ref,evidencia:'https://app.companycam.com/projects/'+profile.id+'/photos/'+sheet+'/photo'};
+      if(gesture){
+        const kind=normal(gesture[1]);
+        if((kind==='arrastra')!==Boolean(gesture[4]))return {action:'respuesta',msg:'Para arrastrar indica los puntos inicial y final.'};
+        if(kind==='arrastra'&&s.laundryOnly)return {action:'respuesta',msg:'Este encargo permite agregar los muros de la lavandería. Los muros existentes se conservan.'};
+        Object.assign(editor,{action:({'mueve el puntero':'moverPunteroSafari','haz clic':'clicSafari','arrastra':'arrastrarSafari'})[kind],x:Number(gesture[2]),y:Number(gesture[3]),operationId:gesture[7]});
+        if(gesture[4])Object.assign(editor,{hastaX:Number(gesture[4]),hastaY:Number(gesture[5])});
+      }else{
+        if(s.laundryOnly&&labelSafari[2]!=='Laundry Room')return {action:'respuesta',msg:'El Label autorizado para esta lavandería es Laundry Room.'};
+        Object.assign(editor,{action:'renombrar',before:labelSafari[1]==='(vacío)'?'':labelSafari[1],after:labelSafari[2]});
+      }
+      return {action:'respuesta',state:{...s,trazado:undefined,muro:undefined},safariOnly:true,msg:'Conectando con el puntero de Safari.',editor};
+    }
     const connection=/^(?:(?:diagnostica|revisa|verifica|comprueba|prueba) (?:la )?conexion (?:con |al |del )?(?:el )?editor(?: de matterport)?|diagnostico (?:de )?(?:la )?conexion (?:con |al |del )?(?:el )?editor(?: de matterport)?)(?: (?:para|de) (.+))?$/.exec(q);
     if(connection){
       const profiles=d?.perfiles||[];

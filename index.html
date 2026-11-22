@@ -83359,6 +83359,11 @@ function lumiIncompleteSpeechReply(text){
         if(decision.editor){
           const id=crypto.randomUUID();
           let bridgeAck=false;
+          const safariController=Boolean(window.webkit?.messageHandlers?.lumiSafari);
+          if((decision.safariOnly||['abrirSafari','desplazarSafari'].includes(decision.editor.action))&&!safariController){
+            reply('Abre Workspace desde la aplicación LumiPlanos en esta Mac para usar el puntero de Safari.');
+            return;
+          }
           const diagnostic=decision.editor.action==='diagnosticarConexion';
           const ack=e=>{if(e.detail?.id===id&&e.detail.bridge===true)bridgeAck=true;};
           const cleanup=()=>{
@@ -83384,6 +83389,18 @@ function lumiIncompleteSpeechReply(text){
               const {operationId:id,x,y,evidencia}=decision.editor;
               sessionStorage.setItem(stateKey,JSON.stringify({...current,muro:{selected:{id,x,y,evidencia}}}));
             }
+            if(safariController&&decision.editor.action==='compararSafari'&&e.detail.ok&&Array.isArray(e.detail.pairImages)&&e.detail.pairImages.length===2){
+              const photos=e.detail.pairImages;
+              if(photos.every(v=>typeof v==='string'&&v.length<24000000&&/^[A-Za-z0-9+/=]+$/.test(v))){
+                const row=document.createElement('div');row.id='lumiPickupEvidence';row.style.display='flex';
+                photos.forEach((v,i)=>{const image=document.createElement('img');image.alt=i?'Matterport':'CompanyCam';image.style.cssText='width:50%;object-fit:contain';image.src='data:image/png;base64,'+v;row.append(image);});host.after(row);
+              }
+            }
+            if(safariController&&typeof e.detail.preview==='string'&&e.detail.preview.length<24000000&&/^[A-Za-z0-9+/=]+$/.test(e.detail.preview)){
+              const preview=document.createElement('img');
+              preview.id='lumiPickupEvidence';preview.alt='Vista actual de Safari para cotejar los vértices';preview.style.maxWidth='100%';
+              preview.src='data:image/png;base64,'+e.detail.preview;host.after(preview);
+            }
             let msg=e.detail.message;
             if(diagnostic&&decision.editor.model&&e.detail.worker===true&&Array.isArray(e.detail.vistas)){
               const tabs=e.detail.vistas.length;
@@ -83398,7 +83415,7 @@ function lumiIncompleteSpeechReply(text){
               return;
             }
             reply(decision.state?.view==='trazadoLaundry'?'El controlador de dibujo no respondió. Comprueba la extensión de Lumi en el perfil de Workspace y abre Edit Layout del mismo modelo. Inspecciona de nuevo el trazado y revisa el último vértice antes de continuar.':'Sin respuesta del editor de Chrome. Comprueba la extensión de Lumi y vuelve a leer el Label antes de repetir un cambio.');
-          },10000);
+          },safariController?90000:10000);
           if(diagnostic)document.addEventListener('lumi-editor-bridge-ack',ack);
           document.addEventListener('lumi-editor-result',receive);
           document.dispatchEvent(new CustomEvent('lumi-editor-request',{detail:{...decision.editor,id}}));
