@@ -213,7 +213,7 @@
        selected.evidencia!=='https://app.companycam.com/projects/'+p.id+'/photos/'+remove[3]+'/photo')return answer('El expediente debe identificar este muro y esta hoja entre los tramos autorizados para retirar.');
     return result('Retirando el muro individual autorizado.','eliminarMuro',{...common,operationId:remove[2],confirmacion:'eliminar muro seleccionado'});
   }
-  function desktopPointerRoute(text,q){
+  function desktopPointerRoute(text,q,d,s){
     const mouse='(?:mouse|raton|puntero)';
     const plain=text.trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
       .replace(/^(?:lumi[, ]+|por favor[, ]+)+/,'').replace(/[.!?]+$/,'');
@@ -235,6 +235,11 @@
     }
     if(!gesture)return null;
     const editor={action:'mouseEscritorio',gesture};
+    const profile=s?.active&&d?.perfiles?.find(p=>p.id===s.id);
+    if(profile?.modelo){
+      editor.project=profile.id;
+      editor.model=profile.modelo;
+    }
     if(match){ editor.x=Number(match[1]);editor.y=Number(match[2]); }
     if(gesture==='drag'){editor.hastaX=Number(match[3]);editor.hastaY=Number(match[4]);}
     return {action:'respuesta',safariOnly:true,msg:'Conectando con el mouse de Lumi.',editor};
@@ -242,7 +247,7 @@
   function route(text,d,s){
     const q=normal(text).replace(/^(?:(?:oye lumi|lumi|por favor|ok|bueno|entonces|ahora|porfa) )+/,'').replace(/ (?:por favor|porfa)$/,'').replace(/^el (siguiente|proximo)( cliente| perfil)?$/,'$1$2').replace(/^la siguiente (pagina|hoja)$/,'siguiente $1');
     if (/^(?:no |nunca )/.test(q)) return null;
-    const mouse=desktopPointerRoute(text,q);if(mouse)return mouse;
+    const mouse=desktopPointerRoute(text,q,d,s);if(mouse)return mouse;
     const safari=/^(?:abre|abrir) (companycam|matterport|el recorrido 3d|el editor de matterport|las fuentes)(?: de (.+?))? en safari$/.exec(q);
     const website=/^abre (https:\/\/[^\s]+) en safari$/i.exec(text.trim());
     const scrollSafari=/^(?:desplaza|mueve) (?:la pagina|la vista) (?:hacia )?(arriba|abajo) en safari$/.exec(q);
