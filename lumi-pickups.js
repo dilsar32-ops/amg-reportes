@@ -213,9 +213,36 @@
        selected.evidencia!=='https://app.companycam.com/projects/'+p.id+'/photos/'+remove[3]+'/photo')return answer('El expediente debe identificar este muro y esta hoja entre los tramos autorizados para retirar.');
     return result('Retirando el muro individual autorizado.','eliminarMuro',{...common,operationId:remove[2],confirmacion:'eliminar muro seleccionado'});
   }
+  function desktopPointerRoute(text,q){
+    const mouse='(?:mouse|raton|puntero)';
+    const plain=text.trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+      .replace(/^(?:lumi[, ]+|por favor[, ]+)+/,'').replace(/[.!?]+$/,'');
+    let gesture;
+    if(new RegExp('^(?:prueba|ensaya) (?:tu |el )?'+mouse+'$').test(q))gesture='test';
+    else if(new RegExp('^(?:comprueba|revisa) (?:tu |el )?'+mouse+'$').test(q))gesture='status';
+    else if(new RegExp('^(?:donde esta|posicion de) (?:tu |el )?'+mouse+'$').test(q))gesture='position';
+    const coordinate='(-?\\d{1,6})\\s*,\\s*(-?\\d{1,6})';
+    let match;
+    if(!gesture){
+      for(const [type,pattern] of [
+        ['move','mueve (?:tu |el )'+mouse+' a '+coordinate],
+        ['click','haz clic con (?:tu |el )'+mouse+' en '+coordinate],
+        ['drag','arrastra con (?:tu |el )'+mouse+' desde '+coordinate+' hasta '+coordinate]
+      ]){
+        match=new RegExp('^'+pattern+'$').exec(plain);
+        if(match){gesture=type;break;}
+      }
+    }
+    if(!gesture)return null;
+    const editor={action:'mouseEscritorio',gesture};
+    if(match){ editor.x=Number(match[1]);editor.y=Number(match[2]); }
+    if(gesture==='drag'){editor.hastaX=Number(match[3]);editor.hastaY=Number(match[4]);}
+    return {action:'respuesta',safariOnly:true,msg:'Conectando con el mouse de Lumi.',editor};
+  }
   function route(text,d,s){
     const q=normal(text).replace(/^(?:(?:oye lumi|lumi|por favor|ok|bueno|entonces|ahora|porfa) )+/,'').replace(/ (?:por favor|porfa)$/,'').replace(/^el (siguiente|proximo)( cliente| perfil)?$/,'$1$2').replace(/^la siguiente (pagina|hoja)$/,'siguiente $1');
     if (/^(?:no |nunca )/.test(q)) return null;
+    const mouse=desktopPointerRoute(text,q);if(mouse)return mouse;
     const safari=/^(?:abre|abrir) (companycam|matterport|el recorrido 3d|el editor de matterport|las fuentes)(?: de (.+?))? en safari$/.exec(q);
     const website=/^abre (https:\/\/[^\s]+) en safari$/i.exec(text.trim());
     const scrollSafari=/^(?:desplaza|mueve) (?:la pagina|la vista) (?:hacia )?(arriba|abajo) en safari$/.exec(q);

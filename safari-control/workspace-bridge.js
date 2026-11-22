@@ -7,8 +7,10 @@
 
   async function execute(request) {
     const call = async (action, args = {}) => {
-      const response = await host.postMessage({id:crypto.randomUUID(), project:request.project,
-        model:request.model, action, ...args});
+      const command = {id:crypto.randomUUID(), action, ...args};
+      if (request.project) command.project = request.project;
+      if (request.model) command.model = request.model;
+      const response = await host.postMessage(command);
       if (!response || response.ok !== true) throw Error(response?.message || response?.error || 'Safari no confirmó la operación.');
       return response;
     };
@@ -17,6 +19,13 @@
       return {ref:request.ref, operationId:request.operationId, x:request.x, y:request.y, evidencia:request.evidencia};
     }
     switch (request.action) {
+      case 'mouseEscritorio': {
+        const args={gesture:request.gesture};
+        for(const field of ['x','y','hastaX','hastaY']){
+          if(Number.isInteger(request[field]))args[field]=request[field];
+        }
+        return call('desktopPointer',args);
+      }
       case 'diagnosticarConexion':
         await call('ping');
         return {message:'El controlador nativo de Safari respondió a Lumi.'};
