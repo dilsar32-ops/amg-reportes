@@ -83325,6 +83325,20 @@ function lumiIncompleteSpeechReply(text){
     void asDeviceClaim(); // User input chooses the reply device; warming here delayed short replies.
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
+    if(!dictando && !AS.conf && !AS.pregunta && SES?.role==='manager' && isManager()){
+      const abrir=/^abre (?:la aplicación|la app) (.+)$/i.exec(texto);
+      const gesto=/^(señala|haz clic) en (.+?) en (-?\d+)[, ]+(-?\d+)$/i.exec(texto);
+      if(abrir||gesto){
+        const orden=abrir?{action:'open',app:abrir[1]}:{action:gesto[1].toLowerCase()==='señala'?'point':'click',app:gesto[2],x:Number(gesto[3]),y:Number(gesto[4])};
+        asTranscribir(texto);
+        try{
+          const res=await fetch('http://127.0.0.1:49183/pointer',{method:'POST',referrerPolicy:'unsafe-url',referrer:location.origin+'/amg-reportes/',headers:{'Content-Type':'application/json'},body:JSON.stringify(orden),signal:AbortSignal.timeout(10000)});
+          const answer=await res.json();
+          asMostrarRespuesta(answer.message||'El controlador rechazó la orden.');
+        }catch{asMostrarRespuesta('Workspace no pudo conectar con LumiMouse en esta computadora. Comprueba el acceso a la red local y el controlador.');}
+        return;
+      }
+    }
     if(!dictando && !AS.conf && !AS.pregunta && !AS_GAL.p && !AS_PREV.spec && SES?.user_id && window.LumiPuntero){
       const orden=LumiPuntero.parse(texto);
       if(orden && !(orden.test && window.webkit?.messageHandlers?.lumiSafari)){
