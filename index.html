@@ -20683,7 +20683,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-21-R515';
+  const APP_BUILD = '2026-11-21-R516';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -77942,6 +77942,11 @@ async function lumiProactiveTick(){
  if(typeof SES==='undefined'||SES.role!=='manager'||!SES.user_id){LUMI_NOTICE_SPOKEN=[];LUMI_NOTICE_OWNER=null;document.getElementById('lumiArrivalBanner')?.remove();return;}
  if(LUMI_NOTICE_BUSY||document.hidden||!await asDeviceOwns())return;
  const owner=SES.user_id+'|'+SES.company_id;if(LUMI_NOTICE_OWNER!==owner){LUMI_NOTICE_OWNER=owner;LUMI_NOTICE_SPOKEN=[];document.getElementById('lumiArrivalBanner')?.remove();}
+ // (21-nov-2026, R516, pedido del dueño) YA NO ANUNCIA SOLA LOS MENSAJES NUEVOS. "No tiene que estar anunciando ... cuando se le está
+ // pidiendo algo o está trabajando; como ya tiene su chat propio, me lo puede mandar por mensaje; no hasta que uno le pregunte,
+ // léeme los mensajes." Los mensajes nuevos ya le llegan al chat de Lumi (la revisión de 15 min del puente, con botones).
+ // Aquí ya no se dicen ni se enseñan solos. "Léeme los mensajes" / "¿qué mensajes tengo?" siguen igual (no usan esta cola).
+ LUMI_NOTICE_SPOKEN=[];document.getElementById('lumiArrivalBanner')?.remove();return;
  LUMI_NOTICE_SPOKEN=LUMI_NOTICE_SPOKEN.filter(n=>!n.at||Date.now()-n.at<900000);
  if(LUMI_NOTICE_SPOKEN.length&&AS.abierto&&!AS.enviando&&!AS_DESKTOP_BUSY&&!lumiReplyInProgress()&&['esperando','escuchando'].includes(AS.estado)&&!(AS.estado==='escuchando'&&AS.texto?.trim())){const next=LUMI_NOTICE_SPOKEN.shift();lumiNoticeSay(next.text,next.routes,next);}
  LUMI_NOTICE_BUSY=true;
@@ -79092,7 +79097,7 @@ async function lumiBasicReview({automatic=false}={}){
  }
  return result;
 }
-async function lumiBasicTick(){if(LUMI_BASIC_BUSY||document.hidden||!lumiBasicOwner())return;LUMI_BASIC_BUSY=true;try{const rows=await lumiBasicReview({automatic:true});for(const r of rows)lumiNoticeSay(r.status==='sent'?'Respondí a '+r.sender+' en Workspace: '+r.text:'No pude confirmar la respuesta a '+r.sender+' en Workspace. Necesita revisión; no la reenviaré automáticamente.');}catch{}finally{LUMI_BASIC_BUSY=false;}}
+async function lumiBasicTick(){if(LUMI_BASIC_BUSY||document.hidden||!lumiBasicOwner())return;LUMI_BASIC_BUSY=true;try{const rows=await lumiBasicReview({automatic:true});for(const r of rows)lumiBasicAviso(r.status==='sent'?'Respondí a '+r.sender+' en Workspace: '+r.text:'No pude confirmar la respuesta a '+r.sender+' en Workspace. Necesita revisión; no la reenviaré automáticamente.');}catch{}finally{LUMI_BASIC_BUSY=false;}}
 setInterval(lumiBasicTick,30000);
 async function asBasicWorkspace(texto){
  const t=lumiBasicNorm(texto),activate=/^(?:activa|activar|enable) (?:las )?respuestas basicas(?: de| en)? workspace$/.test(t);
@@ -83388,6 +83393,8 @@ function lumiIncompleteSpeechReply(text){
         }catch(e){dichoRev='No pude hacer la revisión: '+String(e&&e.message||e).slice(0,120);asMostrarRespuesta(dichoRev);}
         asRecordarAccionMac(texto,dichoRev);asHablar(dichoRev,asSeguirOyendo);return;}
     }
+    // (21-nov-2026, R516) "léeme los avisos": lo que Lumi ya no dice sola (revisión, novedades) lo dice cuando él lo pide.
+    if(!dictando&&!AS.conf&&SES.role==='manager'&&typeof window.lumiAvisosPide==='function'&&window.lumiAvisosPide(texto)){asPararOido();asCallar();asTranscribir(texto);AS.pregunta=null;window.lumiAvisosDecir();return;}
     // (13-nov-2026) ENTENDER AUNQUE SE DIGA DE OTRA FORMA (solo en la app Lumi de la Mac). Si ninguna regla agarra la
     // frase y huele a estas habilidades, el cerebro de la Mac dice qué se pidió y se convierte en la frase de libro
     // (textoMac). Lo que se ve y se guarda sigue siendo lo que él dijo. Si el cerebro tarda más de 3.5 s, sigue como antes.
@@ -86067,19 +86074,89 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
                      : 'Amílcar, hice la revisión de ' + dias + ': labor logs y horas coinciden. No encontré nada.',
         texto: (total ? partes.join('\n\n') : 'Revisión de ' + dias + ': todo coincide.') + (k ? '\n\nMENSAJES QUE MANDARÍA POR LA APP (todavía no mando nada):\n' + porMandar.map(function(x){ return '— Para ' + x.para_nombre + ':\n' + x.texto; }).join('\n\n') : '')
       };
+      if(window.__lumiRevisionAviso) lumiAvisoAlChatReintento('diaria|' + SES.user_id + '|' + hoy, window.__lumiRevisionAviso.texto, 'revisión de labor logs y horas');   // (R516) a su chat
     }catch(e){ /* sin red o sin permiso: se vuelve a intentar en la siguiente vuelta, ya apartado el día no se repite el aviso */ }
     finally{ window.__lumiRevDiariaOcupada = false; }
   }
-  // Decirle el resultado: cuando la plática esté abierta y ella desocupada (no encima de otra respuesta).
+  // (21-nov-2026, R516, pedido del dueño) YA NO SE DICE SOLA. Antes, al abrir la plática, Lumi soltaba la revisión, las novedades
+  // o lo de las respuestas básicas encima de lo que él iba a pedir. Ahora cada aviso se le MANDA a su chat con Lumi (lumiAvisoAlChat:
+  // id fijo, otro aparato no lo repite; lo que lleva dinero o teléfonos no se escribe ahí) y aquí solo se GUARDA (en este aparato,
+  // sobrevive a recargar). Lo dice cuando él lo pide: "léeme los avisos". ("¿Hay novedades?" sigue siendo la revisión de mensajes.)
+  function lumiAvisosLlave(){ return 'lumi_avisos_guardados_' + SES.user_id + '|' + SES.company_id; }
+  function lumiAvisosLeer(){
+    try{ const g = JSON.parse(localStorage.getItem(lumiAvisosLlave()) || '[]'); return Array.isArray(g) ? g.filter(function(x){ return x && x.a && Date.now() - x.at < 3 * 86400000; }) : []; }catch(e){ return []; }
+  }
+  function lumiAvisoGuardar(a){
+    try{ const g = lumiAvisosLeer(); g.push({ a: { dicho: String(a.dicho || ''), texto: String(a.texto || ''), pagos: a.pagos || null }, at: Date.now() }); localStorage.setItem(lumiAvisosLlave(), JSON.stringify(g.slice(-5))); }catch(e){}
+  }
   function lumiRevisionAvisar(){
     try{
       const a = window.__lumiRevisionAviso; if(!a) return;
-      if(a.pagos && (AS.conf || AS.pregunta)) return;   // (21-nov) la pregunta de pagos no va encima de una tarjeta
-      if(!AS.abierto || AS.enviando || !['esperando','escuchando'].includes(AS.estado) || (AS.estado === 'escuchando' && AS.texto && AS.texto.trim()) || Date.now() - (window.__lumiUltimoTurno || 0) < 25000) return;
-      window.__lumiRevisionAviso = null;
-      asCallar(); asMostrarRespuesta(a.texto); if(a.pagos && typeof lumiPrPreguntar === 'function') lumiPrPreguntar(a.pagos); asHablar(a.dicho, asSeguirOyendo);
+      window.__lumiRevisionAviso = null; lumiAvisoGuardar(a);
+    }catch(e){}
+  }
+  window.lumiAvisosPide = function(texto){
+    const t = String(texto || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[¿?¡!.,;:«»"]/g, ' ').replace(/\s+/g, ' ').trim()
+      .replace(/^(?:oye |hey )?lumi /, '').replace(/^(?:por favor |please )/, '').replace(/ (?:por favor|please)$/, '');
+    return /^(?:(?:leeme|lee|dime|muestrame|ensename|pasame) (?:los |tus |mis )?avisos(?: pendientes| que tengas| que tienes| que tengo| de hoy)?|(?:que|cuales) avisos (?:hay|tienes|me tienes|tengo)(?: para mi)?|(?:tienes|hay) (?:algun |algunos )?avisos?(?: para mi)?)$/.test(t);
+  };
+  window.lumiAvisosDecir = function(){
+    try{
+      const g = lumiAvisosLeer();
+      if(window.__lumiRevisionAviso){ const a = window.__lumiRevisionAviso; window.__lumiRevisionAviso = null; g.push({ a: a, at: Date.now() }); }
+      try{ localStorage.removeItem(lumiAvisosLlave()); }catch(e){}
+      if(!g.length){ const d = 'No tengo avisos guardados. Lo nuevo te lo mando a nuestro chat.'; asMostrarRespuesta(d); asHablar(d, asSeguirOyendo); return; }
+      const pagos = g.map(function(x){ return x.a.pagos; }).filter(function(p){ return Array.isArray(p) && p.length; }).pop() || null;
+      asMostrarRespuesta(g.map(function(x){ return x.a.texto; }).join('\n\n'));
+      if(pagos && typeof lumiPrPreguntar === 'function') lumiPrPreguntar(pagos);
+      asHablar(g.length === 1 ? g[0].a.dicho : 'Amílcar, tengo ' + g.length + ' avisos. Ahí te los dejo escritos.' + (pagos ? ' Uno es de pagos dichos en el chat: ¿ya los resolviste?' : ''), asSeguirOyendo);
       if(window.__lumiRevision && window.__lumiRevision.porMandar) void lumiRevisionPrevia(window.__lumiRevision.porMandar);
     }catch(e){}
+  };
+  // A SU CHAT CON LUMI (R516). Un mensaje de él a él mismo con de_nombre "Lumi" (como la revisión de 15 min del puente).
+  // El id sale de la clave (lumiBasicMessageId): el mismo aviso desde otro aparato choca con el primero y no se repite.
+  // Última red como el puente (repaso.mjs): lo que trae dinero o un teléfono NO se escribe; solo se dice que hay un aviso.
+  const LUMI_AVISOS_CHAT_DESDE = Date.parse('2026-11-22T03:00:00Z');   // lo de antes de esta salida ya se dijo; no se manda de golpe
+  function lumiAvisoSinDinero(t){
+    const x = String(t || '').replace(/\b\d{1,2}:\d{2}\s?(?:[ap]\.?\s?m\.?)?/gi, ' ').replace(/\b\d{4}-\d{2}-\d{2}\b/g, ' ');
+    if(/\$\s?\d|\d[\d.,]*\s?\$|\d[\d.,]*\s*(?:d[oó]lares?|dollars?|bucks|usd|dlls?|pesos)\b|\b\d{1,3}(?:,\d{3})+\b|\b\d+(?:[.,]\d+)?\s?k\b|\b\d[\d.,]*\s+mil\b/i.test(x)) return false;
+    if(/\+?\d[\d\s().-]{6,}\d/.test(x)) return false;
+    if(/\b(?:pag\w*|pay\w*|paid|debe\w*|debo|deb[ií]\w*|adelant\w*|cobr\w*|saldo|balance|cash|efectivo|zelle|venmo|cheque|check|dinero|money|tarifa|rate)\b/i.test(x) && /\b\d{2,6}\b/.test(x)) return false;
+    return true;
+  }
+  async function lumiAvisoAlChat(clave, texto, tema, privado){
+    try{
+      if(typeof SES === 'undefined' || !SES || SES.role !== 'manager' || !SES.user_id || !SES.company_id || AS.sandbox || !cloudOn()) return false;
+      let cuerpo = String(texto || '').trim(); if(!cuerpo) return true;
+      if(privado || !lumiAvisoSinDinero(cuerpo)) cuerpo = 'Tengo un aviso nuevo' + (tema ? ' (' + tema + ')' : '') + '. Lleva cantidades o datos privados, así que no lo escribo aquí. Dime en Lumi «léeme los avisos» y te lo digo.';
+      else cuerpo = Array.from(cuerpo).slice(0, 1800).join('') + '\n\nSi quieres que te lo lea, dime en Lumi «léeme los avisos».';
+      const owner = SES.user_id + '|' + SES.company_id, id = await lumiBasicMessageId(owner, 'aviso-chat|' + clave);
+      const row = { id: id, company_id: SES.company_id, de_user_id: SES.user_id, de_nombre: 'Lumi', para_user_id: SES.user_id, para_casual_id: null, para_grupo_id: null, para_todos: false,
+        para_nombre: String(SES.full_name || SES.name || 'Manager'), casa: null, texto: cuerpo, leido_at: new Date().toISOString() };
+      const r = await authFetch('/rest/v1/mensajes?on_conflict=id', { method: 'POST', headers: Object.assign(cloudHeaders(), { Prefer: 'resolution=ignore-duplicates,return=minimal' }), body: JSON.stringify(row), signal: AbortSignal.timeout(15000) });
+      return !!(r && r.ok);
+    }catch(e){ return false; }
+  }
+  // Con 3 intentos (la revisión diaria se aparta el día antes de revisar: si no sale al primero, ese día ya no se repite).
+  function lumiAvisoAlChatReintento(clave, texto, tema, privado){
+    void (async function(){ for(let k = 0; k < 3; k++){ if(await lumiAvisoAlChat(clave, texto, tema, privado)) return; await new Promise(function(r){ setTimeout(r, 20000); }); } })();
+  }
+  // Cada novedad nueva, un mensaje. Si no se pudo mandar, la vuelta no la da por dicha (se reintenta al minuto); a los 3 fallos se deja.
+  // Las de pagos se mandan aparte, solo si de verdad quedó algo sin anotar (lumiPrAviso).
+  async function lumiNovedadesAlChat(nuevas){
+    const F = window.__lumiNovAlChat = window.__lumiNovAlChat || {}; let todo = true;
+    for(const n of nuevas){
+      const id = String(n.id); if(/^pagos-chat:/.test(id) || !(Date.parse(n.at || 0) >= LUMI_AVISOS_CHAT_DESDE) || F[id] === 'ok' || (F[id] || 0) >= 3) continue;
+      const ensayo = /^ensayo-rastro:/.test(id);
+      const texto = (ensayo ? 'ENSAYO DE EVENTUALES (no registré nada):\n' : 'NOVEDAD DE LOS AVISOS DE LABOR LOG:\n') + String(n.texto).slice(0, 1500);
+      const ok = await lumiAvisoAlChat('nov|' + id, texto, ensayo ? 'ensayo de eventuales' : 'avisos de labor log');
+      if(ok) F[id] = 'ok'; else { F[id] = (F[id] || 0) + 1; if(F[id] < 3) todo = false; }
+    }
+    return todo;
+  }
+  // Las respuestas básicas de Workspace (lumiBasicTick) tampoco se dicen solas: a su chat y guardadas.
+  function lumiBasicAviso(texto){
+    try{ lumiAvisoGuardar({ dicho: texto, texto: texto }); lumiAvisoAlChatReintento('basic|' + new Date().toDateString() + '|' + texto, texto, 'respuestas básicas de Workspace'); }catch(e){}
   }
   // NOVEDADES DE LAS CONTESTACIONES (13-nov-2026). El puente de la Mac lee lo que el encargado contesta, responde lo
   // sencillo y deja aquí un renglón para el dueño ("Vero dice que Gerson sí trabajó; ya le escribí a Gerson").
@@ -86091,6 +86168,8 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       let dichas = []; try{ dichas = JSON.parse(localStorage.getItem('lumi_rev_novedades_dichas') || '[]'); }catch(e){}
       const nuevas = lista.filter(function(n){ return n && n.id && n.texto && !dichas.includes(n.id) && Date.now() - Date.parse(n.at || 0) < 3 * 86400000; }).slice(-5);
       if(!nuevas.length) return;
+      // (R516) primero a su chat con Lumi; si no salio, se reintenta en la otra vuelta. Una vuelta a la vez (5 envios pueden pasar del minuto).
+      if(window.__lumiNovOcupada) return; window.__lumiNovOcupada = true; let alChat = false; try{ alChat = await lumiNovedadesAlChat(nuevas); }finally{ window.__lumiNovOcupada = false; } if(!alChat) return;
       // (21-nov-2026, pedido del dueño) PAGOS DICHOS EN EL CHAT: "¿Ya resolviste esto?". Van solos y con su pregunta; lo que ya
       // se resolvió (en este u otro aparato) no se dice. Sin sesión de manager en Lumi todavía: se espera a la siguiente vuelta.
       const pagosN = nuevas.filter(function(n){ return /^pagos-chat:/.test(String(n.id)) && Array.isArray(n.pagos) && n.pagos.length; });
@@ -86098,7 +86177,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
         const pa = await lumiPrAviso(pagosN);
         if(!pa || window.__lumiRevisionAviso) return;
         try{ localStorage.setItem('lumi_rev_novedades_dichas', JSON.stringify(dichas.concat(pagosN.map(function(n){ return n.id; })).slice(-200))); }catch(e){}
-        if(!pa.vacio) window.__lumiRevisionAviso = { dicho: pa.dicho, texto: pa.texto, pagos: pa.pagos };
+        if(!pa.vacio){ window.__lumiRevisionAviso = { dicho: pa.dicho, texto: pa.texto, pagos: pa.pagos }; if(pagosN.some(function(n){ return Date.parse(n.at || 0) >= LUMI_AVISOS_CHAT_DESDE; })) lumiAvisoAlChatReintento('nov|' + pagosN.map(function(n){ return n.id; }).join(','), 'pagos', 'pagos dichos en el chat', true); }   // (R516)
         return;
       }
       try{ localStorage.setItem('lumi_rev_novedades_dichas', JSON.stringify(dichas.concat(nuevas.map(function(n){ return n.id; })).slice(-200))); }catch(e){}
