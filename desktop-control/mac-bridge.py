@@ -53,7 +53,7 @@ class Handler(BaseHTTPRequestHandler):
                     if type(data[key]) is not int or abs(data[key]) > 65535:
                         return self.reply(400)
                     args.append(str(data[key]))
-            result = subprocess.run(args, capture_output=True, text=True, timeout=8)
+            result = subprocess.run(args, capture_output=True, text=True, timeout=24)
             self.reply(200 if result.returncode == 0 else 409, (result.stdout or result.stderr).strip())
         except (ValueError,KeyError,TypeError,subprocess.SubprocessError,OSError):
             self.reply(400, 'No se pudo ejecutar la orden.')
