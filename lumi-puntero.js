@@ -5,6 +5,7 @@
   let cursor, timer, busy=false;
   function parse(text) {
     const input=text.trim().replace(/^(?:oye\s+)?lumi[, ]+/i,'').replace(/^(?:por favor[, ]+)/i,'').replace(/[.!]+$/,'');
+    if(/^(?:prueba|ensaya) (?:tu |el )?(?:mouse|raton|puntero)$/.test(simplify(input)))return {test:true};
     const match=/^(haz clic|haz click|da clic|dale clic|pulsa|presiona|señala|mueve tu (?:mouse|puntero))\s+(?:(?:en|a|sobre)\s+)?(?:el bot[oó]n\s+)?(.+)$/i.exec(input);
     if (!match || /^(?:con (?:tu|el) (?:mouse|puntero)|[-+]?\d+\s*,|safari\b)/i.test(match[2])) return null;
     const target=match[2].trim().replace(/^[«“"]|[»”"]$/g,'');
@@ -30,6 +31,18 @@
   }
   async function run(command,closePanel) {
     if(busy)return 'El puntero de Lumi está en movimiento.';
+    if(command.test){
+      busy=true;
+      const target=document.createElement('button');
+      target.type='button';target.textContent='Prueba del puntero';target.style.cssText='position:fixed;left:50%;top:45%;transform:translateX(-50%);z-index:2147483646;padding:12px 20px';
+      let received=false;target.addEventListener('click',()=>{received=true;},{once:true});document.body.append(target);
+      try{
+        const r=target.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+        show(x,y);await new Promise(resolve=>setTimeout(resolve,350));
+        if(document.elementFromPoint(x,y)===target)target.click();
+        return received?'El botón de prueba de Workspace recibió mi clic.':'El botón de prueba estaba cubierto.';
+      }finally{target.remove();busy=false;}
+    }
     const matches=candidates(command.target);
     if(!matches.length)return 'No encuentro un botón visible llamado «'+command.target+'» en esta pantalla.';
     if(matches.length>1)return 'Hay varios controles llamados «'+command.target+'». Abre la sección que quieres usar.';
