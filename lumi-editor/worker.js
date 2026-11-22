@@ -128,10 +128,49 @@ async function routeDrawing(request) {
   if (!frame?.result) throw Error('El editor cambió durante la operación.');
   return frame.result;
 }
+function diagnoseFrame(model) {
+  const url = new URL(location.href);
+  if (url.origin !== 'https://my.matterport.com' ||
+      !(url.searchParams.get('m') === model || url.pathname.split('/').includes(model))) return null;
+  const esEditor = url.pathname === '/work';
+  const cloudEdit = url.searchParams.get('cloudEdit') === '1';
+  const names = Array.from(document.querySelectorAll('button,[role="button"]'))
+    .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
+    .map(el => (el.getAttribute('aria-label') || el.title || el.textContent || '').trim());
+  const layout = names.includes('Wall') && names.includes('Invisible Wall');
+  return {path:url.pathname,esEditor,cloudEdit,layout,readyState:document.readyState};
+}
+async function diagnoseConnection(request) {
+  const version = chrome.runtime.getManifest().version;
+  const base = {worker:true,version,vistas:[]};
+  if (!request.project && !request.model) return {...base,ok:true,editorPresente:null,message:'El controlador de Chrome responde (v'+version+'). Selecciona el proyecto para inspeccionar su editor.'};
+  if (!/^\d+$/.test(request.project) || !/^[a-zA-Z0-9]{11}$/.test(request.model)) {
+    return {...base,ok:false,editorPresente:null,message:'El controlador responde. El proyecto o el modelo están incompletos.'};
+  }
+  const tabs = (await chrome.tabs.query({url:'https://my.matterport.com/*'})).filter(tab => matchesModel(tab.url,request.model));
+  let incomplete = false;
+  for(const tab of tabs) {
+    try {
+      const frames = await chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},func:diagnoseFrame,args:[request.model]});
+      const marcos = frames.map(frame => frame.result).filter(Boolean);
+      if (!marcos.length) incomplete = true;
+      base.vistas.push({tabId:tab.id,marcos});
+    } catch {
+      incomplete = true;
+      base.vistas.push({tabId:tab.id,marcos:[],error:'No se pudo consultar esta vista.'});
+    }
+  }
+  const marcos = base.vistas.flatMap(vista => vista.marcos);
+  const editorPresente = marcos.some(frame => frame.esEditor) ? true : incomplete ? null : false;
+  const state = editorPresente ? 'Detecté /work. '+(marcos.some(f=>f.esEditor && f.layout)?'Property Layout está abierto.':'Property Layout no está visible.') :
+    incomplete ? 'No se pudo verificar el editor en todas las vistas.' : 'No se detectó /work del modelo en Chrome.';
+  return {...base,ok:!incomplete,editorPresente,message:'Controlador v'+version+' conectado. Vistas del modelo: '+tabs.length+'. '+state};
+}
 chrome.runtime.onMessage.addListener((request,sender,respond) => {
   if (!sender.url?.startsWith('https://dilsar32-ops.github.io/amg-reportes/')) return;
   (async()=>{
     const {project,model,action} = request;
+    if (action === 'diagnosticarConexion') return diagnoseConnection(request);
     if (!/^\d+$/.test(project) || !/^[a-zA-Z0-9]{11}$/.test(model)) throw Error('Identificadores de proyecto incompletos.');
     if (['inspeccionarTrazado','activarMuro','trazarVertice'].includes(action)) return routeDrawing(request);
     if (action==='fuentes') {
@@ -159,5 +198,5 @@ chrome.runtime.onMessage.addListener((request,sender,respond) => {
     const before=request.before==='(vacío)'?'':request.before;
     const [edited]=await chrome.scripting.executeScript({target:{tabId:tab.id,documentIds:[frame.documentId]},func:roomLabel,args:[{before,after:request.after},model]});
     return edited.result;
-  })().then(respond,error=>respond({message:error.message}));return true;
+  })().then(respond,error=>respond({worker:true,ok:false,message:error.message}));return true;
 });

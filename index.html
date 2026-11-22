@@ -12307,7 +12307,7 @@ html body.rdms-pagos main{overflow-x:hidden;}
 html body.rdms-pagos #personCard, html body.rdms-pagos #casualPersonCard, html body.rdms-pagos #teamCard, html body.rdms-pagos #casualTeamCard{min-width:0; max-width:100%;}
 html body.rdms-pagos #personEntries .entryrow .when, html body.rdms-pagos #casualPersonEntries .entryrow .when{overflow-wrap:anywhere;}
 </style>
-<script defer src="lumi-pickups.js?trazado=1"></script>
+<script defer src="lumi-pickups.js?trazado=2"></script>
 </head>
 <body>
 
@@ -83358,18 +83358,43 @@ function lumiIncompleteSpeechReply(text){
         if(decision.state){sessionStorage.setItem(stateKey,JSON.stringify(decision.state));localStorage.setItem(stateKey+'.ultimo',decision.state.id);}
         if(decision.editor){
           const id=crypto.randomUUID();
+          let bridgeAck=false;
+          const diagnostic=decision.editor.action==='diagnosticarConexion';
+          const ack=e=>{if(e.detail?.id===id&&e.detail.bridge===true)bridgeAck=true;};
+          const cleanup=()=>{
+            clearTimeout(timer);
+            document.removeEventListener('lumi-editor-bridge-ack',ack);
+            document.removeEventListener('lumi-editor-result',receive);
+          };
+          const currentTurn=()=>{
+            if(!isManager()||String(SES.company_id)+'/'+String(SES.user_id)!==owner)return null;
+            if(diagnostic&&!decision.editor.project)return {};
+            const current=JSON.parse(sessionStorage.getItem(stateKey)||'null');
+            return current?.id===decision.editor.project&&current.view===decision.state.view?current:null;
+          };
           const receive=e=>{
             if(e.detail?.id!==id)return;
-            clearTimeout(timer);document.removeEventListener('lumi-editor-result',receive);
-            if(!isManager()||String(SES.company_id)+'/'+String(SES.user_id)!==owner)return;
-            const current=JSON.parse(sessionStorage.getItem(stateKey)||'null');
-            if(current?.id!==decision.editor.project||current.view!==decision.state.view)return;
+            cleanup();
+            const current=currentTurn();if(!current)return;
             if(decision.editor.action==='inspeccionarTrazado'&&e.detail.ok&&e.detail.ref){
               sessionStorage.setItem(stateKey,JSON.stringify({...current,trazado:{ref:e.detail.ref}}));
             }
-            reply([e.detail.message,decision.drawingScope].filter(Boolean).join(' '));
+            let msg=e.detail.message;
+            if(diagnostic&&decision.editor.model&&e.detail.worker===true&&Array.isArray(e.detail.vistas)){
+              const tabs=e.detail.vistas.length;
+              msg=[msg,'Pestañas del modelo detectadas: '+tabs+'.',e.detail.editorPresente?'Editor detectado.':'Editor pendiente de detección.'].filter(Boolean).join(' ');
+            }
+            reply([msg,decision.drawingScope].filter(Boolean).join(' '));
           };
-          const timer=setTimeout(()=>{document.removeEventListener('lumi-editor-result',receive);reply(decision.state?.view==='trazadoLaundry'?'El controlador de dibujo no respondió. Comprueba la extensión de Lumi en el perfil de Workspace y abre Edit Layout del mismo modelo. Inspecciona de nuevo el trazado y revisa el último vértice antes de continuar.':'Sin respuesta del editor de Chrome. Comprueba la extensión de Lumi y vuelve a leer el Label antes de repetir un cambio.');},10000);
+          const timer=setTimeout(()=>{
+            cleanup();if(!currentTurn())return;
+            if(diagnostic){
+              reply(bridgeAck?'La extensión recibió el diagnóstico, pero el controlador no devolvió su resultado. Revisa el estado del controlador de Lumi en las extensiones de este perfil de Chrome.':'Workspace no recibió confirmación de la extensión. Comprueba que Lumi · editor de planos esté habilitada en este perfil de Chrome y recarga Workspace.');
+              return;
+            }
+            reply(decision.state?.view==='trazadoLaundry'?'El controlador de dibujo no respondió. Comprueba la extensión de Lumi en el perfil de Workspace y abre Edit Layout del mismo modelo. Inspecciona de nuevo el trazado y revisa el último vértice antes de continuar.':'Sin respuesta del editor de Chrome. Comprueba la extensión de Lumi y vuelve a leer el Label antes de repetir un cambio.');
+          },10000);
+          if(diagnostic)document.addEventListener('lumi-editor-bridge-ack',ack);
           document.addEventListener('lumi-editor-result',receive);
           document.dispatchEvent(new CustomEvent('lumi-editor-request',{detail:{...decision.editor,id}}));
           return;

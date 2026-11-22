@@ -183,6 +183,15 @@
   function route(text,d,s){
     const q=normal(text).replace(/^(?:(?:oye lumi|lumi|por favor|ok|bueno|entonces|ahora|porfa) )+/,'').replace(/ (?:por favor|porfa)$/,'').replace(/^el (siguiente|proximo)( cliente| perfil)?$/,'$1$2').replace(/^la siguiente (pagina|hoja)$/,'siguiente $1');
     if (/^(?:no |nunca )/.test(q)) return null;
+    const connection=/^(?:(?:diagnostica|revisa|verifica|comprueba|prueba) (?:la )?conexion (?:con |al |del )?(?:el )?editor(?: de matterport)?|diagnostico (?:de )?(?:la )?conexion (?:con |al |del )?(?:el )?editor(?: de matterport)?)(?: (?:para|de) (.+))?$/.exec(q);
+    if(connection){
+      const profiles=d?.perfiles||[];
+      if(!profiles.length&&!connection[1])return {action:'respuesta',msg:'Comprobando la extensión de Lumi.',editor:{action:'diagnosticarConexion'}};
+      const candidates=connection[1]?profiles.filter(p=>normal(p.nombre)===connection[1]||normal(p.nombre).startsWith(connection[1]+' ')):profiles.filter(p=>p.id===(s?.id||d?.ultimo));
+      if(candidates.length!==1||!candidates[0].modelo)return {action:'respuesta',msg:'Carga el lote de pickups y especifica el nombre del proyecto para comprobar su editor.'};
+      const p=candidates[0];
+      return {action:'respuesta',state:{active:true,id:p.id,view:'diagnosticoEditor'},msg:'Comprobando la conexión al editor.',editor:{action:'diagnosticarConexion',project:p.id,model:p.modelo}};
+    }
     const laundry=laundryRoute(text,q,d,s);if(laundry)return laundry;
     if(patterns.importar.test(q))return {action:'importar'};
     const resume=patterns.retomar.test(q)||['continuamos con los clientes y aplicando el json y el sql','retoma la auditoria de recogidas','volvamos a los perfiles con retiro','continua con la lista acordada de pickups'].includes(q);
