@@ -45,6 +45,8 @@
  .grande img{max-width:100%;max-height:78vh;object-fit:contain;border-radius:8px}
  .grande p{color:#fff;margin:12px 0 0;text-align:center;font-weight:600} .grande button{margin-top:14px;min-height:44px;padding:0 22px;border-radius:12px;border:0;font:600 16px system-ui}
  .leg{font-size:12px;color:var(--soft);margin-top:10px}
+ .aviso{background:#fff8e6;border:1px solid #f0d58a;border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:10px}
+ .pill.nuevo{background:#2f6fed}
  [hidden]{display:none !important}
 </style></head><body>
 <div class="top"><b><span class="co">Restoration Doctor</span> · Contents inventory</b><small id="sub">Loading…</small></div>
@@ -52,6 +54,7 @@
  <section class="card" id="intro"><h2>Please review every photo <span class="es">/ Revise todas las fotos</span></h2>
   <p class="hint">You will see 4 items at a time. Tap a photo to see it larger. At the end you will read the authorization and sign. <span class="es">Verá 4 objetos a la vez; toque una foto para verla en grande. Al final lee la autorización y firma.</span></p></section>
  <section class="card" id="ver" hidden>
+  <p class="aviso" id="avisoNuevo" hidden>The list was updated. Please review the items marked NEW. <span class="es">/ La lista cambió: revise los objetos marcados NUEVO.</span></p>
   <div class="pag" id="cnt"></div>
   <div class="rej" id="rej"></div>
   <div class="bar"><i id="barra"></i></div>
@@ -60,6 +63,7 @@
  <div class="grande" id="grande" hidden><img id="gImg" alt=""><p id="gTxt"></p><button type="button" id="gCerrar">Close / Cerrar</button></div>
  <section class="card" id="firma" hidden>
   <h2>Authorization <span class="es">/ Autorización</span></h2>
+  <p class="aviso" id="avisoAct" hidden>The crew is updating this list. This page refreshes by itself. <span class="es">/ La cuadrilla está actualizando la lista; la página se refresca sola.</span></p>
   <div class="aut" id="txtEn"></div><div class="aut es" id="txtEs"></div>
   <label>Your name <span>/ Su nombre</span></label><input id="nombre" autocomplete="name">
   <label>Relationship <span>/ Relación</span></label><select id="rel"><option value="Owner / Propietario/a">Owner / Propietario/a</option><option value="Tenant / Inquilino/a">Tenant / Inquilino/a</option><option value="Representative / Representante">Representative / Representante</option><option value="Other / Otro">Other / Otro</option></select>
@@ -77,6 +81,9 @@
   const FN = 'https://ogrvdsawqpiqkkevaewb.supabase.co/functions/v1/firma-remota';
   const q = new URLSearchParams(location.search), token = q.get('t') || '', demo = q.get('demo') === '1';
   let D = null, i = 0, visto = 0, inicio = new Date().toISOString();
+  // (23-nov-2026) Un solo enlace por inventario: si la cuadrilla agrega o cambia algo, ESTE enlace trae la lista nueva.
+  // 'revisados' = las marcas (v) de los objetos que el cliente ya vio; lo que llega nuevo se le enseña antes de firmar.
+  const revisados = new Set(); let nuevos = new Set(), relojAct = null;
   const COLOR = { agua:'#1f6fb5', seco:'#9a7a1f', moho:'#5b7d2a', fuego:'#b3401f', estructural:'#7a6a58', danado:'#c2520a', limpiado:'#1e8449', empacado:'#5b4bc4', devuelto:'#2e5f8a', tirado:'#c0392b', pendiente:'#b7791f' };
   function demoDatos(){
     const o = (n, en, es, marcas, nota) => ({ n, nombre_en: en, nombre: es, marcas, nota_en: nota || '', url: q.get('demofotos') ? 'demo/' + n + '.jpg' : '', extras: [] });
@@ -95,12 +102,13 @@
     $('#rej').innerHTML = D.objetos.slice(i, hasta).map((o, k) => '<div class="it">'
       + '<div class="foto" data-g="' + (i + k) + '">' + (o.url ? '<img src="' + esc(o.url) + '" alt="" loading="eager">' : '<span>photo #' + o.n + '</span>') + '</div>'
       + '<div class="nom">' + nombreHtml(o) + '</div>'
-      + '<div class="pills">' + o.marcas.map(m => '<span class="pill" style="background:' + (COLOR[m[1]] || '#555') + '">' + esc(m[0]).toUpperCase() + '</span>').join('') + '</div>'
+      + '<div class="pills">' + (nuevos.has(o.v) ? '<span class="pill nuevo">NEW / NUEVO</span>' : '') + o.marcas.map(m => '<span class="pill" style="background:' + (COLOR[m[1]] || '#555') + '">' + esc(m[0]).toUpperCase() + '</span>').join('') + '</div>'
       + (o.nota_en ? '<div class="nota">Note: ' + esc(o.nota_en) + '</div>' : '')
       + ((o.extras || []).length ? '<div class="xs">' + o.extras.map((x, z) => '<div><div class="foto" data-g="' + (i + k) + '" data-x="' + z + '">' + (x.url ? '<img src="' + esc(x.url) + '" alt="">' : '') + '</div><small>' + esc(x.rol_en || 'detail') + '</small></div>').join('') + '</div>' : '')
       + '</div>').join('');
     // las 4 que siguen ya se van cargando
     D.objetos.slice(hasta, hasta + POR).forEach(o => { if(o.url){ const im = new Image(); im.src = o.url; } });
+    D.objetos.slice(i, hasta).forEach(o => { if(o.v) revisados.add(o.v); });
     visto = Math.max(visto, hasta); $('#barra').style.width = Math.round(100 * visto / total) + '%';
     $('#atras').disabled = i === 0;
     const ult = hasta >= total; $('#sig').innerHTML = ult ? 'Continue to sign ▶ <span class="es">/ Firmar</span>' : 'Next ▶ <span class="es">/ Siguiente</span>';
@@ -126,16 +134,34 @@
   pad.addEventListener('pointermove', e => { if(!actual) return; actual.push(punto(e)); redibujar(); });
   const fin = () => { actual = null; habilitar(); }; pad.addEventListener('pointerup', fin); pad.addEventListener('pointercancel', fin);
   $('#borrar').addEventListener('click', () => { trazos = []; redibujar(); habilitar(); });
-  function habilitar(){ $('#aceptar').disabled = !(trazos.some(t => t.length > 1) && $('#nombre').value.trim()); }
+  function habilitar(){ $('#aceptar').disabled = !(D && !D.actualizando && trazos.some(t => t.length > 1) && $('#nombre').value.trim()); }
+  // La lista se vuelve a pedir (mismo enlace). Lo que el cliente no ha visto sale marcado NUEVO y se le lleva ahí.
+  async function recargar(){
+    let j = null;
+    try{ const r = await fetch(FN + '?t=' + encodeURIComponent(token)); j = await r.json().catch(() => null); if(!r.ok || !j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + r.status)); }
+    catch(e){ if(j && j.error){ mostrarError(e.message); } return; }
+    D = j; pintarSub(); pintarAct();
+    nuevos = new Set(D.objetos.filter(o => o.v && !revisados.has(o.v)).map(o => o.v));
+    const primero = D.objetos.findIndex(o => nuevos.has(o.v));
+    if(primero >= 0){ i = Math.floor(primero / POR) * POR; visto = i; $('#avisoNuevo').hidden = false; $('#firma').hidden = true; $('#ver').hidden = false; pintarFoto(); window.scrollTo(0, 0); }
+    else if(!$('#firma').hidden){ visto = D.objetos.length; pintarFirma(); }
+    habilitar();
+  }
+  function pintarAct(){
+    $('#avisoAct').hidden = !D.actualizando;
+    if(D.actualizando && !relojAct) relojAct = setInterval(recargar, 15000);
+    if(!D.actualizando && relojAct){ clearInterval(relojAct); relojAct = null; }
+  }
   $('#nombre').addEventListener('input', () => { pintarFirma(); habilitar(); });
   $('#sig').addEventListener('click', () => { if(i + POR < D.objetos.length){ i += POR; pintarFoto(); window.scrollTo(0, 0); } else { $('#ver').hidden = true; $('#firma').hidden = false; pintarFirma(); setTimeout(medir, 50); window.scrollTo(0, 0); } });
   $('#atras').addEventListener('click', () => { if(i > 0){ i = Math.max(0, i - POR); pintarFoto(); window.scrollTo(0, 0); } });
   $('#volver').addEventListener('click', () => { $('#firma').hidden = true; $('#ver').hidden = false; });
   $('#aceptar').addEventListener('click', async () => {
     const b = $('#aceptar'); b.disabled = true; b.textContent = 'Saving…';
-    const cuerpo = { accion: 'firmar', t: token, firmante: $('#nombre').value.trim(), relacion: $('#rel').value, png: pad.toDataURL('image/png'), trazos, base, revision: { inicio_at: inicio, fin_at: new Date().toISOString(), mostradas: visto, total: D.objetos.length }, ua: navigator.userAgent };
+    const cuerpo = { accion: 'firmar', t: token, version: D.version || '', firmante: $('#nombre').value.trim(), relacion: $('#rel').value, png: pad.toDataURL('image/png'), trazos, base, revision: { inicio_at: inicio, fin_at: new Date().toISOString(), mostradas: visto, total: D.objetos.length }, ua: navigator.userAgent };
     if(demo){ mostrarListo({ firmado_at: new Date().toISOString(), huella: 'demo' }); return; }
     try{ const r = await fetch(FN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) }); const j = await r.json().catch(() => null);
+      if(r.status === 409 && j && (j.cambio || j.actualizando)){ b.innerHTML = 'Accept &amp; sign <span class="es">/ Firmar</span>'; await recargar(); return; }
       if(!r.ok || !j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + r.status)); mostrarListo(j); }
     catch(e){ b.disabled = false; b.innerHTML = 'Accept &amp; sign <span class="es">/ Firmar</span>'; alert('Could not save the signature: ' + e.message + '\nPlease try again or ask Restoration Doctor for a new link.'); }
   });
@@ -147,7 +173,7 @@
       try{ const r = await fetch(FN + '?t=' + encodeURIComponent(token)); const j = await r.json().catch(() => null); if(!r.ok || !j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + r.status)); D = j; }
       catch(e){ mostrarError(e.message); return; }
     }
-    pintarSub(); $('#nombre').value = D.cliente || ''; $('#ver').hidden = false; pintarFoto();
+    pintarSub(); pintarAct(); $('#nombre').value = D.cliente || ''; $('#ver').hidden = false; pintarFoto();
     if(q.get('paso') === 'firma'){ $('#ver').hidden = true; $('#firma').hidden = false; visto = D.objetos.length; pintarFirma(); setTimeout(medir, 50); }
     if(q.get('paso') === 'listo'){ $('#ver').hidden = true; mostrarListo({ firmado_at: new Date().toISOString(), huella: 'demo' }); }
   }

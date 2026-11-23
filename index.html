@@ -20684,7 +20684,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-22-R518';
+  const APP_BUILD = '2026-11-23-R519';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71045,22 +71045,23 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   function ctPintarEnlace(t){
     const box = $('#ct-enlace'), btn = $('#ct-enlaceBtn'); if(!box || !btn) return;
     const e = t.enlace;
+    // (23-nov-2026) UN SOLO ENLACE: vencido, el botón de mandar lo renueva (el MISMO enlace, más días); si el inventario
+    // cambia, la lista del enlace se pone al día sola (ctEnlaceAlDia): el cliente sigue con el que ya tiene.
+    const vencido = !!e && !!e.vence_at && new Date(e.vence_at) < new Date();
     box.hidden = !e;
-    btn.hidden = !!e;
+    btn.hidden = !!e && !vencido;
+    ctEnlaceAlDia(t);
     if(!e){ ctEnlaceVigilar(null); return; }
-    const vencido = !!e.vence_at && new Date(e.vence_at) < new Date();
-    const cambio = !!e.huella && ctHuellaInventario(t) !== e.huella;
-    box.innerHTML = '<div class="ct-enlace-cab"><span class="ico">&#128242;</span><div><b>Enlace mandado al cliente</b>' + (t.telefono ? ' <small>' + esc(t.telefono) + '</small>' : '') + '<br><small>el ' + esc(ctFechaBonita(e.creado_at)) + (e.vence_at ? ' · vence el ' + esc(ctFechaBonita(e.vence_at)) : '') + '</small></div></div>'
-      + (vencido ? '<p class="ct-enlace-est no">&#9888; El enlace venció sin firma. Cancélelo y mande uno nuevo.</p>'
-         : (cambio ? '<p class="ct-enlace-est no">&#9888; El inventario cambió después de mandar el enlace (fotos, marcas o nombres). Con este enlace el cliente ya NO puede firmar: cancélelo y mande uno nuevo.</p>'
-         : '<p class="ct-enlace-est"><span class="ct-spin"></span> Esperando la firma del cliente… Esta pantalla revisa sola cada rato y avisa cuando firme. También puede firmar en persona con el botón de arriba.' + (telDigitos(t.telefono) ? '' : ' <span style="color:var(--pick);">Sin teléfono en Información del trabajo: el enlace se manda por la hoja de compartir.</span>') + '</p>'))
-      + '<div class="acts"><button type="button" class="minibtn" data-ct-enlace="revisar">Revisar si ya firmó</button>' + (telDigitos(t.telefono) ? '<button type="button" class="minibtn gh" data-ct-enlace="sms">Mandar por mensaje</button>' : '') + '<button type="button" class="minibtn gh" data-ct-enlace="compartir">' + (telDigitos(t.telefono) ? 'Otra forma de mandar' : 'Volver a mandar') + '</button><button type="button" class="minibtn gh" data-ct-enlace="copiar">Copiar enlace</button><button type="button" class="minibtn gh" data-ct-enlace="quitar">Cancelar el enlace</button></div>';
+    box.innerHTML = '<div class="ct-enlace-cab"><span class="ico">&#128242;</span><div><b>Enlace del cliente</b>' + (t.telefono ? ' <small>' + esc(t.telefono) + '</small>' : '') + '<br><small>' + (vencido ? 'venció el ' + esc(ctFechaBonita(e.vence_at)) : 'mandado el ' + esc(ctFechaBonita(e.creado_at)) + (e.vence_at ? ' · vence el ' + esc(ctFechaBonita(e.vence_at)) : '')) + '</small></div></div>'
+      + (vencido ? ''
+         : ('<p class="ct-enlace-est"><span class="ct-spin"></span> Esperando la firma del cliente… Esta pantalla revisa sola cada rato y avisa cuando firme. También puede firmar en persona con el botón de arriba.' + (telDigitos(t.telefono) ? '' : ' <span style="color:var(--pick);">Sin teléfono en Información del trabajo: el enlace se manda por la hoja de compartir.</span>') + '</p>'))
+      + (vencido ? '' : '<div class="acts"><button type="button" class="minibtn" data-ct-enlace="revisar">Revisar si ya firmó</button>' + (telDigitos(t.telefono) ? '<button type="button" class="minibtn gh" data-ct-enlace="sms">Mandar por mensaje</button>' : '') + '<button type="button" class="minibtn gh" data-ct-enlace="compartir">' + (telDigitos(t.telefono) ? 'Otra forma de mandar' : 'Volver a mandar') + '</button><button type="button" class="minibtn gh" data-ct-enlace="copiar">Copiar enlace</button><button type="button" class="minibtn gh" data-ct-enlace="quitar">Cancelar el enlace</button></div>');
     ctEnlaceVigilar(vencido ? null : t);
   }
   // La pagina publica donde firma el cliente (viaja con la web: www/firmar/index.html).
   const CT_ENLACE_BASE = 'https://dilsar32-ops.github.io/amg-reportes/firmar/';
-  // La huella local de lo que se mando: si la cuadrilla cambia algo despues, la pantalla avisa
-  // (y el servidor, por su cuenta, se niega a firmar un inventario distinto al que mando).
+  // La huella local de lo que se mando: si la cuadrilla cambia algo despues, la lista del mismo enlace se pone al dia
+  // (ctEnlaceAlDia, 23-nov); el servidor deja firmar solo la lista que el cliente reviso.
   function ctHuellaInventario(t){ return ccHash(JSON.stringify(ctObjetos(t).map(f => [f.k, f.sha256 || '', ctEstados(f), f.nombre || '', f.nota_en || '', ctExtrasDe(t, f.k).map(x => x.sha256 || '')]))); }
   // Lo que ve el cliente en su telefono: ingles primero, marcas con su clave de color, el
   // texto con todos los numeros puestos (solo {nombre} queda para que lo llene la pagina).
@@ -71074,20 +71075,54 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const t = ctActual(); if(!t || t.estado !== 'abierto') return;
     const faltan = ctGateFirma(t);
     if(faltan.length){ const otraVez = ctReintentarDe(t); ctPintarFirma(); alert('Todavía no se puede mandar el enlace:\n\n' + faltan.map(x => '• ' + x.replace(/<[^>]+>/g, '')).join('\n') + (otraVez ? '\n\nYa se está subiendo otra vez. Espere un momento con señal y vuelva a tocar.' : '')); return; }
-    showOverlay('Creando el enlace…');
+    showOverlay('Preparando el enlace…');
     try{
-      const empresa = ctEmpresa();
-      const borrador = ctArmarSnapshot(t, { firmante: '', relacion: '' }, { nonce: 'enlace', modo: 'remota', empresa });
-      const vista = ctVistaEnlace(t, empresa);
-      const res = await authFetch('/rest/v1/rpc/contenidos_enlace_firma', { method: 'POST', headers: ctCabeceras(), body: JSON.stringify({ p_id: t.id, p_datos: { borrador, vista }, p_dias: 3 }) });
-      const j = await res.json().catch(() => null);
+      await ctEnlacePedir(t);
       hideOverlay();
-      if(res.status === 404){ alert('Esta parte todavía no está instalada en el servidor: falta correr supabase-contenidos-enlace.sql. Mándele este mensaje a quien le ayuda con la app.'); return; }
-      if(!res.ok || !j || !j.token){ alert('No se pudo crear el enlace.\n\n' + ((j && (j.message || j.hint || j.error)) || ('HTTP ' + res.status))); return; }
-      t.enlace = { token: j.token, url: CT_ENLACE_BASE + '?t=' + j.token, creado_at: j.creado_at || new Date().toISOString(), vence_at: j.vence_at || '', huella: ctHuellaInventario(t) };
       ctEscribir(); ctPintarFirma();
       await ctEnlaceCompartir(t);
-    }catch(e){ hideOverlay(); console.error('contenidos: enlace', e); alert('No se pudo crear el enlace: ' + (e.message || e)); }
+    }catch(e){ hideOverlay(); console.error('contenidos: enlace', e);
+      if(e.status === 404) alert('Esta parte todavía no está instalada en el servidor: falta correr supabase-contenidos-enlace-fijo.sql. Mándele este mensaje a quien le ayuda con la app.');
+      else alert('No se pudo preparar el enlace.\n\n' + (e.message || e)); }
+  }
+  // (23-nov-2026) UN SOLO ENLACE POR INVENTARIO. El servidor guarda el token en un cajón privado: pedir el enlace desde
+  // cualquier teléfono, cuantas veces sea, devuelve el MISMO (con la lista al día y el vencimiento alargado). El token
+  // que ya tiene este teléfono viaja también, para que un enlace mandado antes de este cambio se quede como el de siempre.
+  // Antes cada toque hacía uno nuevo y mataba el que el cliente ya tenía (Chris Sewell, 23-nov).
+  async function ctEnlacePedir(t){
+    const empresa = ctEmpresa(), huella = ctHuellaInventario(t);
+    const borrador = ctArmarSnapshot(t, { firmante: '', relacion: '' }, { nonce: 'enlace', modo: 'remota', empresa });
+    const vista = ctVistaEnlace(t, empresa);
+    const res = await authFetch('/rest/v1/rpc/contenidos_enlace_firma', { method: 'POST', headers: ctCabeceras(), body: JSON.stringify({ p_id: t.id, p_datos: { borrador, vista }, p_dias: 3, p_token: (t.enlace && t.enlace.token) || null }) });
+    const j = await res.json().catch(() => null);
+    if(!res.ok || !j || !j.token){ const err = new Error((j && (j.message || j.hint || j.error)) || ('HTTP ' + res.status)); err.status = res.status; throw err; }
+    const antes = t.enlace || {};
+    t.enlace = { token: j.token, url: CT_ENLACE_BASE + '?t=' + j.token, creado_at: j.creado_at || antes.creado_at || new Date().toISOString(), vence_at: j.vence_at || '', huella };
+    return j;
+  }
+  // Si la cuadrilla agrega o cambia fotos, marcas o nombres después de mandar el enlace, la lista del MISMO enlace se
+  // pone al día sola (una vez por cada cambio). Un teléfono que no mandó el enlace pregunta a la nube si hay uno vivo.
+  // Un enlace vencido no se revive solo: eso lo hace el botón de mandar.
+  var ctEnlaceVisto, ctEnlaceAlDiaYa = false;   // var: ctPintarEnlace puede llamar antes de que esta línea corra
+  async function ctEnlaceAlDia(t){
+    try{
+      ctEnlaceVisto = ctEnlaceVisto || {};
+      if(!t || t.estado !== 'abierto' || ctEnlaceAlDiaYa || !signedIn() || navigator.onLine === false || ctFaltaSql) return;
+      if(t.enlace && t.enlace.vence_at && new Date(t.enlace.vence_at) < new Date()) return;
+      if(ctGateFirma(t).length) return;
+      const h = ctHuellaInventario(t);
+      if((t.enlace && t.enlace.huella === h) || ctEnlaceVisto[t.id] === h) return;
+      ctEnlaceVisto[t.id] = h; ctEnlaceAlDiaYa = true;
+      if(!t.enlace){
+        const res = await authFetch('/rest/v1/contenidos_trabajos?id=eq.' + encodeURIComponent(t.id) + '&select=estado,enlace_hash,enlace_vence_at', { headers: ctCabeceras() });
+        const j = await res.json().catch(() => null), fila = Array.isArray(j) ? j[0] : null;
+        if(!res.ok || !fila || fila.estado !== 'abierto' || !fila.enlace_hash || !fila.enlace_vence_at || new Date(fila.enlace_vence_at) < new Date()) return;
+      }
+      await ctEnlacePedir(t);
+      ctEscribir();
+      const a = ctActual(); if(a === t && document.querySelector('.tab-panel[data-tab="contenidos"].active')) ctPintarFirma();
+    }catch(e){ console.warn('contenidos: poner el enlace al día', (e && e.message) || e); }
+    finally{ ctEnlaceAlDiaYa = false; }
   }
   function ctEnlaceTexto(t){
     const e = t.enlace || {}, emp = ctEmpresa();
@@ -71169,7 +71204,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     ctEnlaceTimer = setInterval(() => {
       const panel = document.querySelector('.tab-panel[data-tab="contenidos"]'), a = ctActual();
       if(!panel || !panel.classList.contains('active') || document.visibilityState !== 'visible' || !a || a !== t || !a.enlace || a.estado !== 'abierto'){ clearInterval(ctEnlaceTimer); ctEnlaceTimer = null; return; }
-      ctEnlaceRevisar(a, true);
+      ctEnlaceRevisar(a, true).then(() => ctEnlaceAlDia(a));
     }, 20000);
   }
   let ctFirmando = false;
@@ -71644,6 +71679,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const panel = document.querySelector('.tab-panel[data-tab="contenidos"]');
       if(panel && panel.classList.contains('active')) ctPintar();
       ctPedirNombres();
+      try{ Object.values(CT.trabajos).forEach(x => { if(x && x.estado === 'abierto' && (x.enlace || x === ctActual())) ctEnlaceAlDia(x); }); }catch(e){}   // (23-nov) el mismo enlace, al día
     }
   }
   function ctReintentar(){ Object.values(CT.trabajos).forEach(t => t.fotos.forEach(f => { if(f.subida === 'error'){ f.subida = 'tel'; f.intentos = 0; } })); ctEscribir(); ctPintarFotos(); ctProcesarCola(); }
