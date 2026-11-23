@@ -20688,7 +20688,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-23-R521';
+  const APP_BUILD = '2026-11-23-R522';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69806,6 +69806,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     ctProcesarCola();
     ctPedirNombres();
     ctRefrescarNombresNube(t);                   // (19 oct 2026) lo que la nube tiene pendiente aunque el telefono crea 'hecho'
+    ctNombreCompanyCam(t);                       // (23-nov-2026) si la oficina renombró el proyecto en CompanyCam, el nombre de hoy
     if(t.enlace && t.estado === 'abierto') ctEnlaceRevisar(t, true);
     ctRefrescarEnvios().then(() => { const p = document.querySelector('.tab-panel[data-tab="contenidos"]'); if(p && p.classList.contains('active')){ ctPintarOtros(); if(ctActual()) ctPintarFirma(); } });
     ctLiberarAuto();
@@ -71419,6 +71420,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // que ya tiene este teléfono viaja también, para que un enlace mandado antes de este cambio se quede como el de siempre.
   // Antes cada toque hacía uno nuevo y mataba el que el cliente ya tenía (Chris Sewell, 23-nov).
   async function ctEnlacePedir(t){
+    await ctNombreCompanyCam(t, 8000);           // (23-nov-2026) el enlace sale con el nombre de hoy de CompanyCam
     const empresa = ctEmpresa(), huella = ctHuellaInventario(t);
     const borrador = ctArmarSnapshot(t, { firmante: '', relacion: '' }, { nonce: 'enlace', modo: 'remota', empresa });
     const vista = ctVistaEnlace(t, empresa);
@@ -71491,6 +71493,37 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     t.pdfPendiente = true; t.cambios = false; t.enlace = null;
     return t;
   }
+  // (23-nov-2026) EL NOMBRE SIGUE A COMPANYCAM. Amilcar: "Si se cambia el nombre en CompanyCam, debería actualizarse en
+  // la aplicación" (el inventario del 3330 Oxon Run iba a salir con el nombre del contacto; la oficina ya había puesto a
+  // la dueña). Al abrir el inventario y antes de mandar el enlace, firmar o sacar el PDF, se le pregunta a la función
+  // companycam-clientes ({accion:'nombre_proyecto'}) el nombre de hoy del proyecto. La regla vive allá (planNombre): el
+  // nombre del proyecto siempre es el de CompanyCam; el del cliente lo sigue solo si salió de él (un nombre que la
+  // cuadrilla escribió distinto se respeta). La misma llamada pone al día el inventario en la nube (solo si está abierto).
+  // Sin señal o si CompanyCam no contesta, se sigue con lo que hay (nunca frena el trabajo). Una vez por minuto como mucho.
+  var ctNombreVisto;   // var: ctEntrar puede llamar antes de que esta línea corra
+  async function ctNombreCompanyCam(t, ms){
+    try{
+      ctNombreVisto = ctNombreVisto || {};
+      if(!t || t.estado !== 'abierto' || !t.cc || !t.cc.id || !signedIn() || navigator.onLine === false) return false;
+      if(ctNombreVisto[t.id] && Date.now() - ctNombreVisto[t.id] < 60000) return false;
+      ctNombreVisto[t.id] = Date.now();
+      const pid = String(t.cc.id);
+      const pedir = ccLlamar({ accion: 'nombre_proyecto', trabajo_id: t.id, project_id: pid, cliente: t.cliente || '', cc_nombre: t.cc.nombre || '', cc_direccion: t.cc.direccion || '' });
+      const r = await (ms ? Promise.race([pedir, new Promise((_, no) => setTimeout(() => no(new Error('CompanyCam tardó')), ms))]) : pedir);
+      if(!r || !r.cambia || t.estado !== 'abierto' || !t.cc || String(t.cc.id) !== pid) return false;
+      const antes = t.cliente || '';
+      t.cc = Object.assign({}, t.cc, { nombre: String(r.cc_nombre || t.cc.nombre || ''), direccion: String(r.cc_direccion || t.cc.direccion || '') });
+      if(r.cliente_cambia && r.cliente) t.cliente = String(r.cliente);
+      t.cambios = true; ctEscribir();
+      if(ctActual() === t){
+        const el = $('#ct-client'); if(el && r.cliente_cambia) el.value = t.cliente;
+        ctPintarProyecto(t);
+        if(r.cliente_cambia) ctAvisoVerde('&#10003; En CompanyCam este cliente ahora es <b>' + esc(t.cliente) + '</b>' + (antes ? ' (antes: ' + esc(antes) + ')' : '') + '. La app ya lo cambió.');
+      }
+      ctProcesarCola();
+      return true;
+    }catch(e){ console.warn('contenidos: nombre de CompanyCam', (e && e.message) || e); return false; }
+  }
   let ctEnlaceRevisando = false;
   async function ctEnlaceRevisar(t, silencio){
     if(!t || !t.enlace || t.estado !== 'abierto' || ctEnlaceRevisando || !signedIn() || navigator.onLine === false) return false;
@@ -71550,6 +71583,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const t = ctActual(); if(!t || t.estado !== 'abierto' || ctFirmando) return;
     const faltan = ctGateFirma(t);
     if(faltan.length){ const otraVez = ctReintentarDe(t); ctPintarFirma(); alert('Todavía no se puede firmar:\n\n' + faltan.map(x => '• ' + x.replace(/<[^>]+>/g, '')).join('\n') + (otraVez ? '\n\nYa se está subiendo otra vez. Espere un momento con señal y vuelva a tocar.' : '')); return; }
+    await ctNombreCompanyCam(t, 6000);           // (23-nov-2026) se firma con el nombre de hoy de CompanyCam
     const revision = await ctGaleria(t);
     if(!revision) return;
     const datos = await ctFirmaCapa(t);
@@ -72328,6 +72362,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   function ctHacerPdf(opts){ const t = ctActual(); if(!t) return alert('No hay un trabajo de contenidos.'); return ctHacerPdfDe(t, opts); }
   async function ctHacerPdfDe(t, opts){
     const o = opts || {};
+    if(t && t.estado === 'abierto') await ctNombreCompanyCam(t, 6000);   // (23-nov-2026) el borrador con el nombre de hoy
     showOverlay('Generando PDF… / Generating PDF…');
     try{
       const imagenes = await ctHojasImagenes(t);
