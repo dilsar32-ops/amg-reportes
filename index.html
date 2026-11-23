@@ -11785,6 +11785,10 @@ html body.rdms-pagos #casualPersonCard .hu-pin .hu-btn:disabled{opacity:.55; cur
 .whychip > summary .hu-tarifa{font-weight:500;}
 /* (17-nov, Lente M3 ronda 2) la ficha de AMG de Raúl: lo que el labor log pasó a Restauración, de esa persona */
 #mgPersonCard .hu-movidas{margin:10px 0 0; font-weight:600;}
+/* (23-nov-2026) TEMPORALES AUTOMÁTICOS: la etiqueta "Del labor log · Vero" (mismo tamaño que "✓ Coincide", el azul de las etiquetas de información) */
+.matchstatus.dellog{color:#2f6fd6;}
+html body.rdms-pagos #casualPersonEntries .matchstatus.dellog{color:#8fc0ff; cursor:pointer;}
+html body.cala-thoras #casualMyHistory .matchstatus.dellog{color:#8fc0ff;}
 
 </style>
 <style>
@@ -20684,7 +20688,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-23-R520';
+  const APP_BUILD = '2026-11-23-R521';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -25037,16 +25041,18 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     let urlH = '', urlP = '';   // (18-nov) las URL sin limit, para las demás páginas
     try{
       const [wRes, hRes, pRes] = await Promise.all([
-        authFetch('/rest/v1/casual_workers?select=id,name,status,rate,pin' + (PAGO_DATOS_READY ? ',nombre_completo,telefono' : '')
+        authFetch('/rest/v1/casual_workers?select=id,name,status,rate,pin' + (PAGO_DATOS_READY ? ',nombre_completo,telefono' : '') + (typeof taSel === 'function' ? taSel() : '')   // (23-nov) origen: lo agregó el labor log
           + '&company_id=eq.' + SES.company_id + '&order=name.asc', { headers: cloudHeaders() }),
         authFetch((urlH = '/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount,work_kind,clock_in,clock_out'
-          + (huColsCh() ? huCols() : '')
+          + (huColsCh() ? huCols() : '') + (typeof taSel === 'function' ? taSel() : '')   // (23-nov) origen: la puso el labor log
           + '&company_id=eq.' + SES.company_id + '&order=work_date.desc,id.desc') + '&limit=1000', { headers: cloudHeaders() }),   // (18-nov) en páginas de 1,000
         authFetch((urlP = '/rest/v1/casual_payments?select=id,casual_worker_id,paid_on,amount,kind,note,settle_key,created_at' + (PAGO_DATOS_READY ? ',metodo' : '')
           + (CASUAL_CONFIRM_READY ? ',accepted,responded_at,response_note,balance_after,confirm_needed' + (AUTO_OK_READY ? ',auto_ok_at' : '') : '')
           + '&company_id=eq.' + SES.company_id + '&order=paid_on.desc,id.desc') + '&limit=1000', { headers: cloudHeaders() })
       ]);
       if(!wRes.ok){
+        // (23-nov) sin la SQL de temporales automáticos: otra vez sin origen (antes que los demás: su 400 también es de columna)
+        if(wRes.status === 400 && typeof taSinColsOtraVez === 'function'){ const x = await taSinColsOtraVez(wRes, () => loadCasualTeam()); if(x) return x.v; }
         // Las columnas nuevas (supabase-datos-de-pago.sql) todavia no estan: se vuelve a pedir sin ellas.
         if(PAGO_DATOS_READY && wRes.status === 400){ PAGO_DATOS_READY = false; return loadCasualTeam(); }
         box.innerHTML = '<p class="clockhint">No se pudo revisar. Esta parte todavía no está instalada en el servidor: falta correr supabase-casual-crew.sql. Mándele este mensaje a quien le ayuda con la app.</p>';
@@ -25059,6 +25065,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // 400 = las columnas de confirmacion todavia no existen (falta correr
       // supabase-casual-confirm.sql). Se pide otra vez sin ellas, para que la
       // pantalla del dinero siga funcionando igual que antes.
+      if(hRes && !hRes.ok && hRes.status === 400 && typeof taSinColsOtraVez === 'function'){ const x = await taSinColsOtraVez(hRes, () => loadCasualTeam()); if(x) return x.v; }   // (23-nov) primero origen
       if(hRes && !hRes.ok && hRes.status === 400 && huColsCh()) return huSinColsOtraVez('t', hRes, () => loadCasualTeam());   // (16-nov) sin la SQL nueva: otra vez sin sus columnas (antes un 400 vaciaba la lista)
       if(pRes && !pRes.ok && pRes.status === 400 && AUTO_OK_READY){
         AUTO_OK_READY = false; return loadCasualTeam();
@@ -25104,10 +25111,15 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         // Sin tarifa el renglon dice "sin tarifa" y no da numero: tampoco entra
         // al total (antes si lo sumaba y la pantalla se contradecia sola).
         if(b.unpriced) missing++;
-        else if(b.balance > 0.004) grand += b.balance;
-        else if(b.balance < -0.004){ credit += -b.balance; creditPeople++; }
+        else{
+          // (23-nov, estudio 2.8) con tarifa de Restauración pero sin la de AMG: sus horas de AMG no están en su número ni en el total
+          if(b.sinPrecioHrs > 0.005) missing++;
+          if(b.balance > 0.004) grand += b.balance;
+          else if(b.balance < -0.004){ credit += -b.balance; creditPeople++; }
+        }
         totalMins += b.openMins;
-        const owedTxt = b.unpriced ? 'sin tarifa'
+        // (23-nov) la persona nueva por confirmar (sin horas todavía) dice «sin tarifa», no $0.00, y no cuenta en «falta la tarifa de N»
+        const owedTxt = (b.unpriced || (typeof taPorConfirmar === 'function' && taPorConfirmar(w) && b.rate === null)) ? 'sin tarifa'
           : (b.balance < -0.004 ? '<span style="color:#3ddc84;">+' + money(-b.balance) + '</span>'
                                 : money(Math.max(0, b.balance)));
         const badge = w.status === 'removed'
@@ -25123,10 +25135,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
             ? '<br><span class="when" style="color:var(--ink-soft);">&#8987; Falta que confirme ' + espera + ' pago(s)</span>' : '';
         const given = (b.plus || b.favor)
           ? ' &middot; entregado ' + money(b.net) : '';
+        const nuevo = typeof taNuevoChip === 'function' ? taNuevoChip(w, b) : '';   // (23-nov) «Nuevo · labor log de Vero»
         return `<div class="entryrow" data-casualid="${esc(w.id)}">
           <span><span class="who">${esc(w.name)}${badge}${resp}</span><br>
             <span class="when">${hhmm(b.openMins)} sin pagar${
-              b.unpriced ? ' &middot; falta la tarifa' : (b.rate !== null ? ' &middot; ' + money(b.rate) + '/hora' : '')}${given}</span></span>
+              b.unpriced ? ' &middot; falta la tarifa' : (b.rate !== null ? ' &middot; ' + money(b.rate) + '/hora' : '')}${
+              (!b.unpriced && b.sinPrecioHrs > 0.005) ? ' &middot; falta la tarifa AMG' : ''}${given}</span>${nuevo}</span>
           <span class="hrs">${owedTxt}</span>
         </div>`;
       }).join('');
@@ -25442,7 +25456,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const laborLoad = laborLoadVal === '' ? null : parseFloat(laborLoadVal);
     // Ya se permiten varios turnos al dia, asi que aqui se rechaza lo unico que
     // no puede pasar: dos turnos a la misma hora, sea del tipo que sea.
-    const sameDay = casualRowsFor(casualPersonKey).filter(r => r.work_date === date && r.clock_in && r.clock_out);
+    // (23-nov) las del labor log sin pagar de ese día no cuentan: al guardar esta, la base las quita TODAS (ta_reemplazo_ch)
+    const sameDay = casualRowsFor(casualPersonKey).filter(r => r.work_date === date && r.clock_in && r.clock_out && !(typeof taReemplaza === 'function' && taReemplaza(r)));
     // shiftSpan devuelve {start, end} o null - misma regla que overlappingEntryFor.
     const span = shiftSpan(fromVal, toVal);
     const clash = span ? sameDay.find(r => { const o = shiftSpan(r.clock_in, r.clock_out); return o && o.start < span.end - 1 && span.start < o.end - 1; }) : null;
@@ -25469,7 +25484,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         res = await post(Object.assign({}, bodyRow, { labor_load_hours: null }));
         droppedLoad = res.ok;
       }
-      if(!res.ok) throw new Error('HTTP '+res.status);
+      if(!res.ok){
+        // (23-nov) "Ese rato ya se le pagó con las horas del labor log…": lo que dijo la base, tal cual (no "HTTP 400")
+        let d = null; try{ d = await res.clone().json(); }catch(x){}
+        const dijo = typeof huMsgServidor === 'function' ? huMsgServidor(d) : '';
+        const err = new Error(dijo || ('HTTP ' + res.status)); if(dijo) err.servidor = true; throw err;
+      }
       if(droppedLoad) alert('Se guardó el turno de AMG, pero SIN las horas del reporte de mudanza: falta correr supabase-amg-labor-logs.sql.');
       await loadCasualHoursAll();
       renderCasualPerson();
@@ -25477,6 +25497,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       setCeKind('restauracion');   // vuelve sola despues de CADA guardado
       updateCasualEntryPreview();
     }catch(e){
+      if(e && e.servidor) alert(e.message); else
       alert('No se pudo guardar.\n\nDetalle: ' + ((e && e.message) || 'sin detalle') + '\nVersión: ' + APP_BUILD);
     }
     btn.textContent = old; btn.disabled = false;
@@ -25486,9 +25507,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!cloudOn() || !isManager()) return;
     try{
       const url = '/rest/v1/casual_hours?select=id,casual_worker_id,work_date,reported_hours,labor_load_hours,paid_at,paid_amount,work_kind,clock_in,clock_out'
-        + (huColsCh() ? huCols() : '')
+        + (huColsCh() ? huCols() : '') + (typeof taSel === 'function' ? taSel() : '')   // (23-nov) origen: la puso el labor log
         + '&company_id=eq.' + SES.company_id + '&order=work_date.desc,id.desc';   // (18-nov) en páginas de 1,000 (id: un orden fijo)
       const res = await authFetch(url + '&limit=1000', { headers: cloudHeaders() });
+      if(!res.ok && res.status === 400 && typeof taSinColsOtraVez === 'function'){ const x = await taSinColsOtraVez(res, () => loadCasualHoursAll()); if(x) return x.v; }   // (23-nov) primero origen
       if(!res.ok && res.status === 400 && huColsCh()) return huSinColsOtraVez('t', res, () => loadCasualHoursAll());   // (16-nov) sin la SQL nueva: sin sus columnas
       if(res.ok) casualHoursAll = await huMasPaginas(url, await res.json(), u => authFetch(u, { headers: cloudHeaders() }));   // (18-nov) todas (una que falla: se queda la de antes)
     }catch(e){}
@@ -25626,26 +25648,30 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const nameLower = ((w && w.name) || '').toLowerCase();
     const live = (!casualPaidView && casualLiveByDate) ? casualLiveCheck(r, casualLiveByDate[r.work_date] || [], nameLower) : null;
     const huV = typeof huFichaTemporal === 'function' ? huFichaTemporal(r) : null;   // (16-nov) el veredicto del servidor; null = como antes
-    const line = casualLoadLine(r, huV ? huLiveTemporal(r) : live, casualPaidView ? 'historial' : casualLiveEstado);
+    // (23-nov) la puso el labor log: "Del labor log · Vero" en vez de "✓ Coincide" (se compararía consigo misma), la línea gris
+    // con sus pedazos unidos y, si se enciman, cuánto se contó una vez. null = la fila de siempre.
+    const ta = typeof taFilaInfo === 'function' ? taFilaInfo(r) : null;
+    const line = (ta && ta.live) ? casualLoadLine(r, ta.live, 'ok') : casualLoadLine(r, huV ? huLiveTemporal(r) : live, casualPaidView ? 'historial' : casualLiveEstado);
     // "No aparece" es un problema de verdad (quien mando el reporte no lo
     // puso): se enciende en rojo. Lo demas sigue la regla de siempre.
-    const status = huV ? (huV.viejo || { cls:'', text:'' }) : (live && live.estado === 'noaparece')
+    const status = ta ? { cls:'dellog', text: ta.chip } : huV ? (huV.viejo || { cls:'', text:'' }) : (live && live.estado === 'noaparece')
       ? { cls:'mismatch', text:'⚠ No aparece en ' + (mg ? 'el reporte de mudanza' : 'el labor log') }
       : casualMatchStatus(r.reported_hours, line.load, r.work_kind);
     // Un dia encontrado tambien se puede tocar: abre el reporte de ese dia.
-    const reviewable = huV ? huV.revisar : (status.cls === 'mismatch' || status.cls === 'partial' || !!(live && live.estado === 'encontrado'));
+    const reviewable = ta ? true : huV ? huV.revisar : (status.cls === 'mismatch' || status.cls === 'partial' || !!(live && live.estado === 'encontrado'));
+    const nota = ((ta && ta.nota) || '') + ((huV && huV.nota) || '');
     const times = (r.clock_in && r.clock_out) ? ' &middot; ' + esc(fmtTime12(r.clock_in)).replace(/ /g, '&nbsp;') + ' - ' + esc(fmtTime12(r.clock_out)).replace(/ /g, '&nbsp;') : '';
     // Solo se corrige lo que todavia no se ha pagado.
     const fixable = !r.paid_at;
     const editing = fixable && String(casualFixingId) === String(r.id);
-    return `<div class="entryrow${huV && huV.nota ? ' hu-fila' : ''}${reviewable ? ' reviewable' : ''}"${reviewable ? ' data-review-date="'+esc(r.work_date)+'" data-review-kind="' + (mg ? 'mudanza' : 'restauracion') + '"' : ''}>
+    return `<div class="entryrow${nota ? ' hu-fila' : ''}${reviewable ? ' reviewable' : ''}"${reviewable ? ' data-review-date="'+esc(r.work_date)+'" data-review-kind="' + (mg ? 'mudanza' : 'restauracion') + '"' : ''}>
       <span><span class="who">${esc(r.work_date)}</span>${mg ? '<span class="kindtag">AMG</span>' : ''}${times ? '<span class="when">' + times + '</span>' : ''}
         ${status.text ? '<br><span class="matchstatus '+status.cls+'">'+status.text+'</span>' : ''}
         <br><span class="when">${line.text}</span></span>
       <span style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
         <span class="hrs">${r.reported_hours != null ? r.reported_hours + ' hrs' : '—'}</span>
         ${fixable ? '<button type="button" class="teedit" data-cffix="' + esc(r.id) + '">' + (editing ? 'Cerrar' : 'Corregir') + '</button>' : ''}
-      </span>${huV && huV.nota ? huV.nota : ''}
+      </span>${nota}
     </div>${editing ? casualFixPanel(r) : ''}`;
   }
 
@@ -25700,7 +25726,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // Misma regla que al agregar: varios turnos al dia si, dos a la misma hora no.
     const span = shiftSpan(from, to);
     const clash = span ? casualRowsFor(casualPersonKey)
-      .filter(x => String(x.id) !== String(id) && x.work_date === date && x.clock_in && x.clock_out)
+      .filter(x => String(x.id) !== String(id) && x.work_date === date && x.clock_in && x.clock_out
+        && !(date !== r.work_date && typeof taReemplaza === 'function' && taReemplaza(x)))   // (23-nov) a otro día: la base quita TODAS las del labor log sin pagar de ese día
       .find(o => { const s2 = shiftSpan(o.clock_in, o.clock_out); return s2 && s2.start < span.end - 1 && span.start < s2.end - 1; }) : null;
     if(clash) return alert('Ese día ya tiene un turno a esa misma hora:\n\n'
       + fmtTime12(clash.clock_in) + ' - ' + fmtTime12(clash.clock_out)
@@ -25802,7 +25829,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // Los dias ya pagados no se revisan: son historial.
     if(!casualPaidView) casualLiveLoad(rows); else { casualLiveKey = ''; casualLiveByDate = null; }
     huTemporalPrep(rows);   // (16-nov) los dueños que puso el servidor: llegan y se vuelve a pintar
-    if(!rows.length){
+    const preg = (!casualPaidView && typeof taPreguntasFicha === 'function') ? taPreguntasFicha() : [];   // (23-nov) «¿Es Enrique?» del labor log
+    if(!rows.length && !preg.length){
       box.innerHTML = '<p class="clockhint">Nada todavía.</p>';
     }else if(casualPaidView){
       box.innerHTML = casualPaidGroups(rows).map(g => {
@@ -25818,7 +25846,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         </div>`;
       }).join('');
     }else{
-      box.innerHTML = rows.map(casualDayRow).join('');
+      box.innerHTML = preg.length ? taJuntar(rows, preg) : rows.map(casualDayRow).join('');
     }
 
     const rate = casualRateOf(casualPersonKey);
@@ -26265,7 +26293,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // La etiqueta: asi el trabajador ve en el papel que horas fueron de AMG
       // y que horas de restauracion, y que cada lado se pago a su precio.
       if(mgRow){ pdf.setFont('helvetica','bold'); pdf.text('AMG', L+95, y); pdf.setFont('helvetica','normal'); }
-      pdf.text(String(r.reported_hours != null ? r.reported_hours : ''), L+150, y);
+      pdf.text(String(r.reported_hours != null ? r.reported_hours : '')   // (23-nov) la puso el labor log: lo dice el papel
+        + ((typeof taDelLog === 'function' && taDelLog(r)) ? ' (labor log)' : ''), L+150, y);
       pdf.text(r.paid_at ? 'paid' : (mismatch ? 'mismatch' : 'open'), L+250, y);
       y += 15;
     });
@@ -59103,6 +59132,44 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       }catch(e){ soltar(); alert('No se pudo guardar el cambio. Revise su internet y vuelva a intentar.'); }
       return;
     }
+    if(que === 'ta-otra'){
+      // (23-nov) «Es otra persona»: el servidor la agrega a Temporales (sin tarifa ni código) con ese turno; los otros días del mismo nombre, también
+      ocupar();
+      try{
+        const r = await huRpc('temporal_auto_agregar', { p_log_id: b.dataset.huLog, p_idx: +b.dataset.huIdx, p_escrito: b.dataset.huEscrito || '' });
+        if(r.falta){ soltar(); return alert('Esto todavía no está instalado en el servidor (falta correr la SQL de temporales automáticos).'); }
+        const dijo = r.ok ? '' : huMsgServidor(r.data);
+        if(dijo){ soltar(); return alert(dijo); }
+        const nuevo = r.ok ? (Array.isArray(r.data) ? r.data[0] : r.data) : null;
+        if(!nuevo || typeof nuevo !== 'string') throw new Error('no se guardó');
+        await taResto(b, 't', nuevo);
+        taQuitar(b.dataset.taClave || ''); huMgrOlvidar();
+        await loadCasualTeam(); renderCasualPerson();
+      }catch(e){ soltar(); alert('No se pudo guardar. Revise su internet y vuelva a intentar.'); }
+      return;
+    }
+    if(que === 'ta-nueva' || que === 'ta-nadie'){
+      // (23-nov) la persona nueva por confirmar («Obispo»): «Sí, es persona nueva» la confirma y el servidor pone TODAS sus horas al momento;
+      // «No es nadie» la quita (sin horas, tarifa ni código) y ese nombre ya no se pregunta
+      if(!taAmbas()) return;   // solo el manager de las dos empresas (la fila tampoco se le pinta a otro)
+      const nueva = que === 'ta-nueva';
+      ocupar();
+      try{
+        const r = await huRpc(nueva ? 'temporal_auto_agregar' : 'temporal_auto_no_es_persona', { p_log_id: b.dataset.huLog, p_idx: +b.dataset.huIdx, p_escrito: b.dataset.huEscrito || '' });
+        if(r.falta){ soltar(); return alert('Esto todavía no está instalado en el servidor (falta correr la SQL de temporales automáticos).'); }
+        const dijo = r.ok ? '' : huMsgServidor(r.data);
+        if(dijo){ soltar(); return alert(dijo); }
+        if(!r.ok) throw new Error('no se guardó');
+        taQuitar(b.dataset.taClave || ''); huMgrOlvidar();
+        if(nueva){
+          const x = Array.isArray(r.data) ? r.data[0] : r.data, id = typeof x === 'string' && x ? x : casualPersonKey;
+          await loadCasualTeam();
+          if(id !== casualPersonKey && (casualWorkers || []).some(w => w.id === id) && typeof openCasualPerson === 'function') openCasualPerson(id); else renderCasualPerson();
+        }else if(typeof cerrarFichaTemporal === 'function') cerrarFichaTemporal();   // ya no existe: a la lista, que se vuelve a cargar
+        else { $('#casualPersonCard').hidden = true; $('#casualTeamCard').hidden = false; await loadCasualTeam(); }
+      }catch(e){ soltar(); alert('No se pudo guardar. Revise su internet y vuelva a intentar.'); }
+      return;
+    }
     const es = que === 'es';
     if(!es && !confirm(huTextoNoEs(b.dataset.huEscrito || '', +b.dataset.huIdx === 0))) return;   // (Lente R2-m7) el líder: solo ese labor log
     ocupar();
@@ -59119,13 +59186,14 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       }
       const res = r.ok && Array.isArray(r.data) && r.data[0] ? r.data[0].resultado : '';
       if(['este', 'este_y_apodo', 'este_apodo_ocupado', 'no_es'].indexOf(res) < 0) throw new Error('no se guardó');
-      const aviso = huTextoConfirmar(res, b.dataset.huEscrito || '', r.data[0].apodo, String(antes || '').replace(/^(Es|It's)\s+/, ''), +b.dataset.huIdx === 0);   // (ronda 3, t1) al líder, nunca el apodo
+      const aviso = huTextoConfirmar(res, b.dataset.huEscrito || '', r.data[0].apodo, String(antes || '').replace(/^(Sí, es|Es|It's)\s+/, ''), +b.dataset.huIdx === 0);   // (ronda 3, t1) al líder, nunca el apodo
       // con un "sí", el manager de las dos empresas deja esa hora en su empresa de una vez; con un "no", solo se pregunta (en seco)
       // (17-nov, menor 5) y lo que contesta refresca "por decidir" / "falta la tarifa" de ese día sin esperar a abrir Pagos otra vez
       if(isManagerTotal() && b.dataset.huDia){
         const ac = await huRpc('horas_a_su_empresa', { p_from: huMenosDias(b.dataset.huDia, 1), p_to: huMenosDias(b.dataset.huDia, -1), p_aplicar: es });   // (18-nov) y los días de al lado: la noche que sigue
         const s = huS(); if(ac.ok && Array.isArray(ac.data)) ac.data.forEach(x => { if(x && x.fila_id){ s.acciones[x.fila_id] = x.accion; (s.detalle = s.detalle || {})[x.fila_id] = x; } });
       }
+      if(es && temporal && b.dataset.taClave !== undefined){ await taResto(b, persona.k, persona.id); taQuitar(b.dataset.taClave); }   // (23-nov) los otros días del mismo nombre; sus horas las pone el servidor en su próxima vuelta (2 min): aquí solo se quita la pregunta
       huMgrOlvidar();
       if(temporal){ await loadCasualHoursAll(); renderCasualPerson(); } else { await loadTeamEntries(true); renderPerson(); }
       if(aviso) alert(aviso);
@@ -59137,6 +59205,256 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     e.preventDefault(); e.stopPropagation();
     huBoton(b);
   }, true);
+  // (23-nov-2026) TEMPORALES AUTOMÁTICOS (sql/temporales-auto-BORRADOR-2026-11-23.sql; la maqueta aprobada). Sin "=====": sus textos siguen en la sección de arriba para la prueba de idioma.
+  // El servidor pone solas en casual_hours las horas que un labor log le da a un temporal SIN código (origen = 'labor_log', con
+  // sus pedazos en origen_detalle) y agrega a Temporales los nombres nuevos (casual_workers.origen = 'labor_log', sin tarifa).
+  // SIN esa SQL las columnas y las funciones no existen y todo se ve y funciona como antes: un 400 por "origen" apaga las
+  // columnas en la sesión y se pide otra vez sin ellas (como huSinColsOtraVez); un 404 de temporales_auto_por_decidir esconde
+  // la pregunta, callado.
+  /*TA-PURO:INICIO*/
+  function taDelLog(r){ return !!r && (r.origen === 'labor_log' || r.origen === 'labor_log_corregida'); }
+  // las que la base borra solas (TODAS las sin pagar de ese día) cuando llega una hora propia (ta_reemplazo_ch): no cuentan como "ya tiene un turno a esa hora"
+  function taReemplaza(r){ return !!r && r.origen === 'labor_log' && !r.paid_at; }
+  function taMin(t){ const m = /^(\d{1,2}):(\d{2})/.exec(String(t == null ? '' : t)); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+  function taReloj(m){ m = ((Math.round(m) % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); }
+  // los pedazos de la fila en minutos de SU día; la madrugada que salió en el labor log del día siguiente va +1440 (como el servidor)
+  function taPedazos(r){
+    const d = r && r.origen_detalle && typeof r.origen_detalle === 'object' ? r.origen_detalle : null;
+    const dia = String((r && r.work_date) || '').slice(0, 10), out = [];
+    (d && Array.isArray(d.pedazos) ? d.pedazos : []).forEach(p => {
+      if(!p) return;
+      const a = taMin(p.de); if(a === null) return;
+      let n = +p.min;
+      if(!(n > 0)){ const b = taMin(p.a); if(b === null) return; n = b - a; if(n <= 0) n += 1440; }
+      const ini = a + (dia && String(p.fecha_log || '').slice(0, 10) > dia ? 1440 : 0);
+      out.push({ ini, fin: ini + n, lider: String(p.lider || '').trim(), kind: p.empresa === 'mudanza' ? 'mudanza' : 'restauracion' });
+    });
+    return out.sort((x, y) => x.ini - y.ini || x.fin - y.fin);
+  }
+  // los tramos unidos (uno que empieza donde acaba el otro, también: como el servidor)
+  function taUnir(xs){
+    const out = [];
+    (xs || []).slice().sort((x, y) => x.ini - y.ini || x.fin - y.fin).forEach(t => {
+      const u = out[out.length - 1];
+      if(u && t.ini <= u.fin) u.fin = Math.max(u.fin, t.fin); else out.push({ ini: t.ini, fin: t.fin });
+    });
+    return out;
+  }
+  function taLideres(pz){ const o = []; (pz || []).forEach(p => { if(p.lider && o.indexOf(p.lider) < 0) o.push(p.lider); }); return o; }
+  // "1–3 PM", "11:30 AM–1 PM"
+  function taHora(m){ m = ((Math.round(m) % 1440) + 1440) % 1440; const h = Math.floor(m / 60), mm = m % 60; return { h: (h % 12 || 12) + (mm ? ':' + String(mm).padStart(2, '0') : ''), s: h >= 12 ? 'PM' : 'AM' }; }
+  function taRango(ini, fin){ const a = taHora(ini), b = taHora(fin); return a.s === b.s ? a.h + '–' + b.h + ' ' + b.s : a.h + ' ' + a.s + '–' + b.h + ' ' + b.s; }
+  // dónde se enciman los pedazos (de dos en dos) y de quién son
+  function taEncime(pz){
+    const cruces = [], quien = [];
+    for(let i = 0; i < pz.length; i++) for(let j = i + 1; j < pz.length; j++){
+      const a = Math.max(pz[i].ini, pz[j].ini), b = Math.min(pz[i].fin, pz[j].fin);
+      if(b > a){ cruces.push({ ini: a, fin: b }); [pz[i].lider, pz[j].lider].forEach(l => { if(l && quien.indexOf(l) < 0) quien.push(l); }); }
+    }
+    return { rangos: taUnir(cruces), quien };
+  }
+  // Lo que enseña en la ficha una fila que puso el labor log (la maqueta 2), o null (no es del labor log: la fila de siempre):
+  //   chip = "Del labor log · Vero" / "Del labor log · corregida" (en vez de "✓ Coincide": se compararía consigo misma)
+  //   live = la línea gris con los pedazos UNIDOS (para casualLoadLine)
+  //   nota = "Samuel y Aroldo se enciman 1–3 PM: se cuenta 9:30 h una vez."
+  function taFilaInfo(r){
+    if(!taDelLog(r)) return null;
+    const mg = huKind(r) === 'mudanza', pz = taPedazos(r), lid = taLideres(pz), u = taUnir(pz);
+    const chip = (mg ? 'Del reporte de mudanza' : 'Del labor log')
+      + (r.origen === 'labor_log_corregida' ? ' · corregida' : (lid.length ? ' · ' + huEsc(huLista(lid)) : ''));
+    const total = u.reduce((s, t) => s + (t.fin - t.ini), 0);
+    const live = u.length ? { estado: 'encontrado', hours: Math.round(total / 60 * 100) / 100, leader: lid.join(', '),
+      times: u.map(t => huH12(taReloj(t.ini)) + ' - ' + huH12(taReloj(t.fin))).join(', ') } : null;
+    const e = taEncime(pz);
+    let nota = '';
+    if(e.rangos.length){
+      const quien = e.quien.length > 1 ? huLista(e.quien) : (e.quien.length ? 'Dos turnos de ' + e.quien[0] : 'Dos turnos');
+      nota = '<div class="hu-nota"><span class="hu-dice"><b>' + huEsc(quien) + ' se enciman ' + huLista(e.rangos.map(t => taRango(t.ini, t.fin)))
+        + ':</b> se cuenta ' + huHhmm(total) + ' h una vez.</span></div>';
+    }
+    return { chip, live, nota };
+  }
+  // «Nuevo · labor log de Vero» (en HTML, escapado): lo agregó el labor log y todavía no tiene tarifa (ni de Restauración ni de AMG)
+  function taNuevoTxt(w, filas, lista){
+    if(!w || w.origen !== 'labor_log') return '';
+    const d = w.origen_detalle && typeof w.origen_detalle === 'object' ? w.origen_detalle : {};
+    let p = (Array.isArray(d.pedazos) ? d.pedazos : []).find(x => x && x.lider) || null;
+    if(!p) (filas || []).some(f => { const z = f && f.origen_detalle && Array.isArray(f.origen_detalle.pedazos) ? f.origen_detalle.pedazos.find(x => x && x.lider) : null; if(z) p = z; return !!z; });
+    // (23-nov) la persona nueva por confirmar no tiene filas: el líder de su pregunta
+    if(!p) (Array.isArray(lista) ? lista : []).some(x => { const z = taPieza(x); if(z && z.nueva && String(x.casual_worker_id) === String(w.id) && z.lider){ p = { lider: z.lider, empresa: z.kind }; } return !!p; });
+    if(!p && d.lider) p = { lider: d.lider, empresa: d.empresa || null };   // (23-nov) sin la pregunta (manager de una empresa)
+    const k = p && p.empresa === 'mudanza' ? 'mudanza' : 'restauracion';
+    return 'Nuevo · ' + huFuenteChip(k, p ? [String(p.lider).trim()] : []);
+  }
+  // (23-nov) «Obispo»: el labor log trajo un nombre que no es un nombre común; el servidor lo deja como temporal por confirmar
+  // (origen_detalle.por_confirmar = true, sin tarifa y sin horas) y pregunta una vez «¿Es una persona nueva?» (motivo 'persona_nueva')
+  function taPorConfirmar(w){ return !!w && w.origen === 'labor_log' && !!(w.origen_detalle && typeof w.origen_detalle === 'object' && w.origen_detalle.por_confirmar === true); }
+  // lo de una pregunta del servidor, venga en las columnas o en el detalle (persona_nueva lo trae en detalle: log_id, idx, escrito, lider, de, a)
+  function taPieza(p){
+    if(!p || typeof p !== 'object') return null;
+    const d = p.detalle && typeof p.detalle === 'object' ? p.detalle : {}, mot = p.motivo || d.motivo || '';
+    const idx = (p.idx != null && p.idx !== '') ? p.idx : (d.idx != null && d.idx !== '' ? d.idx : (d.turno != null && d.turno !== '' ? d.turno : null));
+    return { motivo: mot, nueva: mot === 'persona_nueva', log: p.log_id || d.log_id || d.log || null, idx: idx == null ? null : +idx,
+      escrito: String(p.escrito || d.escrito || '').trim(), dia: String(p.work_date || '').slice(0, 10), kind: p.work_kind || d.empresa || null,
+      lider: String(d.lider || '').trim(), de: d.de || null, a: d.a || null };
+  }
+  // la misma pregunta (para contestar una vez): la persona nueva es UNA por persona; las demás, una por nombre escrito
+  function taClave(p){
+    const z = taPieza(p); if(!z) return '';
+    const d = p.detalle && typeof p.detalle === 'object' ? p.detalle : {};
+    return z.nueva ? 'pn:' + String(p.casual_worker_id || '') : String(d.limpio || z.escrito).trim().toLowerCase();
+  }
+  // Las preguntas «¿Es X?» de ESTE temporal que dejó el servidor (temporales_auto_por_decidir): «Enriq» se parece a Enrique
+  // ('parecido') o el buscador no está seguro ('confirmar'). UNA por nombre escrito (la del día más nuevo; las demás van en
+  // "resto" y se contestan con el mismo toque). Lo que ya pregunta una fila suya de ese día (huDudasDe) no se repite.
+  // (23-nov) ambas = el que mira es manager de las dos empresas: solo él ve «¿Es una persona nueva?» (sin eso, ni la pregunta
+  // ni el «1 por decidir»: un «No es nadie» suelto podría borrar a una persona de verdad)
+  function taPreguntasDe(lista, id, ix, filas, ambas){
+    if(!Array.isArray(lista) || !id) return [];
+    const grupos = new Map();
+    lista.forEach(p => {
+      const z = taPieza(p);
+      if(!z || !z.log || z.idx == null || !z.escrito || !z.dia) return;
+      const d = p.detalle && typeof p.detalle === 'object' ? p.detalle : {}, mot = z.motivo;
+      let suyo = false;
+      if(mot === 'persona_nueva') suyo = ambas === true && String(p.casual_worker_id || '') === String(id);
+      else if(mot === 'parecido') suyo = !!(d.parecido && d.parecido.k === 't' && String(d.parecido.id) === String(id));
+      else if(mot === 'confirmar') suyo = String(p.casual_worker_id || '') === String(id)
+        || (Array.isArray(d.candidatos) && d.candidatos.some(c => c && c.k === 't' && String(c.id) === String(id)));
+      if(!suyo) return;
+      const k = taClave(p);
+      if(!grupos.has(k)) grupos.set(k, []);
+      grupos.get(k).push(p);
+    });
+    const out = [];
+    grupos.forEach((ps, clave) => {
+      ps.sort((x, y) => String(y.work_date).localeCompare(String(x.work_date)) || (+y.id || 0) - (+x.id || 0));
+      const nueva = clave.indexOf('pn:') === 0;
+      const enFila = !nueva && ps.some(p => (filas || []).some(f => f && !f.paid_at && f.work_date === String(p.work_date).slice(0, 10))
+        && !!ix && huDudasDe(ix, 't:' + id, String(p.work_date).slice(0, 10), filas).some(q => q && String(q.log_id) === String(p.log_id) && +q.idx === +p.idx));
+      if(!enFila) out.push({ p: ps[0], resto: nueva ? [] : ps.slice(1), clave, nueva });   // la persona nueva: el servidor contesta todos sus días con un toque
+    });
+    return out.sort((x, y) => String(y.p.work_date).localeCompare(String(x.p.work_date)));
+  }
+  /*TA-PURO:FIN*/
+  function taS(){
+    if(!taS.s) taS.s = { cols: true, falta: false, preg: null, at: 0, va: null, firmaFicha: '' };
+    return taS.s;
+  }
+  function taSel(){ return taS().cols ? ',origen,origen_detalle' : ''; }
+  // ¿el 400 es por las columnas origen (falta la SQL)? 'si' | 'no' (es otra cosa: la revisan los de siempre) | '?' (sin cuerpo)
+  async function taColsFaltan(res){
+    try{
+      const d = await res.clone().json();
+      const m = [d && d.message, d && d.details, d && d.hint].map(x => String(x || '')).join(' ');
+      return /origen/.test(m) ? 'si' : (m.trim() ? 'no' : '?');
+    }catch(e){ return '?'; }
+  }
+  // un 400 con origen pedido: si faltan, se apagan para la sesión; si no se sabe, solo ESA vez sin ellas. null = no era por eso.
+  async function taSinColsOtraVez(res, otraVez){
+    const s = taS(); if(!s.cols) return null;
+    const f = await taColsFaltan(res);
+    if(f === 'no') return null;
+    if(f === 'si'){ s.cols = false; return { v: await otraVez() }; }
+    s.cols = false; try{ return { v: await otraVez() }; }finally{ s.cols = true; }
+  }
+  // Lo "por decidir" del servidor. Un minuto de memoria; sin la función (404): nunca más en la sesión, callado.
+  function taPreguntasPedir(forzar){
+    const s = taS();
+    if(s.falta || huS().rpc !== true || !cloudOn() || !isManager()) return Promise.resolve(null);
+    if(s.va) return s.va;
+    if(!forzar && s.preg && Date.now() - s.at < 60000) return Promise.resolve(s.preg);
+    const hoy = todayStr();
+    s.va = (async () => {
+      try{
+        const r = await huRpc('temporales_auto_por_decidir', { p_from: huMenosDias(hoy, 60), p_to: huMenosDias(hoy, -1) });
+        if(r.falta){ s.falta = true; s.preg = null; return null; }
+        if(r.ok && Array.isArray(r.data)){ s.preg = r.data; s.at = Date.now(); }
+        return s.preg;
+      }catch(e){ return s.preg; }
+      finally{ s.va = null; }
+    })();
+    return s.va;
+  }
+  function taFirma(){ return JSON.stringify((taS().preg || []).map(p => p && p.id)); }
+  // ya contestada: fuera de la lista (sin esperar a que el servidor conteste otra vez) y la próxima vez se pide de nuevo
+  function taQuitar(clave){
+    const s = taS(); s.at = 0; if(!clave || !Array.isArray(s.preg)) return;
+    s.preg = s.preg.filter(p => taClave(p) !== clave);
+  }
+  // el mismo nombre en los otros días que se preguntaban: el mismo sí (en orden, uno a la vez; si uno falla, se queda por decidir)
+  async function taResto(b, k, id){
+    let resto = []; try{ resto = JSON.parse(b.dataset.taResto || '[]'); }catch(e){}
+    for(const x of (Array.isArray(resto) ? resto : [])){
+      try{ await huRpc('confirmar_nombre_labor', { p_log_id: x[0], p_idx: +x[1], p_escrito: x[2] || '', p_es: true, p_persona_kind: k, p_persona_id: id }); }catch(e){}
+    }
+  }
+  // el turno del labor log, de lo que ya trajo cuadre_nombres_labor (Pagos o la ficha), para la hora de la fila de la pregunta
+  function taPiezaDe(log, idx){
+    let hit = null;
+    try{ huS().mgr.forEach(e => { if(hit || !e || !Array.isArray(e.piezas)) return; hit = e.piezas.find(x => x && String(x.log_id) === String(log) && +x.idx === +idx) || null; }); }catch(e){}
+    return hit;
+  }
+  // (23-nov) ¿el que mira es manager de las dos empresas? (la persona nueva solo se le pregunta a él)
+  function taAmbas(){ try{ return isManagerTotal() === true; }catch(e){ return false; } }
+  // La fila de la pregunta (la maqueta 3): el día, la hora del turno, «—» de horas y los dos botones. Sin Corregir: no hay horas.
+  function taFilaPregunta(q, nombre){
+    const p = q.p, z = taPieza(p), mg = huKindDe(z.kind) === 'mudanza';
+    const pz = taPiezaDe(z.log, z.idx), de = z.de || (pz && pz.shift_from), a = z.a || (pz && pz.shift_to);
+    const lider = z.lider || String((pz && pz.crew_leader) || '').trim(), dia = z.dia;
+    const pila = String(nombre || '').trim().split(/\s+/)[0] || '';
+    const fuente = mg ? (lider ? 'El reporte de ' + huEsc(lider) : 'El reporte de mudanza') : (lider ? 'El labor log de ' + huEsc(lider) : 'El labor log');
+    const times = (de && a) ? '<span class="when"> &middot; ' + esc(fmtTime12(String(de))).replace(/ /g, '&nbsp;') + ' - ' + esc(fmtTime12(String(a))).replace(/ /g, '&nbsp;') + '</span>' : '';
+    const datos = ' data-hu-log="' + huEsc(z.log) + '" data-hu-idx="' + huEsc(z.idx) + '" data-hu-escrito="' + huEsc(z.escrito) + '" data-hu-dia="' + huEsc(dia) + '"'
+      + ' data-ta-clave="' + huEsc(q.clave) + '"' + (q.resto.length ? ' data-ta-resto="' + huEsc(JSON.stringify(q.resto.map(x => { const y = taPieza(x); return [y.log, y.idx, y.escrito]; }))) + '"' : '');
+    let pregunta, botones;
+    if(q.nueva){
+      // (23-nov) «¿Es una persona nueva?»: Sí la confirma (temporal_auto_agregar); No es nadie la quita. Solo el manager de las
+      // dos empresas: a cualquier otro no se le pinta nada, aunque llegue la pregunta
+      if(!taAmbas()) return '';
+      pregunta = '<b>¿Es una persona nueva?</b> ' + fuente + ' dice «' + huEsc(z.escrito) + '».';
+      botones = '<button type="button" class="hu-btn si" data-hu="ta-nueva"' + datos + '>Sí, es persona nueva</button>'
+        + '<button type="button" class="hu-btn" data-hu="ta-nadie"' + datos + '>No es nadie</button>';
+    }else{
+      pregunta = '<b>¿Es ' + huEsc(pila || 'él') + '?</b> ' + fuente + ' dice «' + huEsc(z.escrito) + '».';
+      // "Es otra persona" la agrega a Temporales: eso solo lo hace el manager de las dos empresas (temporal_auto_agregar)
+      botones = '<button type="button" class="hu-btn si" data-hu="es"' + datos + ' data-no-idioma>' + (pila ? 'Sí, es ' + huEsc(pila) : 'Sí, es él') + '</button>'
+        + (isManagerTotal() ? '<button type="button" class="hu-btn" data-hu="ta-otra"' + datos + '>Es otra persona</button>' : '');
+    }
+    return `<div class="entryrow hu-fila ta-pregunta">
+      <span><span class="who">${esc(dia)}</span>${mg ? '<span class="kindtag">AMG</span>' : ''}${times}
+        </span>
+      <span style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+        <span class="hrs">—</span>
+      </span><div class="hu-nota"><span class="hu-dice duda">${pregunta}</span>${botones}</div>
+    </div>`;
+  }
+  // Las preguntas de la ficha abierta: [{dia, html}]. Las pide (un minuto de memoria) y, si llegó algo distinto, vuelve a pintar.
+  function taPreguntasFicha(){
+    const s = taS(), h = huS(), id = casualPersonKey;
+    if(!id || casualPaidView || s.falta || h.rpc !== true) return [];
+    if(!s.preg || Date.now() - s.at >= 60000) taPreguntasPedir().then(() => {
+      const f = taFirma(); if(f === s.firmaFicha) return;
+      if(casualPersonKey === id && !casualPaidView) try{ renderCasualPerson(); }catch(e){}
+    });
+    s.firmaFicha = taFirma();
+    const w = (casualWorkers || []).find(x => x.id === id), ix = (h.fichaT && h.fichaT.key.indexOf(id + '|') === 0) ? h.fichaT.ix : null;
+    return taPreguntasDe(s.preg, id, ix, casualRowsFor(id), taAmbas()).map(q => ({ dia: String(q.p.work_date).slice(0, 10), html: taFilaPregunta(q, w ? w.name : '') })).filter(x => x.html);
+  }
+  // las filas del día y las preguntas, en el mismo orden (lo más nuevo arriba; la pregunta antes de las filas de su mismo día)
+  function taJuntar(rows, preg){
+    const out = [], q = preg.slice().sort((x, y) => y.dia.localeCompare(x.dia));
+    let i = 0;
+    rows.forEach(r => { const d = String(r.work_date || ''); while(i < q.length && q[i].dia >= d) out.push(q[i++].html); out.push(casualDayRow(r)); });
+    while(i < q.length) out.push(q[i++].html);
+    return out.join('');
+  }
+  // la etiqueta «Nuevo · labor log de Vero» del renglón de la lista Temporales (va con las demás etiquetas: rdmsPagosEtiquetas)
+  function taNuevoChip(w, b){
+    if(!w || w.origen !== 'labor_log' || !b || b.rate !== null || mgRateTemp(w.id) !== null) return '';
+    const t = taNuevoTxt(w, casualRowsFor(w.id), taS().preg);   // ya viene escapado (huFuenteChip)
+    return t ? '<span class="rdms-chips ta-chips"><i class="rdms-chip info ta-nuevo">' + t + '</i></span>' : '';
+  }
   // PAGOS (M2): al abrir Pagos, el manager de las dos empresas deja cada hora en su empresa (el servidor decide), y las
   // etiquetas de cada persona -crew Y temporales- salen del servidor.
   async function huPagosAcomodar(a, z){
@@ -59167,14 +59485,20 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const pinta = (f, clave, filas) => {
       // las de la cuenta vieja (rdmsPagosCoincide / RDMS_CMP) que alcanzaron a pintarse antes de que contestara el servidor: fuera
       f.querySelectorAll('.rdms-chip:not(.hu-cmp)').forEach(x => { if(x.classList.contains('cmp') || /^\d+ (?:(?:días? )?(?:no coinciden?|sin labor log)|(?:days? )?(?:don't match|doesn't match|without labor log))$/.test(x.textContent.trim())) x.remove(); });
-      const ch = huChips(huContar({ clave, filas, ix, acciones: s.acciones, detalle: s.detalle, ahora, sinLogMudo: mudo })), firma = JSON.stringify(ch);
+      const cuenta = huContar({ clave, filas, ix, acciones: s.acciones, detalle: s.detalle, ahora, sinLogMudo: mudo });
+      if(clave.charAt(0) === 't' && typeof taPreguntasDe === 'function') cuenta.decidir += taPreguntasDe(taS().preg, clave.slice(2), ix, filas, taAmbas()).length;   // (23-nov) «¿Es Enrique?»
+      const ch = huChips(cuenta);
+      { const ya = Array.from(f.querySelectorAll('.rdms-chip:not(.hu-cmp)')).map(x => x.textContent.trim().toLowerCase());   // (23-nov) «falta la tarifa AMG» una vez
+        ch.ini = ch.ini.filter(z => ya.indexOf(String(z[1]).trim().toLowerCase()) < 0); }
+      const firma = JSON.stringify(ch);
       if(f.dataset.hu === firma) return;
       f.dataset.hu = firma;
       f.querySelectorAll('.hu-cmp').forEach(x => x.remove());
       let c = f.querySelector('.rdms-chips');
       if(!c){ if(!ch.ini.length && !ch.fin.length) return; c = document.createElement('span'); c.className = 'rdms-chips hu-cmp-caja'; (f.firstElementChild || f).appendChild(c); }
       const mk = z => { const x = document.createElement('i'); x.className = 'rdms-chip ' + z[0] + ' hu-cmp'; if(z[2]) x.innerHTML = huEsc(z[1]) + ' ' + huDiaHtml(z[2]); else x.textContent = z[1]; return x; };
-      ch.ini.slice().reverse().forEach(z => c.insertBefore(mk(z), c.firstChild));
+      { const tras = c.querySelector('.ta-nuevo');   // (23-nov) «Nuevo · labor log de Vero» va primero, luego «1 por decidir»
+        ch.ini.slice().reverse().forEach(z => c.insertBefore(mk(z), tras ? tras.nextSibling : c.firstChild)); }
       ch.fin.forEach(z => c.appendChild(mk(z)));
       if(c.classList.contains('hu-cmp-caja') && !c.children.length) c.remove();
     };
@@ -59199,6 +59523,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(!r) return;
       const k = r[0] + '|' + r[1];
       if(!s.pagosVisto){ s.pagosVisto = true; s.pagosMovido = ''; s.pagosPedidos = {}; s.rastroMg = null; }   // acaba de abrir Pagos
+      // (23-nov) lo "por decidir" de los temporales automáticos, una vez por apertura (sin la función: nada)
+      if(s.rpc === true && typeof taPreguntasPedir === 'function' && !taS().falta && !(s.pagosPedidos = s.pagosPedidos || {}).ta){
+        s.pagosPedidos.ta = 1; taPreguntasPedir(true).then(x => { if(x){ huS().pagosUlt = null; huPagosLuego(); } }); }
       if(s.pagosVa) return;
       if(isManagerTotal() && s.pagosMovido !== k){ s.pagosVa = true; huPagosAcomodar(r[0], r[1]).finally(() => { s.pagosVa = false; huPagosLuego(); }); return; }
       const e = s.mgr.get(k);
@@ -59505,7 +59832,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const times = (h.clock_in && h.clock_out) ? '<br><span class="when">' + esc(fmtTime12(h.clock_in)) + ' - ' + esc(fmtTime12(h.clock_out)) + '</span>' : '';
       const del = (huKind(h) === sideKind() && !h.paid_at && h.id && CASUAL_SHIFT_READY) ? `<button type="button" class="minibtn cmDel" data-cmid="${esc(h.id)}">Borrar</button>` : '';
       return `<div class="entryrow hu-fila">
-        <span><span class="who">${esc(h.work_date)}</span>${times}${huEmpHtml(huKindsFila(h, v), C.tarifa)}</span>
+        <span><span class="who">${esc(h.work_date)}</span>${times}${(typeof taDelLog === 'function' && taDelLog(h)) ? '<br><span class="matchstatus dellog">' + (huKind(h) === 'mudanza' ? 'Del reporte de mudanza' : 'Del labor log') + '</span>' : ''}${huEmpHtml(huKindsFila(h, v), C.tarifa)}</span>
         <span style="display:flex;align-items:center;gap:10px;">
           <span class="hrs">${h.reported_hours != null ? (+h.reported_hours || 0).toFixed(2) + ' hrs' : '—'}</span>${del}</span>${huNotaHtml(huNotaTrabajador(v, h, primera, { sinCorregir: true, accion: (C.acc || {})[h.id] || '',
         seMueve: huSeMueve((C.det || {})[h.id]), sinFecha: huSeMueveSinFecha((C.det || {})[h.id]), tarifas: C.tarifa, regreso: huRegreso((C.det || {})[h.id]) || (C.reg || {})[h.id] || null }))}
@@ -65256,7 +65583,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const mg = (h.work_kind === 'mudanza');
       const other = mg !== isAmgSide();
       const hrs = +h.reported_hours || 0;
-      const status = (other || h.paid_at) ? { text:'', cls:'' } : casualMatchStatus(h.reported_hours, h.labor_load_hours, h.work_kind);
+      const status = (other || h.paid_at) ? { text:'', cls:'' }
+        : (typeof taDelLog === 'function' && taDelLog(h)) ? { cls:'dellog', text: mg ? 'Del reporte de mudanza' : 'Del labor log' }   // (23-nov) la puso el labor log
+        : casualMatchStatus(h.reported_hours, h.labor_load_hours, h.work_kind);
       const paid = h.paid_at ? '<br><span style="color:var(--green); font-weight:700; font-size:12px;">Pagado</span>' : '';
       const times = (h.clock_in && h.clock_out)
         ? '<br><span class="when">' + esc(fmtTime12(h.clock_in)) + ' - ' + esc(fmtTime12(h.clock_out)) + '</span>' : '';
@@ -91241,9 +91570,9 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       if(cm){ if(cm.mal) chips.push(['mal', cm.mal + (cm.mal === 1 ? ' día no coincide' : ' días no coinciden')]); if(cm.sin) chips.push(['ojo', cm.sin + ' sin labor log']); }
       if(!chips.length) return;
       w.textContent = quedan.join(' · ');
-      const c = document.createElement('span'); c.className = 'rdms-chips';
+      const c0 = f.querySelector('.rdms-chips.ta-chips'), c = c0 || document.createElement('span'); if(!c0) c.className = 'rdms-chips';   // (23-nov) junto a «Nuevo · labor log de …»
       chips.forEach(([k, t]) => { const x = document.createElement('i'); x.className = 'rdms-chip ' + k; x.textContent = t; c.appendChild(x); });
-      const izq = f.firstElementChild; if(izq) izq.appendChild(c);
+      const izq = f.firstElementChild; if(izq && !c0) izq.appendChild(c);
     });
   }
   // horas que no coinciden: para todos los que se deben, con UNA sola consulta de labor logs (las mismas reglas de la ficha: teMatchStatus)
