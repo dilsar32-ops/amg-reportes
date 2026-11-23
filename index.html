@@ -20684,7 +20684,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-23-R519';
+  const APP_BUILD = '2026-11-23-R520';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -71181,7 +71181,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       }
       if(fila.estado !== 'abierto'){ t.enlace = null; ctEscribir(); ctPintarFirma(); return false; }
       if(!fila.enlace_hash){ t.enlace = null; ctEscribir(); ctPintarFirma(); if(!silencio) alert('Ese enlace ya no está activo en el servidor. Mande uno nuevo si hace falta.'); return false; }
-      if(fila.enlace_vence_at && fila.enlace_vence_at !== t.enlace.vence_at){ t.enlace.vence_at = fila.enlace_vence_at; ctEscribir(); }
+      // (23-nov) Si este teléfono guarda un enlace que ya no es el vivo (otro teléfono lo cambió), se trae el vivo:
+      // así nunca se manda un enlace muerto.
+      if(t.enlace.token && (await ctSha256(new Blob([t.enlace.token]))) !== fila.enlace_hash){
+        try{ t.enlace.token = ''; await ctEnlacePedir(t); ctEscribir(); ctPintarFirma(); }catch(e){ console.warn('contenidos: traer el enlace vivo', (e && e.message) || e); t.enlace = null; ctEscribir(); ctPintarFirma(); return false; }
+      }
+      if(fila.enlace_vence_at && t.enlace && fila.enlace_vence_at !== t.enlace.vence_at){ t.enlace.vence_at = fila.enlace_vence_at; ctEscribir(); }
       if(!silencio) ctAvisoVerde('Todavía no firma. El enlace sigue activo' + (fila.enlace_vence_at ? ' hasta el ' + esc(ctFechaBonita(fila.enlace_vence_at)) : '') + '.');
       return false;
     }catch(e){ if(!silencio) alert('No se pudo revisar: ' + (e.message || e)); return false; }
