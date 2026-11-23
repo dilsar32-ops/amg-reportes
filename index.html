@@ -12358,6 +12358,10 @@ html body .med-mat-velo .rdmm-acc{display:flex; flex-direction:column; margin-to
 html body #medResumen .med-total-cuarto .med-mat-total, html body #medResumen .med-total-trabajo .med-mat-total{display:flex; flex-direction:column; align-items:flex-end; margin:4px 0;}
 html body #medResumen .med-mat-total small{font-size:11px; font-weight:500; color:#6b7076; line-height:1.2;}
 html body #medResumen input.med-b[data-rollo], html body .meas-cut input.meas-dimB[data-rollo]{background:#f1f3f5 !important; color:#4a4f55 !important;}
+html body #medResumen .med-comp{display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 2px;}
+html body #medResumen .med-comp-btn{min-height:40px; margin:0; padding:0 12px; border:1.5px dashed #14a1b8; border-radius:10px; background:#f3fbfc; color:#0f6f80; font:600 13.5px/1.2 "Avenir Next", -apple-system, sans-serif; cursor:pointer;}
+html body #medResumen .med-comp-btn:active{transform:scale(.97);}
+html body .med-mat-velo .med-mat-lista{max-height:none;}
 html body.rd-medidas .rdm-fila .rdm-en{display:block; font-size:.82em; font-weight:500; color:#6b7076; overflow:hidden; text-overflow:ellipsis;}
 </style>
 <script defer src="lumi-puntero.js?v=2"></script>
@@ -20738,7 +20742,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-23-R524';
+  const APP_BUILD = '2026-11-23-R525';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -30063,7 +30067,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     ]},
     wall: { labelEn:'Wall', labelEs:'Pared', options: [
       {value:'Drywall', label:'Drywall / Tablaroca'},
+      // (23-nov-2026) EL CORTE BAJO DE 1 PIE, igual que la cámara (ReglasDeMedir.drywallDeUnPie): se cobra por PIE LINEAL y su insulación
+      // sale largo × 1. La cámara ya lo guardaba con este nombre; aquí no estaba en la lista y caía en "Other" con unidad de pared (SF).
+      {value:'Drywall (1 ft cut)', label:'Drywall (1 ft cut) / Corte de drywall de 1 pie'},
       {value:'Plaster', label:'Plaster / Yeso'},
+      // (23-nov-2026) La cámara lo ofrece en la pared (ReglasDeMedir.materialesPared) con su insulación detrás; a mano faltaba.
+      {value:'Paneling', label:'Paneling / Paneles de madera'},
       {value:'Stud / Framing', label:'Stud / Framing / Armazón'},
       {value:'Insulation', label:'Insulación / Insulation'},
       // ZOCALO Y MOLDURA VAN SEPARADOS, Y SE AGREGA LA CORONA (18 sep 2026).
@@ -30262,6 +30271,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // alto no se vuelve pie lineal: queda "falta el alto".
   const MEASURE_LINEAL = new Set([
     'Baseboard', 'Trim / Baseboard', 'Shoe Molding', 'Trim', 'Crown Molding', 'Tackless Strip',
+    'Drywall (1 ft cut)',   // (23-nov) el corte bajo de 1 pie: pie lineal, como la cámara
     'Toe Kick', 'Cabinets', 'Vanity', 'Vanity Top', 'Shower Curb'
   ]);
   // 'EA' | 'LF' | 'SF', o null si es un material escrito a mano (no se le inventa una unidad:
@@ -30313,6 +30323,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     'Trim / Baseboard': { value:'Shoe Molding', labelEn:'Shoe Molding', labelEs:'shoe molding' },
     'Drywall': { value:'Insulation', labelEn:'Insulation', labelEs:'Insulación' },
     'Plaster': { value:'Insulation', labelEn:'Insulation', labelEs:'Insulación' },
+    // (23-nov) Los mismos de la cámara (paredConInsulacion / conUnderlayment): el corte de 1 pie y el paneling llevan insulación
+    // detrás; el hardwood, underlayment debajo.
+    'Drywall (1 ft cut)': { value:'Insulation', labelEn:'Insulation', labelEs:'Insulación' },
+    'Paneling': { value:'Insulation', labelEn:'Insulation', labelEs:'Insulación' },
+    'Hardwood': { value:'Underlayment', labelEn:'Underlayment', labelEs:'Base/Underlayment' },
     'Popcorn / Texture': { value:'Insulation', labelEn:'Insulation', labelEs:'Insulación' },
     'Carpet': { value:'Carpet Pad', labelEn:'Carpet Pad', labelEs:'Almohadilla de Alfombra' },
     'Vinyl (LVP)': { value:'Underlayment', labelEn:'Underlayment', labelEs:'Base/Underlayment' },
@@ -30869,6 +30884,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     piso: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5" stroke-dasharray="3 2.4"/></svg>',
     rectangulo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 19 12 5l9.5 14z"/><path d="M12 5v14"/></svg>',
     otro: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg>',
+    'u-SF': '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 12h16M12 4v16"/></svg>',
+    'u-LF': '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15h18"/><path d="M3 12v6M21 12v6M9 13.5v3M15 13.5v3"/></svg>',
+    'u-EA': '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M12 10v4"/></svg>',
     chev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>' };
   // Los dos nombres en el orden de esta sección: español grande, inglés chico (su regla del 13-sep); con la app en inglés, al revés.
   function medMatNombres(v){
@@ -30877,33 +30895,64 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(v === 'Other') return { a: en ? 'Other' : 'Otro', b: en ? 'type the name' : 'escribir el nombre', como: '', forma: 'otro' };
     return { a: String(v || ''), b: '', como: '', forma: '' };
   }
-  function medMatBotonPintar(bt, v){
-    const n = v ? medMatNombres(v) : { a: idiEn() ? '— Pick the material —' : '— Escoger material —', b: '' };
+  // (23-nov-2026, segunda vuelta) LO DEMOLIDO A MANO TAMBIÉN, como la cámara: cada material con sus dos nombres (la palabra del oficio
+  // primero, como está en su label; la insulación es la excepción) y SU regla: largo × alto, largo × ancho, pie lineal o por pieza, y lo
+  // que la cámara pregunta detrás o debajo (insulación, pad, underlayment, shoe molding).
+  const MED_PISOS_TERMINADOS = ['Carpet', 'Laminate', 'Hardwood', 'Vinyl (LVP)', 'Tile'];
+  function medReglaDe(v, seccion){
+    const n = medNombre(v), en = idiEn();
+    const u = esPorPieza(n) ? 'EA' : medUnidad(n, seccion);
+    let t = u === 'EA' ? (en ? 'Each (count)' : 'Por pieza (cuántos)')
+          : u === 'LF' ? (n === 'Drywall (1 ft cut)' ? (en ? 'Low 1 ft cut · linear ft' : 'Corte bajo de 1 pie · pie lineal') : (en ? 'Linear ft · length only' : 'Pie lineal · solo el largo'))
+          : u === 'SF' ? (seccion === 'wall' ? (en ? 'Length × height · sq ft' : 'Largo × alto · pies²') : (en ? 'Length × width · sq ft' : 'Largo × ancho · pies²')) : '';
+    const c = MATERIAL_COMPANION[n];
+    if(c) t += (en ? ' · asks: + ' + c.labelEn : ' · pregunta: + ' + (c.value === 'Insulation' ? 'Insulación' : c.labelEn));
+    return { texto: t, unidad: u || '' };
+  }
+  function medOpNombres(v, seccion){
+    if(seccion === 'materiales') return medMatNombres(v);
+    const en = idiEn();
+    if(v === 'Other') return { a: en ? 'Other' : 'Otro', b: en ? 'type the name' : 'escribir el nombre', como: '', forma: 'otro' };
+    const n = medNombre(v), o = ((MEASURE_SECTIONS[seccion] || {}).options || []).find(x => x.value === n);
+    const r = medReglaDe(n, seccion), forma = 'u-' + (r.unidad || 'SF');
+    if(!o) return { a: String(v || ''), b: '', como: r.texto, forma: forma };
+    const l = String(o.label || '');
+    let a, b;
+    if(l.indexOf(o.value + ' / ') === 0){ a = o.value; b = l.slice(o.value.length + 3); }
+    else { const i = l.indexOf(' / '); a = i > 0 ? l.slice(0, i) : l; b = i > 0 ? l.slice(i + 3) : ''; }
+    if(en && a !== o.value){ const x = a; a = o.value; b = x; }       // en inglés: el nombre del papel primero
+    return { a: a, b: b, como: r.texto, forma: forma };
+  }
+  function medMatBotonPintar(bt, v, seccion){
+    const n = v ? medOpNombres(v, seccion || 'materiales') : { a: idiEn() ? '— Pick the material —' : '— Escoger material —', b: '' };
     bt.classList.toggle('vacio', !v);
     bt.innerHTML = '<span class="med-mat-n"><b>' + esc(n.a) + '</b>' + (n.b ? '<small>' + esc(n.b) + '</small>' : '') + '</span>' + MED_MAT_IC.chev;
     bt.setAttribute('aria-label', (idiEn() ? 'Material: ' : 'Material: ') + (v ? n.a : (idiEn() ? 'not picked' : 'sin escoger')));
   }
-  function medMatBoton(selMat){
+  function medMatBoton(selMat, seccion){
+    const sec = seccion || 'materiales';
     const bt = medNodo('button', 'med-mat-btn'); bt.type = 'button'; bt.setAttribute('data-no-idioma', '');
-    medMatBotonPintar(bt, selMat.value);
-    bt.addEventListener('click', () => medMatHoja(selMat, bt));
+    medMatBotonPintar(bt, selMat.value, sec);
+    bt.addEventListener('click', () => medMatHoja(selMat, bt, sec));
     return bt;
   }
   // La lista: los mismos materiales que la cámara (los que no están escondidos), cada uno en su renglón con cómo se mide, y "Otro".
-  function medMatHoja(selMat, boton){
+  function medMatHoja(selMat, boton, seccion){
+    const sec = seccion || 'materiales';
     let v = document.getElementById('medMatVelo');
     if(!v){ v = document.createElement('div'); v.id = 'medMatVelo'; v.className = 'vh-velo rdmm med-mat-velo'; v.setAttribute('role', 'dialog'); v.setAttribute('aria-modal', 'true'); v.setAttribute('aria-labelledby', 'medMatT'); document.body.appendChild(v); }
     const en = idiEn(), actual = medNombre(selMat.value);
-    const ops = ((MEASURE_SECTIONS.materiales || {}).options || []).filter(o => !o.oculto);
+    const ops = ((MEASURE_SECTIONS[sec] || {}).options || []).filter(o => !o.oculto);
     const fila = o => {
-      const n = medMatNombres(o.value), marcada = o.value === actual;
+      const n = medOpNombres(o.value, sec), marcada = o.value === actual;
       return '<button type="button" class="med-mat-op" data-med-mat="' + esc(o.value) + '" aria-pressed="' + marcada + '">'
         + '<span class="med-mat-ic">' + (MED_MAT_IC[n.forma] || MED_MAT_IC.otro) + '</span>'
         + '<span class="med-mat-n"><b>' + esc(n.a) + '</b><small>' + esc(n.b) + '</small>' + (n.como ? '<i>' + esc(n.como) + '</i>' : '') + '</span></button>';
     };
     v.innerHTML = '<div class="vh-caja" data-no-idioma>'
-      + '<div class="rdmm-cab"><span class="vh-ico" aria-hidden="true">' + MED_MAT_IC.contencion + '</span><div><b class="vh-t" id="medMatT">' + (en ? 'Which material?' : '¿Qué material mediste?') + '</b>'
-      + '<span class="vh-quien">' + (en ? 'Each one on its own line, like the camera' : 'Cada uno por separado, como en la cámara') + '</span></div></div>'
+      + '<div class="rdmm-cab"><span class="vh-ico" aria-hidden="true">' + (sec === 'materiales' ? MED_MAT_IC.contencion : MED_MAT_IC['u-SF']) + '</span><div><b class="vh-t" id="medMatT">'
+      + (sec === 'materiales' ? (en ? 'Which material?' : '¿Qué material mediste?') : (en ? 'What was removed? · ' : '¿Qué se quitó? · ') + medSupVista(MED_SUPERFICIE_EN[sec] || sec)) + '</b>'
+      + '<span class="vh-quien">' + (sec === 'materiales' ? (en ? 'Each one on its own line, like the camera' : 'Cada uno por separado, como en la cámara') : (en ? 'Each one with its own rule, like the camera' : 'Cada uno con su regla, como en la cámara')) + '</span></div></div>'
       + '<div class="med-mat-lista">' + ops.map(fila).join('') + '</div>'
       + '<div class="rdmm-acc"><button type="button" class="vh-b vh-seguir" data-med-mat-x="1">' + (en ? 'Cancel' : 'Cancelar') + '</button></div></div>';
     const antes = document.activeElement;
@@ -30917,7 +30966,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       cerrar();
       if(val === actual && val !== 'Other') return;
       selMat.value = val;
-      try{ if(boton) medMatBotonPintar(boton, val); }catch(x){}
+      try{ if(boton) medMatBotonPintar(boton, val, sec); }catch(x){}
       selMat.dispatchEvent(new Event('change', { bubbles: true }));
     };
     v.hidden = false;
@@ -30929,6 +30978,30 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     d.appendChild(medNodo('span', 'med-mat-total-n', (n.a || material) + ': ' + total));
     if(n.b) d.appendChild(medNodo('small', '', n.b));
     return d;
+  }
+
+  // ¿Qué se le ofrece de un toque a este renglón? El compañero de la cámara (MATERIAL_COMPANION) y, bajo un piso terminado, el
+  // Subfloor (eso la cámara no lo pregunta: es su pedido "si hay subfloor"). Solo con el largo puesto y si ese cuarto no lo tiene ya
+  // con el mismo tamaño.
+  function medCompanerosParaOfrecer(cut, seccion){
+    const sel = $('.meas-material', cut); if(!sel) return [];
+    const m = medNombre(sel.value), a = parseFloat(($('.meas-dimA', cut) || {}).value);
+    if(!m || m === 'Other' || !(a > 0)) return [];
+    const lista = [];
+    const c = MATERIAL_COMPANION[m];
+    if(c) lista.push({ value: c.value, nombre: c.value === 'Insulation' ? (idiEn() ? 'Insulation' : 'Insulación') : c.labelEn });
+    if(seccion === 'floor' && MED_PISOS_TERMINADOS.indexOf(m) >= 0) lista.push({ value: 'Subfloor', nombre: 'Subfloor' });
+    const card = cut.closest('.measure-card'), bA = String(($('.meas-dimA', cut) || {}).value || '');
+    const ya = v => [...card.querySelectorAll('.meas-cut')].some(x => x !== cut && medNombre(($('.meas-material', x) || {}).value) === v && String(($('.meas-dimA', x) || {}).value || '') === bA);
+    return lista.filter(o => !ya(o.value));
+  }
+  function medAgregarCompanero(cut, valor){
+    addCompanionCut(cut, valor);
+    const nuevo = cut.nextElementSibling;
+    if(!nuevo || !nuevo.classList || !nuevo.classList.contains('meas-cut')) return;
+    // El corte de 1 pie es pie lineal (no trae ancho): su insulación es largo × 1, como en la cámara.
+    if(medNombre(($('.meas-material', cut) || {}).value) === 'Drywall (1 ft cut)' && !String(($('.meas-dimB', nuevo) || {}).value || '').trim())
+      setFieldValue($('.meas-dimB', nuevo), '1');
   }
 
   function medNodo(tag, clase, texto){
@@ -31207,7 +31280,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
               a.placeholder = medVistaEs() ? 'Largo' : 'L'; b.placeholder = medVistaEs() ? (mt.seccion === 'wall' ? 'Alto' : 'Ancho') : 'W';   // (R133)
               a.value = $('.meas-dimA', cut).value;
               b.value = $('.meas-dimB', cut).value;
-              const res = medNodo('span', 'med-res', medTextoDeCorte(cut));
+              const res = medNodo('span', 'med-res', medTotVista(medTextoDeCorte(cut)));   // (23-nov) en español: pies lineales / piezas también
               const quitar = medNodo('button', 'med-quitar', '✕');
               quitar.type = 'button';
               quitar.title = 'Quitar esta medida';
@@ -31219,9 +31292,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
               arriba.appendChild(selMat);
               // (23-nov) Materiales: un botón con el material en sus dos idiomas que abre la lista como la de la cámara (cada uno en su
               // renglón y cómo se mide). El <select> se queda (escondido) y sigue siendo el que manda: lo demás no cambia.
-              if(mt.seccion === 'materiales'){
+              // (23-nov, segunda vuelta) en TODAS las secciones: lo demolido también, cada material con su regla.
+              if(MEASURE_SECTIONS[mt.seccion]){
                 selMat.classList.add('med-mat-escondido'); selMat.tabIndex = -1; selMat.setAttribute('aria-hidden', 'true');
-                arriba.insertBefore(medMatBoton(selMat), selMat);
+                arriba.insertBefore(medMatBoton(selMat, mt.seccion), selMat);
               }
               // Sin esto, el drywall de la pared y el del techo se ven
               // idénticos: mismo nombre, mismas medidas.
@@ -31244,6 +31318,18 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
               abajo.appendChild(quitar);
               fila.appendChild(abajo);
               medAjustarFila(cut, b, equis, res);
+              // (23-nov) LO QUE VA DETRÁS O DEBAJO, de un toque (como la cámara pregunta la insulación, el pad, el underlayment o el
+              // shoe molding): copia el mismo tamaño a un renglón nuevo con ese material. Nunca se agrega solo.
+              const ofertas = medCompanerosParaOfrecer(cut, mt.seccion);
+              if(ofertas.length){
+                const caja = medNodo('div', 'med-comp'); caja.setAttribute('data-no-idioma', '');
+                ofertas.forEach(c => {
+                  const bc = medNodo('button', 'med-comp-btn', '+ ' + c.nombre + ' · ' + (idiEn() ? 'same size' : 'mismo tamaño')); bc.type = 'button';
+                  bc.addEventListener('click', () => { medAgregarCompanero(cut, c.value); saveDraft(); medPintarResumen(); });
+                  caja.appendChild(bc);
+                });
+                fila.appendChild(caja);
+              }
               // (20-oct) LA RESTA del corte, si trae una: se ve aquí, y marcarla o desmarcarla escribe en la casilla de la
               // tarjeta (la que lee el PDF). La que el plano ofreció sin marcar se ve aquí también, para decidir.
               const menosV = parseFloat(($('.meas-menos', cut) || {}).value) || 0, onT = $('.meas-menos-on', cut);
@@ -31271,7 +31357,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
                 if(medEsContencion(selMat.value) && a.value && !String(b.value).trim()) b.value = String(MED_ANCHO_ROLLO);   // (23-nov) el rollo
                 setFieldValue($('.meas-dimA', cut), a.value);
                 setFieldValue($('.meas-dimB', cut), b.value);
-                res.textContent = medTextoDeCorte(cut);
+                res.textContent = medTotVista(medTextoDeCorte(cut));
                 medAjustarFila(cut, null, null, res);
                 // A propósito NO se repinta el resumen aquí: se repintaría a
                 // cada tecla y el cursor saltaría fuera de la casilla.
