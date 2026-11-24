@@ -20884,7 +20884,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-24-R537';
+  const APP_BUILD = '2026-11-24-R538';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -91579,30 +91579,77 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(t){ if(s.dataset.lbtaAntes === undefined) s.dataset.lbtaAntes = s.textContent; s.textContent = t; }
     else if(s.dataset.lbtaAntes !== undefined){ s.textContent = s.dataset.lbtaAntes; delete s.dataset.lbtaAntes; }
   }
+  // (R538, 24-nov noche, bug en vivo: «toco la bocina y no suena») La bocina suena EN EL APARATO que la tocó, sin ir a la Mac:
+  // en la app del iPhone con la voz de Lumi del teléfono (plugin AsistenteVoz.hablar, la misma de la esfera); en un navegador con
+  // speechSynthesis. Antes usaba asDecir, que para el manager pide la voz de la Mac y en el teléfono se quedaba callada.
+  // Todo se encola DENTRO del toque (iOS solo deja hablar al navegador si arranca en el gesto). «Leer todos» = todos en orden.
+  function lbtaPlug(){ try{ return typeof isNative === 'function' && isNative() && typeof asPlugin === 'function' ? asPlugin() : null; }catch(e){ return null; } }
+  function lbtaIdioma(t){ const s = ' ' + String(t || '').toLowerCase() + ' ';
+    const en = (s.match(/ (the|you|your|can|could|will|please|thanks|tomorrow|today|what|when|is|are|we|i|send|call|me|it|this|that|to|for|and|at) /g) || []).length;
+    const es = (s.match(/ (el|la|los|las|que|de|en|por|para|mañana|hoy|gracias|ya|está|es|te|le|lo|y|un|una|dice) /g) || []).length;
+    return en > es ? 'en-US' : 'es-US'; }
+  // habla una lista de textos en orden. alEmpezar(k) cuando arranca el k-ésimo; alTerminar() al final. Devuelve la tanda (para pararla).
+  function lbtaHablar(textos, alEmpezar, alTerminar){
+    const tanda = { vivo: true, timers: [] }; MSG.lbtaTanda = tanda;
+    const fin = () => { if(!tanda.vivo) return; tanda.vivo = false; tanda.timers.forEach(clearTimeout); try{ alTerminar && alTerminar(); }catch(e){} };
+    const P = lbtaPlug();
+    if(P && typeof P.hablar === 'function'){
+      // nativo: se encolan todas de una vez; cada respuesta trae "segundos" = cuándo termina ESA (con la cola). Con eso se marca la fila.
+      let previo = 0;
+      textos.forEach((t, k) => {
+        Promise.resolve(P.hablar({ texto: t, preferida: true, encolar: k > 0 })).then(r => {
+          if(!tanda.vivo) return;
+          const s = Math.max(0.8, +(r && r.segundos) || (String(t).length * 0.065 + 0.6));
+          if(k > 0) tanda.timers.push(setTimeout(() => { if(tanda.vivo) alEmpezar(k); }, previo * 1000));
+          previo = s;
+          if(k === textos.length - 1) tanda.timers.push(setTimeout(fin, s * 1000 + 250));
+        }).catch(() => { if(k === textos.length - 1) fin(); });
+      });
+      alEmpezar(0);
+      return tanda;
+    }
+    const v = window.speechSynthesis;
+    if(!v || typeof SpeechSynthesisUtterance === 'undefined'){ fin(); return tanda; }
+    try{ v.cancel(); }catch(e){}
+    textos.forEach((t, k) => {   // (todas dentro del toque: iOS Safari)
+      const u = new SpeechSynthesisUtterance(t); u.lang = lbtaIdioma(t); u.rate = 1;
+      u.onstart = () => { if(tanda.vivo) alEmpezar(k); };
+      if(k === textos.length - 1) u.onend = u.onerror = fin;
+      v.speak(u);
+    });
+    alEmpezar(0);
+    tanda.timers.push(setTimeout(() => { try{ if(tanda.vivo && !v.speaking && !v.pending) fin(); }catch(e){} }, 4000));   // sin voz en el aparato: no se queda "leyendo"
+    return tanda;
+  }
+  function lbtaCallar(){
+    const t = MSG.lbtaTanda; MSG.lbtaTanda = null;
+    if(t){ t.vivo = false; t.timers.forEach(clearTimeout); }
+    const P = lbtaPlug();
+    if(P && typeof P.parar === 'function'){ try{ P.parar(); }catch(e){} }
+    try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(e){}
+  }
   function lbtaParar(){
     const v = MSG.lbtaVoz; MSG.lbtaVoz = null; clearInterval(MSG.lbtaTic); MSG.lbtaTic = null;
-    if(v){ try{ AS.hablaEpoch = (AS.hablaEpoch || 0) + 1; }catch(e){} try{ if(typeof asCallar === 'function') asCallar(); }catch(e){} try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(e){} }
+    if(v) lbtaCallar();
     lbtaCab(null); msgPintarChat();
   }
-  function lbtaDecirUna(texto, ep){
-    try{ if(typeof asDecir === 'function') return Promise.resolve(asDecir(texto, true, ep)); }catch(e){}
-    return new Promise(ok => { try{ const v = window.speechSynthesis; if(!v){ ok(); return; } const u = new SpeechSynthesisUtterance(texto); u.lang = 'es-US'; u.onend = u.onerror = () => ok(); v.speak(u); }catch(e){ ok(); } });
-  }
-  async function lbtaLeer(card, idxs, todos){
+  // (sin async: se llama DENTRO del toque)
+  function lbtaLeer(card, idxs, todos){
     const a = lbtTarjetaDe(card), ps = a ? lbtaPersonas(a) : []; if(!ps.length) return;
-    if(MSG.lbtaVoz) lbtaParar();
-    try{ if(typeof asCallar === 'function') asCallar(); }catch(e){} try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(e){}
-    const ep = AS.hablaEpoch = (AS.hablaEpoch || 0) + 1, yo = { card: card.id, i: idxs[0], t0: Date.now(), todos: !!todos, ep: ep };
+    const xs = idxs.map(i => ({ i: i, p: ps[i] })).filter(x => x.p); if(!xs.length) return;
+    if(MSG.lbtaVoz){ MSG.lbtaVoz = null; }
+    lbtaCallar();
+    try{ if(typeof asCallar === 'function') asCallar(); }catch(e){}   // (si la esfera estaba hablando, se calla)
+    const yo = { card: card.id, i: xs[0].i, t0: Date.now(), todos: !!todos };
     MSG.lbtaVoz = yo;
     clearInterval(MSG.lbtaTic); MSG.lbtaTic = setInterval(() => { const el = MSG.root && MSG.root.querySelector('.lbta-timer'); if(el && MSG.lbtaVoz) el.textContent = lbtaReloj(MSG.lbtaVoz.t0); }, 1000);
-    for(const i of idxs){
-      if(MSG.lbtaVoz !== yo || AS.hablaEpoch !== ep) return;
-      const p = ps[i]; if(!p) continue;
-      yo.i = i; yo.t0 = Date.now(); lbtaCab('leyendo a ' + p.q + '…'); msgPintarChat();
-      const frases = String(p.voz || p.q).replace(/\s+/g, ' ').trim().match(/[^.!?…]+[.!?…]+["”»]?|[^.!?…]+$/g) || [p.q];
-      for(const f of frases){ if(MSG.lbtaVoz !== yo || AS.hablaEpoch !== ep) return; try{ await lbtaDecirUna(f.trim(), ep); }catch(e){ break; } }
-    }
-    if(MSG.lbtaVoz === yo){ MSG.lbtaVoz = null; clearInterval(MSG.lbtaTic); MSG.lbtaTic = null; lbtaCab(null); msgPintarChat(); }
+    lbtaHablar(xs.map(x => String(x.p.voz || x.p.q)), k => {
+      if(MSG.lbtaVoz !== yo) return;
+      yo.i = xs[k].i; yo.t0 = Date.now(); lbtaCab('leyendo a ' + xs[k].p.q + '…'); msgPintarChat();
+    }, () => {
+      if(MSG.lbtaVoz !== yo) return;
+      MSG.lbtaVoz = null; clearInterval(MSG.lbtaTic); MSG.lbtaTic = null; lbtaCab(null); msgPintarChat();
+    });
   }
   // ---- responder
   function lbtaAbrir(card, i){
@@ -91708,17 +91755,13 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     lbtMandarToque(card, a, b.k, b.t);
   }
   // «Léemelos en voz alta» (24-nov-2026): con la voz de Lumi, frase por frase (un texto largo nunca la traba); Esc o «para» la callan
-  function lbtLeerEnVoz(texto){
+  function lbtLeerEnVoz(texto){   // (R538) en el aparato que la tocó, como la bocina de la tarjeta A
     const frases = String(texto || '').replace(/\s+/g, ' ').trim().match(/[^.!?…]+[.!?…]+["”»]?|[^.!?…]+$/g) || [];
     if(!frases.length) return;
     try{ if(typeof asCallar === 'function') asCallar(); }catch(e){}
-    try{
-      if(typeof asDecir === 'function'){ const ep = AS.hablaEpoch = (AS.hablaEpoch || 0) + 1;
-        (async function(){ for(const f of frases){ if(AS.hablaEpoch !== ep) break; try{ await asDecir(f.trim(), true, ep); }catch(e){ break; } } })(); return; }
-    }catch(e){}
-    try{ const v = window.speechSynthesis; if(!v) return; v.cancel(); frases.forEach(f => { const u = new SpeechSynthesisUtterance(f.trim()); u.lang = 'es-US'; v.speak(u); }); }catch(e){}
+    lbtaCallar(); lbtaHablar(frases.map(f => f.trim()), () => {}, () => {});
   }
-  document.addEventListener('keydown', e => { if(e.key !== 'Escape') return; try{ if(typeof asCallar === 'function') asCallar(); }catch(z){} try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(z){} });
+  document.addEventListener('keydown', e => { if(e.key !== 'Escape') return; try{ lbtaCallar(); }catch(z){} try{ if(typeof asCallar === 'function') asCallar(); }catch(z){} try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(z){} });
   // "Otra…": la caja de abajo queda contestándole a esa tarjeta ("Tu respuesta para Vero"); lo que escriba sale como su toque
   function lbtOtraAbrir(card){
     const root = MSG.root; if(!root) return;
@@ -91776,7 +91819,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const card = MSG.lista.find(x => x.id === b.dataset.lbtCard) || null; if(card) lbtTocar(card, b.dataset.lbtK);
   }, true);
   window.__lbt = { html: lbtHtml, tocar: lbtTocar, esLumi: lbtEsLumi, tarjeta: lbtTarjetaDe, personas: lbtaPersonas, clic: lbtaClic, parar: lbtaParar };   // para las pruebas
-  // LUMI_BOTONES_SELLO=2026-11-24-R536
+  // LUMI_BOTONES_SELLO=2026-11-24-R538
 // ===================== LUMI_BOTONES_CHAT_END =====================
   // ===================== (5-nov-2026, R154) LA FOTO EN GRANDE: SIEMPRE SE PUEDE SALIR =====================
   // Su queja: "abro una foto en grande en cualquier chat ... le pucho para regresar y no regresa", hay que cerrar la app. En el teléfono, al
