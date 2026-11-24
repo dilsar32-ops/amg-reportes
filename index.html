@@ -20816,7 +20816,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-24-R532';
+  const APP_BUILD = '2026-11-24-R533';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -85073,6 +85073,52 @@ function lumiIncompleteSpeechReply(text){
       return hecho;
     }catch(e){return false;}
   }
+  // ===================== LUMI_BANDEJA_PUENTE_BEGIN (24-nov-2026, agente Bandeja) =====================
+  // Su pedido: "¿tengo mensajes?", "muéstrame los mensajes", "¿a quién le tengo que responder?" y "respóndele a X que…"
+  // los contesta la Mac (tools/lumi_mac/bandeja-platica.mjs): TODOS los chats por prioridad, botones por persona en
+  // Mensajes, y antes de sugerir vuelve a mirar si él ya contestó. Aquí solo se decide que esas frases NO las conteste la
+  // guía vieja de la web (asInboxDialogue y compañía) y vayan derecho al cerebro (asLlamar -> la Mac). Copia de los patrones
+  // de leerPedido() en bandeja-platica.mjs: si cambian allá, cambiarlos aquí. Sin lookbehind (iOS 16.0).
+  var LUMI_BANDEJA_PUENTE = null;   // {at, owner}: la última frase que se mandó a la Mac por este camino
+  function lumiBandejaPlano(s){ return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[¿?¡!.,;:"“”«»]/g, ' ').replace(/\s+/g, ' ').trim(); }
+  var LBP_PRE = '(?:(?:oye|hey|lumi|ok|bueno|pues|a ver|ahora|y|por favor|porfa)\\s+)*';
+  var LBP_MENSAJES = new RegExp('^' + LBP_PRE + '(?:(?:tengo|hay|tienes|me llegaron|llegaron|me llego)\\s+(?:algun(?:os)?\\s+|nuevos?\\s+)?(?:mensajes?|chats?|textos?|algo nuevo|novedades en (?:los )?mensajes)(?:\\s+(?:nuevos?|sin leer|sin contestar|pendientes|hoy))*'
+    + '|(?:muestrame|ensename|leeme|lee|dime|pasame|ponme|abreme|revisa|checa|chequea)\\s+(?:los\\s+|mis\\s+|todos\\s+los\\s+|todos\\s+mis\\s+)?(?:mensajes|chats|textos)(?:\\s+(?:nuevos|que tengo|pendientes|sin leer|sin contestar|todos))*'
+    + '|quien(?:es)?\\s+me\\s+(?:escribio|escribieron|ha escrito|han escrito|escribe|mando mensaje)'
+    + '|(?:a quien|a quienes)\\s+(?:le\\s+|les\\s+)?(?:tengo que|debo|necesito)\\s+(?:responder|contestar)'
+    + '|(?:any|do i have)\\s+(?:new\\s+)?messages|show me (?:my |the )?messages)(?:\\s+(?:por favor|porfa|lumi|todos))*$');
+  var LBP_VERBO = '(?:respondele|respondale|respondeles|contestale|contestele|dile|digale|escribele|escribale|mandale(?:\\s+(?:un\\s+)?mensaje)?|reply to|tell)';
+  // "respóndele a Yesenia que…" (con nombre) / "respóndele" o "dile que…" (sin nombre)
+  var LBP_CON_NOMBRE = new RegExp('^' + LBP_PRE + LBP_VERBO + '\\s+(?:a\\s+(?:la\\s+|el\\s+)?)?(.{2,40}?)(?:\\s+(?:que|diciendole que|that)\\s+.+|(?:\\s+(?:por favor|porfa|lumi))*)$');
+  var LBP_SIN_NOMBRE = new RegExp('^' + LBP_PRE + '(?:' + LBP_VERBO + '(?:\\s+(?:por favor|porfa|lumi))*|(?:dile|digale|contestale|respondele|ponle|escribele)\\s+que\\s+.+)$');
+  // ¿Esta frase va a la bandeja de la Mac?
+  //  - "¿tengo mensajes?" y parecidas: siempre.
+  //  - "respóndele a X que…": solo si X salió en lo que la Mac acaba de enseñar (15 min). Si no, sigue la guía de la web
+  //    ("¿Por dónde le escribo: WhatsApp, Mensajes o Workspace?"), que sabe mandar por Workspace a la cuadrilla.
+  //  - "respóndele" / "dile que…" sin nombre, o la respuesta a "¿Qué le digo a X?" / "¿A cuál?": solo justo después (3 min).
+  function lumiBandejaRespuestas(n){ return [].slice.call(document.querySelectorAll('#asPanel .as-charla .as-resp')).slice(-n).map(function(x){ return String(x.innerText || ''); }); }
+  function lumiBandejaPuente(texto){
+    try{
+      if(!SES || SES.role !== 'manager' || AS.sandbox) return false;
+      const t = lumiBandejaPlano(texto); if(!t || t.length > 400) return false;
+      const owner = SES.user_id + '|' + SES.company_id, antes = LUMI_BANDEJA_PUENTE && LUMI_BANDEJA_PUENTE.owner === owner ? Date.now() - LUMI_BANDEJA_PUENTE.at : Infinity;
+      let si = LBP_MENSAJES.test(t);
+      if(!si && antes < 900000){
+        const m = LBP_CON_NOMBRE.exec(t), nombre = m && m[1] ? m[1].trim() : '';
+        if(nombre && !/^(?:que|este|ese|esta|esa|el|ella)$/.test(nombre)){
+          const primero = nombre.split(' ')[0];
+          si = primero.length >= 2 && lumiBandejaRespuestas(4).some(function(r){ return (' ' + lumiBandejaPlano(r) + ' ').indexOf(' ' + primero) >= 0; });
+        }
+      }
+      if(!si && antes < 180000){
+        const ult = lumiBandejaRespuestas(1)[0] || '';
+        si = LBP_SIN_NOMBRE.test(t) || /¿(?:Qué le digo|A cuál|A quién)/.test(ult);
+      }
+      if(si){ LUMI_BANDEJA_PUENTE = { at: Date.now(), owner: owner }; try{ asBit('bandeja -> Mac'); }catch(e){} }
+      return si;
+    }catch(e){ return false; }
+  }
+  // ===================== LUMI_BANDEJA_PUENTE_END =====================
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto) return;
@@ -85423,6 +85469,8 @@ function lumiIncompleteSpeechReply(text){
     // (13-nov-2026) LA HORA VA PRIMERO. Estaba al final: antes pasaba por la Mac ("¿que quiso decir?",
     // hasta 5 s medidos) y hasta despues contestaba algo que el aparato ya sabe.
     if(!dictando&&!AS.conf&&!AS.pregunta){const hora=lumiHoraAnswer(textoMac,asDeviceKind());if(hora){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,hora);asMostrarRespuesta(hora);asHablar(hora,asSeguirOyendo);return;}}
+    // (24-nov-2026, Bandeja) "¿tengo mensajes?" / "respóndele a X que…": derecho a la Mac (bandeja-platica.mjs), sin la guía vieja de abajo
+    lumiPuenteBandeja:{ if(!dictando&&!AS.conf&&!AS.pregunta&&lumiBandejaPuente(texto)) break lumiPuenteBandeja;
     if(!dictando&&!AS.conf&&!AS.pregunta&&typeof asLaborDocument==='function'&&(await asLaborDocument(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLaborRead(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&typeof asGastosLeer==='function'&&(await asGastosLeer(texto)))return;
@@ -85504,6 +85552,7 @@ function lumiIncompleteSpeechReply(text){
     // (R88) los MENSAJES de la app: leerlos y contestarlos se hace en el teléfono (nunca en modo prueba: ahí no se manda nada de verdad)
     if(!AS.conf && !dictando && !AS.sandbox){ const mc = asMsgInterpretar(texto); if(mc && asMsgEsMio(mc)){ AS.telTexto = texto; asTranscribir(texto); asPararOido(); return asMsgEmpezar(mc); } }
     if(!AS.conf && !dictando){ const cmd = asCmdInterpretar(texto, asMedirNorm); if(cmd && !(AS.sandbox && cmd.tipo === 'formulario' && cmd.form === 'equipo')){ AS.telTexto = texto; asTranscribir(texto); asPararOido(); return asComando(cmd); } }
+    }   // fin de lumiPuenteBandeja
     const requestEpoch=AS.requestEpoch=(AS.requestEpoch||0)+1;
     const vigente=()=>AS.abierto && AS.requestEpoch===requestEpoch;
     if(!oculto) asTranscribir(texto); asEstado('pensando', 'Un momento…'); AS.enviando = true; asMostrarRespuesta(''); asMapa(null);
