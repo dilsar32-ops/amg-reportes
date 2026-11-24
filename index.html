@@ -10691,6 +10691,9 @@ html body.rdms .med-previa.rdmpv .rdmpv-barra button[hidden]{display:none !impor
 .msg-root .msg-b.lbt .lbt-doc-t small{font-size:12.5px; line-height:16px; color:var(--wa-sub);}
 html body.rd-msgs .msg-root .msg-b.lbt{--lbt-azul:#1f6fe5; --lbt-line:#e6e7ea; --lbt-verde:#1f8a4c; --lbt-gris:#a0a4ab; --lbt-cita:rgba(0,0,0,.045); --lbt-toque:rgba(0,0,0,.05);}
 html body.amg-msgs .msg-root .msg-b.lbt{--lbt-azul:#f0c93a; --lbt-line:#2a2822;}
+.msg-root .msg-b.lbt .lbt-grupo{display:block; padding:8px 11px 2px; font-weight:700; font-size:13px; letter-spacing:.02em; text-transform:uppercase; color:var(--lbt-azul); border-top:1px solid var(--lbt-line);}
+.msg-root .msg-b.lbt .lbt-grupo:first-of-type{border-top:0;}
+.msg-root .msg-b.lbt .lbt-fila{display:block; padding:4px 11px 6px; white-space:pre-wrap; line-height:1.35;}
 /* ===== LUMI_BOTONES_CHAT_CSS_END ===== */
 </style>
 <script>
@@ -20816,7 +20819,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-24-R533';
+  const APP_BUILD = '2026-11-24-R534';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -85086,10 +85089,11 @@ function lumiIncompleteSpeechReply(text){
     + '|(?:muestrame|ensename|leeme|lee|dime|pasame|ponme|abreme|revisa|checa|chequea)\\s+(?:los\\s+|mis\\s+|todos\\s+los\\s+|todos\\s+mis\\s+)?(?:mensajes|chats|textos)(?:\\s+(?:nuevos|que tengo|pendientes|sin leer|sin contestar|todos))*'
     + '|quien(?:es)?\\s+me\\s+(?:escribio|escribieron|ha escrito|han escrito|escribe|mando mensaje)'
     + '|(?:a quien|a quienes)\\s+(?:le\\s+|les\\s+)?(?:tengo que|debo|necesito)\\s+(?:responder|contestar)'
-    + '|(?:any|do i have)\\s+(?:new\\s+)?messages|show me (?:my |the )?messages)(?:\\s+(?:por favor|porfa|lumi|todos))*$');
+    + '|leemelos(?:\\s+en voz alta)?|(?:dile|digale|escribele|mandale|avisale)\\s+algo\\s+a\\s+.{2,40}'
+    + '|(?:any|do i have)\\s+(?:new\\s+)?messages|show me (?:my |the )?messages)(?:\\s+(?:por favor|porfa|lumi|todos|en voz alta|uno por uno))*$');
   var LBP_VERBO = '(?:respondele|respondale|respondeles|contestale|contestele|dile|digale|escribele|escribale|mandale(?:\\s+(?:un\\s+)?mensaje)?|reply to|tell)';
   // "respóndele a Yesenia que…" (con nombre) / "respóndele" o "dile que…" (sin nombre)
-  var LBP_CON_NOMBRE = new RegExp('^' + LBP_PRE + LBP_VERBO + '\\s+(?:a\\s+(?:la\\s+|el\\s+)?)?(.{2,40}?)(?:\\s+(?:que|diciendole que|that)\\s+.+|(?:\\s+(?:por favor|porfa|lumi))*)$');
+  var LBP_CON_NOMBRE = new RegExp('^' + LBP_PRE + LBP_VERBO + '\\s+(?:al\\s+|a\\s+(?:la\\s+|el\\s+)?)?(.{2,40}?)(?:\\s+(?:que|diciendole que|that)\\s+.+|(?:\\s+(?:por favor|porfa|lumi))*)$');
   var LBP_SIN_NOMBRE = new RegExp('^' + LBP_PRE + '(?:' + LBP_VERBO + '(?:\\s+(?:por favor|porfa|lumi))*|(?:dile|digale|contestale|respondele|ponle|escribele)\\s+que\\s+.+)$');
   // ¿Esta frase va a la bandeja de la Mac?
   //  - "¿tengo mensajes?" y parecidas: siempre.
@@ -85103,6 +85107,7 @@ function lumiIncompleteSpeechReply(text){
       const t = lumiBandejaPlano(texto); if(!t || t.length > 400) return false;
       const owner = SES.user_id + '|' + SES.company_id, antes = LUMI_BANDEJA_PUENTE && LUMI_BANDEJA_PUENTE.owner === owner ? Date.now() - LUMI_BANDEJA_PUENTE.at : Infinity;
       let si = LBP_MENSAJES.test(t);
+      if(!si && antes < 180000 && /¿(?:Le quieres responder|Te lo leo completo|Sigo con|Por dónde se lo mando)/.test(lumiBandejaRespuestas(1)[0] || '') && LBP_CON_NOMBRE.test(t)) si = true;
       if(!si && antes < 900000){
         const m = LBP_CON_NOMBRE.exec(t), nombre = m && m[1] ? m[1].trim() : '';
         if(nombre && !/^(?:que|este|ese|esta|esa|el|ella)$/.test(nombre)){
@@ -85112,7 +85117,8 @@ function lumiIncompleteSpeechReply(text){
       }
       if(!si && antes < 180000){
         const ult = lumiBandejaRespuestas(1)[0] || '';
-        si = LBP_SIN_NOMBRE.test(t) || /¿(?:Qué le digo|A cuál|A quién)/.test(ult);
+        // (24-nov) la lectura guiada: lo que contesta a "¿Le quieres responder?", "¿Te lo leo completo?", "¿Por dónde se lo mando…?", "¿Sigo con…?"
+        si = LBP_SIN_NOMBRE.test(t) || /¿(?:Qué le digo|A cuál|A quién|Le quieres responder|Te lo leo completo|Por dónde se lo mando|Sigo con)/.test(ult);
       }
       if(si){ LUMI_BANDEJA_PUENTE = { at: Date.now(), owner: owner }; try{ asBit('bandeja -> Mac'); }catch(e){} }
       return si;
@@ -91212,6 +91218,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   // Solo la cuenta manager que ve su propia plática con Lumi pinta botones; la cuadrilla nunca ve estas filas (fr-16).
   var LBT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   var LBT_SVG = {
+    voz: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>',
     enviar: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>',
     ver: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>',
     responder: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>',
@@ -91269,14 +91276,24 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     let h = '<div class="msg-b in lbt' + (inicio ? ' inicio' : '') + (hecho ? ' hecho' : '') + (d ? ' con-doc' : '') + '" data-msg-id="' + esc(m.id) + '">'
       + (d ? '<button type="button" class="lbt-doc" data-lbt-doc="' + esc(m.id) + '"><span class="lbt-doc-ico">' + LBT_SVG.doc + '<i>PDF</i></span><span class="lbt-doc-t"><b data-no-idioma>' + esc(d.nombre) + '</b><small>' + esc(d.paginas === 1 ? '1 página' : d.paginas + ' páginas') + ' · PDF</small></span></button>' : '')
       + '<div class="lbt-cuerpo">'
-      + '<span class="msg-txt" data-no-idioma>' + esc(cuerpo) + '</span>'
+      + (Array.isArray(a.filas) && a.filas.length ? '' : '<span class="msg-txt" data-no-idioma>' + esc(cuerpo) + '</span>')
       + (a.cita ? '<span class="lbt-cita">' + (a.para ? '<span class="lbt-para" data-no-idioma>' + esc('Para: ' + a.para) + '</span>' : '') + '<span data-no-idioma>' + esc(a.cita) + '</span></span>' : '')
       + '<span class="msg-meta"><span class="msg-hora">' + esc(hora) + '</span></span></div>';
-    for(const b of a.botones){
-      const si = k === b.k;
-      h += '<button type="button" class="lbt-bt' + (si ? ' si' : '') + '" data-lbt-card="' + esc(m.id) + '" data-lbt-k="' + esc(b.k) + '"' + (hecho ? ' disabled aria-disabled="true"' : '') + '>'
-        + (si ? LBT_SVG.ok : (LBT_SVG[b.i] || LBT_SVG.enviar)) + '<span data-no-idioma>' + esc(b.t) + '</span></button>';
+    // (24-nov-2026, TARJETA EN LISTA) filas: el nombre de la app, cada persona con lo que dijo y SU botón justo debajo; los botones que
+    // no van en una fila («Léemelos en voz alta») al final. Sin filas: como siempre (todos los botones abajo).
+    const btn = function(b){ const si = k === b.k, local = b.i === 'voz' && typeof a.voz === 'string' && a.voz;
+      return '<button type="button" class="lbt-bt' + (si ? ' si' : '') + (local ? ' lbt-voz' : '') + '" data-lbt-card="' + esc(m.id) + '" data-lbt-k="' + esc(b.k) + '"' + (hecho && !local ? ' disabled aria-disabled="true"' : '') + '>'
+        + (si ? LBT_SVG.ok : (LBT_SVG[b.i] || LBT_SVG.enviar)) + '<span data-no-idioma>' + esc(b.t) + '</span></button>'; };
+    const filas = Array.isArray(a.filas) ? a.filas.filter(f => f && typeof f.t === 'string' && f.t.trim()) : [];
+    const usados = {};
+    if(filas.length){
+      for(const f of filas){
+        if(f.titulo){ h += '<div class="lbt-grupo" data-no-idioma>' + esc(f.t) + '</div>'; continue; }
+        h += '<div class="lbt-fila" data-no-idioma>' + esc(f.t) + '</div>';
+        const b = f.k ? a.botones.find(x => x.k === f.k) : null; if(b && !usados[b.k]){ usados[b.k] = 1; h += btn(b); }
+      }
     }
+    for(const b of a.botones){ if(!usados[b.k]) h += btn(b); }
     return h + '</div>';
   }
   async function lbtLeer(id){
@@ -91307,11 +91324,25 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   function lbtTocar(card, k){
     const a = lbtTarjetaDe(card); if(!a) return;
-    const b = a.botones.find(x => x.k === k); if(!b || lbtEscogido(card, a)) return;
+    const b = a.botones.find(x => x.k === k); if(!b) return;
+    if(b.i === 'voz' && typeof a.voz === 'string' && a.voz){ lbtLeerEnVoz(a.voz); return; }
+    if(lbtEscogido(card, a)) return;
     if(lbtVencida(a) || lbtReemplazada(card)){ msgPintarChat(); return; }
     if(b.i === 'otra'){ lbtOtraAbrir(card); return; }
     lbtMandarToque(card, a, b.k, b.t);
   }
+  // «Léemelos en voz alta» (24-nov-2026): con la voz de Lumi, frase por frase (un texto largo nunca la traba); Esc o «para» la callan
+  function lbtLeerEnVoz(texto){
+    const frases = String(texto || '').replace(/\s+/g, ' ').trim().match(/[^.!?…]+[.!?…]+["”»]?|[^.!?…]+$/g) || [];
+    if(!frases.length) return;
+    try{ if(typeof asCallar === 'function') asCallar(); }catch(e){}
+    try{
+      if(typeof asDecir === 'function'){ const ep = AS.hablaEpoch = (AS.hablaEpoch || 0) + 1;
+        (async function(){ for(const f of frases){ if(AS.hablaEpoch !== ep) break; try{ await asDecir(f.trim(), true, ep); }catch(e){ break; } } })(); return; }
+    }catch(e){}
+    try{ const v = window.speechSynthesis; if(!v) return; v.cancel(); frases.forEach(f => { const u = new SpeechSynthesisUtterance(f.trim()); u.lang = 'es-US'; v.speak(u); }); }catch(e){}
+  }
+  document.addEventListener('keydown', e => { if(e.key !== 'Escape') return; try{ if(typeof asCallar === 'function') asCallar(); }catch(z){} try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(z){} });
   // "Otra…": la caja de abajo queda contestándole a esa tarjeta ("Tu respuesta para Vero"); lo que escriba sale como su toque
   function lbtOtraAbrir(card){
     const root = MSG.root; if(!root) return;
@@ -91362,11 +91393,11 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(dd){ e.preventDefault(); e.stopImmediatePropagation(); const c = MSG.lista.find(x => x.id === dd.dataset.lbtDoc) || null; if(c) lbtAbrirDoc(c, dd); return; }
     const b = t.closest('[data-lbt-k]'); if(!b) return;
     e.preventDefault(); e.stopImmediatePropagation();
-    if(b.disabled) return;
+    if(b.disabled && !b.classList.contains('lbt-voz')) return;
     const card = MSG.lista.find(x => x.id === b.dataset.lbtCard) || null; if(card) lbtTocar(card, b.dataset.lbtK);
   }, true);
   window.__lbt = { html: lbtHtml, tocar: lbtTocar, esLumi: lbtEsLumi, tarjeta: lbtTarjetaDe };   // para las pruebas
-  // LUMI_BOTONES_SELLO=2026-11-21-R514
+  // LUMI_BOTONES_SELLO=2026-11-24-R534
 // ===================== LUMI_BOTONES_CHAT_END =====================
   // ===================== (5-nov-2026, R154) LA FOTO EN GRANDE: SIEMPRE SE PUEDE SALIR =====================
   // Su queja: "abro una foto en grande en cualquier chat ... le pucho para regresar y no regresa", hay que cerrar la app. En el teléfono, al
