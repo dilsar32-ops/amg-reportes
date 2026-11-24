@@ -12383,6 +12383,28 @@ html body.rd-medidas .rdmm-chip.rdmm-del-plano{border-color:#9fd3bf;}
 .med-resta-otra{display:grid; grid-template-columns:96px 1fr; gap:8px;}
 .med-resta-otra input{box-sizing:border-box; width:100%; min-height:44px; padding:0 10px; border:1.5px solid #d5d8dd; border-radius:11px; font:600 16px/1.2 "Avenir Next", system-ui, sans-serif;}
 .med-resta-velo .rdmm-acc{display:grid; gap:8px; margin-top:12px;}
+
+/* (revisión 23-nov) cuadrícula pareja, compañeros a lo ancho, chips del plano en cuadrícula, ir a la que falta, ventana del plano */
+html body.rd-medidas #medResumen .med-mas{display:grid !important; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:calc(7*var(--rdu));}
+html body.rd-medidas #medResumen .med-mas .btn{width:100% !important; min-width:0; padding:4px 6px !important; white-space:normal !important; line-height:1.15 !important; text-align:center;}
+#medResumen .med-comp{display:grid !important; grid-template-columns:1fr; gap:6px;}
+#medResumen .med-comp-btn{width:100%; justify-content:center; text-align:center;}
+html body.rd-medidas .rdmm-chips{display:grid; grid-template-columns:repeat(2, minmax(0, 1fr));}
+html body.rd-medidas .rdmm-chip{width:100%; min-width:0;}
+#medResumen .med-ir-falta{width:100%; margin-top:8px;}
+#medResumen .med-quitar-falta{display:block; margin:6px auto 0; min-height:36px; padding:0 10px; border:0; background:none; color:var(--danger, #c62828); font-size:13px; text-decoration:underline; cursor:pointer;}
+#medResumen .med-falta-ver{outline:3px solid #f5a623; outline-offset:3px; border-radius:12px; transition:outline-color .3s;}
+.med-pp .med-pp-mat{display:grid; gap:6px; margin:10px 0 4px; font-weight:700;}
+.med-pp .med-pp-mat select{min-height:46px; padding:0 10px; border:1.5px solid #d5d8dd; border-radius:11px; background:#fff !important; color:#111 !important; -webkit-text-fill-color:#111 !important; font:600 16px/1.2 "Avenir Next", system-ui, sans-serif;}
+.med-pp .med-pp-alto input{color:#111 !important; -webkit-text-fill-color:#111 !important; background:#fff !important;}
+.med-pp .med-pp-falta{margin:4px 0 8px; color:#b26a00; font-weight:700;}
+.med-pp .med-pp-pie{display:grid; gap:8px;}
+.med-pp .med-pp-alto, .med-pp .med-pp-preg{padding:10px 12px; border:1.5px solid #f5a623; border-radius:12px; background:#fffaf0;}
+.med-pp .med-pp-alto p, .med-pp .med-pp-preg p{margin:0 0 8px; font-weight:600;}
+.med-pp .med-pp-alto-fila{display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center;}
+.med-pp .med-pp-preg .med-pp-alto-fila{grid-template-columns:1fr 1fr;}
+.med-pp .med-pp-alto input{min-height:44px; padding:0 10px; border:1.5px solid #d5d8dd; border-radius:11px; font:600 16px/1.2 system-ui, sans-serif;}
+.med-pp .med-pp-pared.usada{border-color:#1f7a5a; background:#eef8f3;}
 </style>
 <script defer src="lumi-puntero.js?v=2"></script>
 <script defer src="lumi-pickups.js?trazado=3"></script>
@@ -20762,7 +20784,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-23-R527';
+  const APP_BUILD = '2026-11-23-R528';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -31011,9 +31033,16 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const c = MATERIAL_COMPANION[m];
     if(c) lista.push({ value: c.value, nombre: c.value === 'Insulation' ? (idiEn() ? 'Insulation' : 'Insulación') : c.labelEn });
     if(seccion === 'floor' && MED_PISOS_TERMINADOS.indexOf(m) >= 0) lista.push({ value: 'Subfloor', nombre: 'Subfloor' });
-    const card = cut.closest('.measure-card'), bA = String(($('.meas-dimA', cut) || {}).value || '');
-    const ya = v => [...card.querySelectorAll('.meas-cut')].some(x => x !== cut && medNombre(($('.meas-material', x) || {}).value) === v && String(($('.meas-dimA', x) || {}).value || '') === bA);
-    return lista.filter(o => !ya(o.value));
+    // (revisión) ¿Ya está? Se mira lo que va JUSTO DEBAJO de esta medida (ahí lo pone el toque, y la cámara igual): los renglones
+    // seguidos que son compañeros de esta. Antes se buscaba por el mismo largo, y al corregir el largo del drywall volvía a
+    // ofrecer la insulación y la duplicaba.
+    const deEsta = new Set(lista.map(o => o.value)), debajo = new Set();
+    for(let x = cut.nextElementSibling; x && x.classList && x.classList.contains('meas-cut'); x = x.nextElementSibling){
+      const v = medNombre(($('.meas-material', x) || {}).value);
+      if(!deEsta.has(v)) break;
+      debajo.add(v);
+    }
+    return lista.filter(o => !debajo.has(o.value));
   }
   function medAgregarCompanero(cut, valor){
     addCompanionCut(cut, valor);
@@ -31059,7 +31088,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const u = esPorPieza(v) ? 'EA' : medUnidad(mat, medSeccionDeCorte(cut));
     const sola = u === 'LF' || u === 'EA';
     if(b){ b.hidden = sola; const pared = cut.closest('.measure-card[data-section="wall"]');   // (R133) en RD en español: Alto / Ancho
-      b.placeholder = medVistaEs() ? (u === 'SF' && pared ? 'Alto' : 'Ancho') : (u === 'SF' ? (pared ? 'H' : 'W') : 'W');
+      const altoP = !!pared && u !== 'LF' && u !== 'EA';   // (revisión) en la pared siempre alto, aunque todavía no tenga material
+      b.placeholder = medVistaEs() ? (altoP ? 'Alto' : 'Ancho') : (altoP ? 'H' : 'W');
       const rollo = medEsRollo(v, b.value); if(rollo) b.placeholder = String(MED_ANCHO_ROLLO);   // (23-nov) contención × 10 ft (nunca readOnly: el borrador lo saltaría)
       b.toggleAttribute('data-rollo', rollo); }
     if(x) x.hidden = sola;
@@ -31168,6 +31198,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       medPintarResumen();
     }, 0));
   }
+  // (revisión) Lo que dice la resta, en español en la pantalla; en la casilla (y en el PDF del seguro) se queda en inglés.
+  function medRestaVista(t){
+    t = String(t || '');
+    if(!medVistaEs()) return t;
+    return t.replace(/\bopenings\b/g, 'aberturas').replace(/\bopening\b/g, 'abertura').replace(/\bdoors\b/g, 'puertas').replace(/\bdoor\b/g, 'puerta')
+      .replace(/\bwindows\b/g, 'ventanas').replace(/\bwindow\b/g, 'ventana').replace(/\broom shape\b/g, 'forma del cuarto').replace(/ sq ft\b/g, ' pies²');
+  }
+  function medRestaAIngles(t){
+    return String(t || '').replace(/\bpuertas\b/gi, 'doors').replace(/\bpuerta\b/gi, 'door').replace(/\bventanas\b/gi, 'windows').replace(/\bventana\b/gi, 'window')
+      .replace(/\baberturas\b/gi, 'openings').replace(/\babertura\b/gi, 'opening');
+  }
   // La resta a mano, en su ventana (lo de la tarjeta de antes): + Puerta, + Ventana, otra cantidad con "¿qué fue?", o quitarla.
   function medRestaHoja(cut){
     let v = document.getElementById('medRestaVelo');
@@ -31177,14 +31218,14 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const num = x => String(Math.round(x * 10) / 10);
     v.innerHTML = '<div class="vh-caja" data-no-idioma>'
       + '<b class="vh-t" id="medRestaT">Restar puerta o ventana</b>'
-      + '<p class="med-resta-ya">' + (n > 0 ? 'Ahora: ' + esc(num(n)) + ' pies²' + (que ? ' (' + esc(que) + ')' : '') : 'Lo que no se quitó: el hueco de la puerta o la ventana.') + '</p>'
+      + '<p class="med-resta-ya">' + (n > 0 ? 'Ahora: ' + esc(num(n)) + ' pies²' + (que ? ' (' + esc(medRestaVista(que)) + ')' : '') : 'Lo que no se quitó: el hueco de la puerta o la ventana.') + '</p>'
       + '<div class="med-resta-ops">'
       + '<button type="button" class="med-resta-op" data-resta-q="puerta"><b>+ Puerta</b><small>' + esc(medPPfi(r.puerta.ancho) + ' × ' + medPPfi(r.puerta.alto)) + ' = ' + num(r.puerta.ancho * r.puerta.alto) + ' pies²</small></button>'
       + '<button type="button" class="med-resta-op" data-resta-q="ventana"><b>+ Ventana</b><small>' + esc(medPPfi(r.ventana.ancho) + ' × ' + medPPfi(r.ventana.alto)) + ' = ' + num(r.ventana.ancho * r.ventana.alto) + ' pies²</small></button>'
       + '</div>'
       + '<span class="rdmm-l">Otra cantidad</span>'
       + '<div class="med-resta-otra"><input type="number" inputmode="decimal" step="0.1" min="0" id="medRestaN" placeholder="pies²" aria-label="Pies cuadrados a restar">'
-      + '<input type="text" id="medRestaQue" maxlength="120" placeholder="¿Qué fue? (door, window…)" aria-label="¿Qué fue?"></div>'
+      + '<input type="text" id="medRestaQue" maxlength="120" placeholder="¿Qué fue? (puerta, ventana…)" aria-label="¿Qué fue?"></div>'
       + '<div class="rdmm-acc">'
       + '<button type="button" class="vh-b vh-si" data-resta-q="poner">Poner</button>'
       + (n > 0 ? '<button type="button" class="vh-b vh-seguir" data-resta-q="quitar">Quitar la resta</button>' : '')
@@ -31201,7 +31242,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(q === 'poner'){
         const x = parseFloat((v.querySelector('#medRestaN') || {}).value);
         if(!(x > 0)){ const el = v.querySelector('#medRestaN'); if(el) el.focus(); return; }
-        const t = String((v.querySelector('#medRestaQue') || {}).value || '').trim();
+        const t = medRestaAIngles(String((v.querySelector('#medRestaQue') || {}).value || '').trim());   // al PDF va en inglés
         medPonerResta(cut, n + x, (que ? que + ', ' : '') + (t || 'opening ' + (Math.round(x * 10) / 10) + ' sq ft'), true); listo();
       }
     };
@@ -31242,11 +31283,20 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
                             : 'Hay ' + incompletos + ' medidas sin terminar. No van a salir en el PDF.');
         // Y EL BOTON PARA QUITARLAS TODAS DE UNA VEZ. Sin esto, el aviso le dice
         // que tiene 27 renglones de basura y lo deja limpiarlos de a uno.
-        const limpiar = medNodo('button', 'btn btn-outline',
+        // (revisión) Lo primero es TERMINARLA: el botón grande lleva a la que falta y la ilumina. Quitar queda chico, aparte.
+        const ir = medNodo('button', 'btn btn-outline med-ir-falta', incompletos === 1 ? 'Ir a terminarla' : 'Ir a la primera');
+        ir.type = 'button';
+        ir.addEventListener('click', () => {
+          const f = caja.querySelector('.med-falta-fila'); if(!f) return;
+          f.classList.remove('med-falta-ver'); void f.offsetWidth; f.classList.add('med-falta-ver');
+          try{ f.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }catch(e){ f.scrollIntoView(); }
+          setTimeout(() => f.classList.remove('med-falta-ver'), 2200);
+        });
+        av.appendChild(ir);
+        const limpiar = medNodo('button', 'med-quitar-falta',
           incompletos === 1 ? 'Quitar la que está sin terminar'
                             : 'Quitar las ' + incompletos + ' sin terminar');
         limpiar.type = 'button';
-        limpiar.style.cssText = 'width:100%; margin-top:8px; border-color:var(--danger); color:var(--danger);';
         limpiar.addEventListener('click', async () => {
           // Con confirmación: es un borrado en bloque. Se dice el número exacto
           // y se dice que las terminadas no se tocan. (R133) En RD con el aviso de la app, nunca el gris del sistema.
@@ -31429,7 +31479,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
                 const ck = medNodo('input'); ck.type = 'checkbox'; ck.checked = !!onT.checked;
                 const que = String(($('.meas-menos-que', cut) || {}).value || '').trim();
                 lab.appendChild(ck);
-                lab.appendChild(medNodo('span', '', 'Restar ' + med2(menosV) + ' sq ft' + (que ? ' (' + que + ')' : '')));
+                lab.appendChild(medNodo('span', '', 'Restar ' + med2(menosV) + (medVistaEs() ? ' pies²' : ' sq ft') + (que ? ' (' + medRestaVista(que) + ')' : '')));
                 ck.addEventListener('change', () => {
                   onT.checked = ck.checked; onT.dispatchEvent(new Event('input', { bubbles: true }));
                   calcCutResult(cut);
@@ -31541,13 +31591,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           // dibujo del cuarto y se llena largo × alto con sus puertas y ventanas ofrecidas. Solo si el plano de esta casa tiene
           // este cuarto en este nivel.
           if(ct.cuarto && nv.nivel && medPPTieneCuarto(nv.nivel, ct.cuarto)){
-            const pp = medNodo('div', 'med-mas med-pp-fila');
+            const pp = mas;     // (revisión) en la misma cuadrícula de 3 que + Piso / + Pared…
             [['wall', 'pared', 'Pared del plano'], ['ceiling', 'techo', 'Techo del plano']].forEach(([seccion, modo, etiqueta]) => {
               const b = medNodo('button', 'btn btn-outline med-pp-de-resumen', etiqueta); b.type = 'button';
               b.addEventListener('click', () => medPPDesdeResumen(tarjetas, seccion, modo, nv.nivel, ct.cuarto));
               pp.appendChild(b);
             });
-            cuartoBox.appendChild(pp);
           }
 
           // El total de CADA partida de este cuarto, uno por renglón: los mismos
@@ -32014,6 +32063,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // palabra; dos en las largas), el mismo tipo de calle si los dos lo dicen, y el mismo zip si los dos lo traen. Sin zip en
   // alguno de los dos, la calle tiene que ser idéntica. La ciudad no cuenta. La unidad ya se comparó antes (apartamento = otro trabajo).
   const MED_TIPOS_CALLE = new Set(['st','ave','rd','dr','ln','ct','blvd','cir','pl','ter','hwy','pkwy','trl','wy','sq','loop','row','aly','xing','pike','cv','pt','grn','mews']);
+  const MED_CUADRANTES = new Set(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']);
   function medCasiIgual(x, y){
     if(x === y) return true;
     const L = Math.max(x.length, y.length), tope = L >= 6 ? 2 : L >= 4 ? 1 : 0;
@@ -32030,20 +32080,27 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const ps = medPalabras(t).map(w => w === 'square' ? 'sq' : w);
     if(!ps.length || !/^[0-9]+$/.test(ps[0])) return null;
     let zip = ''; for(let i = ps.length - 1; i > 0; i--) if(/^[0-9]{5}$/.test(ps[i])){ zip = ps[i]; break; }
-    const calle = []; let tipo = '';
+    const calle = []; let tipo = '', cuad = '';
     for(let i = 1; i < ps.length && calle.length < 4; i++){
       const w = ps[i];
-      if(MED_TIPOS_CALLE.has(w)){ tipo = w; break; }
+      // (revisión) el cuadrante va pegado al tipo de calle ("Ave NW", "Road Southeast"): "1500 Massachusetts Ave NW" y
+      // "1500 Massachusetts Ave SE" son dos casas en dos cuadrantes de DC.
+      if(MED_TIPOS_CALLE.has(w)){ tipo = w; if(MED_CUADRANTES.has(ps[i + 1] || '')) cuad = ps[i + 1]; break; }
       if(/^[0-9]{5}$/.test(w) || MED_MARCAS_UNIDAD.indexOf(w) >= 0) break;
       calle.push(w);
     }
-    return { num: ps[0], zip, calle, tipo };
+    // El de adelante ("E Main St") también es parte de la calle: se queda en `calle` y se compara palabra por palabra.
+    return { num: ps[0], zip, calle, tipo, cuad };
   }
   function medMismaCalle(a, b){
     const x = medPartesCasa(a), y = medPartesCasa(b);
     if(!x || !y || x.num !== y.num) return false;
     if(x.zip && y.zip && x.zip !== y.zip) return false;
     if(x.tipo && y.tipo && x.tipo !== y.tipo) return false;
+    // (revisión) El cuadrante tiene que ser EL MISMO; si uno lo dice y el otro no (o uno no trae tipo de calle para leerlo),
+    // no se adivina: no casa por aquí (la regla de siempre, todas las palabras, sigue aparte).
+    if((x.cuad || '') !== (y.cuad || '')) return false;
+    if((x.cuad || y.cuad) && !(x.tipo && y.tipo)) return false;
     // Sin el tipo en alguno, la calle se lee hasta 4 palabras y puede traer la ciudad: se compara lo que tienen los dos.
     const dos = !!(x.tipo && y.tipo);
     if(dos && x.calle.length !== y.calle.length) return false;
@@ -32554,8 +32611,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       x.letra = i < 26 ? String.fromCharCode(65 + i) : String(i + 1);
       const r = medPPAberturasDeLaPared(x.a, x.b, cand);
       x.aberturas = r.con; x.sinMedida = r.sin;
-      x.resta = Math.round(medPPResta(x.largo, x.alto, r.con) * 10) / 10;
-      x.restaQue = x.resta > 0 ? medPPTextoAberturas(r.con) : '';
+      // (revisión) las aberturas a la pulgada, igual que su texto ("7'3\" × 7'11\"" = 57.4, no 57.6 de los decimales escondidos)
+      x.aberturas = r.con.map(a => Object.assign({}, a, { ancho: Math.round(a.ancho * 12) / 12, alto: Math.round(a.alto * 12) / 12 }));
+      x.resta = Math.round(medPPResta(x.largo, x.alto, x.aberturas) * 10) / 10;
+      x.restaQue = x.resta > 0 ? medPPTextoAberturas(x.aberturas) : '';
     });
     return out;
   }
@@ -32655,7 +32714,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const xs = P.map(p => p.x), ys = P.map(p => p.y);
     const caja = { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
     const bw = caja.x1 - caja.x0, bh = caja.y1 - caja.y0, cajaArea = bw * bh;
-    const r1 = v => Math.round(v * 10) / 10;
+    const r1 = medPPPies;   // (revisión) a la pulgada, dos decimales, como la pared
     const medidaDe = r => { const w = r.x1 - r.x0, h = r.y1 - r.y0; return { L: r1(Math.max(w, h)), W: r1(Math.min(w, h)), rect: r }; };
     const base = { area, atras, rot, poly: P };
     // Medio pie de holgura: el hueco de una puerta que la app cerró en diagonal (el Bathroom de la casa real) se queda en el borde.
@@ -32712,6 +32771,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     el.hidden = !texto;
   }
   // El corte donde cae lo del plano: el primero de la tarjeta que todavía no tiene números; si todos tienen, uno nuevo.
+  function medPPPies(v){ return Math.round(Math.round((+v || 0) * 12) / 12 * 100) / 100; }
   function medPPCorteLibre(card){
     const caja = $('.meas-cuts', card);
     const libre = $$('.meas-cut', caja).find(c => !String($('.meas-dimA', c).value || '').trim() && !String($('.meas-dimB', c).value || '').trim());
@@ -32719,8 +32779,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   }
   function medPPUsarPared(card, pared){
     const cut = medPPCorteLibre(card);
-    setFieldValue($('.meas-dimA', cut), Math.round(pared.largo * 10) / 10);
-    if(pared.alto > 0) setFieldValue($('.meas-dimB', cut), Math.round(pared.alto * 10) / 10);
+    // (revisión) a la pulgada y con dos decimales: 9' 1" es 9.08 (con uno salía 9.1, que se lee 9 pies 1 pulgada)
+    setFieldValue($('.meas-dimA', cut), medPPPies(pared.largo));
+    if(pared.alto > 0) setFieldValue($('.meas-dimB', cut), medPPPies(pared.alto));
     // Sus puertas y ventanas se OFRECEN sin marcar: él decide si se restan (su regla del 11 de septiembre).
     if(pared.resta > 0) medPonerResta(cut, pared.resta, pared.restaQue, false);
     cut.dataset.paredPlano = pared.clave;
@@ -32729,8 +32790,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     saveDraft();
     return cut;
   }
-  function medPPUsarTecho(card, techo){
+  function medPPUsarTecho(card, techo, material){
     const primero = medPPCorteLibre(card);
+    if(material){ setFieldValue($('.meas-material', primero), material); refreshMaterialOther(primero); }
     const mat = $('.meas-material', primero), matOtro = $('.meas-material-other', primero);
     let ultimo = null;
     techo.cortes.forEach((m, i) => {
@@ -32742,6 +32804,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       setFieldValue($('.meas-dimB', cut), m.W);
       // La forma del cuarto no es una opinión: es el área del plano. Va marcada.
       if(m.menos > 0) medPonerResta(cut, m.menos, m.menosQue || 'room shape', true);
+      cut.dataset.techoPlano = '1';
       refreshCutUnidad(cut);
       ultimo = cut;
     });
@@ -32832,7 +32895,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           const sinMed = x.sinMedida ? ' · ' + x.sinMedida + (x.sinMedida === 1 ? ' sin medida en el plano' : ' sin medida en el plano') : '';
           return `<button type="button" class="med-pp-pared${usadas.has(x.clave) ? ' usada' : ''}" data-pp-pared="${esc(x.clave)}">`
             + `<span class="med-pp-letra">${esc(x.letra)}</span><span class="med-pp-txt"><b>${esc(fpPiesPulg(x.largo))} × ${x.alto > 0 ? esc(fpPiesPulg(x.alto)) : 'sin alto'}</b>`
-            + `<small>${x.restaQue ? esc(x.restaQue) : 'sin puertas ni ventanas'}${esc(sinMed)}${usadas.has(x.clave) ? ' · ya puesta' : ''}</small></span></button>`;
+            + `<small>${x.restaQue ? esc(medRestaVista(x.restaQue)) : 'sin puertas ni ventanas'}${esc(sinMed)}${usadas.has(x.clave) ? ' · ya puesta' : ''}</small></span></button>`;
         }).join('');
         bloques.push((titulo ? `<h3 class="med-pp-h">${esc(titulo)}</h3>` : '')
           + `<div class="med-pp-dibujo">${medPPDibujo(room, ri, paredes, null)}</div>`
@@ -32842,7 +32905,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(t.error){ bloques.push((titulo ? `<h3 class="med-pp-h">${esc(titulo)}</h3>` : '') + `<p class="med-pp-nota">${esc(t.error)}</p>`); return; }
         datos.techos[ri] = t;
         const r2 = v => Math.round(v * 100) / 100;
-        const filas = t.cortes.map((m, i) => `<div class="med-pp-corte">${t.tipo === 'partes' ? `<span class="med-pp-letra c${i}">${String.fromCharCode(65 + i)}</span>` : ''}<span>${esc(fpPiesPulg(m.L))} × ${esc(fpPiesPulg(m.W))}${m.menos > 0 ? ' − ' + esc(String(m.menos)) + ' sq ft (' + esc(m.menosQue || 'forma del cuarto') + ')' : ''} = <b>${esc(String(r2(Math.max(0, m.L * m.W - (m.menos || 0)))))} sq ft</b></span></div>`).join('');
+        const filas = t.cortes.map((m, i) => `<div class="med-pp-corte">${t.tipo === 'partes' ? `<span class="med-pp-letra c${i}">${String.fromCharCode(65 + i)}</span>` : ''}<span>${esc(fpPiesPulg(m.L))} × ${esc(fpPiesPulg(m.W))}${m.menos > 0 ? ' − ' + esc(String(m.menos)) + ' pies² (' + esc(medRestaVista(m.menosQue || 'forma del cuarto')) + ')' : ''} = <b>${esc(String(r2(Math.max(0, m.L * m.W - (m.menos || 0)))))} pies²</b></span></div>`).join('');
         const explica = t.tipo === 'rect' ? 'Cuarto rectangular: largo × ancho del plano.' + (t.esquinaCerrada ? ' (El contorno del plano corta una esquina donde no hay pared; el techo es el rectángulo entero.)' : '')
           : t.tipo === 'partes' ? 'Cuarto en L: va en ' + t.cortes.length + ' medidas de verdad que juntas dan el área del plano (' + t.area + ' sq ft). Ningún ancho inventado.'
           : 'Cuarto de forma irregular: largo × ancho de la caja, menos lo que le falta para ser el área del plano (' + t.area + ' sq ft).';
@@ -32858,30 +32921,89 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const capa = document.createElement('div');
     capa.id = 'medPP'; capa.className = 'med-pp';
     capa.setAttribute('role', 'dialog'); capa.setAttribute('aria-modal', 'true');
-    capa.innerHTML = `<div class="med-pp-top"><div class="med-pp-tit"><b>${modo === 'pared' ? 'Pared del plano' : 'Techo del plano'}<span class="en"> / ${modo === 'pared' ? 'Plan wall' : 'Plan ceiling'}</span></b><span>${esc(c.cuarto)} · ${esc(c.nivel)}</span></div>`
+    // (revisión) el material se escoge AQUÍ (sin material la medida no sale en el PDF): el último que se puso en esta tarjeta.
+    const secMat = modo === 'pared' ? 'wall' : 'ceiling';
+    // Solo lo de área (largo × alto / × ancho): el corte de 1 pie y lo de pie lineal no van con la pared entera del plano.
+    const matsPP = ((MEASURE_SECTIONS[secMat] || {}).options || []).filter(o => !o.oculto && o.value !== 'Other' && medUnidad(o.value, secMat) === 'SF');
+    const matAntes = (() => { const cs = $$('.meas-cut', card); for(let i = cs.length - 1; i >= 0; i--){ const v = ($('.meas-material', cs[i]) || {}).value; if(v && matsPP.some(o => o.value === v)) return v; } return ''; })();
+    const es = medVistaEs();
+    const lugarVisto = es ? medNombreVisto(ROOM_OPTIONS, c.cuarto, c.cuarto) + ' · ' + medNombreVisto(LEVEL_OPTIONS, c.nivel, c.nivel) : c.cuarto + ' · ' + c.nivel;
+    capa.innerHTML = `<div class="med-pp-top"><div class="med-pp-tit"><b>${modo === 'pared' ? 'Pared del plano' : 'Techo del plano'}<span class="en"> / ${modo === 'pared' ? 'Plan wall' : 'Plan ceiling'}</span></b><span>${esc(lugarVisto)}</span></div>`
       + `<button type="button" class="med-pp-x" data-pp="cerrar" aria-label="Cerrar">&#10005;</button></div>`
       + `<div class="med-pp-cuerpo"><p class="med-pp-de"><svg class="ico"><use href="#i-ruler"/></svg>Del plano de ${esc(quien)}</p>`
+      + `<label class="med-pp-mat"><span>¿Qué material mediste?</span><select id="medPPMat"><option value="">— Escoger material —</option>${matsPP.map(o => `<option value="${esc(o.value)}"${o.value === matAntes ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select></label>`
+      + `<p class="med-pp-falta" id="medPPMatFalta" hidden>Escoja primero el material.</p>`
       + (modo === 'pared' ? '<p class="med-pp-ayuda">Toque la pared que va a medir: se pone su largo y su alto. Sus puertas y ventanas se ofrecen sin marcar.</p>' : '')
       + bloques.join('') + `</div>`
-      + `<div class="med-pp-pie"><button type="button" class="btn btn-outline" data-pp="cerrar">&#9664; Volver<span class="en"> / Back</span></button></div>`;
+      + `<div class="med-pp-pie">`
+      + `<div class="med-pp-alto" id="medPPAlto" hidden><p id="medPPAltoT"></p><div class="med-pp-alto-fila"><input type="number" inputmode="decimal" step="0.01" min="0" id="medPPAltoN" placeholder="Alto (pies)" aria-label="Alto de la pared en pies"><button type="button" class="btn btn-accent" data-pp="alto-si">Poner</button><button type="button" class="btn btn-outline" data-pp="alto-no">No</button></div></div>`
+      + `<div class="med-pp-preg" id="medPPPreg" hidden><p id="medPPPregT"></p><div class="med-pp-alto-fila"><button type="button" class="btn btn-accent" data-pp="preg-si">Sí, otra vez</button><button type="button" class="btn btn-outline" data-pp="preg-no">No</button></div></div>`
+      + (modo === 'pared' ? `<button type="button" class="btn btn-outline" data-pp="todas">Todas las paredes</button>` : '')
+      + `<button type="button" class="btn btn-ink" data-pp="cerrar">Listo<span class="en"> / Done</span></button></div>`;
     document.body.appendChild(capa);
     document.body.classList.add('med-pp-abierto');
     medPP = { card, modo, datos };
-    capa.addEventListener('click', e => {
+    const $c = q => capa.querySelector(q);
+    const material = () => String(($c('#medPPMat') || {}).value || '');
+    const pideMaterial = () => { if(material()) return true; const f = $c('#medPPMatFalta'); if(f) f.hidden = false; try{ $c('#medPPMat').focus(); $c('#medPPMat').scrollIntoView({ block: 'center' }); }catch(e){} return false; };
+    const yaPuesta = clave => $$('.meas-cut', medPP.card).some(x => x.dataset.paredPlano === clave);
+    const marcar = clave => capa.querySelectorAll('[data-pp-pared]').forEach(el => {
+      if(el.dataset.ppPared !== clave) return;
+      el.classList.add('usada');
+      const sm = el.tagName === 'BUTTON' && el.querySelector('small');
+      if(sm && sm.textContent.indexOf('ya puesta') < 0) sm.textContent += ' · ya puesta';
+    });
+    // Una pregunta dentro de la misma ventana (Sí / No), para volver a poner lo que ya está puesto.
+    const preguntar = texto => new Promise(res => { const b = $c('#medPPPreg'); $c('#medPPPregT').textContent = texto; b.hidden = false; medPP.preg = res; try{ b.scrollIntoView({ block: 'nearest' }); }catch(e){} });
+    const ponerPared = x => {
+      const cut = medPPUsarPared(medPP.card, x);
+      if(material()){ setFieldValue($('.meas-material', cut), material()); refreshMaterialOther(cut); refreshCutUnidad(cut); updateCardTotal(medPP.card); saveDraft(); }
+      marcar(x.clave);
+    };
+    capa.addEventListener('change', e => { if(e.target && e.target.id === 'medPPMat'){ const f = $c('#medPPMatFalta'); if(f) f.hidden = true; } });
+    capa.addEventListener('click', async e => {
       const t = e.target.closest('[data-pp], [data-pp-pared], [data-pp-techo]');
       if(!t || !medPP) return;
-      if(t.dataset.pp === 'cerrar'){ medPPCerrar(); return; }
+      const q = t.dataset.pp;
+      if(q === 'cerrar'){ medPPCerrar(); return; }
+      if(q === 'preg-si' || q === 'preg-no'){ $c('#medPPPreg').hidden = true; const r = medPP.preg; medPP.preg = null; if(r) r(q === 'preg-si'); return; }
+      if(q === 'alto-no'){ $c('#medPPAlto').hidden = true; medPP.pendiente = null; return; }
+      if(q === 'alto-si'){
+        const h = parseFloat(($c('#medPPAltoN') || {}).value); if(!(h > 0)){ $c('#medPPAltoN').focus(); return; }
+        const x0 = medPP.pendiente; if(!x0) return;
+        const x = Object.assign({}, x0, { alto: h });
+        x.resta = Math.round(medPPResta(x.largo, h, x.aberturas) * 10) / 10; x.restaQue = x.resta > 0 ? medPPTextoAberturas(x.aberturas) : '';
+        $c('#medPPAlto').hidden = true; medPP.pendiente = null;
+        ponerPared(x); return;
+      }
+      if(q === 'todas'){
+        if(!pideMaterial()) return;
+        const todas = Object.keys(medPP.datos.paredes).map(k => medPP.datos.paredes[k]);
+        const sinAlto = todas.filter(x => !(x.alto > 0) && !yaPuesta(x.clave)).length;
+        todas.filter(x => x.alto > 0 && !yaPuesta(x.clave)).forEach(ponerPared);
+        if(sinAlto) medAvisoEnPantalla(sinAlto === 1 ? 'Falta 1 pared sin alto en el plano: tóquela para ponerle el alto.' : 'Faltan ' + sinAlto + ' paredes sin alto en el plano: tóquelas para ponerles el alto.');
+        return;
+      }
       if(t.dataset.ppPared != null){
         const x = medPP.datos.paredes[t.dataset.ppPared]; if(!x) return;
-        const card0 = medPP.card; medPPCerrar();
-        const cut = medPPUsarPared(card0, x);
-        if(cut && cut.scrollIntoView) cut.scrollIntoView({ block: 'center' });
+        if(!pideMaterial()) return;
+        if(yaPuesta(x.clave) && !(await preguntar('La pared ' + x.letra + ' ya está puesta. ¿Ponerla otra vez?'))) return;
+        if(!(x.alto > 0)){
+          medPP.pendiente = x;
+          $c('#medPPAltoT').textContent = 'La pared ' + x.letra + ' (' + fpPiesPulg(x.largo) + ') no tiene alto en el plano. ¿Qué alto tiene?';
+          const b = $c('#medPPAlto'); b.hidden = false; $c('#medPPAltoN').value = '';
+          try{ b.scrollIntoView({ block: 'nearest' }); }catch(e){}
+          return;
+        }
+        ponerPared(x);
         return;
       }
       if(t.dataset.ppTecho != null){
         const x = medPP.datos.techos[t.dataset.ppTecho]; if(!x) return;
-        const card0 = medPP.card; medPPCerrar();
-        medPPUsarTecho(card0, x);
+        if(!pideMaterial()) return;
+        if($$('.meas-cut', medPP.card).some(c2 => c2.dataset.techoPlano) && !(await preguntar('El techo del plano ya está puesto en este cuarto. ¿Ponerlo otra vez? Se sumaría dos veces.'))) return;
+        const card0 = medPP.card, mat0 = material(); medPPCerrar();
+        medPPUsarTecho(card0, x, mat0);
       }
     });
     return true;
@@ -39317,7 +39439,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // tarjeta de la app con lo que hace falta para empezar el cuarto (Nivel · Cuarto · ¿Qué mediste?) y de ahí a su tarjeta de Editar
   // medidas, con el renglón nuevo. Se guarda igual que siempre: las mismas tarjetas de captura en sus contenedores.
   const RDMM_TIPOS = [['floor', 'Piso', 'Floor'], ['wall', 'Pared', 'Wall'], ['ceiling', 'Techo', 'Ceiling'],
-                      ['kitchen', 'Cocina', 'Kitchen'], ['bathroom', 'Baño', 'Bathroom'], ['materiales', 'Materiales', 'Materials']];
+                      ['kitchen', 'Cocina (gabinetes)', 'Kitchen (cabinets)'], ['bathroom', 'Baño (muebles)', 'Bath (fixtures)'], ['materiales', 'Materiales', 'Materials']];
   const RDMM_IC = {
     lapiz: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg>',
     chev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
