@@ -12371,6 +12371,18 @@ html body.rd-medidas .rdm-fila .rdm-en{display:block; font-size:.82em; font-weig
 html body.rd-medidas #medResumen .med-otro-cuarto{border:1.5px dashed #9aa3ad !important; border-radius:calc(12*var(--rdu)) !important; background:#fff !important; color:#111 !important; font:600 calc(14*var(--rdu))/1.15 "Avenir Next", var(--sf), sans-serif !important; box-shadow:none !important;}
 .rdmm-plano{margin:-2px 2px 8px; font-size:12.5px; color:#1f7a5a; font-weight:600;}
 html body.rd-medidas .rdmm-chip.rdmm-del-plano{border-color:#9fd3bf;}
+
+/* (23-nov) lo que el rediseño dejó atrás: resta a mano, pared/techo del plano */
+#medResumen .med-resta-btn{display:inline-flex; align-items:center; min-height:36px; margin:6px 0 0; padding:0 12px; border:1.5px solid #d5d8dd; border-radius:10px; background:#fff; color:#1d5fa8; font-weight:600; font-size:13.5px; cursor:pointer;}
+#medResumen .med-pp-fila{margin-top:8px;}
+#medResumen .med-pp-fila .btn{border-style:dashed !important;}
+.med-resta-velo .med-resta-ya{margin:6px 2px 10px; color:#5d6167; font-size:14px;}
+.med-resta-ops{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+.med-resta-op{display:flex; flex-direction:column; align-items:flex-start; gap:3px; min-height:58px; padding:10px 12px; border:1.5px solid #d5d8dd; border-radius:12px; background:#fff; color:#111; text-align:left; cursor:pointer;}
+.med-resta-op b{font-size:15px;} .med-resta-op small{font-size:12.5px; color:#5d6167;}
+.med-resta-otra{display:grid; grid-template-columns:96px 1fr; gap:8px;}
+.med-resta-otra input{box-sizing:border-box; width:100%; min-height:44px; padding:0 10px; border:1.5px solid #d5d8dd; border-radius:11px; font:600 16px/1.2 "Avenir Next", system-ui, sans-serif;}
+.med-resta-velo .rdmm-acc{display:grid; gap:8px; margin-top:12px;}
 </style>
 <script defer src="lumi-puntero.js?v=2"></script>
 <script defer src="lumi-pickups.js?trazado=3"></script>
@@ -20750,7 +20762,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-23-R526';
+  const APP_BUILD = '2026-11-23-R527';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -31130,6 +31142,71 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     return cortes.length;
   }
 
+  // (23-nov) ¿El plano de esta casa tiene este cuarto en este nivel? (los mismos nombres que propone Cuarto a mano)
+  function medPPTieneCuarto(nivel, cuarto){
+    const k = String(cuarto || '').trim().toLowerCase(); if(!k) return false;
+    try{ return medCuartosDelPlano(nivel).some(n => String(n || '').trim().toLowerCase() === k); }catch(e){ return false; }
+  }
+  // La pared (o el techo) del plano desde Editar medidas: la tarjeta de esa superficie de este cuarto (o una nueva al final de su
+  // contenedor, como "+ Pared"), y la ventana de siempre del plano. Al escoger, se vuelve a pintar el resumen.
+  function medPPDesdeResumen(tarjetas, seccion, modo, nivel, cuarto){
+    let card = (tarjetas || []).filter(t => t.dataset.section === seccion)[0], nueva = false;
+    if(!card){
+      const cont = CONTENEDOR_DE[seccion]; if(!cont) return;
+      card = addMeasureRow(seccion, cont); nueva = true;
+      medPonerNivelCuarto(card, nivel, cuarto);
+      try{ const cs = card.querySelectorAll('.meas-cut'); if(cs.length) cs[cs.length - 1].dataset.rdmmNuevo = '1'; }catch(e){}
+      saveDraft();
+    }
+    const c = medPPCuartos(card);
+    if(c.error){ medAvisoEnPantalla(c.error); if(nueva) medPintarResumen(); return; }
+    if(!medPPAbrir(card, modo)) return;
+    const capa = document.getElementById('medPP');
+    if(capa) capa.addEventListener('click', () => setTimeout(() => {
+      if(document.getElementById('medPP')) return;           // sigue abierta
+      try{ saveDraft(); }catch(e){}
+      medPintarResumen();
+    }, 0));
+  }
+  // La resta a mano, en su ventana (lo de la tarjeta de antes): + Puerta, + Ventana, otra cantidad con "¿qué fue?", o quitarla.
+  function medRestaHoja(cut){
+    let v = document.getElementById('medRestaVelo');
+    if(!v){ v = document.createElement('div'); v.id = 'medRestaVelo'; v.className = 'vh-velo rdmm med-resta-velo'; v.dataset.nodraft = ''; v.setAttribute('role', 'dialog'); v.setAttribute('aria-modal', 'true'); v.setAttribute('aria-labelledby', 'medRestaT'); document.body.appendChild(v); }
+    const n = parseFloat(($('.meas-menos', cut) || {}).value) || 0, que = String(($('.meas-menos-que', cut) || {}).value || '').trim();
+    const r = MED_RESTA_RAPIDA;
+    const num = x => String(Math.round(x * 10) / 10);
+    v.innerHTML = '<div class="vh-caja" data-no-idioma>'
+      + '<b class="vh-t" id="medRestaT">Restar puerta o ventana</b>'
+      + '<p class="med-resta-ya">' + (n > 0 ? 'Ahora: ' + esc(num(n)) + ' pies²' + (que ? ' (' + esc(que) + ')' : '') : 'Lo que no se quitó: el hueco de la puerta o la ventana.') + '</p>'
+      + '<div class="med-resta-ops">'
+      + '<button type="button" class="med-resta-op" data-resta-q="puerta"><b>+ Puerta</b><small>' + esc(medPPfi(r.puerta.ancho) + ' × ' + medPPfi(r.puerta.alto)) + ' = ' + num(r.puerta.ancho * r.puerta.alto) + ' pies²</small></button>'
+      + '<button type="button" class="med-resta-op" data-resta-q="ventana"><b>+ Ventana</b><small>' + esc(medPPfi(r.ventana.ancho) + ' × ' + medPPfi(r.ventana.alto)) + ' = ' + num(r.ventana.ancho * r.ventana.alto) + ' pies²</small></button>'
+      + '</div>'
+      + '<span class="rdmm-l">Otra cantidad</span>'
+      + '<div class="med-resta-otra"><input type="number" inputmode="decimal" step="0.1" min="0" id="medRestaN" placeholder="pies²" aria-label="Pies cuadrados a restar">'
+      + '<input type="text" id="medRestaQue" maxlength="120" placeholder="¿Qué fue? (door, window…)" aria-label="¿Qué fue?"></div>'
+      + '<div class="rdmm-acc">'
+      + '<button type="button" class="vh-b vh-si" data-resta-q="poner">Poner</button>'
+      + (n > 0 ? '<button type="button" class="vh-b vh-seguir" data-resta-q="quitar">Quitar la resta</button>' : '')
+      + '<button type="button" class="vh-b vh-seguir" data-resta-q="cancelar">Cancelar</button></div></div>';
+    const cerrar = () => { v.hidden = true; v.onclick = null; };
+    const listo = () => { cerrar(); try{ calcCutResult(cut); }catch(e){} try{ updateCardTotal(cut.closest('.measure-card')); }catch(e){} saveDraft(); medPintarResumen(); };
+    v.onclick = e => {
+      if(e.target === v){ cerrar(); return; }
+      const b = e.target.closest('[data-resta-q]'); if(!b) return;
+      const q = b.dataset.restaQ;
+      if(q === 'cancelar'){ cerrar(); return; }
+      if(q === 'puerta' || q === 'ventana'){ medRestaRapida(cut, q); listo(); return; }
+      if(q === 'quitar'){ medPonerResta(cut, 0, '', false); listo(); return; }
+      if(q === 'poner'){
+        const x = parseFloat((v.querySelector('#medRestaN') || {}).value);
+        if(!(x > 0)){ const el = v.querySelector('#medRestaN'); if(el) el.focus(); return; }
+        const t = String((v.querySelector('#medRestaQue') || {}).value || '').trim();
+        medPonerResta(cut, n + x, (que ? que + ', ' : '') + (t || 'opening ' + (Math.round(x * 10) / 10) + ' sq ft'), true); listo();
+      }
+    };
+    v.hidden = false;
+  }
   // (23-nov) Otro cuarto desde Editar medidas: en Plano y medidas, la tarjeta de Cuarto a mano con ese nivel ya puesto; fuera,
   // el "Cuarto a mano" de siempre.
   function medOtroCuarto(nivel){
@@ -31361,6 +31438,14 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
                 });
                 fila.appendChild(lab);
               }
+              // (23-nov, lo que el rediseño dejó atrás) Antes cada medida de pared traía "− Restar puerta o ventana"
+              // (+ Puerta 20 · + Ventana 12 · otra cantidad · Quitar). En Editar medidas solo se veía la resta que mandaba la
+              // cámara: a mano ya no se podía poner. Vuelve, en su ventana; escribe en las mismas casillas de la tarjeta.
+              if(!($('.meas-resta-wrap', cut) || {}).hidden){
+                const rb = medNodo('button', 'med-resta-btn', menosV > 0 ? 'Cambiar la resta' : '− Puerta o ventana'); rb.type = 'button';
+                rb.addEventListener('click', () => medRestaHoja(cut));
+                fila.appendChild(rb);
+              }
 
               // ---- ESCRIBIR DIRECTO EN LA TARJETA DE VERDAD ----
               // setFieldValue dispara 'input', que es lo que despierta el
@@ -31452,6 +31537,18 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
               mas.appendChild(b);
             });
           cuartoBox.appendChild(mas);
+          // (23-nov, lo que el rediseño dejó atrás) "Usar la pared del plano" / "Usar el techo del plano": tocar la pared en el
+          // dibujo del cuarto y se llena largo × alto con sus puertas y ventanas ofrecidas. Solo si el plano de esta casa tiene
+          // este cuarto en este nivel.
+          if(ct.cuarto && nv.nivel && medPPTieneCuarto(nv.nivel, ct.cuarto)){
+            const pp = medNodo('div', 'med-mas med-pp-fila');
+            [['wall', 'pared', 'Pared del plano'], ['ceiling', 'techo', 'Techo del plano']].forEach(([seccion, modo, etiqueta]) => {
+              const b = medNodo('button', 'btn btn-outline med-pp-de-resumen', etiqueta); b.type = 'button';
+              b.addEventListener('click', () => medPPDesdeResumen(tarjetas, seccion, modo, nv.nivel, ct.cuarto));
+              pp.appendChild(b);
+            });
+            cuartoBox.appendChild(pp);
+          }
 
           // El total de CADA partida de este cuarto, uno por renglón: los mismos
           // números que el PDF. Ya no un total del cuarto que revuelve laminado,
@@ -31487,6 +31584,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
 
       // Sin total del nivel ni del trabajo revueltos: con dos cuartos o más, cada
       // partida sumada en toda la casa, igual que la tabla del final del PDF.
+      // (23-nov) El plano de otro teléfono (o el que editó el manager) llega de la nube: al llegar, se pinta otra vez para que
+      // salgan "Pared del plano" / "Techo del plano". Una sola bajada cada 5 min (medBajarEquipo); sin señal no pasa nada.
+      try{ medBajarPlanosEquipo().then(llego => { if(llego) medPintarResumen(); }).catch(() => {}); }catch(e){}
       if(g.nCuartos > 1 && g.partidas.length){
         const tj = medNodo('div', 'med-total-trabajo');
         tj.appendChild(medNodo('div', '', 'Total del trabajo por partida'));
@@ -39287,6 +39387,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       + (quien ? '<span class="vh-quien">' + esc(quien) + '</span>' : '') + '</div></div>'
       + '<label class="rdmm-l" for="rdmmNivel">' + (en ? 'Level' : 'Nivel') + '</label>'
       + '<span class="rdmm-sel"><select id="rdmmNivel"><option value="">' + (en ? '— Pick the level —' : '— Escoger nivel —') + '</option>' + opNivel + '</select>' + RDMM_IC.chev + '</span>'
+      + '<input type="text" class="rdmm-otro" id="rdmmNivelOtro" hidden>'
       + '<div id="rdmmCuartoBox"><span class="rdmm-l" id="rdmmCuartoL">' + (en ? 'Room' : 'Cuarto') + '</span>'
       + '<p class="rdmm-plano" id="rdmmPlano" hidden></p>'
       + '<div class="rdmm-chips" id="rdmmChips" role="group" aria-labelledby="rdmmCuartoL"></div>'
@@ -39299,6 +39400,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       + '<button type="button" class="vh-b vh-seguir" data-rdmm="cancelar">' + (en ? 'Cancel' : 'Cancelar') + '</button></div></div>';
     const $v = s => v.querySelector(s), selN = $v('#rdmmNivel'), selC = $v('#rdmmCuarto'), otro = $v('#rdmmOtro'), chips = $v('#rdmmChips'), falta = $v('#rdmmFalta');
     selN.value = E.nivel;
+    // (23-nov) Un nivel que no está en la lista ("Otro"): se escribe su nombre, como en la tarjeta de antes.
+    const nOtro = $v('#rdmmNivelOtro'), phN = en ? 'Level name' : 'Nombre del nivel';
+    nOtro.placeholder = phN; nOtro.setAttribute('aria-label', phN); nOtro.autocomplete = 'off'; nOtro.setAttribute('autocapitalize', 'words');
+    if(E.nivel && selN.value !== E.nivel){ selN.value = 'Other'; nOtro.value = E.nivel; nOtro.hidden = false; }
+    nOtro.addEventListener('input', () => { E.nivel = String(nOtro.value || '').trim(); falta.hidden = true; pintarChips(); });
     const phOtro = en ? 'Room name' : 'Nombre del cuarto';
     otro.placeholder = phOtro; otro.setAttribute('aria-label', phOtro); otro.autocomplete = 'off'; otro.setAttribute('autocapitalize', 'words'); otro.setAttribute('enterkeyhint', 'done');
     const plano = $v('#rdmmPlano');
@@ -39327,7 +39433,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     pintarChips();
     // (23-nov) El plano que escaneó otro teléfono (o que el manager editó) llega de la nube: al llegar, se vuelven a pintar.
     try{ medBajarPlanosEquipo(t ? { cliente: t.nombre || '', dir: t.direccion || '' } : undefined).then(llego => { if(llego && !v.hidden) pintarChips(); }).catch(() => {}); }catch(e){}
-    selN.addEventListener('change', () => { E.nivel = selN.value; falta.hidden = true; pintarChips(); });
+    selN.addEventListener('change', () => {
+      nOtro.hidden = selN.value !== 'Other';
+      E.nivel = selN.value === 'Other' ? String(nOtro.value || '').trim() : selN.value;
+      if(selN.value === 'Other') setTimeout(() => nOtro.focus(), 30);
+      falta.hidden = true; pintarChips();
+    });
     selC.addEventListener('change', () => {
       if(selC.value === 'Other'){ otro.hidden = false; E.cuarto = String(otro.value || '').trim(); chips.querySelectorAll('[data-rdmm-cuarto]').forEach(b => b.setAttribute('aria-pressed', 'false')); setTimeout(() => otro.focus(), 30); return; }
       otro.hidden = true; ponerCuarto(selC.value, 'lista');
