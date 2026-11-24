@@ -20884,7 +20884,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-24-R536';
+  const APP_BUILD = '2026-11-24-R537';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -85277,7 +85277,18 @@ function lumiIncompleteSpeechReply(text){
   }
   var LUC_PREG = /^ (?:y |and |oye |lumi |ok |pues |entonces )*(?:que|what|whats|cuantas|cuantos|how many|is there|are there|do i have|do we have|any|dime|tell me|leeme|lee|read me|read|como esta|como va|how s|how is)( |$)/;
   var LUC_NO_LEER = / (pon|ponle|ponme|poner|agrega|agregale|agregar|anade|quita|quitale|quitar|borra|borrar|cambia|cambiar|mueve|mover|cancela|cancelar|anota|apunta|add|put|remove|delete|change|cancel|schedule|programa|confirma|confirmar|pago|pague|pagar|pagos|cobre|cobro|cobrar|factura|facturas|invoice|invoices|dinero|money|paid|pay|hicimos|tuvimos|hubo|hice|did|had|was|were|quien|quienes|who|abre|abreme|abrir|open|ensename|muestrame|show|llevame|take|labor|reporte|hoja|hacer|hago|llevar|llevo|necesito|necesita|cuanto|cuesta|cobra|protocolo) /;
+  // (R537) «¿qué tengo mañana?», «¿qué hay el viernes?», «¿tengo algo mañana?», «¿qué trabajos hay hoy?»: solo esas palabras y un día
+  // (lo mismo que esDiaDeCalendario de la nube): leer el calendario, un solo camino
+  var LUC_DIA_PREG = new Set(('y oye lumi ok pues entonces que tengo tenemos tienes hay habra algo alguna algun programado programada pendiente pendientes trabajos trabajo mudanzas mudanza casas '
+    + 'para el la los las este esta de en del what whats s do i we have is are there anything any on for jobs job moves move scheduled').split(' '));
+  function lumiUcDiaCal(texto){
+    const w = lumiUcPalabras(texto); if(w.length < 2 || w.length > 9) return false;
+    if(!w.some(function(x){ return /^(tengo|tenemos|tienes|hay|habra|have|is|are)$/.test(x); }) || !w.some(function(x){ return LUC_DIA_REAL.test(x); })) return false;
+    if(!/[?¿]/.test(String(texto)) && !/^(que|what|whats|tengo|tenemos|hay|do|is|are|y)$/.test(w[0])) return false;
+    return w.every(function(x){ return LUC_DIA_PREG.has(x) || lumiUcDiaOk(x); });
+  }
   function lumiUcCalLee(texto){
+    if(lumiUcDiaCal(texto)) return true;
     const w = lumiUcPalabras(texto); if(!w.length || w.length > 12) return false;
     const t = ' ' + w.join(' ') + ' ';
     const preg = LUC_PREG.test(t) || (/[?¿]/.test(String(texto)) && /^ (?:y |oye |lumi )*(?:hay|tengo|tenemos) /.test(t));
@@ -85307,7 +85318,7 @@ function lumiIncompleteSpeechReply(text){
     if(tema === 'quien'){ try{ window.__lumiS4Reloj = Date.now(); }catch(e){} }
     return true;
   }
-  if(typeof module === 'object' && module.exports) module.exports.lumiUnCamino = { lumiUcQuien: lumiUcQuien, lumiUcCalLee: lumiUcCalLee, lumiUcSeguida: lumiUcSeguida, LUC_ROBERT_CAL: LUC_ROBERT_CAL };
+  if(typeof module === 'object' && module.exports) module.exports.lumiUnCamino = { lumiUcQuien: lumiUcQuien, lumiUcCalLee: lumiUcCalLee, lumiUcDiaCal: lumiUcDiaCal, lumiUcSeguida: lumiUcSeguida, LUC_ROBERT_CAL: LUC_ROBERT_CAL };
   // ===================== LUMI_UN_CAMINO_END =====================
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
