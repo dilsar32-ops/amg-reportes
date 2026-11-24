@@ -7668,6 +7668,14 @@ html body.rd-clientes .rdcl-tb svg{width:24px; height:24px; fill:none; stroke-wi
 html body.rd-clientes .rdcl-tb.verde svg{stroke:#1f8a4c;} html body.rd-clientes .rdcl-tb.azul svg{stroke:#1f5fd6;}
 html body.rd-clientes .rdcl-tbs.uno{grid-template-columns:1fr;}
 html body .rdpt-chips.tel{display:grid; grid-template-columns:1fr 1fr; gap:calc(8*var(--rdu));}
+/* (revisión 23-nov) los otros contactos de CompanyCam, bajo su título; "Sin señal" chiquito solo cuando no se pudieron traer */
+html body .rdpt-chips .rdpt-grupo{grid-column:1 / -1; flex:0 0 100%; margin:calc(6*var(--rdu)) 0 0; font:700 calc(12.5*var(--rdu))/1.2 "Avenir Next", var(--sf), sans-serif; color:#5f6368; letter-spacing:.01em;}
+html body .rdpt-nota{margin:calc(6*var(--rdu)) 0 0; font:600 calc(12.5*var(--rdu))/1.3 "Avenir Next", var(--sf), sans-serif; color:#9a5b00;}
+html body.rd-clientes .rdcl-tb b.rdcl-tbn{font:700 16px/1.15 "Avenir Next", var(--sf), sans-serif; color:#16325c; letter-spacing:.01em;}
+html body.rd-clientes .rdcl-tb small{font:600 12.5px/1.1 "Avenir Next", var(--sf), sans-serif; color:#1f8a4c;}
+html body #ct-ccProyecto.vacio .ct-proy-t{display:none !important;}
+html body #ct-ccProyecto.vacio:has(#ct-ccEscoger[hidden]){display:none !important;}
+html body .field:has(> #ct-ccProyecto.vacio #ct-ccEscoger[hidden]){display:none !important;}
 html body .rdpt-chips.tel .rdpt-chip{display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:3px; width:100%; min-height:56px; padding:8px 10px; text-align:left; line-height:1.15;}
 html body .rdpt-chips.tel .rdpt-chip small{font:600 calc(12*var(--rdu))/1.2 "Avenir Next", var(--sf), sans-serif; color:#5f6368; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%;}
 html body .rdpt-chips.tel .rdpt-chip[aria-pressed="true"]{border-color:#1f5fd6; background:#eef3ff;}
@@ -20784,7 +20792,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-23-R528';
+  const APP_BUILD = '2026-11-23-R529';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -38889,7 +38897,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         + (o.tipo === 'tel' ? '<input type="tel" inputmode="tel" class="rdpt-in" id="rdPtIn" autocomplete="off" autocapitalize="off" enterkeyhint="done" spellcheck="false" data-no-idioma>'
                             : '<input type="text" class="rdpt-in" id="rdPtIn" autocomplete="off" autocapitalize="words" enterkeyhint="done" spellcheck="false" data-no-idioma>')
         // (R523) un chip puede traer su rótulo: [valor, rótulo] (los números de CompanyCam: "202-555-0177" / "Tessins")
-        + ((o.chips || []).length ? '<div class="rdpt-chips' + (o.tipo === 'tel' ? ' tel' : '') + '" data-no-idioma>' + o.chips.map(c => { const v = Array.isArray(c) ? c[0] : c, r = Array.isArray(c) ? c[1] : '';
+        + (o.nota ? '<p class="rdpt-nota">' + e(o.nota) + '</p>' : '')
+        + ((o.chips || []).length ? '<div class="rdpt-chips' + (o.tipo === 'tel' ? ' tel' : '') + '" data-no-idioma>' + o.chips.map(c => { if(c && !Array.isArray(c) && typeof c === 'object') return '<p class="rdpt-grupo">' + e(c.grupo || '') + '</p>';
+            const v = Array.isArray(c) ? c[0] : c, r = Array.isArray(c) ? c[1] : '';
             return '<button type="button" class="rdpt-chip" data-rpt-chip="' + e(v) + '" aria-pressed="false">' + (r ? '<b>' + e(v) + '</b><small>' + e(r) + '</small>' : e(v)) + '</button>'; }).join('') + '</div>' : '')
         + '<p class="rdpt-falta" hidden></p>'
         + '<div class="rdpt-acc"><button type="button" class="vh-b vh-si" data-rpt="si">' + e(o.si || r135('Guardar', 'Save')) + '</button>'
@@ -70446,8 +70456,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const caja = $('#ct-ccProyecto'); if(!caja) return;
     const txt = caja.querySelector('.ct-proy-t'), btn = $('#ct-ccEscoger');
     if(t.cc) txt.innerHTML = '<span class="ok">&#10003; ' + esc(t.cc.nombre) + '</span><br><span style="color:var(--ink-soft); font-size:12.5px;">' + esc(t.cc.direccion || '') + (t.cc.direccion ? ' &middot; ' : '') + 'las fotos van a este perfil después de la firma</span>';
-    else txt.innerHTML = 'Todavía no se ha escogido.<span class="en"> / Not chosen yet.</span>';
-    if(btn){ btn.textContent = t.cc ? 'Cambiar' : 'Escoger'; btn.disabled = t.estado !== 'abierto'; }
+    else txt.innerHTML = '';
+    caja.classList.toggle('vacio', !t.cc);   // (revisión 23-nov) sin proyecto: sin letrero de relleno; solo el botón (donde hay CompanyCam)
+    if(btn){ btn.textContent = t.cc ? 'Cambiar' : 'Escoger proyecto de CompanyCam'; btn.disabled = t.estado !== 'abierto'; }
     try{ ctPintarTel(t); }catch(e){}
   }
   function ctPintarOtros(){
@@ -72027,14 +72038,16 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // cualquier teléfono, cuantas veces sea, devuelve el MISMO (con la lista al día y el vencimiento alargado). El token
   // que ya tiene este teléfono viaja también, para que un enlace mandado antes de este cambio se quede como el de siempre.
   // Antes cada toque hacía uno nuevo y mataba el que el cliente ya tenía (Chris Sewell, 23-nov).
-  async function ctEnlacePedir(t){
+  // (revisión 23-nov) o.soloMismo: los pedidos AUTOMÁTICOS (poner la lista al día, traer el vivo) nunca hacen un enlace nuevo;
+  // si el servidor no puede dar el mismo (un enlace de antes, sin token guardado), contesta error y el del cliente sigue vivo.
+  async function ctEnlacePedir(t, o){
     await ctNombreCompanyCam(t, 8000);           // (23-nov-2026) el enlace sale con el nombre de hoy de CompanyCam
     const empresa = ctEmpresa(), huella = ctHuellaInventario(t);
     const borrador = ctArmarSnapshot(t, { firmante: '', relacion: '' }, { nonce: 'enlace', modo: 'remota', empresa });
     const vista = ctVistaEnlace(t, empresa);
-    const res = await authFetch('/rest/v1/rpc/contenidos_enlace_firma', { method: 'POST', headers: ctCabeceras(), body: JSON.stringify({ p_id: t.id, p_datos: { borrador, vista }, p_dias: 3, p_token: (t.enlace && t.enlace.token) || null }) });
+    const res = await authFetch('/rest/v1/rpc/contenidos_enlace_firma', { method: 'POST', headers: ctCabeceras(), body: JSON.stringify(Object.assign({ p_id: t.id, p_datos: { borrador, vista }, p_dias: 3, p_token: (t.enlace && t.enlace.token) || null }, (o && o.soloMismo) ? { p_solo_mismo: true } : {})) });
     const j = await res.json().catch(() => null);
-    if(!res.ok || !j || !j.token){ const err = new Error((j && (j.message || j.hint || j.error)) || ('HTTP ' + res.status)); err.status = res.status; throw err; }
+    if(!res.ok || !j || !j.token){ const err = new Error((j && (j.message || j.hint || j.error)) || ('HTTP ' + res.status)); err.status = res.status; err.soloMismo = /SOLO_MISMO/.test(err.message); throw err; }
     const antes = t.enlace || {};
     t.enlace = { token: j.token, url: CT_ENLACE_BASE + '?t=' + j.token, creado_at: j.creado_at || antes.creado_at || new Date().toISOString(), vence_at: j.vence_at || '', huella };
     return j;
@@ -72042,26 +72055,43 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // Si la cuadrilla agrega o cambia fotos, marcas o nombres después de mandar el enlace, la lista del MISMO enlace se
   // pone al día sola (una vez por cada cambio). Un teléfono que no mandó el enlace pregunta a la nube si hay uno vivo.
   // Un enlace vencido no se revive solo: eso lo hace el botón de mandar.
-  var ctEnlaceVisto, ctEnlaceAlDiaYa = false;   // var: ctPintarEnlace puede llamar antes de que esta línea corra
+  // (revisión 23-nov) Antes: lo visto se marcaba ANTES de pedir y nunca se borraba si fallaba (sin señal, el servidor ocupado):
+  // la lista del enlace se quedaba vieja y el cliente veía "The crew is updating" para siempre. Y una llamada que salía
+  // temprano soltaba el candado de otra que seguía trabajando. Ahora: solo quien toma el candado lo suelta; si falla, lo
+  // visto se borra y se vuelve a intentar sola (15 s, 30 s, 1 min... hasta 5 min, 6 veces; luego al siguiente cambio).
+  // Un "SOLO_MISMO" (el enlace vivo es de antes y este teléfono no lo tiene) no se reintenta: el otro teléfono lo pone al día.
+  var ctEnlaceVisto, ctEnlaceAlDiaYa = false, ctEnlaceFallos;   // var: ctPintarEnlace puede llamar antes de que esta línea corra
   async function ctEnlaceAlDia(t){
+    let mio = false, h = '';
     try{
-      ctEnlaceVisto = ctEnlaceVisto || {};
+      ctEnlaceVisto = ctEnlaceVisto || {}; ctEnlaceFallos = ctEnlaceFallos || {};
       if(!t || t.estado !== 'abierto' || ctEnlaceAlDiaYa || !signedIn() || navigator.onLine === false || ctFaltaSql) return;
       if(t.enlace && t.enlace.vence_at && new Date(t.enlace.vence_at) < new Date()) return;
       if(ctGateFirma(t).length) return;
-      const h = ctHuellaInventario(t);
+      h = ctHuellaInventario(t);
       if((t.enlace && t.enlace.huella === h) || ctEnlaceVisto[t.id] === h) return;
-      ctEnlaceVisto[t.id] = h; ctEnlaceAlDiaYa = true;
+      const f0 = ctEnlaceFallos[t.id]; if(f0 && f0.h === h && Date.now() < f0.otra) return;
+      ctEnlaceVisto[t.id] = h; ctEnlaceAlDiaYa = true; mio = true;
       if(!t.enlace){
         const res = await authFetch('/rest/v1/contenidos_trabajos?id=eq.' + encodeURIComponent(t.id) + '&select=estado,enlace_hash,enlace_vence_at', { headers: ctCabeceras() });
         const j = await res.json().catch(() => null), fila = Array.isArray(j) ? j[0] : null;
-        if(!res.ok || !fila || fila.estado !== 'abierto' || !fila.enlace_hash || !fila.enlace_vence_at || new Date(fila.enlace_vence_at) < new Date()) return;
+        if(!res.ok){ const err = new Error('HTTP ' + res.status); err.status = res.status; throw err; }
+        if(!fila || fila.estado !== 'abierto' || !fila.enlace_hash || !fila.enlace_vence_at || new Date(fila.enlace_vence_at) < new Date()) return;
       }
-      await ctEnlacePedir(t);
+      await ctEnlacePedir(t, { soloMismo: true });
+      delete ctEnlaceFallos[t.id];
       ctEscribir();
       const a = ctActual(); if(a === t && document.querySelector('.tab-panel[data-tab="contenidos"].active')) ctPintarFirma();
-    }catch(e){ console.warn('contenidos: poner el enlace al día', (e && e.message) || e); }
-    finally{ ctEnlaceAlDiaYa = false; }
+    }catch(e){
+      console.warn('contenidos: poner el enlace al día', (e && e.message) || e);
+      if(mio && t && !(e && e.soloMismo)){
+        try{ if(ctEnlaceVisto[t.id] === h) delete ctEnlaceVisto[t.id]; }catch(x){}
+        const f = ctEnlaceFallos[t.id], n = (f && f.h === h) ? f.n + 1 : 1, espera = Math.min(300000, 15000 * Math.pow(2, n - 1));
+        ctEnlaceFallos[t.id] = { h, n, otra: Date.now() + espera };
+        if(n <= 6) setTimeout(() => { try{ ctEnlaceAlDia(t); }catch(x){} }, espera + 250);
+      }
+    }
+    finally{ if(mio) ctEnlaceAlDiaYa = false; }
   }
   function ctEnlaceTexto(t){
     const e = t.enlace || {}, emp = ctEmpresa();
@@ -72121,7 +72151,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const r = await (ms ? Promise.race([pedir, new Promise((_, no) => setTimeout(() => no(new Error('CompanyCam tardó')), ms))]) : pedir);
       if(!r || t.estado !== 'abierto' || !t.cc || String(t.cc.id) !== pid) return false;
       // (R523) EL TELÉFONO: los números de CompanyCam (para escoger) y, si la nube/CompanyCam tiene otro, ese.
-      if(Array.isArray(r.telefonos)) t.ccTels = r.telefonos.filter(x => x && x.telefono).slice(0, 8).map(x => ({ telefono: String(x.telefono), de: String(x.de || '') }));
+      if(Array.isArray(r.telefonos)){ t.ccTels = r.telefonos.filter(x => x && x.telefono).slice(0, 8).map(x => ({ telefono: String(x.telefono), de: String(x.de || '') })); t.ccSugerido = String(r.sugerido || ''); }
       if(r.telefono_cambia && r.telefono && telLimpio(r.telefono) !== t.telefono){
         const telAntes = t.telefono || '';
         t.telefono = telLimpio(r.telefono); t.telManoAt = r.telefono_mano_at || null; t.cambios = true; ctEscribir();
@@ -72155,12 +72185,23 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   var ctTelManoNube = true;   // var: se lee al subir, puede correr antes que esta línea
   const telIgual = (a, b) => { const x = String(a || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, ''), y = String(b || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, ''); return x.length >= 7 && x === y; };
   function ctTelRotulo(t, tel){ const x = (t && t.ccTels || []).find(o => telIgual(o.telefono, tel)); return x ? x.de : ''; }
+  // (revisión 23-nov) Los botones del cuadro: el número de la clienta primero, con "Cliente"; los demás debajo, bajo
+  // "Otros contactos de CompanyCam", cada uno con su rótulo (el de la oficina).
+  function ctTelChips(lista, sugerido){
+    const ls = (lista || []).filter(x => x && x.telefono);
+    const suyo = sugerido ? ls.find(x => telIgual(x.telefono, sugerido)) : null;
+    const otros = ls.filter(x => x !== suyo).map(x => [String(x.telefono), String(x.de || 'CompanyCam')]);
+    const out = [];
+    if(suyo) out.push([String(suyo.telefono), r135('Cliente', 'Client')]);
+    if(otros.length) out.push({ grupo: suyo ? r135('Otros contactos de CompanyCam', 'Other CompanyCam contacts') : r135('Contactos de CompanyCam', 'CompanyCam contacts') });
+    return out.concat(otros);
+  }
   // Un número escogido a mano en la ficha del cliente viaja con él al inventario (si no, CompanyCam lo cambiaría).
   function ctTelHeredar(t){
     if(!t || t.telManoAt || !telDigitos(t.telefono)) return;
     let cs = []; try{ cs = clientesLeer(); }catch(e){ return; }
-    const casa = cliCasa(t.direccion || (t.cc && t.cc.direccion) || '');
-    const c = cs.find(x => x && x.telManoAt && telIgual(x.telefono, t.telefono) && casa && cliMismaCasa(cliCasa(x.direccion), casa));
+    const dir = t.direccion || (t.cc && t.cc.direccion) || '';
+    const c = cs.find(x => x && x.telManoAt && telIgual(x.telefono, t.telefono) && dir && cliMismaPuerta(x.direccion, dir));   // (revisión) la misma puerta
     if(c) t.telManoAt = c.telManoAt;
   }
   function ctPintarTel(t){
@@ -72178,8 +72219,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     o = o || {};
     if(!t || t.estado !== 'abierto') return null;
     if(!(t.ccTels || []).length){ try{ if(t.cc) { ctNombreVisto = ctNombreVisto || {}; delete ctNombreVisto[t.id]; await ctNombreCompanyCam(t, 6000); } }catch(e){} }
-    const chips = (t.ccTels || []).map(x => [x.telefono, x.de || 'CompanyCam']);
-    const v = await rdPedirTexto({ titulo: r135('¿A qué número va el enlace?', 'Which number gets the link?'), quien: t.cliente || t.direccion || '', tipo: 'tel', valor: t.telefono || '',
+    const chips = ctTelChips(t.ccTels, t.ccSugerido);
+    const nota = (t.cc && !Array.isArray(t.ccTels)) ? r135('Sin señal: escriba el número', 'No signal: type the number') : '';
+    const v = await rdPedirTexto({ titulo: r135('¿A qué número va el enlace?', 'Which number gets the link?'), quien: t.cliente || t.direccion || '', tipo: 'tel', valor: t.telefono || '', nota,
       etiqueta: r135('Teléfono del cliente', 'Client phone'), chips, si: o.si || r135('Guardar', 'Save'), no: r135('Atrás', 'Back'),
       validar: x => String(x || '').replace(/\D/g, '').length >= 10 ? '' : r135('Escriba el número completo (10 dígitos).', 'Type the full number (10 digits).') });
     if(v === null || t.estado !== 'abierto') return null;
@@ -72194,18 +72236,22 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // La ficha de Clientes: Cambiar teléfono. Los números de CompanyCam de esa casa salen para escoger (sin señal, solo escribir).
   async function cliTelCambiar(c){
     if(!c) return null;
-    let chips = [];
-    const casa = cliCasa(c.direccion || '');
-    let pid = ''; try{ const t = Object.values(CT.trabajos || {}).find(x => x && x.cc && x.cc.id && casa && cliMismaCasa(cliCasa(x.direccion || x.cc.direccion || ''), casa)); if(t){ pid = String(t.cc.id); chips = (t.ccTels || []).map(x => [x.telefono, x.de || 'CompanyCam']); } }catch(e){}
-    if(!chips.length && signedIn() && navigator.onLine !== false && (pid || casa)){
-      showOverlay(r135('Buscando los números en CompanyCam…', 'Looking up the CompanyCam numbers…'));
-      try{
-        const r = await Promise.race([ccLlamar({ accion: 'telefonos_cliente', nombre: c.nombre || '', direccion: c.direccion || '', project_id: pid || undefined }), new Promise((_, no) => setTimeout(() => no(new Error('tardó')), 7000))]);
-        chips = ((r && r.telefonos) || []).map(x => [String(x.telefono), String(x.de || 'CompanyCam')]);
-      }catch(e){ console.warn('clientes: números de CompanyCam', (e && e.message) || e); }
-      hideOverlay();
+    let chips = [], nota = '';
+    // (revisión 23-nov) solo la MISMA PUERTA (número y apartamento) o el mismo proyecto de CompanyCam; nunca el edificio ni una cuadra
+    const dirC = c.direccion || '', puerta = x => !!dirC && cliMismaPuerta(x.direccion || (x.cc && x.cc.direccion) || '', dirC);
+    let pid = ''; try{ const t = Object.values(CT.trabajos || {}).find(x => x && x.cc && x.cc.id && puerta(x)); if(t){ pid = String(t.cc.id); chips = ctTelChips(t.ccTels, t.ccSugerido); } }catch(e){}
+    if(!chips.length && (pid || cliCasa(dirC))){
+      if(signedIn() && navigator.onLine !== false){
+        showOverlay(r135('Buscando los números en CompanyCam…', 'Looking up the CompanyCam numbers…'));
+        try{
+          const r = await Promise.race([ccLlamar({ accion: 'telefonos_cliente', nombre: c.nombre || '', direccion: dirC, project_id: pid || undefined }), new Promise((_, no) => setTimeout(() => no(new Error('tardó')), 7000))]);
+          chips = ctTelChips((r && r.telefonos) || [], (r && r.sugerido) || '');
+          if(!pid && r && /^\d{1,20}$/.test(String(r.project_id || ''))) pid = String(r.project_id);
+        }catch(e){ console.warn('clientes: números de CompanyCam', (e && e.message) || e); nota = r135('Sin señal: escriba el número', 'No signal: type the number'); }
+        hideOverlay();
+      } else nota = r135('Sin señal: escriba el número', 'No signal: type the number');
     }
-    const v = await rdPedirTexto({ titulo: r135('Teléfono del cliente', 'Client phone'), quien: c.nombre || c.direccion || '', tipo: 'tel', valor: c.telefono || '',
+    const v = await rdPedirTexto({ titulo: r135('Teléfono del cliente', 'Client phone'), quien: c.nombre || c.direccion || '', tipo: 'tel', valor: c.telefono || '', nota,
       etiqueta: r135('Número', 'Number'), chips, si: r135('Guardar', 'Save'), no: r135('Atrás', 'Back'),
       validar: x => String(x || '').replace(/\D/g, '').length >= 10 ? '' : r135('Escriba el número completo (10 dígitos).', 'Type the full number (10 digits).') });
     if(v === null) return null;
@@ -72217,11 +72263,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(x){ const l2 = clientesLeer(); const y = l2.find(z => clienteClave(z) === clienteClave(x)); if(y){ y.telefono = tel; y.telManoAt = ahora; y.at = Date.now(); clientesEscribir(l2); clientesSubir([y]); } }
     // los inventarios ABIERTOS de esa casa en este teléfono
     let cambiados = 0;
-    try{ Object.values(CT.trabajos || {}).forEach(t => { if(!t || t.estado !== 'abierto' || !casa || !cliMismaCasa(cliCasa(t.direccion || (t.cc && t.cc.direccion) || ''), casa)) return;
+    try{ Object.values(CT.trabajos || {}).forEach(t => { if(!t || t.estado !== 'abierto') return;
+      if(t.cc && t.cc.id && pid ? String(t.cc.id) !== pid : !puerta(t)) return;   // (revisión) el mismo proyecto, o la misma puerta
       t.telefono = tel; t.telManoAt = ahora; t.cambios = true; cambiados++; });
       if(cambiados){ ctEscribir(); const t = ctActual(); if(t){ const tp = $('#ct-phone'); if(tp && t.estado === 'abierto' && telIgual(t.telefono, tel)) tp.value = tel; ctPintarTel(t); } ctProcesarCola(); } }catch(e){ console.warn('clientes: teléfono a los inventarios', e); }
     // y los de todo el equipo (la función: solo abiertos, de esa casa)
-    if(signedIn() && c.direccion) ccLlamar({ accion: 'telefono_cliente', direccion: c.direccion, telefono: tel }).catch(e => console.warn('clientes: teléfono en la nube', (e && e.message) || e));
+    if(signedIn() && (c.direccion || pid)) ccLlamar(Object.assign({ accion: 'telefono_cliente', direccion: c.direccion || '', telefono: tel }, pid ? { project_id: pid } : {})).catch(e => console.warn('clientes: teléfono en la nube', (e && e.message) || e));
     return tel;
   }
   let ctEnlaceRevisando = false;
@@ -72246,7 +72293,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // (23-nov) Si este teléfono guarda un enlace que ya no es el vivo (otro teléfono lo cambió), se trae el vivo:
       // así nunca se manda un enlace muerto.
       if(t.enlace.token && (await ctSha256(new Blob([t.enlace.token]))) !== fila.enlace_hash){
-        try{ t.enlace.token = ''; await ctEnlacePedir(t); ctEscribir(); ctPintarFirma(); }catch(e){ console.warn('contenidos: traer el enlace vivo', (e && e.message) || e); t.enlace = null; ctEscribir(); ctPintarFirma(); return false; }
+        try{ t.enlace.token = ''; await ctEnlacePedir(t, { soloMismo: true }); ctEscribir(); ctPintarFirma(); }catch(e){ console.warn('contenidos: traer el enlace vivo', (e && e.message) || e); t.enlace = null; ctEscribir(); ctPintarFirma(); return false; }
       }
       if(fila.enlace_vence_at && t.enlace && fila.enlace_vence_at !== t.enlace.vence_at){ t.enlace.vence_at = fila.enlace_vence_at; ctEscribir(); }
       if(!silencio) ctAvisoVerde('Todavía no firma. El enlace sigue activo' + (fila.enlace_vence_at ? ' hasta el ' + esc(ctFechaBonita(fila.enlace_vence_at)) : '') + '.');
@@ -73558,8 +73605,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   function ctCablear(){
     const panel = document.querySelector('.tab-panel[data-tab="contenidos"]'); if(!panel) return;
     ['ct-client', 'ct-address', 'ct-phone', 'ct-date', 'ct-leader'].forEach(id => { const el = $('#' + id); if(!el) return;
-      el.addEventListener('input', () => { const t = ctActual(); if(!t || t.estado !== 'abierto') return;
+      el.addEventListener('input', ev => { const t = ctActual(); if(!t || t.estado !== 'abierto') return;
+        const telAntes = t.telefono;
         t.cliente = $('#ct-client').value.trim(); t.direccion = $('#ct-address').value.trim(); t.telefono = telLimpio(($('#ct-phone') || {}).value); t.fecha = $('#ct-date').value; t.lider = $('#ct-leader').value.trim(); t.cambios = true;
+        // (revisión 23-nov) un número ESCRITO por la persona (no el que llena la app) queda escogido a mano: CompanyCam ya no lo cambia
+        if(id === 'ct-phone' && ev && ev.isTrusted && t.telefono !== telAntes) t.telManoAt = String(t.telefono || '').replace(/\D/g, '').length >= 10 ? new Date().toISOString() : null;
         clearTimeout(ctGuardarTm); ctGuardarTm = setTimeout(() => { ctEscribir(); ctProcesarCola(); }, 600); });
     });
     const input = $('#ct-photoInput');
@@ -74460,6 +74510,19 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(a.num === null && b.num === null) return a.lo === b.lo && a.hi === b.hi;
     const r = a.num === null ? a : b, n = a.num === null ? b.num : a.num;
     return /^\d+$/.test(n) && +n >= r.lo && +n <= r.hi;
+  }
+  // (revisión 23-nov) LA MISMA PUERTA, para el TELÉFONO: cliMismaCasa junta un edificio entero ("Apt 101" = "#305") y una
+  // cuadra ("9100-9198 Hamilton Dr"); un número cambiado en una ficha se iba a los inventarios de los vecinos. Igual que
+  // mismaPuerta de companycam-clientes: número exacto (nunca una cuadra) y el mismo apartamento (los dos sin, o el mismo).
+  function cliUnidadDe(d){
+    const out = [], re = /(?:^|[\s,])(?:apt|apartment|unit|ste|suite|rm|room|lot|floor|bldg|building)\.?\s*#?\s*([a-z0-9][a-z0-9-]*)|#\s*([a-z0-9][a-z0-9-]*)/gi;
+    let m; while((m = re.exec(String(d == null ? '' : d)))) out.push(String(m[1] || m[2] || '').toLowerCase().replace(/^0+(?=\d)/, ''));
+    return out.join('|');
+  }
+  function cliMismaPuerta(a, b){
+    const x = cliCasa(a), y = cliCasa(b);
+    if(!x || !y || x.num === null || y.num === null || !cliMismaCasa(x, y)) return false;
+    return cliUnidadDe(a) === cliUnidadDe(b);
   }
   // Devuelve: true = lleno algo; 'igual' = es de un cliente y ya estaba bien;
   // 'nada' = no hay que buscar (campo corto, sin numero...); false = busco y
@@ -90288,10 +90351,10 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     let h = '<section class="rdcl-card"><div class="rdcl-tit"><span class="rdcl-ic rojo">' + RDCL_SV.per + '</span><span data-no-idioma>' + esc(casa.nombre || casa.direccion || '') + '</span></div>'
       + '<span class="rdcl-chip" data-no-idioma>' + rdclEs('Hoy · Visita ', 'Today · Visit ') + hoyN + '</span>';
     if(casa.direccion) h += '<a class="rdcl-dato" href="' + esc(rdclMapa(casa.direccion)) + '"><span class="rdcl-dic verde">' + RDCL_SV.pin + '</span><span><b data-no-idioma>' + esc(casa.direccion) + '</b><small>' + rdclEs('Abrir en el GPS', 'Open in GPS') + '</small></span></a>';
-    // (R523) el teléfono se cambia aquí mismo (antes solo llamaba): Llamar y Cambiar teléfono, dos botones lado a lado
-    if(tel) h += '<div class="rdcl-dato"><span class="rdcl-dic verde">' + RDCL_SV.tel + '</span><span><b data-no-idioma>' + esc(tel) + '</b></span></div>';
+    // (R523) el teléfono se cambia aquí mismo (antes solo llamaba): Llamar y Cambiar teléfono, dos botones lado a lado.
+    // (revisión 23-nov) el número va DENTRO de Llamar (antes salía arriba y otra vez en el botón)
     h += '<div class="rdcl-grid rdcl-tbs' + (tel ? '' : ' uno') + '">'
-      + (tel ? '<a class="rdcl-tb verde" href="' + esc(rdclTelHref(tel)) + '">' + RDCL_SV.tel + '<span>' + rdclEs('Llamar', 'Call') + '</span></a>' : '')
+      + (tel ? '<a class="rdcl-tb verde" href="' + esc(rdclTelHref(tel)) + '">' + RDCL_SV.tel + '<b class="rdcl-tbn" data-no-idioma>' + esc(tel) + '</b><small>' + rdclEs('Llamar', 'Call') + '</small></a>' : '')
       + '<button type="button" class="rdcl-tb azul" data-rdcl-tel><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg><span>' + (tel ? rdclEs('Cambiar teléfono', 'Change phone') : rdclEs('Poner teléfono', 'Add phone')) + '</span></button></div>';
     h += '</section>';
     h += '<section class="rdcl-card"><div class="rdcl-tit"><span class="rdcl-ic azul">' + RDCL_SV.lista + '</span><span>' + rdclEs('¿Qué vas a llenar hoy?', 'What are you filling in today?') + '</span></div>'
