@@ -20792,7 +20792,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-23-R529';
+  const APP_BUILD = '2026-11-23-R530';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -74122,6 +74122,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   const clienteClave = c => cliNorm(c && c.direccion) || ('n:' + cliNorm(c && c.nombre));
   function clienteGuardar(nombre, direccion, telefono){
     nombre = clienteLimpiarNombre(nombre); direccion = String(direccion || '').replace(/\s+/g, ' ').trim(); telefono = telLimpio(telefono);
+    if(cliPareceTrabajo(nombre)) nombre = '';   // (23-nov) el trabajo no es el cliente
     if(!nombre && !direccion) return null;
     const l = clientesLeer();
     const k = clienteClave({ nombre, direccion });
@@ -74519,6 +74520,25 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     let m; while((m = re.exec(String(d == null ? '' : d)))) out.push(String(m[1] || m[2] || '').toLowerCase().replace(/^0+(?=\d)/, ''));
     return out.join('|');
   }
+  // (23-nov) EL NOMBRE DEL TRABAJO NO ES EL CLIENTE: 18071 Turnberry salió en Clientes como "emergency water extraction and"
+  // (lo que decía la captura del NUEVO TRABAJO). Un nombre con palabras del trabajo (agua, moho, extracción, demo...) o
+  // cortado a media frase ("... and", "... de", "... &") nunca se guarda de cliente; CompanyCam pone después la persona.
+  const CLI_PALABRAS_TRABAJO = new Set(('emergency emergencia emergencias water agua extraction extraccion extract mitigation mitigacion mitigate ' +
+    'mold moho hongo hongos leak leaks leaking fuga fugas goteo tear tearout dry dryout drying secado secar damage damaged dano danos ' +
+    'flood flooding flooded inundacion restoration restauracion remediation remediacion cleanup limpieza sewage sewer fire fuego incendio ' +
+    'smoke humo soot contents contenidos packout demo demolition demolicion service services servicio servicios job trabajo pipe pipes ' +
+    'burst plumbing roof storm estimate estimado inspection inspeccion reconstruction rebuild repair repairs reparacion abatement asbestos ' +
+    'drywall carpet odor removal basement sotano claim').split(' '));
+  const CLI_CONECTORES_FINAL = new Set('and or with for of the from de del con para por'.split(' '));
+  function cliPareceTrabajo(nombre){
+    const s = String(nombre == null ? '' : nombre).replace(/\s+/g, ' ').trim();
+    if(!s) return false;
+    if(/[&+\/,]\s*$/.test(s)) return true;
+    const sin = s.replace(/\([^)]*\)?/g, ' '), w = cliNorm(cliNorm(sin) ? sin : s).split(' ').filter(Boolean);   // lo de entre paréntesis es una nota
+    if(!w.length) return false;
+    if(w.some(x => CLI_PALABRAS_TRABAJO.has(x))) return true;
+    return w.length > 1 && CLI_CONECTORES_FINAL.has(w[w.length - 1]);
+  }
   function cliMismaPuerta(a, b){
     const x = cliCasa(a), y = cliCasa(b);
     if(!x || !y || x.num === null || y.num === null || !cliMismaCasa(x, y)) return false;
@@ -74631,6 +74651,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(guardar) guardar.addEventListener('click', () => {
       const n = document.getElementById('cliNombre').value, d = document.getElementById('cliDireccion').value, tel = (document.getElementById('cliTelefono') || {}).value || '';
       if(!n.trim() && !d.trim()) return alert('Escriba el nombre o la dirección, o saque los datos de una foto.');
+      if(cliPareceTrabajo(n)) return alert(idiEn() ? 'That looks like the job, not the client\'s name. Type the person\'s name.' : 'Eso parece el trabajo, no el nombre del cliente. Escriba el nombre de la persona.');
       if(!clienteGuardar(n, d, tel)) return;
       clienteNuevoMostrar(false);
       clientesPintar();
@@ -90555,6 +90576,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   function rdtjSacar(lineas, texto){
     const r = { cliente: '', direccion: '', telefono: '', que: '', dia: '', hora: '' };
     try{ const s = clienteDeLineas(lineas || []); r.cliente = s.nombre || ''; r.direccion = s.direccion || ''; }catch(e){}
+    if(cliPareceTrabajo(r.cliente)) r.cliente = '';   // (23-nov) "emergency water extraction and" es el trabajo, no el cliente
     const todo = (lineas || []).map(l => l.texto || '').join('\n') + '\n' + (texto || ''), n = rdtjNorm(todo);
     const tel = todo.match(/\(?\b\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}\b/); if(tel) r.telefono = tel[0].trim();
     if(/\b(water|agua|flood|inund|leak|fuga|goteo|basement|sotano)\b/.test(n)) r.que = 'agua';
@@ -90623,6 +90645,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   async function rdtjAnunciar(){
     const b = RDTJ.borrador, root = MSG.root; if(!b || !root) return; const av = root.querySelector('[data-rdtj-aviso]');
     const d = b.d; if(!String(d.cliente || d.direccion || '').trim()){ if(av) av.textContent = rdtjEs('Escribe el cliente o la dirección.', 'Type the client or the address.'); return; }
+    if(cliPareceTrabajo(d.cliente)){ if(av) av.textContent = rdtjEs('Eso parece el trabajo, no el nombre del cliente. Escribe el nombre o déjalo vacío.', 'That looks like the job, not the client\'s name. Type the name or leave it empty.'); const ci = root.querySelector('[data-rdtj-c="cliente"]'); if(ci) ci.focus(); return; }
     if(!cloudOn()){ if(av) av.textContent = rdtjEs('No se pudo mandar. Revise su internet.', 'Could not send. Check your internet.'); return; }
     if(!msgCajaDeOk(b.con)) return;   // (R161) lo pegado y la captura eran para un grupo que ya no existe: ¿a este? No = la hoja y la caja se quedan
     const btn = root.querySelector('[data-rdtj-anunciar]'); if(btn) btn.disabled = true;
