@@ -12363,6 +12363,14 @@ html body #medResumen .med-comp-btn{min-height:40px; margin:0; padding:0 12px; b
 html body #medResumen .med-comp-btn:active{transform:scale(.97);}
 html body .med-mat-velo .med-mat-lista{max-height:none;}
 html body.rd-medidas .rdm-fila .rdm-en{display:block; font-size:.82em; font-weight:500; color:#6b7076; overflow:hidden; text-overflow:ellipsis;}
+
+/* (23-nov) + Otro cuarto al pie del nivel, y "Del plano" en Cuarto a mano */
+#medResumen .med-otro-cuarto{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; width:100%; min-height:52px; margin:12px 0 4px; border-style:dashed !important;}
+#medResumen .med-otro-cuarto b{font-size:15px;}
+#medResumen .med-otro-cuarto small{font-size:12px; font-weight:500; opacity:.7;}
+html body.rd-medidas #medResumen .med-otro-cuarto{border:1.5px dashed #9aa3ad !important; border-radius:calc(12*var(--rdu)) !important; background:#fff !important; color:#111 !important; font:600 calc(14*var(--rdu))/1.15 "Avenir Next", var(--sf), sans-serif !important; box-shadow:none !important;}
+.rdmm-plano{margin:-2px 2px 8px; font-size:12.5px; color:#1f7a5a; font-weight:600;}
+html body.rd-medidas .rdmm-chip.rdmm-del-plano{border-color:#9fd3bf;}
 </style>
 <script defer src="lumi-puntero.js?v=2"></script>
 <script defer src="lumi-pickups.js?trazado=3"></script>
@@ -20742,7 +20750,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-23-R525';
+  const APP_BUILD = '2026-11-23-R526';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -31122,6 +31130,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     return cortes.length;
   }
 
+  // (23-nov) Otro cuarto desde Editar medidas: en Plano y medidas, la tarjeta de Cuarto a mano con ese nivel ya puesto; fuera,
+  // el "Cuarto a mano" de siempre.
+  function medOtroCuarto(nivel){
+    try{ if(typeof rdmEn === 'function' && rdmEn()){ rdmManoAbrir({ nivel }); return; } }catch(e){}
+    const b = document.getElementById('medOtroCuartoMano'); if(b) b.click();
+  }
   let medResumenPintando = false;
   function medPintarResumen(){
     const caja = document.getElementById('medResumen');
@@ -31457,6 +31471,17 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           cuartoBox.appendChild(totCuarto);
           bloque.appendChild(cuartoBox);
         });
+        // (23-nov) Su queja: "ya adentro de un cuarto no hay cómo agregar otro cuarto... solo 'agregar a este cuarto'". Al pie de
+        // cada nivel, el botón para empezar OTRO cuarto ahí mismo (el nivel ya escogido; el nombre del plano de esta casa).
+        if(nv.nivel){
+          const otro = medNodo('button', 'btn btn-outline med-otro-cuarto');
+          otro.type = 'button';
+          otro.dataset.medOtroCuarto = nv.nivel;
+          otro.appendChild(medNodo('b', '', '+ Otro cuarto'));
+          otro.appendChild(medNodo('small', '', 'en ' + medNombreVisto(LEVEL_OPTIONS, nv.nivel, nv.titulo)));
+          otro.addEventListener('click', () => medOtroCuarto(nv.nivel));
+          bloque.appendChild(otro);
+        }
         caja.appendChild(bloque);
       });
 
@@ -31879,8 +31904,56 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(medUnidadDe(a) !== medUnidadDe(b)) return false;
     // UNA DIRECCION suelta tiene que traer dos palabras o un número: "Ave" sola
     // no es una casa, "1420" sí apunta a una.
-    return medMismoTexto(a, b, ps => ps.length >= 2 || ps.some(w => /[0-9]/.test(w)));
+    return medMismoTexto(a, b, ps => ps.length >= 2 || ps.some(w => /[0-9]/.test(w))) || medMismaCalle(a, b);
   };
+  // (23-nov) LA MISMA CASA ESCRITA DISTINTO. Casos reales de la nube: el plano dice "3330 Oxon Run Road Southeast, Woshington, DC
+  // 20032" y el cliente (renombrado hoy en CompanyCam) "... Washington ..."; "5817 Ooklond Pork Dr" y "5817 Oakland Park Dr";
+  // "3971 El Soneta PI, Alexandrid" y "3971 El Soneta Pl, Alexandria"; "42511 Rockrose Square Brambleton" y "... Square, Ashburn".
+  // Con todas las palabras del corto dentro del largo no casaban (una letra de la ciudad bastaba), y Medidas no ofrecía los
+  // cuartos de SU plano. Aquí manda lo que identifica la casa: el MISMO número, la misma calle (una letra de diferencia por
+  // palabra; dos en las largas), el mismo tipo de calle si los dos lo dicen, y el mismo zip si los dos lo traen. Sin zip en
+  // alguno de los dos, la calle tiene que ser idéntica. La ciudad no cuenta. La unidad ya se comparó antes (apartamento = otro trabajo).
+  const MED_TIPOS_CALLE = new Set(['st','ave','rd','dr','ln','ct','blvd','cir','pl','ter','hwy','pkwy','trl','wy','sq','loop','row','aly','xing','pike','cv','pt','grn','mews']);
+  function medCasiIgual(x, y){
+    if(x === y) return true;
+    const L = Math.max(x.length, y.length), tope = L >= 6 ? 2 : L >= 4 ? 1 : 0;
+    if(!tope || Math.abs(x.length - y.length) > tope) return false;
+    let prev = []; for(let j = 0; j <= y.length; j++) prev[j] = j;
+    for(let i = 1; i <= x.length; i++){
+      const cur = [i];
+      for(let j = 1; j <= y.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[y.length] <= tope;
+  }
+  function medPartesCasa(t){
+    const ps = medPalabras(t).map(w => w === 'square' ? 'sq' : w);
+    if(!ps.length || !/^[0-9]+$/.test(ps[0])) return null;
+    let zip = ''; for(let i = ps.length - 1; i > 0; i--) if(/^[0-9]{5}$/.test(ps[i])){ zip = ps[i]; break; }
+    const calle = []; let tipo = '';
+    for(let i = 1; i < ps.length && calle.length < 4; i++){
+      const w = ps[i];
+      if(MED_TIPOS_CALLE.has(w)){ tipo = w; break; }
+      if(/^[0-9]{5}$/.test(w) || MED_MARCAS_UNIDAD.indexOf(w) >= 0) break;
+      calle.push(w);
+    }
+    return { num: ps[0], zip, calle, tipo };
+  }
+  function medMismaCalle(a, b){
+    const x = medPartesCasa(a), y = medPartesCasa(b);
+    if(!x || !y || x.num !== y.num) return false;
+    if(x.zip && y.zip && x.zip !== y.zip) return false;
+    if(x.tipo && y.tipo && x.tipo !== y.tipo) return false;
+    // Sin el tipo en alguno, la calle se lee hasta 4 palabras y puede traer la ciudad: se compara lo que tienen los dos.
+    const dos = !!(x.tipo && y.tipo);
+    if(dos && x.calle.length !== y.calle.length) return false;
+    const n = Math.min(x.calle.length, y.calle.length);
+    if(!n) return false;
+    const ca = x.calle.slice(0, n), cb = y.calle.slice(0, n);
+    if(!ca.some(w => w.length >= 3)) return false;
+    const conZip = !!(x.zip && y.zip);
+    return ca.every((w, i) => conZip ? medCasiIgual(w, cb[i]) : w === cb[i]);
+  }
   // UN NOMBRE de pila suelto sí vale, desde tres letras: así escriben al
   // cliente en el campo de Medidas.
   const medMismoCliente = (a, b) => medMismoTexto(a, b,
@@ -39175,8 +39248,16 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const out = [], ya = new Set(), pon = n => { n = String(n || '').trim(); const k = n.toLowerCase(); if(!n || n === 'Other' || ya.has(k)) return; ya.add(k); out.push(n); };
     if(!nivel) return out;
     try{ medCuartosDelPlano(nivel).forEach(pon); }catch(e){}
+    out.delPlano = out.length;     // (23-nov) los primeros N son del plano de esta casa
     rdmmTarjetas().forEach(c => { if(c.dataset.section === 'kitchen') return; const l = medPPLugar(c); if(l.nivel === nivel) pon(l.cuarto); });
-    return out.slice(0, 14);
+    const r = out.slice(0, 14); r.delPlano = Math.min(out.delPlano, 14);
+    return r;
+  }
+  // (23-nov) De qué casa salieron los nombres del plano: la dirección (o el nombre) que trae el plano.
+  function rdmmPlanoDe(nivel){
+    let p = null; try{ p = medPlanoDeLaPlanta(nivel) || medPlanoDelTrabajo(); }catch(e){ p = null; }
+    const j = (p && (p.job || (p.data && p.data.job))) || {};
+    return String(j.address || j.client || '').trim();
   }
   // (R133) Un renglón recién agregado y todavía vacío no es "sin terminar": el aviso ámbar sale cuando ya se empezó y le falta algo.
   function medRecienVacio(c){
@@ -39192,13 +39273,13 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       texto: en ? 'They have no material or no size, the same ones the PDF leaves out. Finished measurements are not touched.' : 'Son las que no tienen material o no tienen medida, las mismas que el PDF ya no incluye. Las medidas completas no se tocan.',
       botones: [{ q: 'si', t: en ? 'Remove' : 'Quitar', c: 'vh-si' }, { q: '', t: en ? 'Keep them' : 'Dejarlas', c: 'vh-seguir' }] });
   }
-  function rdmManoAbrir(){
+  function rdmManoAbrir(opc){
     let v = document.getElementById('rdmManoVelo');
     if(!v){ v = document.createElement('div'); v.id = 'rdmManoVelo'; v.className = 'vh-velo rdmm'; v.setAttribute('role', 'dialog'); v.setAttribute('aria-modal', 'true'); v.setAttribute('aria-labelledby', 'rdmmT'); document.body.appendChild(v); }
     const en = idiEn(), antes = document.activeElement;
     let t = null; try{ t = trActual(); }catch(e){}
     const quien = (t && (t.nombre || t.direccion)) || String((($('#x-client') || {}).value) || '').trim() || String((($('#x-address') || {}).value) || '').trim();
-    const E = { nivel: rdmmNivelInicial(), cuarto: '', tipo: 'floor' };
+    const E = { nivel: (opc && opc.nivel) || rdmmNivelInicial(), cuarto: '', tipo: 'floor' };
     const opNivel = LEVEL_OPTIONS.map(o => '<option value="' + esc(o.value) + '">' + esc(rdmmEtq(o)) + '</option>').join('');
     const opCuarto = ROOM_OPTIONS.filter(o => !o.oculto).map(o => '<option value="' + esc(o.value) + '">' + esc(rdmmEtq(o)) + '</option>').join('');
     v.innerHTML = '<div class="vh-caja" data-no-idioma>'
@@ -39207,6 +39288,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       + '<label class="rdmm-l" for="rdmmNivel">' + (en ? 'Level' : 'Nivel') + '</label>'
       + '<span class="rdmm-sel"><select id="rdmmNivel"><option value="">' + (en ? '— Pick the level —' : '— Escoger nivel —') + '</option>' + opNivel + '</select>' + RDMM_IC.chev + '</span>'
       + '<div id="rdmmCuartoBox"><span class="rdmm-l" id="rdmmCuartoL">' + (en ? 'Room' : 'Cuarto') + '</span>'
+      + '<p class="rdmm-plano" id="rdmmPlano" hidden></p>'
       + '<div class="rdmm-chips" id="rdmmChips" role="group" aria-labelledby="rdmmCuartoL"></div>'
       + '<span class="rdmm-sel"><select id="rdmmCuarto" aria-labelledby="rdmmCuartoL"><option value="">' + (en ? '— Pick the room —' : '— Escoger cuarto —') + '</option>' + opCuarto + '</select>' + RDMM_IC.chev + '</span>'
       + '<input type="text" class="rdmm-otro" id="rdmmOtro" hidden></div>'
@@ -39219,10 +39301,15 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     selN.value = E.nivel;
     const phOtro = en ? 'Room name' : 'Nombre del cuarto';
     otro.placeholder = phOtro; otro.setAttribute('aria-label', phOtro); otro.autocomplete = 'off'; otro.setAttribute('autocapitalize', 'words'); otro.setAttribute('enterkeyhint', 'done');
+    const plano = $v('#rdmmPlano');
     const pintarChips = () => {
-      const ls = rdmmCuartosDe(E.nivel);
-      chips.innerHTML = ls.map(n => '<button type="button" class="rdmm-chip" data-rdmm-cuarto="' + esc(n) + '" aria-pressed="' + (n === E.cuarto) + '">' + (RDM_IC[rdmIcono(n)] || RDM_IC.cuarto) + '<span>' + esc(rdmmCuartoVisto(n)) + '</span></button>').join('');
+      const ls = rdmmCuartosDe(E.nivel), nP = ls.delPlano || 0;
+      chips.innerHTML = ls.map((n, i) => '<button type="button" class="rdmm-chip' + (i < nP ? ' rdmm-del-plano' : '') + '" data-rdmm-cuarto="' + esc(n) + '" aria-pressed="' + (n === E.cuarto) + '">' + (RDM_IC[rdmIcono(n)] || RDM_IC.cuarto) + '<span>' + esc(rdmmCuartoVisto(n)) + '</span></button>').join('');
       chips.hidden = !ls.length;
+      // (23-nov) Dice de dónde salen: los del plano de ESTA casa van primero; los demás ya se midieron aquí.
+      const de = nP ? rdmmPlanoDe(E.nivel) : '';
+      plano.textContent = nP ? ((en ? 'From the plan' : 'Del plano') + (de ? ' · ' + de : '')) : '';
+      plano.hidden = !nP;
     };
     // el cuarto escogido, de donde venga: un toque, la lista, u "Otro" escrito
     const ponerCuarto = (n, desde) => {
@@ -39238,6 +39325,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       falta.hidden = true;
     };
     pintarChips();
+    // (23-nov) El plano que escaneó otro teléfono (o que el manager editó) llega de la nube: al llegar, se vuelven a pintar.
+    try{ medBajarPlanosEquipo(t ? { cliente: t.nombre || '', dir: t.direccion || '' } : undefined).then(llego => { if(llego && !v.hidden) pintarChips(); }).catch(() => {}); }catch(e){}
     selN.addEventListener('change', () => { E.nivel = selN.value; falta.hidden = true; pintarChips(); });
     selC.addEventListener('change', () => {
       if(selC.value === 'Other'){ otro.hidden = false; E.cuarto = String(otro.value || '').trim(); chips.querySelectorAll('[data-rdmm-cuarto]').forEach(b => b.setAttribute('aria-pressed', 'false')); setTimeout(() => otro.focus(), 30); return; }
