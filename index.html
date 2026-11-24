@@ -20819,7 +20819,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-24-R534';
+  const APP_BUILD = '2026-11-24-R535';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -76760,6 +76760,7 @@ function asSharedStart(){clearInterval(AS_SHARED_TIMER);if(SES.role!=='manager')
     if(AS_DEVICE_SESSION)void AS_DEVICE_SESSION.release();
     asPdfLimpiar();
     AS.requestEpoch=(AS.requestEpoch||0)+1; AS.enviando=false; clearTimeout(AS.tmrRelleno); AS.desktopReadReceipt=null;
+    AS.colaTeclado=null; AS._envDesde=0; try{ asEstado('esperando',''); }catch(e){}   // (R535) nada tecleado se queda «en espera» con la plática cerrada
     asAccionVisible('', '');
     AS.abierto = false; AS.pregunta = null; asPararOido(); asCallar(); asPreviewQuitar(); try{ asGaleriaQuitar(); }catch(e){}
     asPantalla(false);
@@ -78706,6 +78707,12 @@ function intent(text){
  // Borrar, quitar, botar: son otra orden, nunca lectura (12-nov-2026).
  // "los mensajes que me mandaron" es RECIBIR, no mandar: no es una orden de enviar.
  if(!queDicen&&/\b(?:envia\w*|manda\w*|send|borra\w*|borralo|borrala|delete|remove|elimina\w*|quita\w*|bota\w*|tira\w*|paga|pay|dile|escribe\w*|respond\w*|reply to|deja(?:le|les)?|avisa(?:le|les)?)\b/.test(t.replace(/\bque (?:me |nos )(?:mandaron|mando|han mandado|enviaron)\b/g,'')))return null;
+ // (24-nov, revisión total) «léeme el último chat de WhatsApp», «¿cuál es el último chat de WhatsApp y qué dice?»,
+ // «lee mis mensajes de Mensajes»: antes no pegaban, se iban al modelo y a los 45 s salía «No pude terminar a tiempo».
+ {const APP='(?:el |mi )?(whatsapp|wasap|guasap|mensajes(?: normales| de apple)?|imessage|messages|workspace|field reports)';
+  const ultimo=new RegExp('^(?:cual es |dime |leeme |lee |abre(?:me)? |que dice |ensename |muestrame )?(?:el |mi )?(?:ultimos?|mas reciente|mas nuevo) (?:chats?|mensajes?|conversacion|platica)(?: que (?:tengo|me llego|llego))? (?:de|del|en) '+APP+'(?: (?:y|y que|y dime que|y leemelo|y leelo)(?: .{0,30})?)?$').exec(t)
+   ||new RegExp('^(?:lee|leeme|revisa|dime|checa)(?: me)? (?:mis |los )?(?:mensajes|chats)(?: nuevos| sin leer| pendientes)? (?:de|en) '+APP+'$').exec(t);
+  if(ultimo){const a=ultimo[1];const src=/whatsapp|wasap|guasap/.test(a)?['whatsapp']:/workspace|field/.test(a)?['workspace']:['messages'];return {action:'read',sources:src,english:english(t)};}}
  const channel=channelReading(text);if(channel?.explicit){const {explicit,...request}=channel;return request;}
  const noun=/\b(?:mensajes?|messages?|textos?|texts|inbox|novedades)\b/.test(t);
  const ask=/\bhow many\b/.test(t)||/\b(?:hay|tenemos|tengo|llego|llegaron|entro|entraron|recibimos|recibido|nuevos|nuevas|revisa|consulta|checa|chequea|mira|muestrame|dime|cuantos|cuales|que|lee|lees|leas|leer|leeme|leemelo|leemelos|leemelas|leelos|leelas|oir|escuchar|oigo|read|check|look|show|any|have|unread|new|what)\b/.test(t);
@@ -79072,6 +79079,10 @@ function frasePara(etiqueta,quien,frase){
 // "leibor" y "label", pero quien manda mensajes ve el texto crudo. Esto corre sobre lo que el dijo,
 // al entrar, para que TODOS (los de la app y el cerebro grande) vean "labor logs" y "Zelle".
 function oidoDeObra(texto){
+ // Label is an actual editor field. Do not turn a layout instruction into
+ // a labor-report instruction, including when it was pasted from a handoff.
+ if(/\b(?:matterport|companycam)\b/i.test(String(texto||'')) ||
+    (/\blabels?\b/i.test(String(texto||'')) && /\b(?:campo|field|cuarto|room|layout|plano|etiqueta|seleccionado)\b/i.test(String(texto||''))))return String(texto||'');
  return String(texto||'')
   .replace(/\b(?:la[bv]ou?r|lei?b[oe]r|laibor|laber)\s*(?:logg?s?|lo[xk]s?|locks?|lods?|los)\b/gi,'labor logs')
   .replace(/\b(?:la[bv]o(?:u)?r|l[ae]i[bv][oe]r|leb[oe]r|label|laber)\s*(?:lo[bcdgkpqtwx]s?|lou?gs?|locks?|logos?)\b/gi,'labor logs')   // 13-nov: "leibor lobs"
@@ -85047,8 +85058,31 @@ function lumiIncompleteSpeechReply(text){
  return null;
 }
 
-  setInterval(function(){ try{ const c=AS.colaTeclado; if(!c)return; if(Date.now()-c.at>90000||!AS.abierto){AS.colaTeclado=null;return;}
-    if(AS.enviando)return; AS.colaTeclado=null; try{asCallar();}catch(e){} asEnviar(c.texto,true); }catch(e){} },400);
+  // (24-nov-2026, R535 un camino) QUE NO SE CONGELE. Visto en vivo: si la plática se cerraba con algo tecleado en espera, o el
+  // puente de la Mac se reiniciaba a media vuelta, Lumi.app se quedaba para siempre en «En cuanto termine te contesto eso»
+  // (AS.enviando prendido sin nadie que lo apagara, y la pista pegada en la puerta). Ahora:
+  //  - una vuelta que lleva 75 s ocupada CON algo tecleado esperando (180 s sin nada esperando) se suelta: se cambia la
+  //    época (lo que llegue tarde de esa vuelta ya no se enseña) y se apaga AS.enviando;
+  //  - lo tecleado en espera se RETOMA en cuanto se desocupa (hasta 3 min); si la plática se cerró o ya pasó el tiempo, se
+  //    suelta y se dice («No alcancé a contestarte…»), nunca en silencio, y la pista de la puerta se limpia.
+  setInterval(function(){ try{
+    const ahora=Date.now(), c=AS.colaTeclado;
+    if(AS.enviando){ if(!AS._envDesde) AS._envDesde=ahora; } else AS._envDesde=0;
+    if(AS.enviando && AS._envDesde && ahora-AS._envDesde>(c?75000:180000)){
+      AS._envDesde=0; AS.requestEpoch=(AS.requestEpoch||0)+1; AS.enviando=false;
+      try{ AS_DESKTOP_BUSY=false; }catch(e){}
+      clearTimeout(AS.tmrRelleno); try{ asBit('vuelta atorada: se suelta'); }catch(e){}
+      if(!c){ try{ asEstado('esperando',''); }catch(e){} return; }
+    }
+    if(!c) return;
+    if(!AS.abierto || ahora-c.at>180000){
+      AS.colaTeclado=null;
+      try{ asEstado('esperando',''); if(AS.abierto){ const d='No alcancé a contestarte «'+String(c.texto).slice(0,60)+'». Dímelo otra vez.'; asMostrarRespuesta(d); } }catch(e){}
+      return;
+    }
+    if(AS.enviando) return;
+    AS.colaTeclado=null; try{asCallar();}catch(e){} asEnviar(c.texto,true);
+  }catch(e){} },400);
   let AS_ENTENDER_MAC=null;
   async function asEntender(texto){
     try{
@@ -85088,6 +85122,15 @@ function lumiIncompleteSpeechReply(text){
   var LBP_MENSAJES = new RegExp('^' + LBP_PRE + '(?:(?:tengo|hay|tienes|me llegaron|llegaron|me llego)\\s+(?:algun(?:os)?\\s+|nuevos?\\s+)?(?:mensajes?|chats?|textos?|algo nuevo|novedades en (?:los )?mensajes)(?:\\s+(?:nuevos?|sin leer|sin contestar|pendientes|hoy))*'
     + '|(?:muestrame|ensename|leeme|lee|dime|pasame|ponme|abreme|revisa|checa|chequea)\\s+(?:los\\s+|mis\\s+|todos\\s+los\\s+|todos\\s+mis\\s+)?(?:mensajes|chats|textos)(?:\\s+(?:nuevos|que tengo|pendientes|sin leer|sin contestar|todos))*'
     + '|quien(?:es)?\\s+me\\s+(?:escribio|escribieron|ha escrito|han escrito|escribe|mando mensaje)'
+    + '|(?:que|cuantos|cuales)\\s+(?:mensajes|chats|textos)\\s+(?:tengo|me llegaron|hay|me han llegado|tengo sin contestar|tengo pendientes)'
+    + '|(?:que hay de nuevo|hay algo nuevo|algo nuevo)\\s+(?:en\\s+)?(?:los\\s+|mis\\s+)?(?:mensajes|chats|whatsapp)'
+    + '|(?:tengo|hay)\\s+(?:mensajes?|chats?)\\s+(?:de alguien|por contestar|por responder|sin responder)'
+    + '|(?:revisa|checa|chequea|ve|mira)\\s+(?:mis\\s+|los\\s+)?(?:mensajes|chats|whatsapp)(?:\\s+y\\s+(?:mensajes|whatsapp))?'
+    + '|(?:mis\\s+)?mensajes\\s+(?:nuevos|pendientes|sin leer)'
+    + '|(?:leeme|lee|leer|dime|revisa)\\s+(?:(?:los|mis)\\s+)?(?:(?:mensajes|chats)\\s+)?(?:(?:de|en|del)\\s+)?(?:el\\s+|mi\\s+)?(?:whatsapp|wasap|guasap|mensajes normales|mensajes de apple|imessage|workspace)(?:\\s+(?:nuevos|pendientes|sin leer))?'
+    + '|(?:leeme|lee)\\s+(?:(?:los|mis)\\s+)?(?:mensajes|chats)\\s+(?:de|en)\\s+(?:los\\s+)?mensajes'
+    + '|(?:leeme|lee|dime|abre(?:me)?)\\s+(?:el|la)\\s+(?:primero|primer|primera|segundo|segunda|tercero|tercer|tercera|cuarto|cuarta|quinto|quinta|ultimo|ultima|mas reciente)(?:\\s+(?:chat|mensaje|persona|de la lista))?(?:\\s+(?:de|en)\\s+(?:el\\s+|mi\\s+)?(?:whatsapp|wasap|mensajes normales|mensajes|workspace))?'
+    + '|(?:cual es |dime |leeme |lee |que dice )?(?:el |mi )?(?:ultimo|mas reciente|mas nuevo) (?:chat|mensaje|conversacion)s? (?:de|en) (?:el |mi )?(?:whatsapp|wasap|guasap|mensajes normales|mensajes|imessage|workspace)(?:\\s+y\\s+que\\s+dice)?'
     + '|(?:a quien|a quienes)\\s+(?:le\\s+|les\\s+)?(?:tengo que|debo|necesito)\\s+(?:responder|contestar)'
     + '|leemelos(?:\\s+en voz alta)?|(?:dile|digale|escribele|mandale|avisale)\\s+algo\\s+a\\s+.{2,40}'
     + '|(?:any|do i have)\\s+(?:new\\s+)?messages|show me (?:my |the )?messages)(?:\\s+(?:por favor|porfa|lumi|todos|en voz alta|uno por uno))*$');
@@ -85124,7 +85167,83 @@ function lumiIncompleteSpeechReply(text){
       return si;
     }catch(e){ return false; }
   }
+  // (24-nov noche, R535) UNA SOLA RESPUESTA. Visto en vivo: él preguntó "¿tengo mensajes?" y contestó la guía vieja ("tienes mensajes
+  // nuevos en 9 conversaciones…", con nombres que no conoce) porque había una pregunta vieja pendiente (AS.pregunta) o la frase llegó
+  // antes a otra puerta. Ahora se decide ARRIBA de todo en asEnviar: las frases de mensajes van a la Mac aunque haya una pregunta
+  // vieja (esa se olvida); las respuestas de la lectura guiada siguen pidiendo que no haya otra pregunta abierta.
+  function lumiBandejaPuenteYa(texto){
+    try{
+      if(!SES || SES.role !== 'manager' || AS.sandbox) return false;
+      const t = lumiBandejaPlano(texto);
+      if(t && t.length <= 400 && LBP_MENSAJES.test(t)){ if(AS.pregunta) AS.pregunta = null; return lumiBandejaPuente(texto); }
+      return !AS.pregunta && lumiBandejaPuente(texto);
+    }catch(e){ return false; }
+  }
   // ===================== LUMI_BANDEJA_PUENTE_END =====================
+  // ===================== LUMI_UN_CAMINO_BEGIN (24-nov-2026, R535, orden del dueño: "una sola respuesta por cosa") =====================
+  // Estas frases tenían DOS caminos vivos y él recibía respuestas distintas según por dónde caían:
+  //  - «¿quién trabajó hoy?» / «¿y ayer?»: la guía de la web (labor logs, el entendedor de la Mac) o el cerebro; el modelo inventó el «y ayer».
+  //    Camino único: la nube (asistente, rutaUnCamino -> cerebro quien_trabajo, las horas del reloj).
+  //  - «¿qué tengo en el calendario mañana?»: el oído de la Mac (lumiMacHuele) lo volvía «abre el calendario» y ABRÍA la pantalla.
+  //    Camino único: la nube LEE el calendario (rutaUnCamino -> trabajos). Solo «ábreme/enséñame el calendario» abre (LUMI_NAV, sin cambio).
+  //  - «lee el grupo de Robert y agrega al calendario»: la web leía el chat y armaba su propia tarjeta (LUMI_CAL_CHAT, reglas viejas)
+  //    mientras la Vigía de la Mac lleva ese grupo. Camino único: la Mac (bandeja -> aprobar-calendario, RE_GRUPO_ROBERT_AL_CAL).
+  // Copia de esQuienTrabajo / esCalendarioLee de supabase/functions/asistente/index.ts (R535): si cambian allá, cambiarlas aquí. Sin lookbehind.
+  var LUMI_UN_CAMINO = null;   // {tema:'quien'|'cal', at, owner}: para la seguida corta («y ayer», «y el viernes») en los 3 minutos siguientes
+  function lumiUcPalabras(s){ return String(s || '').replace(/\b(?!(?:what|that|it|he|she|there|here|who|where|how|let)['’]s\b)([A-Za-zÀ-ÿ]+)['’]s\b/gi, '$1').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9ñ]+/g, ' ').trim().split(' ').filter(Boolean); }
+  var LUC_DIAS = new Set(('hoy ayer antier anteayer antes de el la dia this last past on today yesterday tomorrow manana pasado lunes martes miercoles jueves viernes sabado domingo '
+    + 'monday tuesday wednesday thursday friday saturday sunday enero febrero marzo abril mayo junio julio agosto septiembre setiembre octubre noviembre diciembre '
+    + 'january february march april may june july august september october november december').split(' '));
+  var LUC_DIA_REAL = /^(hoy|ayer|antier|anteayer|today|yesterday|tomorrow|manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2})$/;
+  var LUC_RELLENO = new Set('y and e oye lumi ok okay pues entonces dime sabes me tell'.split(' '));
+  var LUC_QT = new Set('quien quienes who trabajo trabajaron vino vinieron marco marcaron worked came in clocked ha han has have ya'.split(' '));
+  var LUC_LABOR = / (labor|labour|label|leibor|leiber|reporte|reportes|hoja|hojas|log|logs) /;
+  function lumiUcDiaOk(w){ return LUC_DIAS.has(w) || /^\d{1,2}$/.test(w); }
+  function lumiUcQuien(texto){
+    const w = lumiUcPalabras(texto); if(!w.length || w.length > 9) return false;
+    const t = ' ' + w.join(' ') + ' ';
+    if(LUC_LABOR.test(t) || !/ (quien|quienes|who) /.test(t) || !/ (trabajo|trabajaron|vino|vinieron|marco|marcaron|worked|came|clocked) /.test(t)) return false;
+    return w.every(function(x){ return LUC_QT.has(x) || LUC_RELLENO.has(x) || lumiUcDiaOk(x); });
+  }
+  function lumiUcSeguida(texto, conQuien){
+    const w = lumiUcPalabras(texto); if(w.length < 2 || w.length > 5 || !/^(y|and|e)$/.test(w[0])) return false;
+    if(!w.slice(1).some(function(x){ return LUC_DIA_REAL.test(x); })) return false;
+    return w.slice(1).every(function(x){ return lumiUcDiaOk(x) || (conQuien && LUC_QT.has(x)); });
+  }
+  var LUC_PREG = /^ (?:y |and |oye |lumi |ok |pues |entonces )*(?:que|what|whats|cuantas|cuantos|how many|is there|are there|do i have|do we have|any|dime|tell me|leeme|lee|read me|read|como esta|como va|how s|how is)( |$)/;
+  var LUC_NO_LEER = / (pon|ponle|ponme|poner|agrega|agregale|agregar|anade|quita|quitale|quitar|borra|borrar|cambia|cambiar|mueve|mover|cancela|cancelar|anota|apunta|add|put|remove|delete|change|cancel|schedule|programa|confirma|confirmar|pago|pague|pagar|pagos|cobre|cobro|cobrar|factura|facturas|invoice|invoices|dinero|money|paid|pay|hicimos|tuvimos|hubo|hice|did|had|was|were|quien|quienes|who|abre|abreme|abrir|open|ensename|muestrame|show|llevame|take|labor|reporte|hoja|hacer|hago|llevar|llevo|necesito|necesita|cuanto|cuesta|cobra|protocolo) /;
+  function lumiUcCalLee(texto){
+    const w = lumiUcPalabras(texto); if(!w.length || w.length > 12) return false;
+    const t = ' ' + w.join(' ') + ' ';
+    const preg = LUC_PREG.test(t) || (/[?¿]/.test(String(texto)) && /^ (?:y |oye |lumi )*(?:hay|tengo|tenemos) /.test(t));
+    if(!(/ (calendario|calendar|agenda) /.test(t) || / (mudanza|mudanzas|move|moves) /.test(t)) || !preg || LUC_NO_LEER.test(t) || / como se /.test(t) || /\d+ (personas|people|guys|horas|hours)/.test(t)) return false;
+    return true;
+  }
+  // la misma frase que aprobar-calendario.mjs (RE_GRUPO_ROBERT_AL_CAL): el grupo de Robert lo lleva la Vigía de la Mac
+  var LUC_ROBERT_CAL = /\b(?:lee|leer|leelo|leeme|revisa|revisar|checa|chequea|mira|ve|read|check)\b.{0,80}\brobert\b.{0,120}\b(?:agrega(?:lo|la|los|r)?|anade(?:lo)?|pon(?:lo|la|er)?|programa(?:lo|r)?|mete(?:lo)?|apunta(?:lo)?|actualiza(?:lo|r)?|guarda(?:lo)?|add|put|schedule)\b.{0,60}\b(?:calendario|agenda|calendar)\b/;
+  // ¿Va derecho a la nube / la Mac (asLlamar), sin pasar por las guías viejas de la web? Devuelve qué tema o ''.
+  function lumiUnCaminoTema(texto){
+    try{
+      if(!SES || SES.role !== 'manager' || AS.sandbox) return '';
+      const owner = SES.user_id + '|' + SES.company_id, plano = lumiUcPalabras(texto).join(' ');
+      if(!plano || plano.length > 400) return '';
+      if(lumiUcQuien(texto)) return 'quien';
+      if(lumiUcCalLee(texto)) return 'cal';
+      if(LUC_ROBERT_CAL.test(plano) && !/\b(?:no agregues|no pongas|no programes|no guardes|don t add|do not add)\b/.test(plano)) return 'robert';
+      const u = LUMI_UN_CAMINO && LUMI_UN_CAMINO.owner === owner && Date.now() - LUMI_UN_CAMINO.at < 180000 ? LUMI_UN_CAMINO.tema : '';
+      if(u === 'quien' && lumiUcSeguida(texto, true)) return 'quien';
+      if(u === 'cal' && lumiUcSeguida(texto, false)) return 'cal';
+      return '';
+    }catch(e){ return ''; }
+  }
+  function lumiUnCaminoYa(texto){
+    const tema = lumiUnCaminoTema(texto); if(!tema) return false;
+    try{ LUMI_UN_CAMINO = { tema: tema, at: Date.now(), owner: SES.user_id + '|' + SES.company_id }; if(AS.pregunta && tema !== 'robert') AS.pregunta = null; asBit('un camino: ' + tema + ' -> nube'); }catch(e){}
+    if(tema === 'quien'){ try{ window.__lumiS4Reloj = Date.now(); }catch(e){} }
+    return true;
+  }
+  if(typeof module === 'object' && module.exports) module.exports.lumiUnCamino = { lumiUcQuien: lumiUcQuien, lumiUcCalLee: lumiUcCalLee, lumiUcSeguida: lumiUcSeguida, LUC_ROBERT_CAL: LUC_ROBERT_CAL };
+  // ===================== LUMI_UN_CAMINO_END =====================
   async function asEnviar(texto, desdeTeclado, oculto){
     texto = String(texto || '').trim();
     if(!texto) return;
@@ -85144,21 +85263,12 @@ function lumiIncompleteSpeechReply(text){
     void asDeviceClaim(); // User input chooses the reply device; warming here delayed short replies.
     // (R42) MODO DICTADO: mientras dicta el equipo o el labor log, todo va a la función (ni comandos ni medir ni adiós aquí)
     const dictando = !!AS.dictado;
-    if(!dictando && !AS.conf && !AS.pregunta && SES?.role==='manager' && isManager()){
-      const abrir=/^abre (?:la aplicación|la app) (.+)$/i.exec(texto);
-      const gesto=/^(señala|haz clic) en (.+?) en (-?\d+)[, ]+(-?\d+)$/i.exec(texto);
-      const tecla=/^(?:pulsa|presiona|escribe|haz clic en) (?:el )?(?:número )?([0-9]) en (?:la )?calculadora[.!]?$/i.exec(texto);
-      if(abrir||gesto||tecla){
-        const orden=tecla?{action:"digit",app:"Calculadora",digit:tecla[1]}:abrir?{action:'open',app:abrir[1]}:{action:gesto[1].toLowerCase()==='señala'?'point':'click',app:gesto[2],x:Number(gesto[3]),y:Number(gesto[4])};
-        asTranscribir(texto);
-        try{
-          const res=await fetch('http://127.0.0.1:49183/pointer',{method:'POST',referrerPolicy:'unsafe-url',referrer:location.origin+'/amg-reportes/',headers:{'Content-Type':'application/json'},body:JSON.stringify(orden),signal:AbortSignal.timeout(27000)});
-          const answer=await res.json();
-          asMostrarRespuesta(answer.message||'El controlador rechazó la orden.');
-        }catch{asMostrarRespuesta('Workspace no pudo conectar con LumiMouse en esta computadora. Comprueba el acceso a la red local y el controlador.');}
-        return;
-      }
-    }
+    // (R535, 24-nov noche) UNA SOLA RESPUESTA para los mensajes: «¿tengo mensajes?», «léeme los mensajes», «muéstramelos», «léeme el primero»…
+    // van a la Mac ANTES que cualquier otra puerta (la guía vieja contestaba "9 conversaciones" con nombres que él no conoce).
+    lumiPuenteBandeja:{ if(!dictando&&!AS.conf&&(lumiBandejaPuenteYa(texto)||lumiUnCaminoYa(texto))) break lumiPuenteBandeja;   // (R535 completa) + LUMI_UN_CAMINO: horas, calendario y el grupo de Robert, un solo camino
+    // (R535 un camino, 24-nov) Aquí estaba LumiMouse (127.0.0.1:49183): nunca se instaló (tools/lumi_mac/control/BUILD.txt) y contestaba
+    // «no pudo conectar con LumiMouse» a «abre la aplicación X». Abrir apps y dar clics es del cursor de Lumi (cursor.mjs) y, fuera de
+    // Lumi.app, de lumiDesktopOrder (desktop-actions.mjs). El bloque viejo quedó en respaldo_R534_index.html.
     if(!dictando && !AS.conf && !AS.pregunta && !AS_GAL.p && !AS_PREV.spec && SES?.user_id && window.LumiPuntero){
       const orden=LumiPuntero.parse(texto);
       if(orden && !(orden.test && window.webkit?.messageHandlers?.lumiSafari)){
@@ -85476,7 +85586,7 @@ function lumiIncompleteSpeechReply(text){
     // hasta 5 s medidos) y hasta despues contestaba algo que el aparato ya sabe.
     if(!dictando&&!AS.conf&&!AS.pregunta){const hora=lumiHoraAnswer(textoMac,asDeviceKind());if(hora){asPararOido();asCallar();asTranscribir(texto);asRecordarAccionMac(texto,hora);asMostrarRespuesta(hora);asHablar(hora,asSeguirOyendo);return;}}
     // (24-nov-2026, Bandeja) "¿tengo mensajes?" / "respóndele a X que…": derecho a la Mac (bandeja-platica.mjs), sin la guía vieja de abajo
-    lumiPuenteBandeja:{ if(!dictando&&!AS.conf&&!AS.pregunta&&lumiBandejaPuente(texto)) break lumiPuenteBandeja;
+    // (R535) la puerta de la bandeja ya se abrió arriba (lumiBandejaPuenteYa, al empezar asEnviar)
     if(!dictando&&!AS.conf&&!AS.pregunta&&typeof asLaborDocument==='function'&&(await asLaborDocument(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&(await asLaborRead(texto)))return;
     if(!dictando&&!AS.conf&&!AS.pregunta&&typeof asGastosLeer==='function'&&(await asGastosLeer(texto)))return;
@@ -85592,7 +85702,7 @@ function lumiIncompleteSpeechReply(text){
     try{
       AS.telTexto = null;   // (R49) lo que va a la función ya no es del teléfono
       const r = await asLlamar(Object.assign({ texto: texto, historial: AS.historial, sandbox: AS.sandbox }, AS.dictado ? { dictado: AS.dictado } : {}, (!AS.sandbox && AS.telLog && AS.telLog.length) ? { telefono_turnos: AS.telLog.splice(0) } : {}), onTexto);
-      if(!vigente())return;
+      if(!vigente()){ if(AS.requestEpoch===requestEpoch) AS.enviando=false; return; }   // (R535) la plática se cerró a media vuelta: no dejar AS.enviando prendido
       const j = r.json || {};
       if(!(r.ok && j.ok)) throw new Error(j.texto || j.error || ('HTTP ' + r.status));
       AS.historial = j.historial || AS.historial;
@@ -91397,7 +91507,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     const card = MSG.lista.find(x => x.id === b.dataset.lbtCard) || null; if(card) lbtTocar(card, b.dataset.lbtK);
   }, true);
   window.__lbt = { html: lbtHtml, tocar: lbtTocar, esLumi: lbtEsLumi, tarjeta: lbtTarjetaDe };   // para las pruebas
-  // LUMI_BOTONES_SELLO=2026-11-24-R534
+  // LUMI_BOTONES_SELLO=2026-11-24-R535
 // ===================== LUMI_BOTONES_CHAT_END =====================
   // ===================== (5-nov-2026, R154) LA FOTO EN GRANDE: SIEMPRE SE PUEDE SALIR =====================
   // Su queja: "abro una foto en grande en cualquier chat ... le pucho para regresar y no regresa", hay que cerrar la app. En el teléfono, al
