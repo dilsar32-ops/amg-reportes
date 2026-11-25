@@ -20884,7 +20884,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-24-R538';
+  const APP_BUILD = '2026-11-25-R539';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -38426,6 +38426,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     else if(RDP.tab === 'guardados') v = 'guardados';
     else if(RDP.vista === 'plano' && t) v = 'plano';
     if(p.dataset.rdpVista !== v) p.dataset.rdpVista = v;
+    if(v !== 'eligiendo' && typeof trrCerrarBusca === 'function') trrCerrarBusca();   // (R539)
     if(v !== 'plano') RDP.vista = '';
     rdCls(document.body, 'rdp-en-plano', v === 'plano');
     if(v === 'plano') try{ rdpPvPintar(); }catch(e){}
@@ -38467,6 +38468,12 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(si){ if(TR_VISTA !== 'lista'){ TR_VISTA = 'lista'; } rdHid(document.getElementById('trLista'), false); try{ trPintarLista(); trAquiPintar(); }catch(e){} }   // (R127) la lista vuelve a salir aunque haya un trabajo abierto
     rdpPintar();
   }
+  // (25-nov-2026, R539) ya escogido el cliente: a la pestaña que está marcada abajo (Plano o Medidas). Antes siempre Plano: tocaba
+  // Medidas sin cliente, escogía el cliente y caía en el plano.
+  function rdpTrasEscoger(){
+    rdpPintar(); if(!trActual()) return;
+    if(RDP.tab === 'plano') rdpAbrirPlano(); else if(RDP.tab === 'medidas') trIr('medidas');
+  }
   (function rdpCablear(){
     document.addEventListener('click', e => {
       if(!rdpEn() || !e.target.closest) return;
@@ -38480,12 +38487,13 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         const q = tb.dataset.rdpTab; RDP.eligiendo = false;
         if(TR_VISTA === 'form' || TR_VISTA === 'nivelCam' || TR_VISTA === 'pdf'){ TR_EDITANDO = false; if(trActual()){ trPintarTrabajo(); TR_VISTA = 'trabajo'; } else TR_VISTA = 'lista'; }
         RDP.tab = q;
-        if(q === 'medidas'){ if(trActual()){ trIr('medidas'); return; } RDP.tab = 'plano'; rdpElegir(true); return; }   // sin cliente: primero el cliente
+        if(q === 'medidas'){ if(trActual()){ trIr('medidas'); return; } rdpElegir(true); return; }   // sin cliente: primero el cliente (R539: Medidas se queda marcada y al escogerlo va a Medidas)
         if(q === 'plano' && trActual()){ rdpAbrirPlano(); return; }   // (R124) con cliente: el plano (o "Aún no hay planos")
         rdpPintar(); return;
       }
       // al escoger un cliente (Abrir, Estás aquí) o crear el trabajo, se cierra la lista
-      if(t.closest('[data-tr-abrir], [data-tr-aqui]')){ RDP.eligiendo = false; setTimeout(() => { rdpPintar(); if(RDP.tab === 'plano' && trActual()) rdpAbrirPlano(); }, 0); }
+      if(t.closest('[data-tr-abrir], [data-tr-aqui]')){ RDP.eligiendo = false; setTimeout(rdpTrasEscoger, 0); }
+      if(t.closest('#trCrear') && !TR_EDITANDO){ setTimeout(() => { if(TR_VISTA !== 'form'){ RDP.eligiendo = false; rdpTrasEscoger(); } }, 0); }   // (R539) creado: a la pestaña marcada
     }, true);
     // la flecha de arriba: primero cierra lo que está abierto (la lista, el formulario, el nivel); si no, regresa como siempre
     document.addEventListener('click', e => {
@@ -38529,7 +38537,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // pinta la ruleta en la lista de Planos (devuelve false fuera de RD o buscando: entonces la lista de siempre)
   function trrPintar(caja){
     const l = document.getElementById('trLista'), q = ((document.getElementById('trBuscar') || {}).value || '').trim();
-    if(!trrEn() || q){ if(caja.classList.contains('trr-on')) caja.classList.remove('trr-on'); return false; }
+    if(!trrEn()){ if(caja.classList.contains('trr-on')) caja.classList.remove('trr-on'); return false; }
+    if(q){ const bus = document.getElementById('trBuscar'); if(bus) bus.value = ''; }   // (R539) escondido no filtra: antes solo salían los de la búsqueda vieja
     const filas = trrFilas(); TRR.filas = filas; TRR.aqui = filas[0] && filas[0].aqui || '';
     if(!caja.classList.contains('trr-on')) caja.classList.add('trr-on');
     caja.innerHTML = filas.length ? trrHtml(filas) : '<p class="clockhint">' + (idiEn() ? 'No clients yet. Tap «+ New job».' : 'Todavía no hay clientes. Toque «+ Trabajo nuevo».') + '</p>';
@@ -38549,7 +38558,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(!id){ const c = trAquiClienteDe({ cliente: f.n, direccion: f.d }) || clienteGuardar(f.n, f.d, f.tel); if(c) id = c.id; }
     if(!id) return;
     RDP.eligiendo = false; trAbrirCliente(id);
-    setTimeout(() => { rdpPintar(); if(RDP.tab === 'plano' && trActual()) rdpAbrirPlano(); }, 0);
+    setTimeout(rdpTrasEscoger, 0);
   }
   document.addEventListener('click', e => {
     if(!rdpEn() || !e.target || !e.target.closest) return;
@@ -39347,7 +39356,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(t.closest('#rdPfAtras')){ e.preventDefault(); e.stopPropagation();
           if(typeof fpEditMode !== 'undefined' && fpEditMode){ const b = document.getElementById('floorplanEditToggle'); if(b) b.click(); return; }
           rdvAlInicio(); return; }
-        if(t.closest('#rdvCliBtn')){ rdvAlInicio(); setTimeout(() => { try{ rdpElegir(true); }catch(x){} }, 30); return; }
+        if(t.closest('#rdvCliBtn')){ rdvAlInicio(); setTimeout(() => { try{ RDP.tab = 'plano'; rdpElegir(true); }catch(x){} }, 30); return; }
         if(t.closest('#rdvMasBtn')){ const m = document.getElementById('rdvMas'); rdvMenu(m && m.hidden); return; }
         const mi = t.closest('[data-rdv-mas]');
         if(mi){
@@ -39504,7 +39513,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(!rdmEn() || !e.target.closest) return;
       const t = e.target;
       if(t.closest('#rdPfAtras')){ e.preventDefault(); e.stopPropagation(); if(RDM.editando){ RDM.editando = false; rdmPintar(); return; } rdmAlInicio(); return; }
-      if(t.closest('#rdmCliBtn')){ rdmAlInicio(); setTimeout(() => { try{ rdpElegir(true); }catch(x){} }, 30); return; }
+      if(t.closest('#rdmCliBtn')){ rdmAlInicio(); setTimeout(() => { try{ RDP.tab = 'medidas'; rdpElegir(true); }catch(x){} }, 30); return; }
       if(t.closest('#rdmLap')){ rdmAlInicio(); setTimeout(() => { try{ RDP.eligiendo = false; trAbrirForm(true); }catch(x){} }, 30); return; }
       if(t.closest('#rdmMasBtn')){ const m = document.getElementById('rdmMas'); rdmMenus(m && m.hidden, 'rdmMas'); return; }
       const cb = t.closest('.rdm-room-b');
@@ -91033,6 +91042,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(typeof commitPending === 'function') try{ commitPending(); }catch(e){}
     if(kind === 'planos'){
       showTab('planomed'); pushBack('visitas');
+      try{ if(window.__rdp) window.__rdp.estado.tab = 'plano'; }catch(e){}   // (R539)
       setTimeout(() => { try{ if(typeof trrEscoger === 'function') trrEscoger({ id: cli && cli.id, n: c.nombre, d: c.direccion, tel: c.telefono }); }catch(e){ console.warn('rdcl planos', e); } }, 120);
       return;
     }
