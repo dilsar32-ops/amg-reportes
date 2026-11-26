@@ -16488,7 +16488,7 @@ html body #asPanel .as-texto input{width:0;min-width:0;}
     "Turn this door into solid wall? The wall closes across the span - Undo brings it back.": "¿Convertir esta puerta en pared? La pared se cierra en ese tramo. Deshacer la regresa.",
     "Turn this window into solid wall? The wall closes across the span - Undo brings it back.": "¿Convertir esta ventana en pared? La pared se cierra en ese tramo. Deshacer la regresa.",
     "Now solid wall - Undo brings it back.": "Ahora es pared. Deshacer la regresa.",
-    "Space inside a room": "Espacio dentro de un cuarto", "Named space": "Espacio con nombre" });
+    "Space inside a room": "Espacio dentro de un cuarto", "Space of a room": "Espacio de un cuarto", "Named space": "Espacio con nombre" });
   // (12-nov, revision 2) el ingles de los avisos nuevos de hoy
   Object.assign(IDI_DICC, { "No se guardó: escriba el precio": "Not saved: type the price",
     "No pude leer los adelantos de esta persona. No se marcó nada: revise su internet y abra su ficha otra vez.": "I couldn't read this person's advances. Nothing was marked: check your internet and open their card again.",
@@ -21132,7 +21132,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-25-R542';
+  const APP_BUILD = '2026-11-26-R543';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -33014,7 +33014,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // lugar) se quita; si el clóset cae dentro de un pedazo más grande, a ese pedazo se le resta el área del clóset, marcada
   // "Closet". Así el techo del cuarto = su piso neto (fpRoomDisplayAreaSqFt) y el clóset sale con lo suyo.
   function medPPQuitarClosets(room, t){
-    const cls = fpClosetsAparte(room);
+    const cls = fpClosetsAparte(room).filter(sa => !sa._fuera);   // (Rincón 2) el de afuera no está en el techo del cuarto
     if(!cls.length || !t || !Array.isArray(t.cortes)) return t;
     const cortes = t.cortes.slice(), quitados = [];
     for(const sa of cls){
@@ -33039,7 +33039,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // (1-nov, Remiendo) Los pedazos se cuadran contra el piso ENTERO que encierra el contorno (cuarto + sus clósets aparte);
     // después el clóset aparte se le quita al techo del cuarto (tiene su propio renglón, igual que en la tabla de medidas).
     // Antes se comparaban contra el área neta y todo cuarto con clóset aparte decía "mida el techo a mano".
-    const area = fpRoomGrossAreaSqFt(room);
+    const area = Math.round((fpRoomGrossAreaSqFt(room) - (typeof fpAreaClosetsFuera === 'function' ? fpAreaClosetsFuera(room) : 0)) * 10) / 10;   // (Rincón 2) sin el clóset de afuera
     if(!(area > 1)) return { error: 'El plano no trae el área de este cuarto: mida el techo a mano.' };
     const sinCloset = t => medPPQuitarClosets(room, t);
     // Un lado que la app cerró sola con una recta (el hueco de una puerta, o una pared que se recortó) no es pared: no
@@ -35528,7 +35528,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         const cs = o.summary.porRevisar || typeof fpClosetsAparte !== 'function' ? [] : fpClosetsAparte(r);
         if(cs.length){
           o.summary.grossAreaSqFt = fpRoomGrossAreaSqFt(r);
-          o._subAreas = cs.map(sa => ({ name: sa.name, cx: sa.cx, cy: sa.cy, w: sa.w, d: sa.d, _frente: true, _aparte: true }));
+          o._subAreas = cs.map(sa => ({ name: sa.name, cx: sa.cx, cy: sa.cy, w: sa.w, d: sa.d, _frente: true, _aparte: true, _fuera: sa._fuera || undefined }));
         }
         return o;
       })
@@ -36807,6 +36807,18 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       if(!q || !vale(q.r) || !isFinite(q.x) || !isFinite(q.y)) return;
       const p = P(q.x, q.y); q.x = p.x; q.y = p.y;
     });
+    // (26-nov-2026, Rincón) la huella del láser (botón Mesh) y sus nichos, por cuarto: también giran (antes se quedaban en el
+    // marco de antes de enderezar el plano; en el de Vero, los 6 cuartos corridos el mismo giro de 9°).
+    Object.keys(insp.lidar || {}).forEach(k => {
+      if(!vale(Number(k))) return;
+      const li = insp.lidar[k]; if(!li || typeof li !== 'object') return;
+      if(Array.isArray(li.footprint)) for(let i = 0; i + 1 < li.footprint.length; i += 2){
+        const x = li.footprint[i], y = li.footprint[i + 1]; if(!isFinite(x) || !isFinite(y)) continue;
+        const p = P(x, y); li.footprint[i] = Math.round(p.x * 100) / 100; li.footprint[i + 1] = Math.round(p.y * 100) / 100;
+      }
+      (Array.isArray(li.nooks) ? li.nooks : []).forEach(nk => ((nk && nk.polygon) || []).forEach(q => {
+        if(!q || !isFinite(q.x) || !isFinite(q.y)) return; const p = P(q.x, q.y); q.x = p.x; q.y = p.y; }));
+    });
     // Las esquinas que el teléfono avisó, por cuarto: también giran.
     Object.keys(insp.scanCorners || {}).forEach(k => {
       if(!vale(Number(k))) return;
@@ -36872,6 +36884,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           obj.center = rot(obj.center);
           obj.rotationDeg = (obj.rotationDeg||0) - angleDeg;
         });
+        // (26-nov-2026, Rincón) el nicho del láser gira con sus paredes. Sin esto se quedaba en el marco de antes de enderezar: en
+        // el plano de Vero (25-nov, giro de 9°) el "Closet" del láser quedó a 2 ft de su clóset, casi todo afuera.
+        (room.lidarNooks||[]).forEach(nk => { if(nk && Array.isArray(nk.polygon)) nk.polygon = nk.polygon.map(q => (q && isFinite(q.x) && isFinite(q.y)) ? rot(q) : q); });
       });
       fpTransformarInspeccion(data.inspection, (x, y) => rot({ x, y }), soloCuarto);
       // (12-nov-2026, Vecino) las manchas de humedad y los huecos con nombre giran con el plano (Girar/Voltear ya lo hacía; aquí
@@ -37225,6 +37240,377 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     }
     return fpRinconEnPisoDeOtro(room, fpMuestrasDelRincon(pts, 7), rooms);
   }
+  // (26-nov-2026, Rincón) EL NICHO VA EN SU PARED. El teléfono entrega cada nicho ya en el marco del plano, con su boca (los dos
+  // primeros puntos) sobre su pared (nk.wall). La web enderezaba las paredes al abrir el escaneo (floorplanAlignRooms) y no giraba
+  // los nichos: el "Closet" del láser quedaba corrido lo que giró el plano (Vero, 25-nov: 9°, el rótulo a 2 ft de su clóset, en el
+  // piso de Room 2). Ahora giran juntos; para los planos ya guardados, si la boca no cae en ninguna pared del cuarto, el nicho se
+  // gira alrededor del origen (como giraron las paredes) lo que su boca difiere de su pared; si así tampoco cae en ella (el plano se
+  // volteó, la pared ya no es esa), no se dibuja. Devuelve los puntos a dibujar o null. Nunca toca medidas.
+  function fpNichoEnSuPared(room, nk, pts){
+    if(!room || !pts || pts.length < 4) return null;
+    const ang = (a, b) => Math.atan2(b.y - a.y, b.x - a.x);
+    const dPS = (p, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l = dx * dx + dy * dy || 1e-9; const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l)); return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy); };
+    const tramo = w => (typeof fpRecorteVigente === 'function' && fpRecorteVigente(w)) || w;
+    const enPared = (Q0, Q1, w) => { const g = w && tramo(w);
+      if(!g || !g.start || !g.end || Math.hypot(g.end.x - g.start.x, g.end.y - g.start.y) < 0.5) return false;
+      let da = Math.abs(ang(Q0, Q1) - ang(g.start, g.end)) % Math.PI; da = Math.min(da, Math.PI - da);
+      return da <= 6 * Math.PI / 180 && dPS(Q0, g.start, g.end) <= 0.5 && dPS(Q1, g.start, g.end) <= 0.5; };
+    const ws = (room.walls || []).filter(w => w && w.start && w.end && !w._removed && !w._invisible);
+    if(ws.some(w => enPared(pts[0], pts[1], w))) return pts;
+    const w = (room.walls || [])[nk && nk.wall];
+    if(!w || !w.start || !w.end || w._removed || w._invisible) return null;
+    const g = tramo(w), t = ang(g.start, g.end) - ang(pts[0], pts[1]), c = Math.cos(t), s = Math.sin(t);
+    const q = pts.map(p => ({ x: p.x * c - p.y * s, y: p.x * s + p.y * c }));
+    return enPared(q[0], q[1], w) ? q : null;
+  }
+  // (26-nov-2026, Rincón) El nicho que cae (la mitad o más) en un rincón que las paredes ya dibujan no se dibuja otra vez encima: ese
+  // rincón ya lleva su rótulo, su largo x ancho y sus sq ft. (Rincón 2, Tamiz) CUALQUIER rincón de la cuadrilla o de la app en ese
+  // lugar -renombrado («Pantry»), quitado o con el nombre que sea-: el «Closet» punteado del láser nunca pone un nombre que la persona
+  // ya cambió o quitó (salía encima de «13.9 pies²» al renombrar o quitar el clóset nuevo de Room 2 de Vero).
+  function fpNichoYaContado(room, pts){
+    const subs = ((room && room._subAreas) || []).filter(sa => sa && sa.w > 0 && sa.d > 0);
+    if(!subs.length || !pts || pts.length < 3) return false;
+    let poly = null; try{ poly = fpOrderedRoomPolygon(room); }catch(e){ poly = null; }
+    const ms = fpMuestrasDelRincon(pts, 7); if(!ms.length) return false;
+    return subs.some(sa => { const r = fpRectDelRincon(sa, poly); return !!r && ms.filter(q => fpPointInPolygon(q, r)).length >= 0.5 * ms.length; });
+  }
+  // (26-nov-2026, Rincón) Las paredes de ADENTRO de un cuarto (el frente de un clóset, su costado): pared propia (no ajena, no quitada, no
+  // invisible, no un cierre de la app) con su punto medio adentro del contorno y a más de 0.3 ft de su orilla (lo mismo que las caras).
+  function fpSobrasDelCuarto(room, poly){
+    const out = [];
+    if(!poly || poly.length < 3) return out;
+    ((room && room.walls) || []).forEach(w => {
+      if(!w || !w.start || !w.end || w._ajena || w._removed || w._invisible || w._cierre) return;
+      const g = (typeof fpRecorteVigente === 'function' && fpRecorteVigente(w)) || w;
+      if(!(Math.hypot(g.end.x - g.start.x, g.end.y - g.start.y) >= 0.5)) return;
+      const m = { x: (g.start.x + g.end.x) / 2, y: (g.start.y + g.end.y) / 2 };
+      if(fpPointInPolygon(m, poly) && fpDistToPolygon(m, poly) > 0.3) out.push({ a: { x: g.start.x, y: g.start.y }, b: { x: g.end.x, y: g.end.y }, w });
+    });
+    return out;
+  }
+  // El punto de la orilla de `poly` más cerca de p: { i: lado, t: 0..1, d, x, y }.
+  function fpLugarEnOrilla(p, poly){
+    let m = null;
+    for(let i = 0; i < poly.length; i++){
+      const a = poly[i], b = poly[(i + 1) % poly.length], dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1e-9;
+      const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)), x = a.x + t * dx, y = a.y + t * dy, d = Math.hypot(p.x - x, p.y - y);
+      if(!m || d < m.d) m = { i, t, d, x, y };
+    }
+    return m;
+  }
+  // Parte el contorno `poly` con la línea `corte` (sus dos puntas sobre la orilla): devuelve los dos pedazos o null si no parte limpio.
+  function fpPartirPorCorte(poly, corte){
+    const n = poly.length; if(n < 3 || !corte || corte.length < 2) return null;
+    const ls = fpLugarEnOrilla(corte[0], poly), le = fpLugarEnOrilla(corte[corte.length - 1], poly);
+    if(!ls || !le || ls.d > 0.05 || le.d > 0.05) return null;
+    const igual = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-6;
+    const andar = (A, B) => {                       // por la orilla, hacia adelante, de A a B
+      const out = [{ x: A.x, y: A.y }];
+      if(A.i === B.i && B.t >= A.t) out.push({ x: B.x, y: B.y });
+      else { let k = A.i, vueltas = 0;
+        do { k = (k + 1) % n; out.push({ x: poly[k].x, y: poly[k].y }); vueltas++; } while(k !== B.i && vueltas <= n);
+        if(vueltas > n) return null;
+        out.push({ x: B.x, y: B.y }); }
+      return out.filter((p, i, a) => !i || !igual(p, a[i - 1]));
+    };
+    const mitad = corte.slice(1, corte.length - 1).map(p => ({ x: p.x, y: p.y }));
+    const w1 = andar(le, ls), w2 = andar(ls, le); if(!w1 || !w2) return null;
+    const p1 = w1.concat(mitad), p2 = w2.concat(mitad.slice().reverse());
+    const limpio = p => p.filter((q, i, a) => !igual(q, a[(i + 1) % a.length]));
+    const A = limpio(p1), B = limpio(p2);
+    if(A.length < 3 || B.length < 3 || fpContornoCruces(A) > 0 || fpContornoCruces(B) > 0) return null;
+    const a0 = fpPolygonAreaSqFt(poly), a1 = fpPolygonAreaSqFt(A), a2 = fpPolygonAreaSqFt(B);
+    if(!(a1 > 0.5 && a2 > 0.5) || Math.abs(a1 + a2 - a0) > 0.2) return null;
+    return [A, B];
+  }
+  // (26-nov-2026, Rincón) EL CLÓSET DE ESQUINA. floorplanDetectSubAreas solo veía el clóset que hace una U en el contorno (tres lados
+  // del contorno). El clóset de la esquina del cuarto -dos lados del contorno y dos paredes de adentro: el frente con su puerta y el
+  // costado- no hace U: el contorno pasa derecho por su fondo y el cuarto se comía sus sq ft sin nombre ni medida (Room 2 de Vero,
+  // 25-nov: 13.9 sq ft adentro de sus 147.7, frente de 5' 2" con su puerta de 4' 5"). Regla: las paredes de adentro (fpSobrasDelCuarto)
+  // que van de orilla a orilla del contorno (hasta 4 seguidas) lo parten en dos; el pedazo chico es un clóset con su frente si:
+  //   - lleva puerta o abertura EN esas paredes (su boca) y ninguna en el resto de su orilla (eso sería un paso);
+  //   - mide como clóset con el FONDO MEDIDO DESDE SU BOCA (fpMideComoCloset, la regla de la U: fondo de 1.2 a 5.5 ft, boca hasta 12,
+  //     5 a 32 sq ft, no más del 30 % del cuarto) y es casi rectangular (Rincón 2: antes tomaba el lado corto como fondo y un hueco de
+  //     escalera de 3.5 x 9 con un paso de 3 ft salía Closet 31.5);
+  //   - todas las puertas de su boca van en una misma línea (frente y costado con puerta es un paso) y adentro no hay escalera ni
+  //     mueble que no sea repisa (fpNoVaEnCloset: baño, cocina, lavadora...);
+  //   - no tiene adentro el punto del nombre del cuarto, y su rótulo (fpRotuloDeRincon, la regla de siempre) dice Closet.
+  // Cuenta aparte igual que el de la U (_frente, _aparte): w a lo largo de su frente y d = su piso / w, así w x d es su piso exacto.
+  function fpClosetsDeEsquina(room, poly, sobras, doorPts, data){
+    const out = [];
+    if(!room || !poly || poly.length < 3 || !(sobras || []).length) return out;
+    const nivel = room.level || 1, aCuarto = fpPolygonAreaSqFt(poly) || 1, TOL = 0.4;
+    const nodos = [], nodo = p => { let k = nodos.findIndex(q => Math.hypot(q.x - p.x, q.y - p.y) <= TOL); if(k < 0){ nodos.push({ x: p.x, y: p.y, l: [] }); k = nodos.length - 1; } return k; };
+    const lados = []; sobras.forEach(sb => { const i = nodo(sb.a), j = nodo(sb.b); if(i !== j) lados.push({ i, j, pi: sb.a, pj: sb.b }); });
+    lados.forEach((l, k) => { nodos[l.i].l.push(k); nodos[l.j].l.push(k); });
+    const orilla = nodos.map(q => fpDistToPolygon(q, poly) <= TOL);
+    const caminos = [], vistos = new Set();
+    // el corte va por las puntas DE VERDAD de cada pared (los nodos solo dicen cuáles se tocan): en la unión de dos paredes, su punto medio
+    const puntaEn = (li, k) => { const l = lados[li]; return l.i === k ? l.pi : l.pj; };
+    const andar = (k, usados, pasos, ls) => {
+      if(pasos.length > 1 && orilla[k]){ const ll = ls.slice().sort((a, b) => a - b).join(','); if(!vistos.has(ll)){ vistos.add(ll);
+        const c = [puntaEn(ls[0], pasos[0])];
+        for(let m = 1; m < ls.length; m++){ const a = puntaEn(ls[m - 1], pasos[m]), b = puntaEn(ls[m], pasos[m]); c.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }); }
+        c.push(puntaEn(ls[ls.length - 1], pasos[pasos.length - 1])); caminos.push(c); } return; }
+      if(usados.size >= 4) return;
+      nodos[k].l.forEach(li => { if(usados.has(li)) return; const l = lados[li], o = l.i === k ? l.j : l.i; if(pasos.includes(o)) return;
+        usados.add(li); pasos.push(o); ls.push(li); andar(o, usados, pasos, ls); ls.pop(); pasos.pop(); usados.delete(li); });
+    };
+    nodos.forEach((q, k) => { if(orilla[k]) andar(k, new Set(), [k], []); });
+    const ancla = floorplanLabelAnchor(room);
+    const puertas = (doorPts || []).filter(p => p.level === nivel);
+    const dS = (p, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l = dx * dx + dy * dy || 1e-9; const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l)); return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy); };
+    const dPL = (p, pl) => { let m = Infinity; for(let i = 0; i + 1 < pl.length; i++) m = Math.min(m, dS(p, pl[i], pl[i + 1])); return m; };
+    caminos.forEach(c => {
+      const corte = c.map(q => ({ x: q.x, y: q.y }));
+      const e0 = fpLugarEnOrilla(corte[0], poly), e1 = fpLugarEnOrilla(corte[corte.length - 1], poly);
+      corte[0] = { x: e0.x, y: e0.y }; corte[corte.length - 1] = { x: e1.x, y: e1.y };
+      const piezas = fpPartirPorCorte(poly, corte); if(!piezas) return;
+      const P = fpPolygonAreaSqFt(piezas[0]) <= fpPolygonAreaSqFt(piezas[1]) ? piezas[0] : piezas[1];
+      const area = fpPolygonAreaSqFt(P);
+      if(area < 5) return;   // (Rincón 2) el tope de tamaño va abajo (fpMideComoCloset, con el fondo desde su boca)
+      if(ancla && fpPointInPolygon(ancla, P)) return;
+      // la boca: una puerta o abertura sobre el corte; ninguna en el resto de su orilla
+      if(!puertas.some(p => dPL(p, corte) <= 0.6)) return;
+      const orillaP = P.concat([P[0]]);
+      if(puertas.some(p => dPL(p, corte) > 0.6 && dPL(p, orillaP) <= 0.4)) return;
+      if(typeof fpMideComoCloset !== 'function' || typeof fpNoVaEnCloset !== 'function') return;   // (copiada sola en una prueba: sin clóset, como antes)
+      // (26-nov-2026, Rincón 2) LA BOCA: el tramo del corte que lleva la puerta (o el paso). Las demás puertas del corte van en esa misma
+      // línea; una en el frente y otra en el costado es un paso. El fondo se mide desde ella hasta el lado de atrás, como en la U.
+      const enCorte = puertas.filter(p => dPL(p, corte) <= 0.6);
+      let tb = 0, db = Infinity;
+      for(let i = 0; i + 1 < corte.length; i++){ const dd = dS(enCorte[0], corte[i], corte[i + 1]); if(dd < db){ db = dd; tb = i; } }
+      const bA = corte[tb], bB = corte[tb + 1], bL = Math.hypot(bB.x - bA.x, bB.y - bA.y);
+      if(!(bL > 0.3)) return;
+      const bu = { x: (bB.x - bA.x) / bL, y: (bB.y - bA.y) / bL };
+      if(enCorte.some(p => Math.abs((p.x - bA.x) * bu.y - (p.y - bA.y) * bu.x) > 0.6)) return;
+      const pb = P.map(q => q.x * bu.x + q.y * bu.y), pf = P.map(q => q.y * bu.x - q.x * bu.y);
+      const bocaB = Math.max(...pb) - Math.min(...pb), fondoB = Math.max(...pf) - Math.min(...pf);
+      // con escalera, inodoro, tina, lavabo, refri, lavadora o cualquier mueble que no sea repisa adentro no es clóset
+      const delNivel = ((data && data.rooms) || []).filter(r => r && !r.deleted && (r.level || 1) === nivel);
+      if(!delNivel.includes(room)) delNivel.push(room);
+      if(delNivel.some(r => (r.objects || []).some(o => fpNoVaEnCloset(o) && fpPointInPolygon(o.center, P)))) return;
+      // ejes: u a lo largo del lado más largo del pedazo que es del contorno (su fondo o su costado: las paredes del cuarto, ya
+      // derechas), v de la boca hacia el fondo. Así su rectángulo queda parejo con el cuarto aunque el frente venga un poco chueco.
+      let lmax = -1, u = null;
+      for(let i = 0; i < P.length; i++){ const a = P[i], b = P[(i + 1) % P.length], dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
+        if(L > lmax && dPL({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, corte) > 0.05){ lmax = L; u = { x: dx / (L || 1), y: dy / (L || 1) }; } }
+      if(!u) return;
+      let v = { x: -u.y, y: u.x };
+      let A2 = 0, gx = 0, gy = 0;
+      for(let i = 0, j = P.length - 1; i < P.length; j = i++){ const f = P[j].x * P[i].y - P[i].x * P[j].y; A2 += f; gx += (P[j].x + P[i].x) * f; gy += (P[j].y + P[i].y) * f; }
+      if(!A2) return;
+      const cx = gx / (3 * A2), cy = gy / (3 * A2);
+      if(!fpPointInPolygon({ x: cx, y: cy }, P)) return;
+      const mc = corte[Math.floor((corte.length - 1) / 2)];
+      if((cx - mc.x) * v.x + (cy - mc.y) * v.y < 0) v = { x: -v.x, y: -v.y };
+      const pu = P.map(q => q.x * u.x + q.y * u.y), pv = P.map(q => q.x * v.x + q.y * v.y);
+      const ancho = Math.max(...pu) - Math.min(...pu), fondo = Math.max(...pv) - Math.min(...pv);
+      if(!(ancho > 0 && fondo > 0) || area < 0.8 * ancho * fondo) return;
+      if(!fpMideComoCloset(fondoB, bocaB, area, aCuarto, true)) return;   // (Rincón 2) su frente es pared: el corte
+      const name = fpRotuloDeRincon(room, { polygon: P, widthFt: ancho, depthFt: fondo, conPuerta: true }, data);
+      if(!/^cl[oó]set$/i.test(name || '')) return;
+      const w = Math.round(ancho * 100) / 100, d = Math.round(area / ancho * 100) / 100;
+      const nuevo = { name, cx: Math.round(cx * 100) / 100, cy: Math.round(cy * 100) / 100, w, d, _suggested: true, conPuerta: true, _frente: true, _aparte: true, _esquina: true };
+      if(typeof fpRinconEjes !== 'undefined') fpRinconEjes.set(nuevo, { u, v });
+      out.push(nuevo);
+    });
+    return out;
+  }
+  // (26-nov-2026, Rincón 2) EL CLÓSET SIN DUEÑO. El escáner para cada cuarto en las puertas de su clóset: el clóset de pared a pared
+  // del Master room de Vero (25-nov) quedó como dos aberturas (4' 7" y 4' 1") en la pared de abajo del Master, y su espacio -entre esa
+  // pared, la de arriba de Room 3, la del Hallway y la que Vero puso a mano- no era de NINGÚN cuarto: sin nombre, sin medida y fuera de
+  // todo total (10' 7" x 2' 10" = 30.4 sq ft). fpAutoCompletarEspacios deduce esos espacios, pero solo al juntar el escaneo (y ese día
+  // el espacio no estaba cerrado: la pared de Vero llegó después), y la regla de esquina solo parte el piso de adentro de un cuarto.
+  // REGLA (cada dibujo, como los demás rincones): un espacio cerrado por paredes (las de cualquier cuarto del piso, nunca las invisibles)
+  // que no es piso de ningún cuarto y que se abre a UN cuarto por su frente -puertas o aberturas en UN solo lado, todas de ese cuarto-
+  // es el Closet de ese cuarto: cuenta aparte con sus sq ft (_fuera: el cuarto se queda con su piso y el total SUBE lo del clóset). No es
+  // (Rincón 3, Tamiz ronda 2) Tampoco: con menos de 2 ft de fondo (un ducto con su puertita de registro; dos cuartos que el escáner
+  // dejó 1.3 ft separados y una puerta que vio uno solo) ni con una ventana en sus lados (un patio de luz cerrado).
+  // clóset: con escalera, inodoro, tina, lavabo, refri, lavadora o cualquier mueble que no sea repisa adentro (fpNoVaEnCloset); con
+  // puertas en dos lados o a dos cuartos (es un paso); sin puerta; si no mide como clóset con el fondo medido DESDE SU BOCA (fpMideComoCloset,
+  // los números de la U); si es piso de alguien o tiene un rótulo o el nombre de un cuarto encima; o si el cuarto mismo es un Closet.
+  // Devuelve Map(cuarto -> [rincones]). Lo pesado (la rejilla) se guarda mientras las paredes, puertas y muebles no cambien.
+  function fpClosetsSinDueno(data){
+    const out = new Map();
+    const todos = ((data && data.rooms) || []).filter(r => r && !r.deleted && (r.walls || []).length >= 3);
+    if(!todos.length || (data && data.merged === false)) return out;
+    const r2 = v => Math.round((+v || 0) * 100) / 100, pt = p => p ? [r2(p.x), r2(p.y)] : 0;
+    const llave = JSON.stringify(todos.map(r => [(data.rooms || []).indexOf(r), r.level || 1, r.roomName || '', r._anillo ? (r._anillo.n || 'A') : '',
+      (r.walls || []).map(w => w && w.start && w.end ? [pt(w.start), pt(w.end), w._removed ? 1 : 0, w._invisible ? 1 : 0, w._recorte ? [pt(w._recorte.start), pt(w._recorte.end)] : 0] : 0),
+      ['doors', 'openings', 'windows'].map(k => (r[k] || []).map(o => o && o.position ? [pt(o.position), r2(o.widthFt), o._removed ? 1 : 0, o._kindOverride || ''] : 0)),
+      (r.objects || []).map(o => o && o.center ? [o.category || '', pt(o.center), o._hidden ? 1 : 0] : 0)]).concat([((data && data._spaceLabels) || []).map(q => q ? [q.level || 1, r2(q.x), r2(q.y)] : 0)]));
+    // (Rincón 3) se guardan las 4 últimas (deshacer / rehacer no vuelve a buscar). Arrastrar una pared NO busca en cada cuadro: el
+    // editor mueve el dibujo con un transform y solo dibuja de nuevo (y busca una vez) al soltar.
+    const memo = fpClosetsSinDueno._memo || (fpClosetsSinDueno._memo = []);
+    let lista, m = memo.findIndex(x => x.llave === llave);
+    if(m >= 0){ lista = memo[m].lista; if(m > 0) memo.unshift(memo.splice(m, 1)[0]); }
+    else { try{ lista = fpBuscarClosetsSinDueno(data, todos); }catch(e){ lista = []; } memo.unshift({ llave, lista }); if(memo.length > 4) memo.length = 4; }
+    lista.forEach(c => {
+      const room = (data.rooms || [])[c.ri]; if(!room) return;
+      const sa = { name: c.name, cx: c.cx, cy: c.cy, w: c.w, d: c.d, _suggested: true, conPuerta: true, _frente: true, _aparte: true, _fuera: true };
+      if(typeof fpRinconEjes !== 'undefined') fpRinconEjes.set(sa, { u: c.u, v: c.v });
+      if(!out.has(room)) out.set(room, []);
+      out.get(room).push(sa);
+    });
+    return out;
+  }
+  function fpBuscarClosetsSinDueno(data, todos){
+    const res = [];
+    const dS = (p, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l = dx * dx + dy * dy || 1e-9; const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l)); return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy); };
+    const r2 = v => Math.round(v * 100) / 100;
+    [...new Set(todos.map(r => r.level || 1))].forEach(lvl => {
+      const cuartos = todos.filter(r => (r.level || 1) === lvl);
+      const walls = [];
+      cuartos.forEach(r => (r.walls || []).forEach(w => {
+        if(!w || !w.start || !w.end || w._removed || w._invisible) return;
+        const g = (typeof fpRecorteVigente === 'function' && fpRecorteVigente(w)) || w;
+        if(Math.hypot(g.end.x - g.start.x, g.end.y - g.start.y) >= 0.2) walls.push({ a: g.start, b: g.end });
+      }));
+      if(walls.length < 4) return;
+      const pisos = [];
+      cuartos.forEach(r => {
+        const fragil = (typeof fpAiFragileOutline === 'function' && fpAiFragileOutline(r)) || (typeof fpOutlineDoublesBack === 'function' && fpOutlineDoublesBack(r));
+        if(fragil){ const b = floorplanRoomBounds(r); if(b && isFinite(b.minX)) pisos.push({ r, caja: b }); return; }
+        let p = null; try{ p = fpOrderedRoomPolygon(r); }catch(e){ p = null; }
+        if(p && p.length >= 3) pisos.push({ r, p });
+      });
+      const enPiso = q => pisos.some(o => o.p ? fpPointInPolygon(q, o.p) : (q.x >= o.caja.minX && q.x <= o.caja.maxX && q.y >= o.caja.minY && q.y <= o.caja.maxY));
+      const polyDe = r => { const o = pisos.find(x => x.r === r && x.p); return o ? o.p : null; };
+      // la rejilla de 0.5 ft: libre = ni piso de nadie ni pared (0.45 ft: media pared y un poco); lo de afuera se inunda desde la orilla
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      walls.forEach(w => [w.a, w.b].forEach(p => { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }));
+      const CELL = 0.5, PAD = 1.5; minX -= PAD; minY -= PAD; maxX += PAD; maxY += PAD;
+      const nx = Math.ceil((maxX - minX) / CELL), ny = Math.ceil((maxY - minY) / CELL);
+      if(nx * ny > 40000) return;
+      const cx = gx => minX + (gx + 0.5) * CELL, cy = gy => minY + (gy + 0.5) * CELL;
+      const grid = new Uint8Array(nx * ny);
+      // (Rincón 3) la misma rejilla que antes, sin probar cada celda contra todas las paredes y todos los pisos (en el teléfono, al soltar
+      // una pared, la búsqueda tardaba ~120 ms): cada pared marca solo las celdas de su caja (0.45 ft alrededor) y cada piso las de la suya
+      const enCaja = (x0, y0, x1, y1, marcar) => {
+        const gx0 = Math.max(0, Math.floor((x0 - minX) / CELL) - 1), gx1 = Math.min(nx - 1, Math.ceil((x1 - minX) / CELL) + 1);
+        const gy0 = Math.max(0, Math.floor((y0 - minY) / CELL) - 1), gy1 = Math.min(ny - 1, Math.ceil((y1 - minY) / CELL) + 1);
+        for(let gy = gy0; gy <= gy1; gy++) for(let gx = gx0; gx <= gx1; gx++){ const k = gy * nx + gx; if(!grid[k] && marcar({ x: cx(gx), y: cy(gy) })) grid[k] = 1; }
+      };
+      walls.forEach(w => enCaja(Math.min(w.a.x, w.b.x) - 0.45, Math.min(w.a.y, w.b.y) - 0.45, Math.max(w.a.x, w.b.x) + 0.45, Math.max(w.a.y, w.b.y) + 0.45, q => dS(q, w.a, w.b) <= 0.45));
+      pisos.forEach(o => {
+        if(o.p){ let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; o.p.forEach(v => { x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y); });
+          enCaja(x0, y0, x1, y1, q => fpPointInPolygon(q, o.p)); }
+        else enCaja(o.caja.minX, o.caja.minY, o.caja.maxX, o.caja.maxY, q => q.x >= o.caja.minX && q.x <= o.caja.maxX && q.y >= o.caja.minY && q.y <= o.caja.maxY);
+      });
+      const pila = [];
+      for(let gx = 0; gx < nx; gx++) pila.push(gx, gx + (ny - 1) * nx);
+      for(let gy = 0; gy < ny; gy++) pila.push(gy * nx, gy * nx + nx - 1);
+      while(pila.length){ const k = pila.pop(); if(grid[k] !== 0) continue; grid[k] = 2; const gx = k % nx, gy = (k - gx) / nx;
+        if(gx > 0) pila.push(k - 1); if(gx < nx - 1) pila.push(k + 1); if(gy > 0) pila.push(k - nx); if(gy < ny - 1) pila.push(k + nx); }
+      // cada espacio cerrado sin dueño
+      const puertas = [];
+      cuartos.forEach(r => ['doors', 'openings'].forEach(k => (r[k] || []).forEach(o => {
+        if(o && o.position && !o._removed && o._kindOverride !== 'window') puertas.push({ p: o.position, r });
+      })));
+      const anclas = cuartos.map(r => { try{ return floorplanLabelAnchor(r); }catch(e){ return null; } }).filter(Boolean)
+        .concat(((data && data._spaceLabels) || []).filter(q => q && (q.level || 1) === lvl).map(q => ({ x: +q.x, y: +q.y })));
+      const muebles = [];
+      cuartos.forEach(r => (r.objects || []).forEach(o => { if(fpNoVaEnCloset(o)) muebles.push(o.center); }));
+      // (Rincón 3) las ventanas del piso (las de cualquier cuarto, y la abertura que se marcó como ventana)
+      const ventanas = [];
+      cuartos.forEach(r => [].concat(r.windows || [], (r.openings || []).filter(o => o && o._kindOverride === 'window'), (r.doors || []).filter(o => o && o._kindOverride === 'window'))
+        .forEach(o => { if(o && o.position && !o._removed) ventanas.push(o.position); }));
+      for(let k0 = 0; k0 < grid.length; k0++){
+        if(grid[k0] !== 0) continue;
+        const celdas = [], cola = [k0]; grid[k0] = 3;
+        while(cola.length){ const k = cola.pop(); celdas.push(k); const gx = k % nx, gy = (k - gx) / nx;
+          [[gx > 0, k - 1], [gx < nx - 1, k + 1], [gy > 0, k - nx], [gy < ny - 1, k + nx]].forEach(([ok, j]) => { if(ok && grid[j] === 0){ grid[j] = 3; cola.push(j); } }); }
+        const area = celdas.length * CELL * CELL;
+        if(area < 0.5) continue;
+        let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+        celdas.forEach(k => { const gx = k % nx, gy = (k - gx) / nx; bx0 = Math.min(bx0, cx(gx)); bx1 = Math.max(bx1, cx(gx)); by0 = Math.min(by0, cy(gy)); by1 = Math.max(by1, cy(gy)); });
+        bx0 -= CELL / 2; bx1 += CELL / 2; by0 -= CELL / 2; by1 += CELL / 2;
+        // cada lado se pega a la pared paralela más cercana (a menos de 0.9 ft) que corra por lo menos 1 ft (o un tercio) a lo largo de él
+        const pegar = (v, eje, lo, hi) => {
+          let mejor = 0.9, val = null; const pide = Math.min(1, 0.3 * (hi - lo));
+          walls.forEach(w => {
+            const vert = Math.abs(w.a.x - w.b.x) <= 0.3, hor = Math.abs(w.a.y - w.b.y) <= 0.3;
+            if(eje === 'x' ? !vert : !hor) return;
+            const a0 = eje === 'x' ? Math.min(w.a.y, w.b.y) : Math.min(w.a.x, w.b.x), a1 = eje === 'x' ? Math.max(w.a.y, w.b.y) : Math.max(w.a.x, w.b.x);
+            if(Math.min(a1, hi) - Math.max(a0, lo) < pide) return;
+            const c = eje === 'x' ? (w.a.x + w.b.x) / 2 : (w.a.y + w.b.y) / 2, dd = Math.abs(c - v);
+            if(dd < mejor){ mejor = dd; val = c; }
+          });
+          return val;
+        };
+        const X0 = pegar(bx0, 'x', by0, by1), X1 = pegar(bx1, 'x', by0, by1), Y0 = pegar(by0, 'y', bx0, bx1), Y1 = pegar(by1, 'y', bx0, bx1);
+        if([X0, X1, Y0, Y1].some(v => v == null)) continue;
+        const W = X1 - X0, Dp = Y1 - Y0;
+        if(!(W > 1 && Dp > 1)) continue;
+        const adentro = Math.max(0.1, W - 0.9) * Math.max(0.1, Dp - 0.9);
+        if(area < 0.75 * adentro || area > 1.3 * adentro) continue;                 // casi un rectángulo
+        const lados = [[{ x: X0, y: Y0 }, { x: X1, y: Y0 }], [{ x: X1, y: Y0 }, { x: X1, y: Y1 }], [{ x: X1, y: Y1 }, { x: X0, y: Y1 }], [{ x: X0, y: Y1 }, { x: X0, y: Y0 }]];
+        const cubre = (A, B) => { const n = Math.max(4, Math.ceil(Math.hypot(B.x - A.x, B.y - A.y) / 0.25)); let c = 0;
+          for(let i = 0; i <= n; i++){ const q = { x: A.x + (B.x - A.x) * i / n, y: A.y + (B.y - A.y) * i / n }; if(walls.some(w => dS(q, w.a, w.b) <= 0.3)) c++; } return c / (n + 1); };
+        // (Rincón 3) cerrado por paredes DE VERDAD: un lado con ventana no es pared de clóset (un patio de luz cerrado)
+        const conVentana = ventanas.some(q => lados.some(([A, B]) => dS(q, A, B) <= 0.6));
+        if(conVentana || lados.some(([A, B]) => cubre(A, B) < 0.8)) continue;      // cerrado por paredes de verdad
+        const dentro = (q, m) => q.x > X0 + m && q.x < X1 - m && q.y > Y0 + m && q.y < Y1 - m;
+        let piso = false;
+        for(let i = 0; i < 7 && !piso; i++) for(let j = 0; j < 7 && !piso; j++){ const q = { x: X0 + 0.35 + (W - 0.7) * i / 6, y: Y0 + 0.35 + (Dp - 0.7) * j / 6 }; if(enPiso(q)) piso = true; }
+        if(piso) continue;                                                          // es piso de alguien
+        if(anclas.some(q => dentro(q, 0.2))) continue;                              // ya tiene nombre (un cuarto o un rótulo)
+        if(muebles.some(q => dentro(q, 0.1))) continue;                             // escalera, baño, cocina, lavandería...: no es clóset
+        const suyas = puertas.map(x => { const ds = lados.map(([A, B]) => dS(x.p, A, B)), m = Math.min(...ds); return m <= 0.6 ? Object.assign({ lado: ds.indexOf(m) }, x) : null; }).filter(Boolean);
+        if(!suyas.length) continue;                                                 // sin puerta: no se entra
+        if(new Set(suyas.map(x => x.lado)).size !== 1) continue;                    // puertas en dos lados: es un paso
+        const [A, B] = lados[suyas[0].lado], boca = { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 }, c = { x: (X0 + X1) / 2, y: (Y0 + Y1) / 2 };
+        const largo = Math.hypot(B.x - A.x, B.y - A.y), fondo = W * Dp / largo;
+        const u = { x: (B.x - A.x) / largo, y: (B.y - A.y) / largo };
+        let v = { x: -u.y, y: u.x }; if((c.x - boca.x) * v.x + (c.y - boca.y) * v.y < 0) v = { x: -v.x, y: -v.y };
+        const duenos = pisos.filter(o => o.p && fpPointInPolygon({ x: boca.x - v.x * 0.8, y: boca.y - v.y * 0.8 }, o.p)).map(o => o.r);
+        if(duenos.length !== 1) continue;
+        const R = duenos[0], pR = polyDe(R);
+        if(!pR || /cl[oó]set/i.test(R.roomName || '')) continue;
+        if(suyas.some(x => fpDistToPolygon(x.p, pR) > 0.6)) continue;               // la boca da también a otro cuarto
+        // (Rincón 3) 2 ft de fondo o más: el clóset sin dueño SUMA sq ft al total; uno más angosto es un ducto o un error del escáner
+        if(fondo < 2 || !fpMideComoCloset(fondo, largo, W * Dp, fpPolygonAreaSqFt(pR) + W * Dp, true)) continue;   // su frente es pared (cubierto arriba)
+        res.push({ ri: (data.rooms || []).indexOf(R), name: 'Closet', cx: r2(c.x), cy: r2(c.y), w: r2(largo), d: r2(fondo), u, v });
+      }
+    });
+    return res;
+  }
+  // (26-nov-2026, Rincón 2) EL TAMAÑO DE UN CLÓSET: la misma regla que la U del contorno (floorplanDetectSubAreas, los mismos números;
+  // la U conserva su código porque hay pruebas que la copian sola) para el de esquina (fpClosetsDeEsquina) y el sin dueño
+  // (fpBuscarClosetsSinDueno). Si cambian aquí, cambian allá. El FONDO se mide DESDE
+  // SU BOCA (el lado con su puerta o su paso) hasta el de atrás; la boca, a lo largo de ella. Así un hueco de escalera o la punta de un
+  // pasillo (3.5 de boca y 9 ft de hondo, Tamiz 26-nov) no es clóset aunque su lado corto mida como uno.
+  //   - fondo de 1.2 a 5.5 ft;  boca de 1.8 a 8 ft, o hasta 12 si su frente es pared (el de pared a pared del Master de Vero: 10' 7");
+  //   - de 5 a 32 sq ft y no más del 30 % del cuarto CON el clóset adentro (areaCuarto).
+  // Un walk-in más hondo de 5.5 ft no sale solo (como siempre en la U): la cuadrilla lo nombra.
+  function fpMideComoCloset(fondo, boca, area, areaCuarto, conFrente){
+    if(!(fondo >= 1.2 && fondo <= 5.5) || !(boca >= 1.8) || (boca > 8 && !(conFrente && boca <= 12))) return false;
+    return area >= 5 && area <= 32 && area <= (areaCuarto || 0) * 0.3;
+  }
+  // (26-nov-2026, Rincón 2) Adentro de un clóset solo hay repisas (storage). Una escalera, un inodoro, una tina, un lavabo, el refri, la
+  // estufa, la lavadora, una cama...: ese espacio no es clóset (el de esquina y el sin dueño).
+  function fpNoVaEnCloset(o){ return !!(o && o.center && !o._hidden && !/storage|shel/i.test(String(o.category || ''))); }
+  // Lo que suman los clósets de un cuarto que quedan FUERA de su contorno (fpClosetsSinDueno): van en su piso entero y en el total.
+  function fpAreaClosetsFuera(room){
+    if(!room || /cl[oó]set/i.test(room.roomName || '')) return 0;
+    let t = 0;
+    for(const sa of (room._subAreas || [])) if(sa && sa._fuera && sa._frente && !sa._quitado && (sa._aparte || /cl[oó]set/i.test(sa.name || '')) && sa.w > 0 && sa.d > 0) t += Math.round(sa.w * sa.d * 10) / 10;
+    return Math.round(t * 10) / 10;
+  }
+  // El clóset sin dueño que cae bajo el dedo (su piso no es de ningún cuarto, así que fpQueHayAqui no lo ve): su rincón o null.
+  function fpClosetFueraEn(svgEl, cx, cy){
+    if(!floorplanData) return null;
+    const p = fpClientToFeet(svgEl, cx, cy); if(!p) return null;
+    for(const r of (floorplanData.rooms || [])){
+      if(!r || r.deleted) continue;
+      const fu = fpClosetsAparte(r).filter(sa => sa._fuera); if(!fu.length) continue;
+      let pg = null; try{ pg = fpOrderedRoomPolygon(r); }catch(e){ pg = null; }
+      const sa = fu.find(q => { const rc = fpRectDelRincon(q, pg); return rc && fpPointInPolygon(p, rc); });
+      if(sa) return sa;
+    }
+    return null;
+  }
   const FP_APARATO_COCINA = /refrigerator|fridge|stove|oven|cooktop|dishwasher|microwave|nevera|refri|estufa|horno|lavaplatos/i;
   const FP_NO_ES_BANO_NOMBRE = /kitchen|cocina|storage|bodega|laundry|lavander|utility|garage|garaje|pantry|alacena|cl[oó]set|mechanic|furnace|boiler/i;
   function fpEnMueble(p, o){
@@ -37301,10 +37687,18 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(!o._removed && o.position) doorPts.push({ x: o.position.x, y: o.position.y, level: r.level || 1 });
       });
     });
+    // (26-nov-2026, Rincón 2) los clósets sin dueño (fpClosetsSinDueno), una vez por dibujo para todo el plano
+    const sinDueno = typeof fpClosetsSinDueno === 'function' ? fpClosetsSinDueno(data) : new Map();
     ((data && data.rooms) || []).forEach(room => {
       const giSub = {};
       const poly = fpOrderedRoomPolygon(room, giSub);
       const found = [];
+      // (26-nov-2026, Rincón) El cuarto que salió de partir otro (pared invisible) usa su anillo guardado, y el anillo no dice cuáles
+      // paredes quedan ADENTRO: sin ellas ningún clóset suyo tenía frente y el cuarto se comía sus sq ft. El clóset del Hallway de Vero
+      // contaba aparte solo por la marca que le dejó la pared invisible (_invLlevado); sin ella el Hallway decía 142.0 con el clóset
+      // adentro en vez de 133.6. Las de adentro se sacan de las paredes, como en las caras (fpSobrasDelCuarto).
+      const sobras = (poly && poly.length >= 3 && typeof fpSobrasDelCuarto === 'function') ? fpSobrasDelCuarto(room, poly) : [];
+      if(giSub.anillo && !(giSub.leftovers || []).length && sobras.length) giSub.leftovers = sobras.map(sb => [{ x: sb.a.x, y: sb.a.y }, { x: sb.b.x, y: sb.b.y }]);
       // Un lado que es el PUENTE con que la app cerró el contorno (línea
       // punteada) no es pared: un rincón con un lado así no es un clóset
       // (14-oct, el Hallway de harold_otros salía con 'CLOSET').
@@ -37406,6 +37800,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           if(typeof fpRinconEjes !== 'undefined') fpRinconEjes.set(nuevo, { u: rectR.u, v: rectR.v });   // (13-nov-2026, Rincón) para su rótulo
         }
       }
+      // (26-nov-2026, Rincón) el clóset de esquina (fpClosetsDeEsquina); el que ya salió como U es el mismo y se queda el de la U
+      if(sobras.length && typeof fpClosetsDeEsquina === 'function') fpClosetsDeEsquina(room, poly, sobras, doorPts, data).forEach(p => {
+        if(!found.some(q => { const r = fpRectDelRincon(q, poly); return r && fpPointInPolygon({ x: p.cx, y: p.cy }, r); })) found.push(p); });
+      // (26-nov-2026, Rincón 2) el clóset sin dueño que da a este cuarto
+      (sinDueno.get(room) || []).forEach(p => { if(!found.some(q => Math.hypot(q.cx - p.cx, q.cy - p.cy) <= 1.5)) found.push(p); });
       // Dedupe overlapping detections (an alcove can match from both
       // walk directions, and a wide alcove can ALSO match a sub-span of
       // itself - a real bedroom closet drew "CLOSET" twice 2.2ft apart).
@@ -44748,6 +45147,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     fpSetTool('select');
     fpEditMode = false;
     fpUpdateEditModeUI();
+    // (26-nov-2026, Rincón 3) la hoja del clóset escogido (letra, nombre, quitar) es del editor: Listo la cierra y la hoja se esconde
+    if(!$('#fpSpaceDetail').hidden){ closeFpSpaceDetail(); fpTrasCerrarDetalle(); }
     const hint = $('#fpToolHint');
     if(hint){ hint.hidden = false; hint.textContent = 'Saved.'; setTimeout(() => { hint.hidden = true; }, 1500); }
   }
@@ -45026,6 +45427,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       // El punto del rotulo del cuarto (editor de Scanova: a que cara pertenece
       // cada cuarto) gira con el plano; sin girar, los nombres saltaban de cuarto.
       mv(r._rotulo);
+      // (26-nov-2026, Rincón) los nichos del láser giran (y se voltean) con el plano
+      (r.lidarNooks || []).forEach(nk => ((nk && nk.polygon) || []).forEach(mv));
       // _swingAcross y _hingeFlip NO se tocan. Son banderas RELATIVAS: el
       // dibujante saca "u" de la pared ya transformada y reorienta "n" contra el
       // centro del cuarto (fpDoorSwingMarkup 14174-14182), asi que el lado se
@@ -49543,7 +49946,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   function openFpSpaceDetail(kind, meta){
     if(!meta) return;
     fpSpacePanel = { kind, meta };
-    $('#fpSpaceKindLabel').textContent = kind === 'sub' ? 'Space inside a room' : 'Named space';
+    $('#fpSpaceKindLabel').textContent = kind === 'sub' ? 'Space of a room' : 'Named space';   // (Rincón 3) adentro o afuera de su contorno
     $('#fpSpaceStats').textContent = fpMedidaSirve(meta.w, meta.d)
       ? `${fpFeetInches(meta.w)} x ${fpFeetInches(meta.d)}` : 'no measurement';
     $('#fpSpaceName').value = meta.name || '';
@@ -49560,7 +49963,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     fpExpandDrawer();
     $('#fpSpaceDetail').scrollIntoView({behavior:'smooth', block:'nearest'});
   }
-  function closeFpSpaceDetail(){ fpSpacePanel = null; $('#fpSpaceDetail').hidden = true; }
+  function closeFpSpaceDetail(){ fpSpacePanel = null; $('#fpSpaceDetail').hidden = true; fpPintarSeleccionCuarto(); }   // (26-nov-2026, Rincón) se quita el azul del clóset
   function fpSpaceApply(mutate){
     if(!fpSpacePanel || !floorplanData) return;
     fpPushUndo();
@@ -49681,18 +50084,50 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // (31 oct 2026, R72) EL ÁREA AZUL DEL CUARTO ESCOGIDO, como en Scanova 360 (él: "ese azul que se mueve cuando se ve el espacio
   // de cada cuarto, cuando uno le cliquea, debe también estar en Field Reports al editar el plano"). Al tocar un cuarto en el
   // editor, su piso se pinta azul tenue con borde azul, encima del dibujo; no recibe toques. Se vuelve a pintar en cada dibujo.
+  // (26-nov-2026, Rincón) EL AZUL ES EL PISO QUE SE COBRA. El azul de un cuarto era su contorno entero, con sus clósets aparte
+  // adentro: tocar el Hallway de Vero lo pintaba con su clóset (el clóset no tenía espacio propio), aunque su número ya lo restaba.
+  // Ahora el azul del cuarto lleva un hueco por cada clóset que cuenta aparte (fpClosetsAparte: el mismo que resta su número) y
+  // el clóset se escoge solo, con su propio azul. Devuelve { poly, huecos } (pies) o null.
+  function fpPisoAzulDe(room){
+    let pg = null; try{ pg = fpOrderedRoomPolygon(room); }catch(e){ pg = null; }
+    if(!pg || pg.length < 3) return null;
+    const huecos = (typeof fpClosetsAparte === 'function' ? fpClosetsAparte(room).filter(sa => !sa._fuera) : []).map(sa => fpRectDelRincon(sa, pg)).filter(r => r && r.length >= 3);
+    return { poly: pg, huecos };
+  }
+  // El clóset aparte escogido (su panel abierto): { ri, sa } o null.
+  function fpClosetEscogido(){
+    if(!floorplanData || !fpSpacePanel || fpSpacePanel.kind !== 'sub' || !fpSpacePanel.meta) return null;
+    const det = $('#fpSpaceDetail'); if(!det || det.hidden) return null;
+    const rooms = floorplanData.rooms || [];
+    for(let ri = 0; ri < rooms.length; ri++){ const r = rooms[ri]; if(r && !r.deleted && (r._subAreas || []).includes(fpSpacePanel.meta) && fpClosetsAparte(r).includes(fpSpacePanel.meta)) return { ri, sa: fpSpacePanel.meta }; }
+    return null;
+  }
+  // ¿El toque `h` (de fpQueHayAqui) cae en un clóset que cuenta aparte? Su rótulo, o su piso dentro del cuarto tocado.
+  function fpClosetTocado(svgEl, h, cx, cy){
+    const room = floorplanData && (floorplanData.rooms || [])[h.ri]; if(!room) return null;
+    const aparte = typeof fpClosetsAparte === 'function' ? fpClosetsAparte(room) : []; if(!aparte.length) return null;
+    if(h.tipo === 'label'){
+      const el = h.el; if(!el || !el.classList || !el.classList.contains('fp-subarea') || Number(el.dataset.roomIdx) !== h.ri) return null;
+      const sa = (room._subAreas || [])[Number(el.dataset.subIdx)]; return aparte.includes(sa) ? sa : null;
+    }
+    const pt = fpClientToFeet(svgEl, cx, cy); if(!pt) return null;
+    let pg = null; try{ pg = fpOrderedRoomPolygon(room); }catch(e){ pg = null; }
+    return aparte.find(sa => { const r = fpRectDelRincon(sa, pg); return r && fpPointInPolygon(pt, r); }) || null;
+  }
   function fpPintarSeleccionCuarto(){
     document.querySelectorAll('#floorplanSvgWrap .fp-capa-sel').forEach(g => g.remove());
-    if(!fpEditMode || fpSelectedRoomPanelIdx == null || !floorplanData) return;
-    const room = (floorplanData.rooms||[])[fpSelectedRoomPanelIdx]; if(!room) return;
-    let pg = null; try{ pg = fpOrderedRoomPolygon(room); }catch(e){}
-    if(!pg || pg.length < 3) return;
+    if(!fpEditMode || !floorplanData) return;
+    let ri = fpSelectedRoomPanelIdx, figs = null;
+    const cl = fpClosetEscogido();
+    if(cl){ ri = cl.ri; let pg = null; try{ pg = fpOrderedRoomPolygon(floorplanData.rooms[ri]); }catch(e){ pg = null; } const r = fpRectDelRincon(cl.sa, pg); if(r) figs = [r]; }
+    else if(ri != null){ const room = (floorplanData.rooms||[])[ri]; const z = room && fpPisoAzulDe(room); if(z) figs = [z.poly].concat(z.huecos); }
+    if(!figs) return;
     document.querySelectorAll('#floorplanSvgWrap svg').forEach(svg => {
       const s = +svg.dataset.fpScale, mx = +svg.dataset.fpMinx, my = +svg.dataset.fpMiny;
       if(!(s > 0) || !isFinite(mx) || !isFinite(my)) return;
-      if(svg.dataset.fpRoomIdx != null && Number(svg.dataset.fpRoomIdx) !== fpSelectedRoomPanelIdx) return;
-      const pts = pg.map(q => ((q.x - mx) * s).toFixed(1) + ',' + ((q.y - my) * s).toFixed(1)).join(' ');
-      svg.insertAdjacentHTML('beforeend', `<g class="fp-capa-sel" pointer-events="none"><polygon points="${pts}" fill="rgba(37,99,235,.10)" stroke="#2563eb" stroke-width="3" vector-effect="non-scaling-stroke"/></g>`);
+      if(svg.dataset.fpRoomIdx != null && Number(svg.dataset.fpRoomIdx) !== ri) return;
+      const d = figs.map(f => 'M' + f.map(q => ((q.x - mx) * s).toFixed(1) + ' ' + ((q.y - my) * s).toFixed(1)).join(' L') + ' Z').join(' ');
+      svg.insertAdjacentHTML('beforeend', `<g class="fp-capa-sel" pointer-events="none"><path d="${d}" fill-rule="evenodd" fill="rgba(37,99,235,.10)" stroke="#2563eb" stroke-width="3" vector-effect="non-scaling-stroke"/></g>`);
     });
   }
   $('#fpRoomDetailClose').addEventListener('click', closeFloorplanRoomDetail);
@@ -50229,6 +50664,15 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const svgEl = e.target && e.target.closest ? e.target.closest('svg') : null;
     if(!svgEl || !svgEl.dataset.fpScale){ fpSoltarSeleccion(); return true; }
     const h = fpQueHayAqui(svgEl, e.clientX, e.clientY);
+    // (26-nov-2026, Rincón 2) el piso del clóset sin dueño no es de ningún cuarto: tocarlo lo escoge a él
+    if(!h && fpEditMode && typeof fpClosetFueraEn === 'function'){
+      const sa = fpClosetFueraEn(svgEl, e.clientX, e.clientY);
+      if(sa){
+        if(fpSpacePanel && fpSpacePanel.meta === sa && !$('#fpSpaceDetail').hidden){ fpSoltarSeleccion(); return true; }
+        fpUltimoToqueY = e.clientY; openFpSpaceDetail('sub', sa); fpPintarSeleccionCuarto(); fpEnsureAboveSheet(e.clientY);
+        return true;
+      }
+    }
     if(!h){ fpSoltarSeleccion(); return true; }
     if(h.tipo === 'label' && !fpEditMode){
       const el = h.el, ri = h.ri;
@@ -50248,6 +50692,16 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     }
     if((h.tipo === 'room' || h.tipo === 'label') && (!fpEditMode || h.ri == null)){ fpSoltarSeleccion(); return true; }
     const antes = fpLlaveSel();
+    // (26-nov-2026, Rincón) el clóset que cuenta aparte es su propio espacio: tocar su rótulo o su piso lo escoge a ÉL (su azul),
+    // no al cuarto de al lado (en el Hallway de Vero, tocar el clóset escogía el Hallway y lo pintaba con el clóset adentro).
+    if(fpEditMode && (h.tipo === 'room' || h.tipo === 'label') && h.ri != null){
+      const sa = fpClosetTocado(svgEl, h, e.clientX, e.clientY);
+      if(sa){
+        if(antes && fpSpacePanel && fpSpacePanel.meta === sa){ fpSoltarSeleccion(); return true; }
+        fpUltimoToqueY = e.clientY; openFpSpaceDetail('sub', sa); fpPintarSeleccionCuarto(); fpEnsureAboveSheet(e.clientY);
+        return true;
+      }
+    }
     if(antes && antes === fpLlaveDeToque(h)){ fpSoltarSeleccion(); return true; }
     fpUltimoToqueY = e.clientY;
     if(h.tipo === 'opening') openFloorplanOpeningDetail(h.ri, h.kind, h.id);
@@ -54550,7 +55004,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // El piso entero que encierra el contorno (cuarto + sus clósets aparte): lo que se mostraba antes.
   function fpRoomGrossAreaSqFt(room){
     const area = fpPolygonAreaSqFt(fpOrderedRoomPolygon(room));
-    if(area > 1) return Math.round(area*10)/10;
+    // (26-nov-2026, Rincón 2) + sus clósets de afuera (fpClosetsSinDueno): son suyos y van en el total
+    if(area > 1) return Math.round((Math.round(area*10)/10 + (typeof fpAreaClosetsFuera === 'function' ? fpAreaClosetsFuera(room) : 0))*10)/10;
     // (13-nov-2026, Regla) el cuarto del resumen con clóset aparte trae su piso entero aparte (fpResumenDe)
     return ((room.summary && (room.summary.grossAreaSqFt || room.summary.floorAreaSqFt)) || 0);
   }
@@ -54564,8 +55019,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(/cl[oó]set/i.test((room && room.roomName) || '')) return bruto;
     let cl = 0;
     // (12-nov-2026, Molde) la misma regla de fpEsClosetAparte: la marca _aparte o, en planos viejos, el nombre
-    for(const sa of ((room && room._subAreas) || [])) if(sa && sa._frente && !sa._quitado && (sa._aparte || /cl[oó]set/i.test(sa.name || '')) && sa.w > 0 && sa.d > 0) cl += Math.round(sa.w * sa.d * 10) / 10;
-    return (cl > 0 && cl < bruto * 0.5) ? Math.round((bruto - cl) * 10) / 10 : bruto;
+    // (26-nov-2026, Rincón 2) el clóset de AFUERA del contorno (_fuera) va en el piso entero y se resta igual: el cuarto dice lo suyo
+    let fu = 0;
+    for(const sa of ((room && room._subAreas) || [])) if(sa && sa._frente && !sa._quitado && (sa._aparte || /cl[oó]set/i.test(sa.name || '')) && sa.w > 0 && sa.d > 0){ const a = Math.round(sa.w * sa.d * 10) / 10; cl += a; if(sa._fuera) fu += a; }
+    const entero = Math.round((bruto + fu) * 10) / 10;
+    return (cl > 0 && cl < entero * 0.5) ? Math.round((entero - cl) * 10) / 10 : entero;
   }
   // Building total recomputed from the same corrected per-room areas the
   // labels show, so the total always equals the sum of what's printed -
@@ -54774,18 +55232,18 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       });
     });
     // (typeof: varias pruebas copian esta función con una lista corta de vecinas; sin ellas mide como antes)
-    const floorSqFt = entero && typeof fpRoomGrossAreaSqFt === 'function' ? fpRoomGrossAreaSqFt(room) : fpRoomDisplayAreaSqFt(room);
+    const floorSqFt = entero && typeof fpRoomGrossAreaSqFt === 'function' ? Math.round((fpRoomGrossAreaSqFt(room) - (typeof fpAreaClosetsFuera === 'function' ? fpAreaClosetsFuera(room) : 0)) * 10) / 10 : fpRoomDisplayAreaSqFt(room);
     const closets = [];
     let resto = enBorde;
     (entero || typeof fpClosetsAparte !== 'function' ? [] : fpClosetsAparte(room)).forEach(sa => {
       const area = fpAreaSubArea(sa), mc = outlineOk ? fpMarcoDelCloset(sa, poly) : null;
-      const per = outlineOk ? Math.min(perimeterFt, 2 * sa.d + sa.w) : 0;
+      const per = sa._fuera ? 2 * sa.d + sa.w : outlineOk ? Math.min(perimeterFt, 2 * sa.d + sa.w) : 0;   // (Rincón 2) el de afuera: sus 3 lados
       const dentro = x => { if(!mc || !x.pos) return false;
         const rx = x.pos.x - sa.cx, ry = x.pos.y - sa.cy, a = rx * mc.u.x + ry * mc.u.y, b = rx * mc.v.x + ry * mc.v.y;
         return Math.abs(a) <= sa.w / 2 + 0.4 && b >= -sa.d / 2 + 0.3 && b <= sa.d / 2 + 0.6; };
-      const suyas = resto.filter(dentro);
+      const suyas = sa._fuera ? [] : resto.filter(dentro);   // (Rincón 2) las puertas del frente son de la pared del cuarto
       resto = resto.filter(x => !suyas.includes(x));
-      perimeterFt = Math.max(0, perimeterFt - per);
+      if(!sa._fuera) perimeterFt = Math.max(0, perimeterFt - per);
       const op = suyas.reduce((t, x) => t + x.w * x.h, 0), pw = suyas.reduce((t, x) => t + (x.puerta ? x.w : 0), 0);
       closets.push({ name: sa.name, sa, closet: true, floorSqFt: area, ceilingSqFt: area, outlineOk, perimeterFt: per,
         baseboardFt: Math.max(0, per - pw), wallHeightFt, oddHeights: [], heightKnown: wallHeightFt > 0, insideOpenings: 0,
@@ -58400,6 +58858,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const pts = (nk && nk.polygon || []).filter(p => p && isFinite(p.x) && isFinite(p.y));
       if(pts.length < 4) return;
       // (13-nov-2026, Rincón) el nicho fantasma (en el piso de otro cuarto, o flotando lejos de su cuarto) no se dibuja
+      // (26-nov-2026, Rincón) el nicho va en su pared (si no cae en ella no se dibuja) y no encima del clóset que ya se cuenta
+      { const enSu = typeof fpNichoEnSuPared === 'function' ? fpNichoEnSuPared(room, nk, pts) : pts; if(!enSu) return; pts.splice(0, pts.length, ...enSu); }
+      if(typeof fpNichoYaContado === 'function' && fpNichoYaContado(room, pts)) return;
       if(typeof fpNichoFantasma === 'function' && fpNichoFantasma(room, pts, cuartosDelPlano)) return;
       let rotulo = fpRotuloDeRincon(room, { polygon: pts, widthFt: nk.widthFt, depthFt: nk.depthFt }, { rooms: cuartosDelPlano });
       if(rotulo && typeof fpRinconSinRotulo === 'function' && fpRinconSinRotulo(room, { polygon: pts }, { rooms: cuartosDelPlano }, rotulo)) rotulo = '';
