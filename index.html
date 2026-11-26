@@ -20946,7 +20946,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-25-R540';
+  const APP_BUILD = '2026-11-25-R541';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -69864,7 +69864,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     });
   }
   // Las hojas de un reporte, igual que el PDF (sin partir filas), cada una en JPG.
-  async function ccHojasDelReporte(tab){
+  async function ccHojasDelReporte(tab, opts){
+    opts = opts || {};
     await ccEsperar(50);
     const node = buildFor(tab);
     try{
@@ -69872,7 +69873,15 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       const bloques = tab === 'measurements' ? bloquesDelNodo(node) : [];
       const anchoDom = node.offsetWidth || 1;
       const firma = ccHash(node.innerHTML);
-      const canvas = await html2canvas(node, { scale: 2, useCORS: true });
+      // (R541, 25-nov) html2canvas 1.4.1 copia la PÁGINA ENTERA a un iframe y en Safari/WKWebView espera a que carguen
+      // TODAS sus imágenes, sin límite. Una <img loading="lazy"> (Mensajes: fotos, stickers, portadas, tarjetas de trabajo)
+      // nunca carga en ese iframe escondido y la promesa no termina: así se quedó colgado el lote de labor logs en la
+      // Mac (1 de 7). soloLaHoja copia solo la hoja (más los estilos); limiteMs corta la espera si aun así se atora.
+      const h2c = { scale: 2, useCORS: true };
+      if(opts.soloLaHoja) h2c.ignoreElements = function(el){ return !(el === node || el.contains(node) || node.contains(el) || el.tagName === 'STYLE' || el.tagName === 'LINK' || !!(el.closest && el.closest('head'))); };
+      let canvas;
+      try{ canvas = opts.limiteMs ? await labConLimite(html2canvas(node, h2c), opts.limiteMs, 'la hoja tardó demasiado en pintarse') : await html2canvas(node, h2c); }
+      catch(e){ if(e && e.tiempo){ try{ document.querySelectorAll('iframe.html2canvas-container').forEach(function(f){ f.remove(); }); }catch(x){} } throw e; }
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF('p', 'pt', 'a4');
       const imagenes = [];
@@ -86259,6 +86268,53 @@ function lumiIncompleteSpeechReply(text){
     }
     status.textContent='El envío sigue sin confirmación. Revisa Mensajes antes de repetirlo.';
   }
+  // BEGIN LAB LOTE MAC (R541, 25-nov-2026)
+  // El 25-nov el lote de 7 labor logs se quedó callado después del primero: la hoja del 2º nunca terminó de pintarse
+  // (ver ccHojasDelReporte) y el for esperaba para siempre. Ahora: cada espera tiene límite; si un reporte falla se
+  // dice CUÁL y se sigue con los demás (menos "necesita revisión"/"cancelado", que paran todo); al final, cuántos
+  // quedaron en la cola. Repetir es seguro: la cola de la Mac no duplica un reporte que ya tiene (mismo report_id).
+  const LAB_LOTE_LIMITE_MS = 6 * 60 * 1000;
+  function labConLimite(p, ms, que, incierto){
+    let t; return Promise.race([Promise.resolve(p), new Promise(function(_, no){ t = setTimeout(function(){ const e = new Error(que || 'tardó demasiado'); e.tiempo = true; if(incierto) e.incierto = true; no(e); }, ms); })]).finally(function(){ clearTimeout(t); });
+  }
+  const LAB_MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  function labLoteNombre(nav, i){
+    const f = nav && nav.fila, m = f && /^(\d{4})-(\d{2})-(\d{2})$/.exec(f.fecha || '');
+    if(f && f.lider) return f.lider + (m ? ' ' + (+m[3]) + '-' + LAB_MESES[+m[2] - 1] : '');
+    return 'el reporte ' + (i + 1);
+  }
+  function labLoteMotivo(e){
+    if(e && e.incierto) return 'la Mac no contestó; puede que sí haya quedado en cola';
+    return String((e && e.message) || e || 'error').replace(/\.$/, '').slice(0, 120);
+  }
+  function lumiLoteMacResumen(o){
+    const n = o.enCola, total = o.total, partes = [];
+    if(o.parado) partes.push(o.parado);
+    if(!o.fallas.length && !o.parado) return n + ' reportes registrados en la cola de la Mac. Esto todavía no confirma su entrega al grupo.';
+    partes.push(n + ' de ' + total + ' reportes quedaron en la cola de la Mac.');
+    if(o.fallas.length) partes.push((o.fallas.length === 1 ? 'No salió: ' : 'No salieron: ') + o.fallas.join('; ') + '.');
+    if(o.fallas.length) partes.push('Pídemelos otra vez y reintento solo los que faltan.');
+    return partes.join(' ');
+  }
+  async function labLoteMac(navC){
+    const owner = SES.user_id + '|' + SES.company_id, ids = Array.isArray(navC.ids) ? navC.ids : [], enCola = [], okIds = [], fallas = [];
+    const limite = (window.__labLoteLimiteMs > 0 ? window.__labLoteLimiteMs : LAB_LOTE_LIMITE_MS);
+    let parado = '';
+    for(let i = 0; i < ids.length; i++){
+      if(owner !== SES.user_id + '|' + SES.company_id){ parado = 'Cambió la cuenta. Se detuvo el lote.'; break; }
+      const nav = { id: ids[i], requireMac: true };
+      let result;
+      try{ result = await labConLimite(laborMandarHojas(nav), limite, 'ese reporte tardó demasiado'); }
+      catch(e){ try{ if(typeof hideOverlay === 'function') hideOverlay(); }catch(x){} fallas.push(labLoteNombre(nav, i) + ' (' + labLoteMotivo(e) + ')'); try{ asBit('lote Mac: ' + labLoteNombre(nav, i) + ' falló: ' + labLoteMotivo(e)); }catch(x){} continue; }
+      if(result && (result.estado === 'mac_needs_review' || result.estado === 'mac_cancelled')){ parado = 'El de ' + labLoteNombre(nav, i) + (result.estado === 'mac_cancelled' ? ' está cancelado' : ' necesita revisión') + '. Se detuvo el resto del lote.'; break; }
+      enCola.push(result); okIds.push(ids[i]);
+    }
+    const message = lumiLoteMacResumen({ total: ids.length, enCola: enCola.length, fallas: fallas, parado: parado });
+    asMostrarRespuesta(message); asHablar(message, asSeguirOyendo);
+    if(enCola.length) asSeguirEnvioMac(enCola, okIds);
+    return { enCola: enCola.length, fallas: fallas.length, parado: parado };
+  }
+  // END LAB LOTE MAC
 
   function asGaleriaMostrar(p){
     if(AS.enPuerta) asPuertaAbrirPanel();   // (R88)
@@ -86695,20 +86751,7 @@ function lumiIncompleteSpeechReply(text){
       // (R43) la tarjeta del grupo: la MISMA acción de siempre (armar las hojas y abrir Mensajes al grupo)
       if(navC && navC.pantalla === 'mensajes'){ asHablar(j.dicho || j.texto || 'Listo.', function(){ asCerrar(); try{ window.__msgDesdeLumi(navC); }catch(e){} }); return; }
       if(navC && navC.pantalla === 'gastos_mandar'){ asHablar(j.dicho || j.texto || 'Listo.', function(){ asCerrar(); try{ window.__grdDesdeLumi(navC); }catch(e){ alert('No se pudieron mandar los recibos.'); } }); return; }
-      if(navC && navC.pantalla === 'labor_logs_mac'){
-        const owner=SES.user_id+'|'+SES.company_id, results=[];
-        try{
-          for(const id of navC.ids){
-            if(owner!==SES.user_id+'|'+SES.company_id) throw new Error('Cambió la cuenta. Se detuvo el lote.');
-            const result=await laborMandarHojas({id:id,requireMac:true});
-            results.push(result);
-            if(result.estado==='mac_needs_review' || result.estado==='mac_cancelled') throw new Error('Un reporte necesita revisión. Se detuvo el resto del lote.');
-          }
-          const message=results.length+' reportes registrados en la cola de la Mac. Esto todavía no confirma su entrega al grupo.';
-          asMostrarRespuesta(message); asHablar(message,asSeguirOyendo); asSeguirEnvioMac(results,navC.ids);
-        }catch(e){const message=results.length+' reportes procesados antes de detenerse. '+String(e.message||e);asMostrarRespuesta(message);asHablar(message,asSeguirOyendo);}
-        return;
-      }
+      if(navC && navC.pantalla === 'labor_logs_mac'){ await labLoteMac(navC); return; }
       if(navC && navC.pantalla === 'labor_log_mandar'){ asHablar(j.dicho || j.texto || 'Listo.', function(){ asCerrar(); laborMandarHojas(navC).catch(function(e){ alert('No se pudo mandar el labor log.\n\n' + ((e && e.message) || e)); }); }); return; }
       asHablar(j.dicho || j.texto || 'Listo.', function(){ if(navC){ asNavegar(navC); return; } asSeguirOyendo(); });
       return;
@@ -88015,7 +88058,7 @@ function lumiIncompleteSpeechReply(text){
       if(!res.ok) return [];
       const rows = await res.json();
       for(const r of rows){
-        try{ const u = await signedReceiptUrl(r.receipt_path); const b = await (await fetch(u)).blob(); out.push({ blob: b, nombre: 'recibo-' + (r.what || 'gasto') + '-' + String(r.id).slice(0, 6) + '.jpg' }); }catch(e){}
+        try{ const u = await labConLimite(signedReceiptUrl(r.receipt_path), 20000, 'el recibo'); const ctlR = new AbortController(), tR = setTimeout(function(){ try{ ctlR.abort(); }catch(x){} }, 30000); let b; try{ b = await (await fetch(u, { signal: ctlR.signal })).blob(); } finally { clearTimeout(tR); } out.push({ blob: b, nombre: 'recibo-' + (r.what || 'gasto') + '-' + String(r.id).slice(0, 6) + '.jpg' }); }catch(e){}
       }
     }catch(e){}
     return out;
@@ -88103,9 +88146,13 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     overlay('Preparando las hojas…');
     try{
       // 1. el labor log
-      const res = await (deps.authFetch || authFetch)('/rest/v1/labor_logs?select=id,crew_leader,log_date,payload,work_kind,client_id&id=eq.' + encodeURIComponent(id) + '&limit=1', { headers: (deps.cloudHeaders || cloudHeaders)() });
-      if(!res.ok) throw new Error('HTTP ' + res.status);
-      const row = (await res.json())[0]; if(!row) throw new Error('ese labor log ya no está');
+      const row = await labConLimite((async function(){
+        const res = await (deps.authFetch || authFetch)('/rest/v1/labor_logs?select=id,crew_leader,log_date,payload,work_kind,client_id&id=eq.' + encodeURIComponent(id) + '&limit=1', { headers: (deps.cloudHeaders || cloudHeaders)() });
+        if(!res.ok) throw new Error('HTTP ' + res.status);
+        return (await res.json())[0];
+      })(), 40000, 'no pude leer el labor log');
+      if(!row) throw new Error('ese labor log ya no está');
+      if(nav) nav.fila = { lider: String(row.crew_leader || ''), fecha: String(row.log_date || '').slice(0, 10) };   // (R541) para decir CUÁL falló
       const kind = row.work_kind === 'mudanza' ? 'mudanza' : 'restauracion';
       // (12-nov-2026) AL GRUPO SOLO VAN LOS LABOR LOGS DE RESTORATION DOCTOR. Regla del dueño: "si llega un
       // labor log de mudanza, no se envía al grupo; esos llegan a otra sección, en mudanzas". El estudio de
@@ -88122,11 +88169,11 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       // (30 oct, el dueño: "¿por qué va sin precio?") la hoja del grupo va CON precio, igual que la de la galería de Lumi: el manager manda
       // la hoja completa (Shift Total, extras, GRAND TOTAL). Se fuerza el precio solo mientras se saca la hoja.
       const fpAntes = window.__forcePriced; window.__forcePriced = true;
-      let hojas; try{ hojas = await (deps.hojas || function(){ return ccHojasDelReporte('labor'); })(); } finally{ window.__forcePriced = fpAntes; }
+      let hojas; try{ hojas = await labConLimite((deps.hojas || function(){ return ccHojasDelReporte('labor', { soloLaHoja: true, limiteMs: 60000 }); })(), 75000, 'la hoja tardó demasiado en pintarse'); } finally { window.__forcePriced = fpAntes; }
       const imagenes = (hojas && hojas.imagenes) || [];
       if(!imagenes.length) throw new Error('no salió ninguna hoja');
       // 3. los recibos
-      const recibos = await (deps.recibos || laborRecibosDe)(row.client_id);
+      const recibos = await labConLimite((deps.recibos || laborRecibosDe)(row.client_id), 120000, 'los recibos tardaron demasiado');
       const base = 'labor-log-' + String(row.log_date || '').slice(0, 10) + '-' + String(row.crew_leader || '').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 20);
       const archivos = imagenes.map(function(d, i){ return { blob: asDataUrlABlob(d), nombre: base + (imagenes.length > 1 ? '-p' + (i + 1) : '') + '.jpg' }; }).concat(recibos);
       // (30 oct, el dueño: "no debería de llevar ese texto") el mensaje va SIN texto: solo la hoja (y los recibos). El título queda para la hoja de compartir.
@@ -88135,7 +88182,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       // Automatic Mac path: queued/uncertain is NEVER sent/archived and never falls back to a second send.
       const macTransport = deps.macTransport || window.__lumiMacTransport;
       if(macTransport){
-        const queued = await macTransport({reportId:id,files:archivos});
+        const queued = await labConLimite(macTransport({reportId:id,files:archivos}), 240000, 'la cola de la Mac no contestó', true);
         if(queued) return Object.assign({hojas:imagenes.length,recibos:recibos.length},queued);
       }
       if(nav && nav.requireMac) throw new Error('La Mac no aceptó el reporte. No se abrió el envío manual.');
