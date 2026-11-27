@@ -21132,7 +21132,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-26-R547';
+  const APP_BUILD = '2026-11-27-R548';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -37398,7 +37398,9 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     };
     nodos.forEach((q, k) => { if(orilla[k]) andar(k, new Set(), [k], []); });
     const ancla = floorplanLabelAnchor(room);
-    const puertas = (doorPts || []).filter(p => p.level === nivel);
+    // (26-nov-2026, Rincón 4) una abertura que se marcó como ventana no es boca (Tamiz: la boca del clóset de esquina vuelta ventana
+    // seguía contando el clóset; quitada, no). La U de siempre no cambia: para ella sigue valiendo como puerta.
+    const puertas = (doorPts || []).filter(p => p.level === nivel && !p.ventana);
     const dS = (p, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l = dx * dx + dy * dy || 1e-9; const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l)); return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy); };
     const dPL = (p, pl) => { let m = Infinity; for(let i = 0; i + 1 < pl.length; i++) m = Math.min(m, dS(p, pl[i], pl[i + 1])); return m; };
     caminos.forEach(c => {
@@ -37476,7 +37478,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const todos = ((data && data.rooms) || []).filter(r => r && !r.deleted && (r.walls || []).length >= 3);
     if(!todos.length || (data && data.merged === false)) return out;
     const r2 = v => Math.round((+v || 0) * 100) / 100, pt = p => p ? [r2(p.x), r2(p.y)] : 0;
-    const llave = JSON.stringify(todos.map(r => [(data.rooms || []).indexOf(r), r.level || 1, r.roomName || '', r._anillo ? (r._anillo.n || 'A') : '',
+    // (26-nov-2026, Rincón 5) también los cuartos quitados (fpCuartosQuitados) y el piso de antes de quitar (fpPisosDeAntes)
+    const llave = fpLlaveDeAntes(data) + JSON.stringify(todos.concat(((data && data.rooms) || []).filter(r => r && r.deleted && (r.walls || []).length >= 3)).map(r => [(data.rooms || []).indexOf(r), r.deleted ? 1 : 0, r.level || 1, r.roomName || '', r._anillo ? (r._anillo.n || 'A') : '',
       (r.walls || []).map(w => w && w.start && w.end ? [pt(w.start), pt(w.end), w._removed ? 1 : 0, w._invisible ? 1 : 0, w._recorte ? [pt(w._recorte.start), pt(w._recorte.end)] : 0] : 0),
       ['doors', 'openings', 'windows'].map(k => (r[k] || []).map(o => o && o.position ? [pt(o.position), r2(o.widthFt), o._removed ? 1 : 0, o._kindOverride || ''] : 0)),
       (r.objects || []).map(o => o && o.center ? [o.category || '', pt(o.center), o._hidden ? 1 : 0] : 0)]).concat([((data && data._spaceLabels) || []).map(q => q ? [q.level || 1, r2(q.x), r2(q.y)] : 0)]));
@@ -37501,19 +37504,27 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const r2 = v => Math.round(v * 100) / 100;
     [...new Set(todos.map(r => r.level || 1))].forEach(lvl => {
       const cuartos = todos.filter(r => (r.level || 1) === lvl);
+      // (26-nov-2026, Rincón 5) se busca con los cuartos QUITADOS del nivel como si siguieran ahí (fpCuartosQuitados): ver allá
+      const antes = fpPisosDeAntes(data, lvl), enBusca = cuartos.concat(fpCuartosQuitados(data, lvl, antes));
       const walls = [];
-      cuartos.forEach(r => (r.walls || []).forEach(w => {
+      enBusca.forEach(r => (r.walls || []).forEach(w => {
         if(!w || !w.start || !w.end || w._removed || w._invisible) return;
         const g = (typeof fpRecorteVigente === 'function' && fpRecorteVigente(w)) || w;
         if(Math.hypot(g.end.x - g.start.x, g.end.y - g.start.y) >= 0.2) walls.push({ a: g.start, b: g.end });
       }));
       if(walls.length < 4) return;
       const pisos = [];
-      cuartos.forEach(r => {
+      enBusca.forEach(r => {
+        // (Rincón 5) el piso que el cuarto tenía antes de quitar (fpPisosDeAntes) tampoco es de nadie más; el de un cuarto quitado es ése
+        const pa = antes && antes.get(r);
+        if(pa && !r.deleted) pisos.push({ r: null, p: pa });
         const fragil = (typeof fpAiFragileOutline === 'function' && fpAiFragileOutline(r)) || (typeof fpOutlineDoublesBack === 'function' && fpOutlineDoublesBack(r));
-        if(fragil){ const b = floorplanRoomBounds(r); if(b && isFinite(b.minX)) pisos.push({ r, caja: b }); return; }
-        let p = null; try{ p = fpOrderedRoomPolygon(r); }catch(e){ p = null; }
+        if(fragil && !(pa && r.deleted)){ const b = floorplanRoomBounds(r); if(b && isFinite(b.minX)) pisos.push({ r, caja: b }); return; }
+        let p = r.deleted && pa ? pa : null;
+        if(!p){ try{ p = fpOrderedRoomPolygon(r); }catch(e){ p = null; } }
         if(p && p.length >= 3) pisos.push({ r, p });
+        // (Rincón 5) un cuarto quitado sin contorno: su piso no se sabe, todo lo que cae en su caja se queda sin contar
+        else if(r.deleted){ const b = floorplanRoomBounds(r); if(b && isFinite(b.minX)) pisos.push({ r, caja: b }); }
       });
       const enPiso = q => pisos.some(o => o.p ? fpPointInPolygon(q, o.p) : (q.x >= o.caja.minX && q.x <= o.caja.maxX && q.y >= o.caja.minY && q.y <= o.caja.maxY));
       const polyDe = r => { const o = pisos.find(x => x.r === r && x.p); return o ? o.p : null; };
@@ -37545,16 +37556,16 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(gx > 0) pila.push(k - 1); if(gx < nx - 1) pila.push(k + 1); if(gy > 0) pila.push(k - nx); if(gy < ny - 1) pila.push(k + nx); }
       // cada espacio cerrado sin dueño
       const puertas = [];
-      cuartos.forEach(r => ['doors', 'openings'].forEach(k => (r[k] || []).forEach(o => {
+      enBusca.forEach(r => ['doors', 'openings'].forEach(k => (r[k] || []).forEach(o => {
         if(o && o.position && !o._removed && o._kindOverride !== 'window') puertas.push({ p: o.position, r });
       })));
-      const anclas = cuartos.map(r => { try{ return floorplanLabelAnchor(r); }catch(e){ return null; } }).filter(Boolean)
+      const anclas = enBusca.map(r => { try{ return floorplanLabelAnchor(r); }catch(e){ return null; } }).filter(Boolean)
         .concat(((data && data._spaceLabels) || []).filter(q => q && (q.level || 1) === lvl).map(q => ({ x: +q.x, y: +q.y })));
       const muebles = [];
-      cuartos.forEach(r => (r.objects || []).forEach(o => { if(fpNoVaEnCloset(o)) muebles.push(o.center); }));
+      enBusca.forEach(r => (r.objects || []).forEach(o => { if(fpNoVaEnCloset(o)) muebles.push(o.center); }));
       // (Rincón 3) las ventanas del piso (las de cualquier cuarto, y la abertura que se marcó como ventana)
       const ventanas = [];
-      cuartos.forEach(r => [].concat(r.windows || [], (r.openings || []).filter(o => o && o._kindOverride === 'window'), (r.doors || []).filter(o => o && o._kindOverride === 'window'))
+      enBusca.forEach(r => [].concat(r.windows || [], (r.openings || []).filter(o => o && o._kindOverride === 'window'), (r.doors || []).filter(o => o && o._kindOverride === 'window'))
         .forEach(o => { if(o && o.position && !o._removed) ventanas.push(o.position); }));
       for(let k0 = 0; k0 < grid.length; k0++){
         if(grid[k0] !== 0) continue;
@@ -37604,10 +37615,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         const largo = Math.hypot(B.x - A.x, B.y - A.y), fondo = W * Dp / largo;
         const u = { x: (B.x - A.x) / largo, y: (B.y - A.y) / largo };
         let v = { x: -u.y, y: u.x }; if((c.x - boca.x) * v.x + (c.y - boca.y) * v.y < 0) v = { x: -v.x, y: -v.y };
-        const duenos = pisos.filter(o => o.p && fpPointInPolygon({ x: boca.x - v.x * 0.8, y: boca.y - v.y * 0.8 }, o.p)).map(o => o.r);
+        const duenos = pisos.filter(o => o.r && o.p && fpPointInPolygon({ x: boca.x - v.x * 0.8, y: boca.y - v.y * 0.8 }, o.p)).map(o => o.r);
         if(duenos.length !== 1) continue;
         const R = duenos[0], pR = polyDe(R);
-        if(!pR || /cl[oó]set/i.test(R.roomName || '')) continue;
+        if(!pR || R.deleted || /cl[oó]set/i.test(R.roomName || '')) continue;   // (Rincón 5) el de un cuarto quitado se va con él
         if(suyas.some(x => fpDistToPolygon(x.p, pR) > 0.6)) continue;               // la boca da también a otro cuarto
         // (Rincón 3) 2 ft de fondo o más: el clóset sin dueño SUMA sq ft al total; uno más angosto es un ducto o un error del escáner
         if(fondo < 2 || !fpMideComoCloset(fondo, largo, W * Dp, fpPolygonAreaSqFt(pR) + W * Dp, true)) continue;   // su frente es pared (cubierto arriba)
@@ -37637,6 +37648,54 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     let t = 0;
     for(const sa of (room._subAreas || [])) if(sa && sa._fuera && sa._frente && !sa._quitado && (sa._aparte || /cl[oó]set/i.test(sa.name || '')) && sa.w > 0 && sa.d > 0) t += Math.round(sa.w * sa.d * 10) / 10;
     return Math.round(t * 10) / 10;
+  }
+  // (26-nov-2026, Rincón 4 y 5) LOS CUARTOS QUITADOS. «Remove room» deja el cuarto en el plano con deleted, y quitar un cuarto no cambia
+  // ningún otro (regla del dueño, 12-nov). El clóset sin dueño se busca con los cuartos quitados del nivel COMO SI SIGUIERAN AHÍ: sus
+  // paredes, su piso, sus puertas, su rótulo y sus muebles; el clóset que fuera de un cuarto quitado se va con él. Así (Tamiz):
+  //  - el clóset de afuera que cierra una pared del cuarto quitado se queda (en un plano real, quitar el Hallway o Room 3 le quitaba al
+  //    Master su clóset de afuera de 30.4 sin decirlo);
+  //  - el piso del cuarto quitado nunca vuelve, ni en parte, como clóset de otro (el Closet quitado de closet_de_pared volvía como
+  //    «Closet 27.7» del Living; el Hallway quitado de live_plan_closet, como «Closet 20.9» del Living);
+  //  - lo que no era clóset con el cuarto ahí tampoco lo es sin él (sin la puerta del cuarto quitado, la boca daba a otro cuarto).
+  // Un cuarto que se JUNTÓ con otro también queda con deleted, pero su piso ya es del que se quedó: no es quitado (el de la pared
+  // invisible lleva _invUnido; el que juntó el editor, la mitad o más de su piso en el piso de un cuarto vivo). Ése sigue como siempre.
+  function fpCuartosQuitados(data, lvl, antes){
+    const rooms = (data && data.rooms) || [];
+    const qs = rooms.filter(r => r && r.deleted && !r._invUnido && (r.level || 1) === lvl && (r.walls || []).length >= 3);
+    if(!qs.length) return qs;
+    const vivos = rooms.filter(r => r && !r.deleted && (r.level || 1) === lvl && (r.walls || []).length >= 3)
+      .map(r => { try{ return fpOrderedRoomPolygon(r); }catch(e){ return null; } }).filter(p => p && p.length >= 3);
+    return qs.filter(r => {
+      let p = antes && antes.get(r); if(!p){ try{ p = fpOrderedRoomPolygon(r); }catch(e){ p = null; } }
+      if(!p || p.length < 3 || !vivos.length) return true;
+      const xs = p.map(q => q.x), ys = p.map(q => q.y); let n = 0, k = 0;
+      for(let x = Math.min(...xs) + 0.25; x < Math.max(...xs); x += 0.5) for(let y = Math.min(...ys) + 0.25; y < Math.max(...ys); y += 0.5){
+        const q = { x, y }; if(!fpPointInPolygon(q, p)) continue; n++; if(vivos.some(v => fpPointInPolygon(q, v))) k++; }
+      return !n || k < 0.5 * n;
+    });
+  }
+  // El piso de cada cuarto del nivel como estaba ANTES de quitar (Map cuarto -> polígono), si el plano lo trae en _pisosDeAntes: en
+  // Scanova lo pone plano_preparar.js (allá un cuarto abierto se dibuja con sus cierres y un cuarto quitado ya no los lleva: su contorno
+  // solo, torcido, no cubre su piso; y quitar un cuarto puede cambiar el cierre de su vecino). Field Reports no cierra los cuartos
+  // abiertos (el contorno del cuarto quitado es el que tenía) y no lo trae: null. Solo vale con las mismas paredes (fpFirmaDeAntes).
+  function fpPisosDeAntes(data, lvl){
+    const a = data && data._pisosDeAntes;
+    if(!a || a.nivel !== lvl || !Array.isArray(a.pisos) || a.firma !== fpFirmaDeAntes(data, lvl)) return null;
+    const m = new Map();
+    a.pisos.forEach(x => { const r = x && ((data.rooms || [])[x.ri]); if(r && Array.isArray(x.p) && x.p.length >= 3) m.set(r, x.p); });
+    return m.size ? m : null;
+  }
+  // Las paredes y puertas de los cuartos del nivel (quitados también), sin lo que solo es del dibujo (los cierres)
+  function fpFirmaDeAntes(data, lvl){
+    const r2 = v => Math.round((+v || 0) * 100) / 100, pt = p => p ? [r2(p.x), r2(p.y)] : 0;
+    return JSON.stringify(((data && data.rooms) || []).map((r, i) => r && (r.level || 1) === lvl ? [i, r.deleted ? 1 : 0,
+      (r.walls || []).filter(w => w && !w._cierre).map(w => w.start && w.end ? [pt(w.start), pt(w.end), w._removed ? 1 : 0, w._invisible ? 1 : 0] : 0),
+      ['doors', 'openings'].map(k => (r[k] || []).filter(o => o && !o._cierre).map(o => o.position ? [pt(o.position), r2(o.widthFt), o._removed ? 1 : 0] : 0))] : 0));
+  }
+  function fpLlaveDeAntes(data){
+    const a = data && data._pisosDeAntes; if(!a) return '';
+    const r2 = v => Math.round((+v || 0) * 100) / 100;
+    return JSON.stringify([a.nivel, a.firma, (a.pisos || []).map(x => x ? [x.ri, (x.p || []).map(q => q ? [r2(q.x), r2(q.y)] : 0)] : 0)]);
   }
   // El clóset sin dueño que cae bajo el dedo (su piso no es de ningún cuarto, así que fpQueHayAqui no lo ve): su rincón o null.
   function fpClosetFueraEn(svgEl, cx, cy){
@@ -37724,7 +37783,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     ((data && data.rooms) || []).forEach(r => {
       if(r.deleted) return;
       [].concat(r.doors||[], r.openings||[]).forEach(o => {
-        if(!o._removed && o.position) doorPts.push({ x: o.position.x, y: o.position.y, level: r.level || 1 });
+        if(!o._removed && o.position) doorPts.push({ x: o.position.x, y: o.position.y, level: r.level || 1, ...(o._kindOverride === 'window' ? { ventana: true } : {}) });
       });
     });
     // (26-nov-2026, Rincón 2) los clósets sin dueño (fpClosetsSinDueno), una vez por dibujo para todo el plano
