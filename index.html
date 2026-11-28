@@ -21163,7 +21163,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-27-R552';
+  const APP_BUILD = '2026-11-27-R553';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -46489,11 +46489,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           }
         }catch(e){ fijo = null; }
         finally{ if(teniaC) teniaC.length = n0C; room.walls = teniaC; }
+        // (24-nov-2026) Ya no se niega una pared: se pone y el aviso dice cuánto cambian los pies cuadrados (Deshacer la regresa).
         if(fijo){ anilloC = fijo; cambiaC = false; }
-        else if(!cierraC){ fpHint('Wall not added: it would change the floor area (sq ft). To split a room, use Wall > Invisible wall.'); return; }
       }
-      if(cambiaC) avisoC = Math.abs(t1C - t0C) > 0.05 ? `Wall added. Total floor area went from ${t0C} to ${t1C} sq ft. Undo if that is not right.`
-        : 'Wall added. The room measurements changed. Check them, or Undo.';
+      if(cambiaC) avisoC = Math.abs(t1C - t0C) > 0.05 ? `Pared puesta. El total de pies cuadrados pasó de ${t0C} a ${t1C}. Deshacer si no está bien.`
+        : 'Pared puesta. Cambiaron las medidas del cuarto: revíselas, o Deshacer.';
     }
     fpPushUndo();
     fpCommitEdit(() => { room.walls = room.walls||[]; room.walls.push(entry); if(jogEntry) room.walls.push(jogEntry); if(anilloC) room._anillo = anilloC; }, [roomIdx]);
@@ -51003,7 +51003,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const w = findFloorplanWall(fpSelectedWallRoomIdx, fpSelectedWallId);
     const room = floorplanData && floorplanData.rooms[fpSelectedWallRoomIdx];
     if(!w || !room) return;
-    if(w._invisible){ fpQuitarParedInvisible(fpSelectedWallRoomIdx, fpSelectedWallId); return; }
+    if(w._invisible){ if(fpQuitarParedInvisible(fpSelectedWallRoomIdx, fpSelectedWallId) !== 'generic') return; }   // 'generic': no se puede juntar, se quita como cualquier pared
     // (12-nov-2026, Molde) la pared sólida que partió el cuarto: se van las dos copias y los dos cuartos vuelven a ser uno
     if(w._paredPar && fpQuitarParticionSolida(fpSelectedWallRoomIdx, fpSelectedWallId) !== null) return;
     // (12-nov, revision) Regla 11: una pared entre dos cuartos existe en LOS DOS (cada cuarto guarda su copia). Antes se quitaba solo
@@ -51073,7 +51073,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(!confirm('Esta pared es compartida con ' + otros + ': sale de los dos cuartos, con sus puertas y ventanas. Deshacer la regresa. ¿Quitarla?')) return;
       }
     } else
-    if(!confirm('Remove this wall from the plan? Its doors and windows come off with it, and it may leave an open gap - use Undo if that\'s not what you wanted.')) return;
+    if(!confirm('¿Quitar esta pared del plano? Sus puertas y ventanas salen con ella, y puede quedar un hueco abierto. Deshacer la regresa.')) return;
     fpSnapshotBeforeEdit();
     fpCommitEdit(() => {
       if(fpGemQuita){ fpGemQuita(floorplanData); return; }   // (12-nov, revision) pared compartida: todas sus copias
@@ -56356,7 +56356,8 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // la prueba en una copia (fpInvUnirRevisado deja el contexto de medidas en la copia: se regresa al plano)
     const t = JSON.parse(JSON.stringify(floorplanData)); fpParedComoInvisible(t, par);
     let prueba = null; try{ prueba = fpInvUnirRevisado(t, par); } finally { fpUsarContextoDePlano(floorplanData); }
-    if(!prueba.ok && prueba.duro){ alert('No se puede quitar así: ' + prueba.fail[0] + '.'); return false; }   // (19-nov-2026, Sin excusas) como la invisible
+    // (24-nov-2026) ya no se niega: se pregunta y se quita como cualquier pared (con su aviso y Deshacer)
+    if(!prueba.ok && prueba.duro){ if(!confirm('No se puede juntar sin dejar un hueco: ' + prueba.fail[0] + '. ¿Quitar la pared de todos modos? Sus puertas y ventanas salen con ella. Deshacer la regresa.')) return false; return null; }
     const cambiaQ = prueba.quedaSf != null && Math.abs(prueba.quedaSf) > 0.05, quedaQ = n1(cambiaQ ? total + prueba.quedaSf : total);
     if(!confirm(r135('¿Quitar la pared? ' + n[0] + ' y ' + n[1] + ' vuelven a ser un solo cuarto (' + quedaQ + ' sq ft' + (cambiaQ ? '; hoy los dos suman ' + n1(total) : '') + '). Deshacer lo regresa.',
       'Remove the wall? ' + n[0] + ' and ' + n[1] + ' become one room again (' + quedaQ + ' sq ft' + (cambiaQ ? '; today the two add up to ' + n1(total) : '') + '). Undo brings it back.'))) return false;
@@ -56605,7 +56606,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     if(duenos.length < 2){
       // la otra mitad ya no está (se quitó): la línea sola no parte nada, se quita de este cuarto
       const pruebaSola = fpInvSueltaRevisada(floorplanData, roomIdx, w._invPar);
-      if(!pruebaSola.ok){ alert('No se puede quitar así: ' + pruebaSola.fail[0] + '.'); return false; }
+      if(!pruebaSola.ok){ if(!confirm('Quitar esta línea deja un hueco: ' + pruebaSola.fail[0] + '. ¿Quitarla de todos modos? Deshacer la regresa.')) return false; return 'generic'; }
       if(!confirm('¿Quitar esta línea? Ya no divide nada. Deshacer la regresa.')) return false;
       fpPushUndo();
       fpCommitEdit(() => { const r = floorplanData.rooms[roomIdx]; r.walls = (r.walls || []).filter(q => !(q && q._invisible && q._invPar === w._invPar)); }, [roomIdx]);
@@ -56618,7 +56619,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     // (19-nov-2026, Sin excusas) QUITAR LA PARED INVISIBLE YA NO SE NIEGA porque lo juntado no mida exacto lo que sumaban los dos: el cuarto
     // juntado cose los dos contornos (fpAnilloJuntar) y, si aun así el número cambia, se dice cuánto queda y se pregunta. Solo se niega
     // cuando no hay cómo juntar (la línea la comparten tres espacios).
-    if(!prueba.ok && prueba.duro){ alert('No se puede quitar así: ' + prueba.fail[0] + '.'); return false; }
+    if(!prueba.ok && prueba.duro){ if(!confirm('No se puede juntar sin dejar un hueco: ' + prueba.fail[0] + '. ¿Quitar la pared de todos modos? Deshacer la regresa.')) return false; return 'generic'; }
     { const d1 = v => (Math.round(v * 10) / 10).toFixed(1), cambia = prueba.quedaSf != null && Math.abs(prueba.quedaSf) > 0.05;
       const mv = (prueba.fail || []).map(m => /cambiaría los sq ft de (.+)/.exec(m)).find(Boolean), vecQ = mv ? ' También cambian un poco los sq ft de ' + mv[1] + '.' : '';
       if(!confirm(r135('¿Quitar la pared invisible? ' + n[0] + ' y ' + n[1] + ' vuelven a ser un solo espacio (' + d1(cambia ? total + prueba.quedaSf : total) + ' sq ft' + (cambia ? '; hoy los dos suman ' + d1(total) : '') + ').' + vecQ + ' Deshacer lo regresa.',
