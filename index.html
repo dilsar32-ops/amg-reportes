@@ -21376,7 +21376,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-28-R559';
+  const APP_BUILD = '2026-11-28-R560';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -63250,7 +63250,27 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     else if(o.lider) v.estado = 'lider';   // (17-nov) solo salió de líder: el labor log no trae sus horas. No se avisa nada (como 'less').
     else if(huEsperando(o, filas)) v.estado = 'esperando';
     else v.estado = v.logs.length ? 'notinlog' : 'nolog';
+    // (R560, 28-nov, el dueño: Cristian 21-oct) Día con horas de las DOS empresas: si lo de más es solo lo de la empresa que no
+    // tiene reporte ese día, y lo de la otra cuadra con su labor log, cada fila se juzga con lo de su empresa (huVerFila). El día
+    // sigue contando como 'more' (hay horas sin respaldo); la fila que sí cuadra ya no sale roja.
+    if(v.estado === 'more' && kR.length > 1){
+      const minK = k => filas.filter(f => huKind(f) === k).reduce((s, f) => s + (huMinFila(f) || 0), 0);
+      const turK = k => turnos.filter(t => huKindDe(t.work_kind) === k).reduce((s, t) => s + huMinTurno(t), 0);
+      const kSin = kR.filter(k => kT.indexOf(k) < 0), kCon = kR.filter(k => kT.indexOf(k) >= 0);
+      if(kSin.length && kCon.length && kT.every(k => kR.indexOf(k) >= 0) && kCon.every(k => minK(k) - turK(k) <= tol)){
+        v.porKind = {};
+        kCon.forEach(k => { v.porKind[k] = { estado: (turK(k) - minK(k) > tol) ? 'less' : 'ok', mine: minK(k), theirs: turK(k) }; });
+        kSin.forEach(k => { v.porKind[k] = { estado: 'more', mine: minK(k), theirs: 0, sinReporte: true }; });
+      }
+    }
     return v;
+  }
+  // (R560) El veredicto de UNA fila en un día partido por empresa (v.porKind): solo sus filas y su reporte. Sin porKind: el del día.
+  function huVerFila(v, fila){
+    const k = fila ? huKind(fila) : '', p = v && v.porKind && v.porKind[k];
+    if(!p) return v;
+    return Object.assign({}, v, p, { filas: v.filas.filter(f => huKind(f) === k), turnos: (v.turnos || []).filter(t => huKindDe(t.work_kind) === k),
+      kR: [k], kT: p.sinReporte ? [] : [k], porKind: null, parteDe: k });
   }
   // "labor log de Anderson" / "reporte de Raúl" (la pastilla) y "el labor log de Anderson" / "el reporte de mudanza de Raúl" (la frase)
   function huFuenteChip(k, lid){ lid = lid || []; return k === 'mudanza' ? (lid.length ? 'reporte de ' + huEsc(huLista(lid)) : 'reporte de mudanza') : (lid.length ? 'labor log de ' + huEsc(huLista(lid)) : 'labor log'); }
@@ -63263,6 +63283,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   function huNotaTrabajador(v, fila, primera, op){
     if(!v) return null;
     op = op || {};
+    if(v.porKind){ const w = huVerFila(v, fila); if(w !== v){ v = w; primera = true; } }   // (R560) día partido por empresa
     const n = huNotaDia(v, fila, primera, op);
     // (17-nov, ronda 3, T1b) la hora regresó sola a su empresa de antes: se dice en su fila. Con un aviso del día, va abajo de él.
     const r = op.regreso && huKind(fila) === op.regreso.a ? op.regreso : null;
@@ -63301,6 +63322,13 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       return { cls: 'soft', chip: 'Se queda en ' + aqui, why: 'Salió en ' + huFuenteTxt(k, lid(k)) + '.<span class="muted">'
         + (op.accion === 'sin_tarifa' ? 'Todavía no tiene tarifa de ' + (k === 'mudanza' ? 'AMG' : 'Restauración') + ': su manager la pone.'
           : op.accion === 'fijado' ? 'Su manager la dejó en ' + aqui + '.' : 'Su manager decide en qué empresa va.') + '</span>' };
+    }
+    if(v.estado === 'more' && v.sinReporte){   // (R560) lo de esta empresa no sale en ningún reporte de ese día
+      const mg = v.parteDe === 'mudanza';
+      return { cls: '', chip: '⚠ No coincide: ' + (mg ? 'no sale en ningún reporte de mudanza' : 'no sale en ningún labor log'),
+        why: 'Usted puso <b>' + huHhmm(v.mine) + '</b> de ' + (mg ? 'AMG Moving' : 'Restauración') + ' ese día y ' + (mg ? 'ningún reporte de mudanza' : 'ningún labor log') + ' trae esas horas.'
+          + '<span class="muted">Hable con su manager antes del pago.' + (op.sinCorregir ? '' : ' Si usted se equivocó, toque Corregir.') + '</span>',
+        txt: op.sinCorregir ? 'Hable con su manager antes del pago.' : 'Hable con su manager antes del pago, o toque <b>Corregir</b> si se equivocó.' };
     }
     if(v.estado === 'more'){
       const todos = lid('restauracion').concat(lid('mudanza').filter(x => lid('restauracion').indexOf(x) < 0));
@@ -63515,6 +63543,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   //        (17-nov, ronda 3) soloAviso ('sin_respaldo' sin a_kind: fija o pagada, sin botón), regreso (huRegreso), seMueve (huSeMueve)
   function huNotaManager(v, fila, primera, op){
     op = op || {};
+    if(v && v.porKind){ const w = huVerFila(v, fila); if(w !== v){ v = w; primera = true; } }   // (R560) día partido por empresa
     const T = (v && v.turnos) || [], lid = k => huLideres(T, k), partes = [];
     const nada = k => k === 'mudanza' ? 'ya no sale en ningún reporte de mudanza' : 'ya no sale en ningún labor log';
     if(op.regreso && huKind(fila) === op.regreso.a && !huMovida(fila)){
@@ -63539,7 +63568,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         + (huKindDe(fila.kind_original) === 'mudanza' ? 'AMG' : 'Restauración') + '</span></span></span>'
         + ((fila.paid_at || op.sinDeshacer) ? '' : '<button type="button" class="hu-btn deshacer" data-hu="deshacer" data-hu-id="' + huEsc(fila.id) + '">Deshacer</button>'));
     }
-    if(v && primera && v.estado === 'more'){
+    if(v && primera && v.estado === 'more' && v.sinReporte){   // (R560)
+      partes.push('<span class="hu-dice"><span class="matchstatus mismatch">⚠ No coincide</span> · ' + (v.parteDe === 'mudanza' ? 'no sale en ningún reporte de mudanza de ese día' : 'no sale en ningún labor log de ese día')
+        + ' (<b>' + huHhmm(v.mine) + '</b>)</span>');
+    }else if(v && primera && v.estado === 'more'){
       const todos = lid('restauracion').concat(lid('mudanza').filter(x => lid('restauracion').indexOf(x) < 0));
       const suyas = huHorasDe(T, 'shift_from', 'shift_to').map(t => '<span class="hu-r">' + huRangoCorto(t.shift_from, t.shift_to) + '</span>').join(', ');   // (R503) idem
       partes.push('<span class="hu-dice"><span class="matchstatus mismatch">⚠ No coincide</span> · ' + (todos.length ? huEsc(huLista(todos)) + (todos.length > 1 ? ' reportaron' : ' reportó') : 'el labor log dice')
@@ -64000,7 +64032,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const primera = myShown().find(x => (x.work_date || '') === dia) === e;
     const det = (s.misDet || {})[e.id];   // (ronda 3) "pasa a AMG el…" y "regresó a…"
     return { emp: huEmpHtml(huKindsFila(e, v), s.tarifa), nota: huNotaHtml(huNotaTrabajador(v, e, primera, { sinCorregir: !turnoCorregible(e), accion: (s.misAcc || {})[e.id] || '',
-      seMueve: huSeMueve(det), sinFecha: huSeMueveSinFecha(det), tarifas: s.tarifa, regreso: huRegreso(det) || (s.misReg || {})[e.id] || null })), corregir: huPideCorregir(v) };
+      seMueve: huSeMueve(det), sinFecha: huSeMueveSinFecha(det), tarifas: s.tarifa, regreso: huRegreso(det) || (s.misReg || {})[e.id] || null })), corregir: huPideCorregir(huVerFila(v, e)) };
   }
   function huLineaAviso(v){
     const lid = huLideres(v.turnos, 'restauracion').concat(huLideres(v.turnos, 'mudanza'));
