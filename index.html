@@ -21350,7 +21350,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-28-R554';
+  const APP_BUILD = '2026-11-28-R555';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -43859,7 +43859,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         const c = faltan[k];
         try{
           const r = await Loc.geocode({ address: c.direccion });
-          if(r && Number.isFinite(+r.lat) && Number.isFinite(+r.lng)){
+          if(r && cliPuntoOk(r.lat, r.lng)){   // (R555) sin punto (null) no es el 0,0
             cliGeoPoner(c.dir_key, +r.lat, +r.lng); n++;
             if(fix && trAquiMasCercana(fix, [Object.assign({}, c, { lat: +r.lat, lng: +r.lng })], maxM)){ porque = 'cerca'; break; }
           }
@@ -78105,11 +78105,30 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   let CLI_TEL_NUBE = true;                         // idem, para el telefono (supabase-telefono-cliente.sql)
   let CLI_TELMANO_NUBE = true;                     // (R523) idem, la marca "escogido a mano" (supabase-telefono-companycam.sql)
   const cliGeoKey = () => 'cliGeo1:' + ((SES && SES.company_id) || 'x');
-  function cliGeoLeer(){ try{ const m = JSON.parse(localStorage.getItem(cliGeoKey()) || '{}'); return (m && typeof m === 'object') ? m : {}; }catch(e){ return {}; } }
+  // (R555) UN PUNTO DE VERDAD, la misma regla en Clientes, en la sincronización y en el Mapa de trabajos. El Mapa se abría en
+  // África: la sincronización guardaba {lat:0, lng:0} cuando el punto de la nube venía en null (+null es 0, y 0 es finito).
+  // Vale si vienen los dos (ni null ni ''), son números, caben en el globo y no son el (0,0).
+  function cliPuntoOk(lat, lng){
+    const n = x => (typeof x === 'number' || (typeof x === 'string' && x.trim() !== '')) ? +x : NaN;
+    const a = n(lat), b = n(lng);
+    return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a) <= 90 && Math.abs(b) <= 180 && !(a === 0 && b === 0);
+  }
+  // (R555) al leer se quitan los puntos malos que ya quedaron en el teléfono (y se guarda sin ellos): esa casa vuelve a
+  // «sin punto», así el punto de la nube o el de Apple la llenan por el camino de siempre.
+  function cliGeoLeer(){
+    try{
+      const m = JSON.parse(localStorage.getItem(cliGeoKey()) || '{}');
+      if(!m || typeof m !== 'object') return {};
+      let malos = 0;
+      Object.keys(m).forEach(k => { const g = m[k]; if(!g || !cliPuntoOk(g.lat, g.lng)){ delete m[k]; malos++; } });
+      if(malos) cliGeoEscribir(m);
+      return m;
+    }catch(e){ return {}; }
+  }
   function cliGeoEscribir(m){ try{ localStorage.setItem(cliGeoKey(), JSON.stringify(m)); }catch(e){} }
-  function cliGeoDe(k){ const g = cliGeoLeer()[k]; return (g && Number.isFinite(+g.lat) && Number.isFinite(+g.lng)) ? g : null; }
+  function cliGeoDe(k){ const g = cliGeoLeer()[k]; return (g && cliPuntoOk(g.lat, g.lng)) ? g : null; }
   function cliGeoPoner(k, lat, lng, subir){
-    if(!k || !Number.isFinite(+lat) || !Number.isFinite(+lng)) return;
+    if(!k || !cliPuntoOk(lat, lng)) return;
     const m = cliGeoLeer(); m[k] = { lat: +lat, lng: +lng, at: Date.now() }; cliGeoEscribir(m);
     if(subir !== false) cliGeoSubir(k, +lat, +lng);
   }
@@ -78198,7 +78217,11 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
         if(!Array.isArray(pag)) return false;
         // El punto que ya buscó otro teléfono llega con el cliente: aquí ya no se busca.
         const geo = cliGeoLeer(); let hayGeo = false;
-        pag.forEach(f => { if(f && f.dir_key && Number.isFinite(+f.lat) && Number.isFinite(+f.lng) && !geo[f.dir_key]){ geo[f.dir_key] = { lat: +f.lat, lng: +f.lng, at: Date.now() }; hayGeo = true; } });
+        // (R555) solo un punto bueno (el null de la nube no es el 0,0); y si el del teléfono está malo, el de la nube lo reemplaza
+        pag.forEach(f => {
+          const ya = (f && f.dir_key) ? geo[f.dir_key] : null;
+          if(f && f.dir_key && cliPuntoOk(f.lat, f.lng) && !(ya && cliPuntoOk(ya.lat, ya.lng))){ geo[f.dir_key] = { lat: +f.lat, lng: +f.lng, at: Date.now() }; hayGeo = true; }
+        });
         if(hayGeo) cliGeoEscribir(geo);
         remotas.push(...pag);
         if(pag.length < 1000) break;
@@ -78650,7 +78673,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
       for(const c of faltan){
         try{
           const r = await Loc.geocode({ address: c.direccion });
-          if(r && Number.isFinite(+r.lat)) cliGeoPoner(c.dir_key, +r.lat, +r.lng);
+          if(r && cliPuntoOk(r.lat, r.lng)) cliGeoPoner(c.dir_key, +r.lat, +r.lng);   // (R555) sin punto (null) no es el 0,0
         }catch(err){
           if(err && (err.code === 'red' || err.errorMessage === 'red')) break;      // sin senal: se deja para despues
         }
@@ -95294,8 +95317,40 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     });
     return out;
   }
+  // (R555) el punto de un trabajo: {lat, lng} bueno (cliPuntoOk, la regla de Clientes) o null
+  function rdmtPunto(p){ return (p && cliPuntoOk(p.lat, p.lng)) ? { lat: +p.lat, lng: +p.lng } : null; }
+  // (R555) LA MISMA CASA CON UN ERROR DE DEDO: la tarjeta NUEVO TRABAJO decía «7310 Cedar Ct, ..., 22150» y el conteo «7310 Cendar ct
+  // ... 22150» (datos de ejemplo), y el trabajo salía dos veces. Solo aquí (visMismaCasa no cambia): el mismo número de casa, el
+  // mismo zip (los dos lo traen), el mismo apartamento, la misma clase de calle (Ct, Dr...) y su orientación, los mismos números en
+  // el nombre, y el nombre a 1 letra (nombres de 4 o 5 letras) o a 2 (6 o más); con menos de 4 letras, nunca.
+  // a y b: lo que da casaDe(dirección) -> { num, pre, nombre, tipo, zip, unidad } | null
+  function rdmtDistancia(a, b){                                   // letras de diferencia; dos letras volteadas cuentan 1
+    const n = a.length, m = b.length; if(Math.abs(n - m) > 2) return 3;
+    let d0 = null, d1 = [], d2 = [];
+    for(let j = 0; j <= m; j++) d1[j] = j;
+    for(let i = 1; i <= n; i++){
+      d2 = [i];
+      for(let j = 1; j <= m; j++){
+        const c = a[i - 1] === b[j - 1] ? 0 : 1;
+        let v = Math.min(d1[j] + 1, d2[j - 1] + 1, d1[j - 1] + c);
+        if(d0 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, d0[j - 2] + 1);
+        d2[j] = v;
+      }
+      d0 = d1; d1 = d2;
+    }
+    return d1[m];
+  }
+  function rdmtCasaParecida(a, b){
+    if(!a || !b || !a.num || a.num !== b.num || !a.zip || a.zip !== b.zip) return false;
+    if((a.unidad || '') !== (b.unidad || '') || (a.tipo || '') !== (b.tipo || '') || (a.pre || '') !== (b.pre || '')) return false;
+    const na = String(a.nombre || ''), nb = String(b.nombre || '');
+    if(!na || !nb || na.replace(/[^0-9]/g, '') !== nb.replace(/[^0-9]/g, '')) return false;
+    const corta = Math.min(na.replace(/[^a-z]/g, '').length, nb.replace(/[^a-z]/g, '').length);
+    if(corta < 4) return false;
+    return rdmtDistancia(na, nb) <= (corta < 6 ? 1 : 2);
+  }
   function rdmtMillas(a, b){
-    if(!a || !b || !Number.isFinite(+a.lat) || !Number.isFinite(+b.lat)) return null;
+    if(!a || !b || !cliPuntoOk(a.lat, a.lng) || !cliPuntoOk(b.lat, b.lng)) return null;
     const r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
     const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
     return 3958.8 * 2 * Math.asin(Math.min(1, Math.sqrt(x)));
@@ -95304,10 +95359,10 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   //   turnos:[filas de trabajo_grupo, sin dirección], lugares:{card_id: {cliente, direccion, lat, lng}} (trabajo_despacho_lugar: solo lo
   //   que la nube deja ver), ofertas:{card_id: {cliente}} (lo que dice la oferta: cliente y ciudad, nunca la calle),
   //   tarjetas:[{id, cliente, direccion, lat, lng}] (NUEVO TRABAJO sin turnos: solo el manager),
-  //   geo(dir_key, direccion) -> {lat, lng} | null, mismaCasa(a, b), enSitio(renglon) }
+  //   geo(dir_key, direccion) -> {lat, lng} | null, mismaCasa(a, b), enSitio(renglon), casaDe(direccion) (R555, rdmtCasaParecida) }
   // -> { trabajos:[...], grupos:[{id, nombre, color, mio}], misGrupos:[id] }
   function rdmtCalcular(o){
-    const hoy = String(o.hoy || ''), uid = o.uid || '', mgr = !!o.mgr, misma = o.mismaCasa, enSitio = o.enSitio, geo = o.geo || (() => null);
+    const hoy = String(o.hoy || ''), uid = o.uid || '', mgr = !!o.mgr, misma = o.mismaCasa, enSitio = o.enSitio, geo = o.geo || (() => null), casaDe = o.casaDe || (() => null);
     const yo = (o.nombres || []).map(rdmtNorm).filter(Boolean);
     const dia = f => Date.parse(String(f).slice(0, 10) + 'T12:00:00Z');
     const dias = f => f ? Math.round((dia(hoy) - dia(f)) / 864e5) : Infinity;
@@ -95350,32 +95405,39 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       const fue = (q > 0 || String(ult.fecha) <= hoy) && (deCasa.some(v => String(v.fecha) === hoy) || ruta.some(r => misma({ dir_key: r.k, direccion: r.d }, c)));
       let g = null, mejor = 0;
       grupos.forEach(gr => { const k = racha.filter(v => deGrupo(v, gr)).length; if(k > mejor){ mejor = k; g = gr; } });
-      const pt = geo(c.dir_key, c.direccion);
+      const pt = rdmtPunto(geo(c.dir_key, c.direccion));
       trabajos.push({ k: 'c:' + c.dir_key, tipo: 'activo', cliente: c.cliente, direccion: c.direccion, dir_key: c.dir_key, ciudad: rdmtCiudad(c.direccion),
-        lat: pt ? +pt.lat : null, lng: pt ? +pt.lng : null, dia: dias(racha[0].fecha) + 1, etapa, paso: RDMT_ETAPAS[etapa][1], quedan: q, retiro: q <= 0 ? String(ult.fecha).slice(0, 10) : '',
+        lat: pt ? pt.lat : null, lng: pt ? pt.lng : null, dia: dias(racha[0].fecha) + 1, etapa, paso: RDMT_ETAPAS[etapa][1], quedan: q, retiro: q <= 0 ? String(ult.fecha).slice(0, 10) : '',
         fue, vieja: q > 0 && dias(ultVis) >= 7 && !fue, hace: dias(ult.fecha), grupoId: g ? g.id : '', mio: racha.some(esMio),
         deMisGrupos: grupos.some(gr => misGrupos.includes(gr.id) && racha.some(v => deGrupo(v, gr))) });
     });
     // los trabajos NUEVOS (la tarjeta NUEVO TRABAJO y su turno)
     const porCard = new Map();
     (o.turnos || []).forEach(t => { if(!t || !t.card_id) return; const l = porCard.get(t.card_id) || []; l.push(t); porCard.set(t.card_id, l); });
-    const yaActivo = (dir) => { const c = { dir_key: rdmtNorm(dir), direccion: dir || '' }; return trabajos.find(w => w.tipo === 'activo' && misma(w, c)) || null; };
+    // (R555) la misma casa (visMismaCasa) o, si no, la misma casa con un error de dedo en la calle (rdmtCasaParecida)
+    const yaActivo = (dir) => {
+      const c = { dir_key: rdmtNorm(dir), direccion: dir || '' }, act = trabajos.filter(w => w.tipo === 'activo');
+      const igual = act.find(w => misma(w, c)); if(igual) return igual;
+      const cd = dir ? casaDe(dir) : null;
+      return (cd && act.find(w => rdmtCasaParecida(casaDe(w.direccion), cd))) || null;
+    };
     porCard.forEach((ts, id) => {
       ts.sort((a, b) => (+a.orden || 0) - (+b.orden || 0));
       const va = ts.find(t => t.estado === 'va') || null, of = ts.find(t => t.estado === 'ofrecido') || null;
-      const L = (o.lugares && o.lugares[id]) || {}, O = (o.ofertas && o.ofertas[id]) || {}, dir = String(L.direccion || '');
+      const L = (o.lugares && o.lugares[id]) || {}, O = (o.ofertas && o.ofertas[id]) || {}, dir = String(L.direccion || ''), pl = rdmtPunto(L);
       const act = dir ? yaActivo(dir) : null;
       if(act){ if(va) act.grupoId = va.grupo_id; return; }   // ya se instaló: es un trabajo activo más, del grupo que lo tomó
       const mia = ts.find(t => misGrupos.includes(t.grupo_id)) || null;
       const abierto = !!(va || of || ts.some(t => t.estado === 'fila' || t.estado === 'espera'));
       trabajos.push({ k: 'n:' + id, tipo: 'nuevo', cardId: id, cliente: L.cliente || O.cliente || '', direccion: dir, dir_key: rdmtNorm(dir),
-        ciudad: rdmtCiudad(dir), lat: L.lat != null && Number.isFinite(+L.lat) ? +L.lat : null, lng: L.lng != null && Number.isFinite(+L.lng) ? +L.lng : null,
+        ciudad: rdmtCiudad(dir), lat: pl ? pl.lat : null, lng: pl ? pl.lng : null,
         dia: 0, etapa: 'nuevo', paso: 0, fue: false, vieja: false, grupoId: va ? va.grupo_id : (of ? of.grupo_id : ''), turnos: ts, va, of, mia, nadie: !abierto && !va });
     });
     (o.tarjetas || []).forEach(x => {
       if(!x || !x.id || porCard.has(x.id) || yaActivo(x.direccion)) return;
+      const px = rdmtPunto(x);
       trabajos.push({ k: 'n:' + x.id, tipo: 'nuevo', cardId: x.id, cliente: x.cliente || '', direccion: x.direccion || '', dir_key: rdmtNorm(x.direccion), ciudad: rdmtCiudad(x.direccion),
-        lat: Number.isFinite(+x.lat) && x.lat !== null ? +x.lat : null, lng: Number.isFinite(+x.lng) && x.lng !== null ? +x.lng : null,
+        lat: px ? px.lat : null, lng: px ? px.lng : null,
         dia: 0, etapa: 'nuevo', paso: 0, fue: false, vieja: false, grupoId: '', turnos: [], va: null, of: null, mia: null, sinTurno: true });
     });
     const visible = w => {
@@ -95406,12 +95468,12 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   function rdmtEnRutaSolo(w, hoy){ return w.tipo === 'nuevo' ? !!w.va : (!w.fue && !w.vieja && (w.etapa !== 'pickup' || w.retiro === hoy)); }
   function rdmtParadas(ts, grupoId, hoy, quitar, poner){
     const gid = grupoId === '-' ? '' : String(grupoId || ''), q = quitar || new Set(), p = poner || new Set();
-    return (ts || []).filter(w => (w.grupoId || '') === gid && Number.isFinite(w.lat) && Number.isFinite(w.lng)
+    return (ts || []).filter(w => (w.grupoId || '') === gid && cliPuntoOk(w.lat, w.lng)
       && (p.has(w.k) || (rdmtEnRutaSolo(w, hoy) && !q.has(w.k))));
   }
   function rdmtRuta(desde, paradas){
-    const quedan = (paradas || []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng)).slice(), out = [];
-    let cur = (desde && Number.isFinite(+desde.lat) && Number.isFinite(+desde.lng)) ? { lat: +desde.lat, lng: +desde.lng } : null;
+    const quedan = (paradas || []).filter(p => p && cliPuntoOk(p.lat, p.lng)).slice(), out = [];
+    let cur = rdmtPunto(desde);
     if(!cur && quedan.length){ cur = quedan.shift(); out.push(cur); }
     while(quedan.length){
       let k = 0, dmin = Infinity;
@@ -95424,7 +95486,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   // Va con los puntos (lat,lng), no con la dirección escrita: Google no recibe la dirección del cliente.
   function rdmtGoogle(paradas){
     const pt = p => (+p.lat).toFixed(6) + ',' + (+p.lng).toFixed(6), out = [];
-    const ps = (paradas || []).filter(p => p && Number.isFinite(+p.lat) && Number.isFinite(+p.lng));
+    const ps = (paradas || []).filter(p => p && cliPuntoOk(p.lat, p.lng));
     for(let i = 0; i < ps.length; i += 4){
       const tramo = ps.slice(i, i + 4), dest = tramo[tramo.length - 1], esc = tramo.slice(0, -1);
       out.push({ desde: i + 1, hasta: i + tramo.length, url: 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(pt(dest))
@@ -95433,7 +95495,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     return out;
   }
   // Apple Maps: una parada a la vez (como «Cómo llegar» de Hoy y de NUEVO TRABAJO)
-  function rdmtApple(p){ return 'maps://?daddr=' + encodeURIComponent(String((p && (p.direccion || (Number.isFinite(+p.lat) ? (+p.lat) + ',' + (+p.lng) : ''))) || '')) + '&dirflg=d'; }
+  function rdmtApple(p){ return 'maps://?daddr=' + encodeURIComponent(String((p && (p.direccion || (cliPuntoOk(p.lat, p.lng) ? (+p.lat) + ',' + (+p.lng) : ''))) || '')) + '&dirflg=d'; }
   /*RD-MAPA-PURO:FIN*/
 
   // ---- los textos (también en IDI_DICC: el inglés para quien escogió English) ----
@@ -95478,6 +95540,29 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   const rdmtSoyJefe = () => { try{ return typeof isManagerDe === 'function' ? isManagerDe('restauracion') : isManager(); }catch(e){ return false; } };
   function rdmtGeo(k, dir){ try{ return cliGeoDe(k) || (dir ? cliGeoDe(cliNorm(dir)) : null); }catch(e){ return null; } }
+  // (R555) la casa para rdmtCasaParecida: número, calle partida en nombre / clase (Ct, Dr...) / orientación, zip y apartamento.
+  // Sin número de casa o sin la clase de calle no se adivina nada (null).
+  function rdmtCasaDe(dir){
+    try{
+      const c = visCasaDe(dir); if(!c || c.num === null) return null;
+      const p = String(c.calle || '').split(' ').filter(Boolean);
+      let fin = p.length; if(fin > 2 && CLI_ORIENTA.has(p[fin - 1])) fin--;
+      if(fin < 2 || !CLI_TIPO_CALLE.has(p[fin - 1])) return null;
+      const pre = (fin > 2 && CLI_ORIENTA.has(p[0])) ? p[0] : '';
+      return { num: c.num, pre, nombre: p.slice(pre ? 1 : 0, fin - 1).join(' '), tipo: p.slice(fin - 1).join(' '), zip: (z => (z && z !== String(c.num)) ? z : '')(visZip(dir)), unidad: visUnidad(dir) };   // (R555) un zip igual al numero de casa no es zip
+    }catch(e){ return null; }
+  }
+  // (R555) los trabajos activos sin punto: el teléfono lo busca con Apple (visGeocodificar: solo en la app, 20 a la vez, con su pausa),
+  // lo guarda y lo sube a la nube por el camino de siempre (cliGeoPoner); cuando termina, el mapa se vuelve a pintar.
+  function rdmtBuscarPuntos(){
+    try{
+      if(typeof visGeocodificar !== 'function') return;
+      const d = RDMT.ultimo || rdmtDatos();
+      const faltan = d.trabajos.filter(w => w.tipo === 'activo' && !cliPuntoOk(w.lat, w.lng) && w.direccion && w.dir_key).map(w => ({ dir_key: w.dir_key, direccion: w.direccion }));
+      if(!faltan.length) return;
+      Promise.resolve(visGeocodificar(faltan)).then(() => rdmtPintar()).catch(() => {});
+    }catch(e){}
+  }
   // las tarjetas NUEVO TRABAJO sin turno (sin fr-32, sin punto, o con todos los grupos apagados): solo el manager, de las pláticas ya leídas
   function rdmtTarjetas(){
     const out = [];
@@ -95486,7 +95571,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       MSG.lista.forEach(m => {
         const t = m && !m.borrado_at && rdtjAdj(m, 'trabajo'); if(!t || !(Date.now() - Date.parse(m.created_at) < 2 * 864e5)) return;
         try{ if(rdtjEstado(m).cerrado) return; }catch(e){}
-        const p = (Number.isFinite(+t.lat) && t.lat != null) ? { lat: +t.lat, lng: +t.lng } : rdmtGeo(cliNorm(t.direccion), t.direccion);
+        const p = rdmtPunto(t) || rdmtPunto(rdmtGeo(cliNorm(t.direccion), t.direccion));
         out.push({ id: m.id, cliente: t.cliente || '', direccion: t.direccion || '', lat: p ? p.lat : null, lng: p ? p.lng : null });
       });
     }catch(e){}
@@ -95504,7 +95589,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   function rdmtDatos(){
     try{
       return rdmtCalcular({ visitas: visLeer(), ruta: (typeof rutaLeer === 'function' ? rutaLeer() : []), hoy: todayStr(), uid: nubeYo(), nombres: rdMisNombres(), mgr: rdmtSoyJefe(), grupos: RDMT.grupos || [],
-        turnos: RDMT.turnos || [], lugares: RDMT.lugares || {}, ofertas: rdmtOfertas(), tarjetas: rdmtTarjetas(), geo: rdmtGeo, mismaCasa: visMismaCasa, enSitio: visEnSitio });
+        turnos: RDMT.turnos || [], lugares: RDMT.lugares || {}, ofertas: rdmtOfertas(), tarjetas: rdmtTarjetas(), geo: rdmtGeo, mismaCasa: visMismaCasa, enSitio: visEnSitio, casaDe: rdmtCasaDe });
     }catch(e){ console.warn('rdmtDatos', e); return { trabajos: [], grupos: [], misGrupos: [] }; }
   }
 
@@ -95548,15 +95633,16 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   // el círculo: la casa va en la ruta (palomita roja; con «Ruta de…» abierta, su número) o no (vacío). Tocarlo la pone o la quita.
   function rdmtFilaHtml(w, d, num, desde, enRuta){
-    const sinPunto = !Number.isFinite(w.lat), dist = desde ? rdmtMillas(desde, w) : null;
+    const sinPunto = !cliPuntoOk(w.lat, w.lng), dist = desde ? rdmtMillas(desde, w) : null;
     const circ = sinPunto ? '<span class="rdmt-ck sin" aria-hidden="true"></span>'
       : '<span class="rdmt-ck' + (enRuta ? (num ? ' num' : ' si') : '') + '" role="checkbox" tabindex="0" aria-checked="' + (enRuta ? 'true' : 'false') + '" aria-label="' + esc(rdmtT('En la ruta')) + '" data-rdmt-marca="' + esc(w.k) + '">'
         + (enRuta ? (num ? '<b>' + num + '</b>' : rdmtSvg(RDMT_SV.ok, '#fff')) : '') + '</span>';
     return '<div class="rdmt-fila' + (RDMT.sel === w.k ? ' sel' : '') + (w.vieja || (w.etapa === 'pickup' && w.fue) ? ' apagada' : '') + '" data-rdmt-ver="' + esc(w.k) + '" role="button" tabindex="0">' + circ
       + '<span class="rdmt-fx"><b data-no-idioma>' + esc(w.cliente || rdmtCalle(w.direccion) || '?') + '</b>'
       + '<span class="rdmt-et' + (w.tipo === 'nuevo' ? ' nuevo' : '') + '">' + esc(rdmtEtapaTxt(w)) + rdmtPasos(w) + '</span>'
-      + '<small><span data-no-idioma>' + esc([rdmtCalle(w.direccion), w.ciudad].filter(Boolean).join(', ') || '') + '</span>'
-      + (sinPunto ? ' · <em>' + esc(rdmtT('sin ubicación')) + '</em>' : (dist != null ? ' · ' + esc(rdmtMi(dist)) : '')) + '</small></span>'
+      + '<small>' + (sinPunto ? '<em>' + esc(rdmtT('sin ubicación').replace(/^./, x => x.toUpperCase())) + '</em>' + (rdmtCalle(w.direccion) || w.ciudad ? ' · ' : '') : '')   // (R555) primero: si no, el «…» se lo come
+      + '<span data-no-idioma>' + esc([rdmtCalle(w.direccion), w.ciudad].filter(Boolean).join(', ') || '') + '</span>'
+      + (!sinPunto && dist != null ? ' · ' + esc(rdmtMi(dist)) : '') + '</small></span>'
       + rdmtEtiqueta(w, d) + '</div>';
   }
   // lo que le ofrecen a mi grupo (arriba de la lista): Yo voy / No puedo
@@ -95588,7 +95674,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     }).join('') + '</div>';
   }
   function rdmtFichaHtml(w, d, ps){
-    const g = rdmtGrupoDe(d, w.grupoId), dentro = (ps || []).some(p => p.k === w.k), puede = Number.isFinite(w.lat) && !(w.tipo === 'nuevo' && !w.grupoId);
+    const g = rdmtGrupoDe(d, w.grupoId), dentro = (ps || []).some(p => p.k === w.k), puede = cliPuntoOk(w.lat, w.lng) && !(w.tipo === 'nuevo' && !w.grupoId);
     let h = '<div class="rdmt-fi-c"><div class="rdmt-fi-t"><b data-no-idioma>' + esc(w.cliente || rdmtCalle(w.direccion) || '?') + '</b><button type="button" class="rdmt-fi-x" data-rdmt-cerrar aria-label="' + esc(rdmtT('Cerrar')) + '">' + rdmtSvg(RDMT_SV.x, '#3a3d42') + '</button></div>'
       + (w.direccion ? '<a class="rdmt-fi-dir" href="' + esc(rdmtApple(w)) + '" data-no-idioma>' + esc(w.direccion) + '</a>' : '')
       + '<div class="rdmt-fi-e"><span class="rdmt-et' + (w.tipo === 'nuevo' ? ' nuevo' : '') + '">' + esc(rdmtEtapaTxt(w)) + rdmtPasos(w) + '</span>' + rdmtEtiqueta(w, d) + '</div>';
@@ -95596,7 +95682,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       + (w.quedan > 0 ? ' · ' + esc(rdmtF(w.quedan === 1 ? '{n} equipo' : '{n} equipos', { n: w.quedan })) : '') + '</div>';
     if(w.tipo === 'nuevo' && rdmtSoyJefe() && (w.turnos || []).length) h += rdmtTurnosHtml(w, d);
     if(w.tipo === 'nuevo' && w.sinTurno) h += '<p class="rdmt-fi-p">' + esc(rdmtT('Sin turno: le sonó a todos, como siempre.')) + '</p>';
-    if(!Number.isFinite(w.lat)) h += '<p class="rdmt-fi-p">' + esc(rdmtT('Sin ubicación en el mapa: falta el punto del cliente en Clientes.')) + '</p>';
+    if(!cliPuntoOk(w.lat, w.lng)) h += '<p class="rdmt-fi-p">' + esc(rdmtT('Sin ubicación en el mapa: falta el punto del cliente en Clientes.')) + '</p>';
     h += '<div class="rdmt-fi-b">' + (w.direccion ? '<a class="rdmt-azul" href="' + esc(rdmtApple(w)) + '">' + rdmtSvg(RDMT_SV.nav, '#fff') + esc(rdmtT('Cómo llegar')) + '</a>' : '')
       + (puede ? '<button type="button" class="rdmt-gris' + (dentro ? ' on' : '') + '" data-rdmt-marca="' + esc(w.k) + '">' + rdmtSvg(dentro ? RDMT_SV.ok : RDMT_SV.mas, '#121212') + esc(rdmtT(dentro ? 'En la ruta' : 'Ruta')) + '</button>' : '') + '</div>';
     return h + '</div>';
@@ -95620,7 +95706,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   function rdmtPintar(){
     const root = document.getElementById('rdMapa'); if(!root) return;
-    const hoy = todayStr(), d = rdmtDatos(), desde = (typeof visFix === 'function' && visFix()) || null; RDMT.ultimo = d;
+    const hoy = todayStr(), d = rdmtDatos(), desde = rdmtPunto(typeof visFix === 'function' && visFix()); RDMT.ultimo = d;
     const ts = rdmtFiltrar(d.trabajos, Object.assign({ dia: hoy }, RDMT.filtro)), gr = rdmtGrupoRuta(d);
     const ps = rdmtRuta(desde, rdmtParadas(d.trabajos, gr, hoy, RDMT.quitar, RDMT.poner)), enRuta = new Set(ps.map(p => p.k));
     const ver = RDMT.verRuta, orden = new Map(); if(ver) ps.forEach((p, i) => orden.set(p.k, i + 1));
@@ -95642,7 +95728,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     ts.filter(w => w.tipo === 'nuevo' && w.mia && !w.va).forEach(w => { h += rdmtOfertaHtml(w, desde); });
     if(rdmtSoyJefe()) ts.filter(w => w.tipo === 'nuevo' && !w.va && !w.mia).forEach(w => {
       h += '<div class="rdmt-nuevo" data-rdmt-ver="' + esc(w.k) + '"><div class="rdmt-of-t ambar">' + esc(rdmtT('TRABAJO NUEVO')) + '<span data-no-idioma>' + esc(w.cliente || rdmtCalle(w.direccion)) + '</span></div>'
-        + (w.turnos && w.turnos.length ? rdmtTurnosHtml(w, d) : '<p class="rdmt-fi-p">' + esc(rdmtT(Number.isFinite(w.lat) ? 'Sin turno: le sonó a todos, como siempre.' : 'Sin ubicación: le sonó a todos, como siempre.')) + '</p>') + '</div>';
+        + (w.turnos && w.turnos.length ? rdmtTurnosHtml(w, d) : '<p class="rdmt-fi-p">' + esc(rdmtT(cliPuntoOk(w.lat, w.lng) ? 'Sin turno: le sonó a todos, como siempre.' : 'Sin ubicación: le sonó a todos, como siempre.')) + '</p>') + '</div>';
     });
     const resto = ts.filter(w => !(w.tipo === 'nuevo' && !w.va && (w.mia || rdmtSoyJefe())));
     const ordenar = (ws, id) => ws.slice().sort((a, b) => (ver && id === gr) ? ((orden.get(a.k) || 99) - (orden.get(b.k) || 99))
@@ -95703,7 +95789,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     let gl;
     try{ gl = await rdmtLibreria(); }catch(e){ rdmtSinMapa(true); return; }
     try{
-      const d = RDMT.ultimo || rdmtDatos(), pts = d.trabajos.filter(w => Number.isFinite(w.lat));
+      const d = RDMT.ultimo || rdmtDatos(), pts = d.trabajos.filter(w => cliPuntoOk(w.lat, w.lng));
       const c = pts.length ? [pts.reduce((s, w) => s + w.lng, 0) / pts.length, pts.reduce((s, w) => s + w.lat, 0) / pts.length] : [-77.19, 38.80];
       const m = new gl.Map({ container: lz, style: RDMT_ESTILO, center: c, zoom: 10, attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false, touchPitch: false, cooperativeGestures: false });
       try{ m.touchZoomRotate.disableRotation(); }catch(e){}
@@ -95726,7 +95812,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   function rdmtMarcas(ts, d, ruta, gr){
     const m = RDMT.mapa, gl = window.maplibregl; if(!m || !gl) return;
     const orden = new Map(); ruta.forEach((p, i) => orden.set(p.k, i + 1));
-    const pts = ts.filter(w => Number.isFinite(w.lat) && Number.isFinite(w.lng));
+    const pts = ts.filter(w => cliPuntoOk(w.lat, w.lng));
     const firma = pts.map(w => w.k + (orden.get(w.k) || '') + (w.k === RDMT.sel ? '*' : '') + w.fue + w.grupoId + (w.va ? 'v' : '')).join('|');
     if(firma === RDMT.firma) return;
     const encuadrar = RDMT.firma.split('|').map(x => x.split(/[0-9*]/)[0]).sort().join() !== pts.map(w => w.k).sort().join() || !RDMT.firma;
@@ -95755,8 +95841,11 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     rdmtLeerCopia(); RDMT.sel = ''; RDMT.abrir = false; rdmtPintar();
     requestAnimationFrame(() => { rdmtMapaIniciar(); });
     Promise.resolve(rdmtCargar(false)).then(x => { if(x) rdmtPintar(); }).catch(() => {});
-    try{ if(typeof visSincronizar === 'function') Promise.resolve(visSincronizar(false)).then(() => rdmtPintar()).catch(() => {}); }catch(e){}
-    try{ if(typeof clientesSincronizar === 'function') Promise.resolve(clientesSincronizar(false)).then(() => rdmtPintar()).catch(() => {}); }catch(e){}
+    // (R555) cuando ya llegaron los conteos y los puntos de la nube, los trabajos activos que siguen sin punto se buscan en el teléfono
+    const sinc = [];
+    try{ if(typeof visSincronizar === 'function') sinc.push(Promise.resolve(visSincronizar(false)).then(() => rdmtPintar()).catch(() => {})); }catch(e){}
+    try{ if(typeof clientesSincronizar === 'function') sinc.push(Promise.resolve(clientesSincronizar(false)).then(() => rdmtPintar()).catch(() => {})); }catch(e){}
+    Promise.all(sinc).then(() => rdmtBuscarPuntos()).catch(() => {});
   }
   async function rdmtResponder(cardId, r){
     const d = RDMT.ultimo || rdmtDatos(), w = d.trabajos.find(x => x.cardId === cardId); if(!w || !w.mia) return;
@@ -95778,7 +95867,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   // el círculo de un renglón (o «Ruta» en la ficha): la casa entra o sale de la ruta; si es de otro grupo, la ruta pasa a ese grupo
   function rdmtMarcar(k){
-    const d = RDMT.ultimo || rdmtDatos(), w = d.trabajos.find(x => x.k === k); if(!w || !Number.isFinite(w.lat)) return;
+    const d = RDMT.ultimo || rdmtDatos(), w = d.trabajos.find(x => x.k === k); if(!w || !cliPuntoOk(w.lat, w.lng)) return;
     const gid = w.grupoId || '-', hoy = todayStr(), cambio = gid !== rdmtGrupoRuta(d);
     if(cambio) RDMT.ruta = gid;
     const dentro = rdmtParadas(d.trabajos, gid, hoy, RDMT.quitar, RDMT.poner).some(p => p.k === k);
@@ -95789,7 +95878,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   }
   // el punto tocado queda a la vista, justo debajo de la ficha (como el globo de la propuesta B)
   function rdmtCentrar(w){
-    const m = RDMT.mapa; if(!m || !w || !Number.isFinite(w.lat) || !Number.isFinite(w.lng)) return;
+    const m = RDMT.mapa; if(!m || !w || !cliPuntoOk(w.lat, w.lng)) return;
     const mp = document.querySelector('#rdMapa .rdmt-mapa'), fi = document.querySelector('#rdMapa .rdmt-ficha');
     const h = (mp && mp.clientHeight) || 300, abajo = (fi && !fi.hidden) ? fi.offsetTop + fi.offsetHeight : 0;
     const y = Math.max(h / 2, Math.min(abajo + 46, h - 40));
