@@ -9133,6 +9133,10 @@ html body.rdms-mas #mgrMoreGrupo p:not([id]):not(:first-of-type){display:none !i
 
 /* (R168) Editar · Borrar van en la barra: los botones de la tarjeta se quedan escondidos (los toca la barra) */
 html body.rdms-rd #mpVerBorrar, html body.rdms-rd #mpVerEditar{display:none !important;}
+/* (28-nov) Medir en plano del manager: su botón va en la barra; y adentro la casa es la del plano abierto (el cliente no se cambia) */
+#mpVerMedir{display:none !important;}
+html body.mpe-mep #rdpCliBtn{pointer-events:none;}
+html body.mpe-mep #rdpCli .rdp-chev, html body.mpe-mep #rdpCli .rdp-div-lap, html body.mpe-mep #rdpLap{display:none !important;}
 html body.rdms #rdmsPie button.rdms-cargando{opacity:.45; pointer-events:none;}
 /* de quién es lo que el manager está corrigiendo: en la cabecera, al lado de la ‹ */
 .mpe-pill{position:fixed; left:16px; top:calc(env(safe-area-inset-top, 0px) + 10px); z-index:60; display:flex; align-items:center; gap:7px; max-width:calc(100vw - 32px);
@@ -21376,7 +21380,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-28-R560';
+  const APP_BUILD = '2026-11-28-R561';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -43504,7 +43508,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     else if(S.vista === 'marcado') S.vista = S.volverMarcado && S.volverMarcado !== 'marcado' && S.volverMarcado !== 'hoja' ? S.volverMarcado : 'nivel';
     else if(S.vista === 'closet'){ if(String(S.cuarto).indexOf('E:') === 0){ S.vista = 'nivel'; S.cuarto = ''; } else S.vista = 'cuarto'; S.closet = -1; }
     else if(S.vista === 'cuarto'){ S.vista = 'nivel'; S.cuarto = ''; }
-    else { S.dentro = false; S.vista = 'nivel'; }
+    else { S.dentro = false; S.vista = 'nivel'; if(typeof mpeMedirVolver === 'function' && mpeMedirVolver()) return; }   // (28-nov) el manager vuelve a su Planos y medidas
     rdpPintar();
   }
   function mepAMedidas(){ try{ saveDraft(); }catch(e){} trIr('medidas'); }
@@ -99349,7 +99353,8 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     }
     if(k === 'planos' && rdmsVis('mpVer')) return [   // (R168) uno abierto: Editar · Borrar
       { i: 'editar', t: en ? 'Edit' : 'Editar', id: 'mpVerEditar', on: () => false },
-      { i: 'borrar', t: en ? 'Delete' : 'Borrar', id: 'mpVerBorrar', on: () => false } ];
+      { i: 'borrar', t: en ? 'Delete' : 'Borrar', id: 'mpVerBorrar', on: () => false } ].concat(   // (28-nov) y al final Medir en plano, si esa casa tiene plano
+      (typeof mpeMedirPuede === 'function' && mpeMedirPuede()) ? [{ i: 'medirplano', t: en ? 'Measure on plan' : 'Medir en plano', id: 'mpVerMedir', on: () => false }] : []);
     if(k === 'planos' && rdmsVis('mpPersona')) return [
       { i: 'plano', t: en ? 'Plans' : 'Planos', acc: 'sel:#mpSegPlanos', on: () => rdmsOn('mpSegPlanos') },
       { i: 'medida', t: en ? 'Measurements' : 'Medidas', acc: 'sel:#mpSegMedidas', on: () => rdmsOn('mpSegMedidas') } ];
@@ -99491,7 +99496,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   function mpeRdAhora(){
     if(!MPE.fuera) return false;
     const tab = ((document.querySelector('main > .tab-panel.active') || {}).dataset || {}).tab;
-    return tab === 'floorplan' || tab === 'floorplan-view' || tab === 'floorplan-moisture' || tab === 'measurements';
+    return tab === 'floorplan' || tab === 'floorplan-view' || tab === 'floorplan-moisture' || tab === 'measurements' || (MPE.mep && tab === 'planomed');   // (28-nov) Medir en plano
   }
   // La ‹ del editor de RD lleva a la entrada de la cuadrilla (Plano y medidas): aquí regresa a Planos y medidas del manager.
   function mpeVolverAMgr(){
@@ -99573,6 +99578,7 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
   // Al volver a Planos y medidas: se terminan las subidas, se suelta lo prestado y se vuelve a pintar lo que estaba abierto.
   async function mpeAlVolver(){
     MPE.fuera = false;
+    if(MPE.mep) mpeMedirSalir();   // (28-nov) Medir en plano: la casa prestada se suelta y vuelve el trabajo que él tenía
     const abierto = mpAbierto ? { t: mpAbierto.t, id: mpAbierto.id } : null;
     try{ await mpeLimpiarTodo(); }catch(e){ console.warn('[mpe] soltar', e); }
     try{ await mpCargar(); }catch(e){}
@@ -99580,6 +99586,104 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
       if(abierto.t === 'planos' && mpPlanos.some(x => x.id === abierto.id)) mpVerPlano(abierto.id);
       else if(abierto.t === 'medidas' && mpMedidas.some(x => x.id === abierto.id)) mpVerMedidas(abierto.id);
     }
+  }
+  // ===================== (28-nov-2026) MEDIR EN PLANO DESDE PLANOS Y MEDIDAS DEL MANAGER =====================
+  // La pestaña «Medir en plano» (R542) vivía solo en la entrada de la cuadrilla RD: pide el trabajo abierto (trActual) y el
+  // diseño de RD (rdEsRd), y el manager no tiene ninguno de los dos. Con un plano (o unas medidas) abierto en su Planos y
+  // medidas, la barra dice Editar · Borrar · Medir en plano. Se usa la MISMA herramienta: los planos y los trabajos de Medidas
+  // de ESA casa (la del que está abierto, por trEsLaCasa, nada de otra casa) se traen PRESTADOS como en Editar, la casa se
+  // pone como trabajo abierto solo en memoria (el que él tenía guardado en el teléfono no se toca) y lo que marque se escribe
+  // en el trabajo de Medidas de esa casa, que sube a la fila de quien lo hizo (mpeSubir). Al volver, todo se suelta igual que Editar.
+  RDMS_BI.medirplano = ['#22c3e6', 'M10.5 20.5H4.5a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1h15a1 1 0 0 1 1 1V9.5M3.5 11.5H9M12.5 3.5V8M13.6 20.6l.8-3.3 5.5-5.5a1.6 1.6 0 0 1 2.3 2.3l-5.5 5.5z'];
+  const mpeDeLaCasa = (c, j) => { try{ return !!(c && j) && trEsLaCasa(c, j); }catch(e){ return false; } };
+  // La casa de lo que está abierto: { nombre, direccion } o null.
+  function mpeMedirCasa(){
+    const a = mpAbierto; if(!a || !a.id) return null;
+    const f = a.t === 'planos' ? mpPlanos.find(x => x.id === a.id) : mpMedidas.find(x => x.id === a.id);
+    if(!f) return null;
+    const c = a.t === 'planos' ? { nombre: String((f.job || {}).client || '').trim(), direccion: String((f.job || {}).address || '').trim() }
+                               : { nombre: String(f.cliente || '').trim(), direccion: String(f.dir || '').trim() };
+    return (c.nombre || c.direccion) ? c : null;
+  }
+  // Solo el manager de Restoration Doctor, y solo si esa casa tiene plano en la nube (sin plano no hay qué tocar).
+  function mpeMedirPuede(){
+    if(!(typeof isManagerDe === 'function' && isManagerDe('restauracion'))) return false;
+    const c = mpeMedirCasa(); if(!c) return false;
+    return mpPlanos.some(f => mpeDeLaCasa(c, f.job || {}));
+  }
+  async function mpeMedir(){
+    const a = mpAbierto; if(!a || !a.id || MPE.abriendo) return;
+    if(!mpeMedirPuede() || !cloudOn()) return;
+    const yo = nubeYo(); if(!yo) return;
+    const casa = mpeMedirCasa();
+    const filasP = mpPlanos.filter(f => mpeDeLaCasa(casa, f.job || {}));
+    const filasM = mpMedidas.filter(f => mpeDeLaCasa(casa, { client: f.cliente, address: f.dir }));
+    const btn = document.querySelector('#rdmsPie [data-rdms-id="mpVerMedir"]');
+    MPE.abriendo = true; if(btn) btn.classList.add('rdms-cargando');
+    try{
+      let planos = 0;
+      for(const fp of filasP){
+        const r = await authFetch('/rest/v1/floor_plans?select=id,plan_id,created_by,author_name,job,data,at_ms&id=eq.' + encodeURIComponent(fp.id) + '&deleted_at=is.null&limit=1', { headers: cloudHeaders() });
+        if(!r.ok) throw new Error('HTTP ' + r.status);
+        const f = (await r.json())[0];
+        if(mpAbierto !== a) return;
+        if(!f || !f.data || !Array.isArray(f.data.rooms) || !f.plan_id) continue;
+        if(!mpeDeLaCasa(casa, f.job || f.data.job || {})) continue;   // lo que contestó el servidor también tiene que ser de esta casa
+        const id = f.plan_id, ajeno = f.created_by !== yo;
+        if(nubeOcupado('planos', id)) throw new Error('ocupado');
+        planos++;
+        if(!ajeno && fpListLive().some(e => e && e.id === id)) continue;
+        const d = mpeLimpiarPlano(JSON.parse(JSON.stringify(f.data)));
+        const entrada = { id, at: +f.at_ms || Date.now(), _v: ++fpVersion.n, job: f.job || d.job || {}, owner: f.created_by, data: d };
+        const lista = fpListLive().filter(e => e && e.id !== id); lista.unshift(entrada);
+        if(!fpListSave(lista)){ alert(mpeEs('No hay espacio en este teléfono para abrir ese plano.', 'There is no room on this phone to open that plan.')); return; }
+        if(fpDisco()) fpProgramarEscritura(entrada);
+        nubeMarcar('planos', id, entrada.at);
+        if(ajeno) mpeAnotar('planos', id, { uuid: f.id, autor: f.author_name || '', at: entrada.at, res: '' });
+      }
+      if(!planos) throw new Error('vacio');
+      for(const fm of filasM){
+        const r = await authFetch('/rest/v1/measure_jobs?select=id,job_id,created_by,author_name,cliente,dir,fecha,tarjetas,vals,rows,at_ms&id=eq.' + encodeURIComponent(fm.id) + '&deleted_at=is.null&limit=1', { headers: cloudHeaders() });
+        if(!r.ok) throw new Error('HTTP ' + r.status);
+        const f = (await r.json())[0];
+        if(mpAbierto !== a) return;
+        if(!f || !f.vals || !f.job_id) continue;
+        if(!mpeDeLaCasa(casa, { client: f.cliente, address: f.dir })) continue;
+        const id = f.job_id, ajeno = f.created_by !== yo;
+        if(nubeOcupado('medidas', id)) throw new Error('ocupado');
+        if(!ajeno && medLeerGuardadas().some(x => x && x.id === id)) continue;
+        const trabajo = { id, at: +f.at_ms || Date.now(), cliente: String(f.cliente || ''), dir: String(f.dir || ''), fecha: String(f.fecha || ''),
+                          cuartos: +f.tarjetas || 0, rows: (f.rows && typeof f.rows === 'object') ? f.rows : {}, vals: (f.vals && typeof f.vals === 'object') ? f.vals : {}, owner: f.created_by };
+        const lista = medLeerGuardadas().filter(x => x && x.id !== id); lista.unshift(trabajo);
+        if(!medEscribirGuardadas(lista)) return;
+        nubeMarcar('medidas', id, trabajo.at);
+        if(ajeno) mpeAnotar('medidas', id, { uuid: f.id, autor: f.author_name || '', at: trabajo.at, res: '' });
+      }
+      // la casa como trabajo abierto, solo en memoria (TR_LEIDO): al volver se lee otra vez el que él tenía guardado
+      MPE.mep = true; MPE.fuera = true;
+      MPE.mepAntes = { vista: TR_VISTA, tab: RDP.tab };
+      TR = { nombre: casa.nombre, direccion: casa.direccion, telefono: '', fecha: todayStr(), reclamo: '', lider: '', uid: trYo() }; TR_LEIDO = true;
+      TR_VISTA = 'trabajo'; RDP.vista = ''; RDP.eligiendo = false;
+      const S = mepS(); S.vista = 'nivel'; S.cuarto = ''; S.closet = -1; S.hoja = null; S.pendiente = null; S.aviso = '';
+      document.body.classList.add('mpe-mep');
+      showTab('planomed'); pushBack('mgrplanos');
+      mepAbrir();
+    }catch(e){
+      const m = String(e && e.message);
+      alert(m === 'ocupado' ? mpeEs('Todavía se está guardando el cambio anterior. Vuelva a tocar Medir en plano en unos segundos.', 'The previous change is still saving. Tap Measure on plan again in a few seconds.')
+        : m === 'vacio' ? mpeEs('El plano de esta casa ya no está en la nube.', 'The plan for this house is no longer in the cloud.')
+        : mpeEs('No se pudo abrir Medir en plano. Revise su internet.', 'Could not open Measure on plan. Check your internet.'));
+    }finally{ MPE.abriendo = false; if(btn) btn.classList.remove('rdms-cargando'); }
+  }
+  // Salir de la herramienta (su Regresar o la ‹ de arriba en el plano entero): a Planos y medidas del manager.
+  function mpeMedirVolver(){ return !!MPE.mep && mpeVolverAMgr(); }
+  function mpeMedirSalir(){
+    MPE.mep = false; document.body.classList.remove('mpe-mep');
+    const antes = MPE.mepAntes || {}; MPE.mepAntes = null;
+    try{ const S = mepS(); S.dentro = false; S.vista = 'nivel'; S.cuarto = ''; S.closet = -1; S.hoja = null; S.pendiente = null; S.fijo = ''; S.aviso = ''; }catch(e){}
+    try{ TR = null; TR_LEIDO = false; TR_VISTA = antes.vista || 'lista'; }catch(e){}
+    try{ RDP.tab = antes.tab || 'plano'; RDP.vista = ''; RDP.eligiendo = false; }catch(e){}
+    try{ rdCls(document.body, 'rdp-en-mep', false); rdCls(document.body, 'mep-hoja', false); }catch(e){}
   }
   (function mpeCablear(){
     const panel = document.querySelector('.tab-panel[data-tab="mgrplanos"]');
@@ -99590,6 +99694,11 @@ function createLumiMacClient({authFetch,headers,companyId,cryptoAPI=globalThis.c
     if(ver && !document.getElementById('mpVerEditar')){
       const b = document.createElement('button'); b.type = 'button'; b.id = 'mpVerEditar'; b.className = 'btn btn-outline'; b.hidden = true; b.textContent = 'Editar';
       b.addEventListener('click', () => { mpeEditar(); });
+      ver.appendChild(b);
+    }
+    if(ver && !document.getElementById('mpVerMedir')){   // (28-nov) el de «Medir en plano» de la barra
+      const b = document.createElement('button'); b.type = 'button'; b.id = 'mpVerMedir'; b.className = 'btn btn-outline'; b.hidden = true; b.textContent = 'Medir en plano';
+      b.addEventListener('click', () => { mpeMedir(); });
       ver.appendChild(b);
     }
     // Mientras se edita lo de otro, arriba del editor una línea chica dice de quién es.
