@@ -7355,7 +7355,6 @@ html body .rdmd-t tbody td.rdmd-sup{color:#45464b; font-size:15.5px;}
 html body .rdmd-t tbody td.rdmd-qty{font-weight:800;}
 html body .rdmd-t tbody td.rdmd-uni{font-weight:700;}
 html body .rdmd-t tbody td.rdmd-rooms{color:#45464b; font-size:15.5px;}
-html body .rdmd-t tbody tr.rdmd-resta td{height:auto; padding:0 12px 7px 30.5px; border-top:0; text-align:left; font:500 13.5px/1.45 "Avenir Next", var(--sf), -apple-system, sans-serif; color:#45464b;}
 html body .rdmd-falta{display:block; white-space:nowrap; font:700 12px/1.25 "Avenir Next", var(--sf), -apple-system, sans-serif; color:#9a5b00;}
 html body .rdmd-aviso{margin:0 0 15.5px; padding:10px 14px; border:1.5px solid #e8b04a; border-left:5px solid #e89a0c; border-radius:7px; background:#fff8e8; font:600 14.5px/1.45 "Avenir Next", var(--sf), -apple-system, sans-serif; color:#8a5200;}
 
@@ -21377,7 +21376,7 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
   // "did this phone really get the update?" has been the wrong answer more
   // than once, because installing over a running app leaves the old bundle
   // live until it is fully closed.
-  const APP_BUILD = '2026-11-28-R558';
+  const APP_BUILD = '2026-11-28-R559';
 
   // LA REJA DEL AUTO-ACTUALIZADOR.
   // Que tan nuevo tiene que ser el codigo NATIVO (camara, escaner, voz) para
@@ -35404,19 +35403,13 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
           const qu = medQtyUnidad(mt.sqft, mt.linear, mt.piezas);
           // Una pared sin alto no se cobra: el papel lo dice en vez de dejar la cantidad vacía (15-oct-2026).
           const falta = mt.faltaAlto ? '<div style="color:#B42318; font-size:10px; font-weight:700;">' + (qu.qty || qu.unidad ? '+ missing height' : 'missing height') + '</div>' : '';
-          // (20-oct) LO QUE SE RESTÓ SE DICE, corte por corte, debajo de su partida: el ajustador ve el largo × alto de
-          // la pared, lo que se le quitó y qué fue. Solo los cortes con resta: los demás siguen sin listarse (su regla del
-          // 12 de septiembre, "en el PDF ya no").
-          const restas = (mt.cortes || []).filter(c => c.vaAlPapel && c.menos > 0 && c.a > 0 && c.b > 0);
-          const conResta = restas.length > 0;
+          // (28-nov) Las restas NO van al PDF: el trabajador las ve en la app; el papel solo lleva la partida.
           html += `<tr>
-            <td style="${MED_TD} font-weight:700;${conResta ? ' border-bottom:none;' : ''}">${esc(mt.material)}</td>
-            <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;${conResta ? ' border-bottom:none;' : ''}">${esc(medSuperficieEn(mt.superficie))}</td>
-            <td style="${MED_TD} text-align:center; font-weight:700;${conResta ? ' border-bottom:none;' : ''}">${esc(qu.qty)}</td>
-            <td style="${MED_TD} text-align:center; font-weight:700;${conResta ? ' border-bottom:none;' : ''}">${esc(medUnidadCorta(qu.unidad))}${falta}</td>
+            <td style="${MED_TD} font-weight:700;">${esc(mt.material)}</td>
+            <td style="${MED_TD} text-align:center; color:#3A4552; font-size:11px;">${esc(medSuperficieEn(mt.superficie))}</td>
+            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(qu.qty)}</td>
+            <td style="${MED_TD} text-align:center; font-weight:700;">${esc(medUnidadCorta(qu.unidad))}${falta}</td>
           </tr>`;
-          if(conResta) html += `<tr data-resta><td colspan="4" style="padding:0 8px 6px 18px; border-bottom:1px solid #EEF1EE; font-size:11px; line-height:1.45; color:#3A4552;">${restas.map(c =>
-            'Deduction: ' + med2(c.a) + ' × ' + med2(c.b) + ' ft − ' + med2(c.menos) + ' SF' + (c.menosQue ? ' (' + esc(c.menosQue) + ')' : '') + ' = ' + med2(c.sqft) + ' SF').join('<br>')}</td></tr>`;
         });
         html += '</table>';
         // SIN TOTAL DEL CUARTO (15 sep 2026): sumaba partidas distintas en un
@@ -35464,13 +35457,10 @@ document.addEventListener('click',e=>{if(e.target.closest?.('[data-labor-continu
     const e = esc, qu = medQtyUnidad(mt.sqft, mt.linear, mt.piezas);
     // una pared sin alto no se cobra: el papel lo dice en vez de dejar la cantidad vacía (en ámbar: es lo que falta)
     const falta = mt.faltaAlto ? '<span class="rdmd-falta">' + (qu.qty || qu.unidad ? '+ missing height' : 'missing height') + '</span>' : '';
-    // lo que se restó, corte por corte, debajo de su partida (solo en los cuartos; en los totales no)
-    const restas = rooms === undefined ? (mt.cortes || []).filter(c => c.vaAlPapel && c.menos > 0 && c.a > 0 && c.b > 0) : [];
-    let r = '<tr' + (restas.length ? ' data-nocorte' : '') + '><td class="rdmd-mat">' + e(mt.material) + '</td><td class="rdmd-sup">' + e(medSuperficieEn(mt.superficie)) + '</td>'
+    // (28-nov) Las restas NO van al PDF (el trabajador las ve en la app).
+    let r = '<tr><td class="rdmd-mat">' + e(mt.material) + '</td><td class="rdmd-sup">' + e(medSuperficieEn(mt.superficie)) + '</td>'
       + '<td class="rdmd-qty">' + e(qu.qty) + '</td><td class="rdmd-uni">' + e(medUnidadCorta(qu.unidad)) + falta + '</td>'
       + (rooms !== undefined ? '<td class="rdmd-rooms">' + e(rooms) + '</td>' : '') + '</tr>';
-    if(restas.length) r += '<tr data-resta class="rdmd-resta"><td colspan="4">' + restas.map(c =>
-      'Deduction: ' + med2(c.a) + ' × ' + med2(c.b) + ' ft − ' + med2(c.menos) + ' SF' + (c.menosQue ? ' (' + e(c.menosQue) + ')' : '') + ' = ' + med2(c.sqft) + ' SF').join('<br>') + '</td></tr>';
     return r;
   }
   function rdmdCuerpo(agrupado){
